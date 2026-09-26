@@ -11,30 +11,20 @@ const APPLE = /Mac|iP(?:hone|ad|od)/.test(navigator.userAgent);
 const MOD = APPLE ? "⌘" : "Ctrl+";
 const SHIFT = APPLE ? "⇧" : "Shift+";
 
-// `"k"`, `"shift+o"` or `"meta+b"`. `meta+` narrows to ⌘ alone: Ctrl+B is the
-// backward motion every Unix text field has.
-const parse = (spec: string): { key: string; shift: boolean; meta: boolean } => {
-  const meta = spec.startsWith("meta+");
-  const rest = meta ? spec.slice(5) : spec;
-  return rest.startsWith("shift+")
-    ? { key: rest.slice(6), shift: true, meta }
-    : { key: rest, shift: false, meta };
-};
+// `"k"` or `"shift+o"`.
+const parse = (spec: string): { key: string; shift: boolean } =>
+  spec.startsWith("shift+") ? { key: spec.slice(6), shift: true } : { key: spec, shift: false };
 
-/** The chord as a person reads it — for the hover card, or for a menu row
- *  that is itself the affordance (menu.ts's `hint`). */
+/** The chord as a person reads it, for a menu row that is itself the
+ *  affordance (menu.ts's `hint`). */
 export function chordLabel(spec: string): string {
-  const { key, shift, meta } = parse(spec);
-  return `${meta ? "⌘" : MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
+  const { key, shift } = parse(spec);
+  return `${MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
 }
 
 /** A chord acting under a modal would leave it floating over a view it was
  *  never opened from. */
 export const modalOpen = (): boolean => document.querySelector("dialog[open]") !== null;
-
-/** What Shift turns a bracket into on a US layout — the only non-letter keys
- *  a chord here is written with. */
-const SHIFTED: Record<string, string | undefined> = { "[": "{", "]": "}" };
 
 const CARD =
   "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
@@ -69,20 +59,6 @@ function hint(el: HTMLElement, label: string, chord: string): void {
   });
   el.addEventListener("pointerleave", hide);
   el.addEventListener("pointerdown", hide); // the card would sit over what the click opens
-}
-
-/** Capture phase and `preventDefault` first: ⌘K is Firefox's search bar, and a
- *  focused composer must not swallow the chord. `unless` is how an open
- *  surface takes the chord back, checked before `preventDefault`. */
-export function shortcut(
-  el: HTMLElement,
-  key: string,
-  label: string,
-  run: () => void,
-  unless?: () => boolean,
-): void {
-  hint(el, label, chordLabel(key));
-  chord(key, run, unless);
 }
 
 /** Not capture phase: every overlay consumes Esc on the way down, and bubbling
@@ -130,20 +106,18 @@ export function letterKey(
   });
 }
 
-/** Without the hover card, for an action whose affordance is a menu row: a
- *  card on the ⋯ button would name the wrong control. Never unbound. */
+/** Capture phase and `preventDefault` first: ⌘K is Firefox's search bar, and a
+ *  focused composer must not swallow the chord. `unless` is how an open
+ *  surface takes the chord back, checked before `preventDefault`. No hover
+ *  card: the affordance is a menu row. Never unbound. */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {
-  const { key, shift, meta } = parse(spec);
-  // A shifted bracket arrives as the character Shift makes of it (`{`), and a
-  // binding written as ⇧[ should not have to know the layout's answer.
-  const shifted = SHIFTED[key];
+  const { key, shift } = parse(spec);
   document.addEventListener(
     "keydown",
     (ev) => {
       if (!ev.key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
-      const pressed = ev.key.toLowerCase();
-      if (pressed !== key && pressed !== shifted) return;
-      if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
+      if (ev.key.toLowerCase() !== key) return;
+      if (!ev.metaKey && !ev.ctrlKey) return;
       if (unless?.()) return;
       ev.preventDefault();
       ev.stopPropagation();

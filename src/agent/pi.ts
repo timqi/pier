@@ -194,8 +194,8 @@ export class PiSession implements AgentSession {
     private readonly pi: PiAgentSession,
     /** Read per call — the menu can change while we run. */
     private readonly pinned: () => ModelRef[] = () => [],
-    /** Drops the factory's retained listing: a rename lands in exactly the
-     *  window it covers, and every surface would keep the old title. */
+    /** Drops the factory's retained listing: a title lands in exactly the
+     *  window it covers, and every surface would keep the old one. */
     private readonly wrote: () => void = () => {},
     private readonly retention: CacheRetentionBox = { value: "long" },
     /** Read per turn: switching auto-titling on takes effect without a restart. */
@@ -345,45 +345,8 @@ export class PiSession implements AgentSession {
     if (cancelled) throw new Error("rewind cancelled");
   }
 
-  /** Pi keeps no lock of its own: a second `compact()` summarizes a transcript
-   *  being replaced under it, and two POSTs a millisecond apart both pass the
-   *  route's idle check. */
-  private compacting: Promise<void> | null = null;
-
-  async compact(): Promise<void> {
-    this.live();
-    if (this.compacting) throw new Error(`session ${this.pi.sessionId} is already compacting`);
-    // Recorded in the same tick, no await between: that is what makes the check a gate.
-    const running = this.pi.compact().then(() => undefined);
-    this.compacting = running;
-    try {
-      await running;
-    } finally {
-      this.compacting = null;
-    }
-  }
-
-  /** An append: Pi's reader takes the latest `session_info`. Never refused for
-   *  being busy. TODO: renaming a cold session costs a whole resume for one
-   *  appended line; revisit when Pi offers a lightweight append. */
-  async rename(name: string): Promise<void> {
-    this.live();
-    this.pi.sessionManager.appendSessionInfo(name);
-    this.wrote();
-  }
-
-  /** A dispatch landing mid-compaction waits for the summary instead of
-   *  starting a turn over it. Not Pi's follow-up queue: that is drained only by
-   *  the *next* turn, so a message parked there while idle would sit unsent. */
-  private async whenCompacted(): Promise<void> {
-    while (this.compacting) await this.compacting.catch(() => undefined);
-  }
-
   // Async, so a refusal is a rejected promise the seam lets callers `.catch()`.
   async prompt(text: string): Promise<void> {
-    this.live();
-    await this.whenCompacted();
-    // The wait above is long enough for a dispose to land.
     this.live();
     // A turn may have started since the caller read the state. Bare, Pi throws
     // "already processing" and the message is gone (§5); queued, it is the
@@ -407,10 +370,7 @@ export class PiSession implements AgentSession {
     mode: "prompt" | "steer" | "followUp" | "append",
   ): Promise<void> {
     this.live();
-    // Same gate as prompt(): an idle session takes a system input as a turn.
-    await this.whenCompacted();
-    this.live();
-    // Read after the wait: a running turn means the call below queues.
+    // A running turn means the call below queues.
     const queued = this.pi.isStreaming && mode !== "append";
     if (queued) this.queuedInputs.push(origin);
     try {
@@ -464,8 +424,7 @@ export class PiSession implements AgentSession {
     if (!first.trim()) return;
     void suggest(first, reply).then(
       (title) => {
-        // Named while we waited, by a person: their word beats the model's.
-        if (this.disposed || this.pi.sessionManager.getSessionName()) return;
+        if (this.disposed) return;
         this.pi.sessionManager.appendSessionInfo(title);
         this.wrote();
         fn({ type: "renamed", title });

@@ -240,8 +240,7 @@ export type SessionEventPayload =
   // leaves on a surface, because the transcript renders none.
   | { type: "context-compacted"; before: number; after: number }
   // The session named itself (the operator's title model, after the first
-  // exchange). A rename made through a route already tells every surface to
-  // re-list; this is the same fact for one the session made on its own.
+  // exchange).
   | { type: "renamed"; title: string }
   | { type: "state"; state: SessionState }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
@@ -278,8 +277,8 @@ export type WorkspaceEvent =
 export const MAX_STEP_OUTPUT = 8_000;
 
 /** How much of a message becomes a title, wherever one is derived: the listing
- *  reading a transcript (agent/listing.ts), a rename's fallback (agent/pi.ts),
- *  the fill at first prompt and the rename boundary (web/). */
+ *  reading a transcript (agent/listing.ts), the title model's answer
+ *  (agent/pi.ts), the fill at first prompt (web/). */
 export const SESSION_TITLE_MAX = 80;
 
 /**
@@ -394,22 +393,6 @@ export interface AgentSession {
    * Rejects while streaming.
    */
   rewindToUserTurn(index: number): Promise<void>;
-  /**
-   * Shrink the context: summarize the older transcript and continue from the
-   * summary. Backend-neutral — anything that can compact its own context can
-   * implement it — and deliberately returns nothing: what happened reaches
-   * surfaces as a `context-compacted` event, which auto-compaction emits too
-   * and no caller of this method would otherwise ever see.
-   */
-  compact(): Promise<void>;
-  /**
-   * Name the session. Persisted in the transcript, not beside it, so every
-   * surface and every later listing reads the same title and a restart keeps
-   * it. An empty name clears it, and the title then falls back to whatever a
-   * listing derives — which is also why nothing comes back: the transcript is
-   * the answer, and a second derivation here would be a second rule.
-   */
-  rename(name: string): Promise<void>;
   prompt(text: string): Promise<void>; // resolves when the turn settles
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle

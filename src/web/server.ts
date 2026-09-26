@@ -21,7 +21,6 @@ import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
   AgentFactory,
-  AgentSession,
   BackgroundRun,
   ChatTurn,
   InboundMessage,
@@ -36,7 +35,7 @@ import type {
   PackageStore,
   ProviderManager,
 } from "../agent/types.js";
-import { CHAIN_FULL_TOKENS, isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
+import { CHAIN_FULL_TOKENS, isThinkingLevel } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import type { OpenItems, ParkedMessage } from "../tasks/types.js";
@@ -274,26 +273,6 @@ export function createServer(
     return turns;
   };
 
-  // Pi persists a session only once the first assistant message lands; until
-  // then the session list lists it from here.
-  const nascent = new Map<string, { cwd: string; createdAt: number }>();
-
-  /** A session created and never messaged does not survive an eviction (Pi
-   *  persisted nothing) but is still in `nascent`; left alone, clicking it 404s
-   *  forever. Dropped here, and the 404 says what happened (§5). */
-  const ensureLoadable = async (id: string): Promise<AgentSession> => {
-    try {
-      return await ensure(id);
-    } catch (err) {
-      if (String(err).includes("unknown session")) {
-        nascent.delete(id);
-        hub.emitWorkspace({ type: "sessions-changed" });
-        throw new Error(`session ${id} no longer exists — it never got a first reply, so nothing was persisted; its session list entry was removed`);
-      }
-      throw err;
-    }
-  };
-
   // Concurrent consumers share one scan; nothing is cached past the last of them.
   let listing: Promise<SessionSummary[]> | undefined;
   const listSessions = (): Promise<SessionSummary[]> =>
@@ -303,16 +282,8 @@ export function createServer(
 
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
-    for (const s of sessions) nascent.delete(s.id);
-    // A session created but never prompted would otherwise be listed forever.
-    for (const [id, n] of nascent) {
-      if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
-    }
     const owned = taskSessions?.() ?? new Set<string>();
-    return [
-      ...[...nascent].map(([id, n]) => ({ id, ...n })),
-      ...sessions.filter((s) => !owned.has(s.id)),
-    ];
+    return sessions.filter((s) => !owned.has(s.id));
   };
 
   // `modified` is for the row's tooltip and orders nothing.
@@ -339,8 +310,7 @@ export function createServer(
   // a header to name and a session info panel to fill.
   app.get("/api/sessions/:id", async (c) => {
     const id = c.req.param("id");
-    const n = nascent.get(id);
-    const summary = n ? { id, ...n } : (await listSessions()).find((s) => s.id === id);
+    const summary = (await listSessions()).find((s) => s.id === id);
     if (!summary) return c.json({ error: `no session ${id}` }, 404);
     return c.json(present(summary, state.flags().get(id), activeRuns(), leads?.() ?? new Map()));
   });
@@ -351,21 +321,6 @@ export function createServer(
   app.get("/api/search", async (c) => {
     const q = (c.req.query("q") ?? "").trim();
     return c.json({ hits: q ? await factory.search(q) : [] });
-  });
-
-  app.post("/api/sessions", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
-    // Never in pier's own directory.
-    if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
-    // Resolved like the seam does (agent/pi.ts), or the nascent row is the one
-    // place a symlinked directory still looks like a project of its own.
-    const cwd = await realpath(body.cwd).catch(() => body.cwd as string);
-    const session = await factory.create({ cwd });
-    const createdAt = Date.now();
-    nascent.set(session.id, { cwd, createdAt });
-    router.attach({ channelId: "web", conversationId: session.id }, session);
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ id: session.id }, 201);
   });
 
   app.post("/api/sessions/:id/read", (c) => {
@@ -386,7 +341,7 @@ export function createServer(
     const id = c.req.param("id");
     // Nothing live to snapshot: no cursor, no state, the transcript and its run cards.
     if (older(id)) return c.json({ turns: (await turnsOf(id)).map(slim), backgroundRuns: backgroundRuns?.(id) ?? [], skills: [], readonly: true });
-    const session = await ensureLoadable(id);
+    const session = await ensure(id);
     // Async seam reads can straddle an event. Never label older content with a
     // newer cursor, and never spin indefinitely if the session stays busy.
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -595,31 +550,6 @@ export function createServer(
       const { steering, followUp } = await router.recallQueue(id);
       return { messages: [...steering, ...followUp] };
     });
-  });
-
-  // Refused while streaming: Pi's compaction aborts a running turn, and losing
-  // one is not what the button offered. The result arrives on the stream as
-  // `context-compacted`.
-  guarded(app, "POST", "/api/sessions/:id/compact", 404, async (c) => {
-    const session = await ensure(c.req.param("id"));
-    if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    // The check above is not the lock: two clicks pass it on the same tick, and
-    // the seam's refusal must keep the "not now" status, not read as "no such session".
-    return await session.compact().then(
-      () => c.json({ ok: true }, 202),
-      (err: unknown) => c.json({ error: String(err) }, 409),
-    );
-  });
-
-  // Not refused while streaming: a rename has nothing to do with the turn running.
-  guarded(app, "POST", "/api/sessions/:id/rename", 404, async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
-    const id = c.req.param("id");
-    await (await ensure(id)).rename(body.name.trim().slice(0, SESSION_TITLE_MAX));
-    // The transcript is the answer; the event tells surfaces to re-read it.
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ ok: true });
   });
 
   app.post("/api/sessions/:id/abort", async (c) => {

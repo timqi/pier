@@ -616,103 +616,6 @@ describe("workbench server", () => {
     expect(((await res.json()) as { error: string }).error).toContain("invalid_auth");
   });
 
-  it("lists a created session before Pi persists it, without duplicating later", async () => {
-    const session = fakeSession("s2");
-    const listed: { id: string; cwd: string; createdAt: number; modified?: number }[] = [];
-    const factory: AgentFactory = {
-      availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
-    create: vi.fn(async () => session),
-      resume: vi.fn(async () => session),
-      list: vi.fn(async () => listed),
-      find: vi.fn(async (id: string) => listed.find((s) => s.id === id)),
-      search: vi.fn(async () => []),
-      readHistory: vi.fn(async () => undefined),
-    };
-    const hub = new EventHub();
-    const router = new Router(hub, () => factory.resume("s2"));
-    const app = createServer({
-      factory,
-      router,
-      hub,
-      sessions: new SessionStateStore(openDb(":memory:")),
-      config: fakeConfig(),
-      packages: fakePackages(),
-      providers: fakeProviders(),
-      settings: new SettingsStore(openDb(":memory:")),
-      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
-      secrets: fakeSecrets(),
-      continuous: idleChain(factory, router, hub),
-    });
-    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
-
-    // Not on disk yet — the nascent entry fills the gap: the person who
-    // created it is about to type into it.
-    let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
-    expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
-    ]);
-
-    // Pi persisted it — the real row wins, no duplicate.
-    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: 7 });
-    rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
-    expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", unread: false, activeRuns: 0, channel: "web" },
-    ]);
-  });
-
-  // Every listed directory is reported as its real path (agent/pi.ts), and a
-  // nascent row stands in for a listing for as long as a day: a session created
-  // through a symlink must not be the one row where `/home/u` and `/essd/u`
-  // look like two projects.
-  it("creates a session in the real path of the directory it was given", async () => {
-    const real = realpathSync(mkdtempSync(join(tmpdir(), "pier-real-")));
-    const link = join(mkdtempSync(join(tmpdir(), "pier-link-")), "proj");
-    symlinkSync(real, link);
-    const { app, factory } = setup();
-    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: link }) });
-
-    // The same resolved value the nascent row is filed under.
-    expect(factory.create).toHaveBeenCalledWith({ cwd: real });
-  });
-
-  // The name goes into the transcript and nowhere else; the session list re-reads it
-  // like every other title, so there is no second copy to keep in step.
-  it("names a session in its transcript, and tells the surfaces to re-read", async () => {
-    const { app, session, router, hub } = setup();
-    router.attach({ channelId: "web", conversationId: "s1" }, session);
-    const changed = vi.fn();
-    hub.subscribeWorkspace(changed);
-
-    const res = await app.request("/api/sessions/s1/rename", {
-      method: "POST",
-      body: JSON.stringify({ name: "  parser work  " }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-    expect(session.calls).toContain("rename:parser work");
-    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
-
-    expect((await app.request("/api/sessions/s1/rename", { method: "POST", body: "{}" })).status)
-      .toBe(400);
-  });
-
-  it("creates a session in the given project directory, never pier's own", async () => {
-    const { app, factory, session, hub } = setup();
-    expect((await app.request("/api/sessions", { method: "POST", body: "{}" })).status).toBe(400);
-    const res = await app.request("/api/sessions", {
-      method: "POST",
-      body: JSON.stringify({ cwd: "/tmp" }),
-    });
-    expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ id: "s1" });
-    expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
-    // attached: session events now reach the hub
-    const seen = vi.fn();
-    hub.subscribe("s1", seen);
-    session.emit({ type: "turn-start" });
-    expect(seen).toHaveBeenCalledOnce();
-  });
-
   it("accepts an inbox upload and refuses a malformed one", async () => {
     const { app } = setup();
     const res = await app.request("/api/inbox", {
@@ -1362,36 +1265,6 @@ describe("workbench server", () => {
     });
     expect((await app.request("/api/sessions/nope/history")).status).toBe(404);
     expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
-  });
-
-  it("drops a ghost session's session list entry when loading it proves Pi never persisted it", async () => {
-    const { factory } = setup();
-    const hub = new EventHub();
-    const router = new Router(hub, async () => {
-      throw new Error("unknown session: ghost");
-    });
-    const state = new SessionStateStore(openDb(":memory:"));
-    const events: string[] = [];
-    hub.subscribeWorkspace((e) => events.push(e.type));
-    const app = createServer({
-      factory,
-      router,
-      hub,
-      sessions: state,
-      config: fakeConfig(),
-      packages: fakePackages(),
-      providers: fakeProviders(),
-      settings: new SettingsStore(openDb(":memory:")),
-      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
-      secrets: fakeSecrets(),
-      continuous: idleChain(factory, router, hub),
-    });
-    const res = await app.request("/api/sessions/ghost/history");
-    expect(res.status).toBe(404);
-    const { error } = (await res.json()) as { error: string };
-    expect(error).toContain("never got a first reply");
-    // Every list was told, so no row keeps pointing at a session nothing can resume.
-    expect(events).toContain("sessions-changed");
   });
 
   it("relays API-key and OAuth login flows without returning submitted secrets", async () => {
@@ -2138,35 +2011,9 @@ describe("workbench server", () => {
     expect(capped).toBeGreaterThan(0);
   });
 
-  it("compacts a session's context through the seam, once", async () => {
-    const { app, session } = setup();
-    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
-    expect(res.status).toBe(202);
-    expect(session.calls.filter((c) => c === "compact")).toEqual(["compact"]);
-  });
-
-  it("refuses to compact a running turn instead of aborting it", async () => {
-    const { app, session } = setup();
-    session.setState("streaming");
-    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
-    expect(res.status).toBe(409);
-    expect(session.calls).not.toContain("compact");
-  });
-
-  it("answers a seam refusal with 409, not the 404 of an unknown session", async () => {
-    const { app, session } = setup();
-    // The idle check is one tick old by the time the route dispatches, so the
-    // exclusivity gate is the seam's (agent/pi.ts); this is how it reads here.
-    session.compact = () => Promise.reject(new Error("session s1 is already compacting"));
-    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
-    expect(res.status).toBe(409);
-    expect((await res.json() as { error: string }).error).toContain("already compacting");
-  });
-
   it("aborts via the router", async () => {
-    const { app, session } = setup();
-    // attach first so the router knows the session
-    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
+    const { app, session, router } = setup();
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
     const res = await app.request("/api/sessions/s1/abort", { method: "POST" });
     expect(res.status).toBe(202);
     expect(session.calls).toContain("abort");

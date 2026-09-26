@@ -12,8 +12,6 @@ surface owns its routes and is mounted beside it.
 | ----- | -------- |
 | `GET /api/sessions` | `AgentFactory.list()` joined with live router state and unread flags; `modified` is metadata, not the drawer's ordering key |
 | `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from its run card names it and fills its info panel from here; 404 if unknown |
-| `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
-| `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
@@ -32,7 +30,6 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's previews and attachment cards; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
 | `GET /api/search?q=` | content hits for the palette (below): `{hits}`, empty for an empty query |
-| `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
 | `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null, locked?: true}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`installed by the rtk tool`, `not loaded — <why>`); `locked` marks a switch that is another surface's (`<agentDir>/extensions/rtk.ts` is the rtk tool's under Tools; `PUT` on it is 409); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
@@ -167,16 +164,20 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; it is absent at zero. Conversation shows only its used context ([12](12-ui-shape.md)); a child session's model, reasoning and context chips open model selection.
-- The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings. Status opens the open items as one card ([12 §Status](12-ui-shape.md#status)). Session info and model actions are disabled before the first reply; Search is shown on Conversation.
-- In progress lists live sessions outside the continuous conversation and live runs not represented by a session row. Rows open in the column; a child session's ‹ returns to Conversation. ⌘⇧P opens the drawer.
-- The drawer is a popover under the status chip at widths of 640px and above, and a bottom sheet below 640px. The sheet uses `menu.ts` focus, inertness and backdrop behavior.
+- The single column has one bar, the only chrome: the transcript runs the full pane under it. Conversation shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
+- The status chip reads `N running · M needs you` and opens In progress; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; running counts the drawer's other rows. Absent at zero, and the drawer cannot open. The app icon badge counts the needs-you rows plus the conversation's own unread reply.
+- Context chip: Conversation shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
+- The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings; Search is shown on Conversation only. Session info and model actions are disabled before the first reply.
+- **Status** opens `/status` as one `system-card` in the drawer's placement, headed ← back to ⋯, Status, ✕: Open (per item its problem, stage, `running`/`idle` and its runs), Not on the list, Designs for you to finalize; empty → `Nothing open.` A run is a line — state glyph, name, `<state> <age>` and a lead's `workers: …` (`runStatus`/`workerCounts`, `core/reply.ts`); a name with a session opens it and closes the panel. Same source as the drawer, refilled in place while open on `sessions-changed`, `task-run-changed` and `open-items-changed`; it posts nothing to the transcript, typing `/status` does.
+- **In progress** lists sessions outside the continuous conversation and runs not represented by a session row. A session is in it while streaming, while a run targets it or while runs it launched are in flight (green; sky when only subagents are), or while its last turn is unread (amber); a lead whose run is queued or whose design waits on Finalize is grey, as is a run with no session yet. A failed run's callback reaches main, so a failure is the conversation's unread, never a row. Rows: name · `phase` tag · dot, newest first by birth, from `GET /api/sessions` and `GET /api/continuous/open`'s live runs, re-read on `sessions-changed` and `open-items-changed`.
+- A row opens the session in the column (`#/session/<id>`) and closes the drawer; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
+- The drawer is a 20rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
 - Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
 
 ### Search palette (`palette.ts`, ⌘K)
 
-- Empty query: Conversation, Running, Recent and Actions. Actions contains Settings. Running uses the drawer's sessions; Recent contains finished sessions.
-- Typed query: Conversation when matched, Settings actions, named sessions, then content hits from `GET /api/search?q=`. Content hits search user messages and replies, not steps.
+- Empty query: Conversation, Running, Recent and Actions. Conversation is always first, with the head's dot — the one way back from anywhere. Running is exactly the drawer's rows; Recent is everything else (finished leads, IM sessions, earlier chain members); Actions is Settings and its topics. On a phone the palette is the ⋯ menu's first item.
+- Typed query: Conversation when its word matches, Settings actions, named sessions, then content hits from `GET /api/search?q=`. Content hits search user messages and replies, not steps.
 - Whitespace splits the query into terms; every term must match. Local rows render immediately and content search starts after 80ms.
 - A content hit opens the session at the matched turn when it remains in the transcript.
 - Keys: ↑↓ / ⌃N ⌃P / ⌃J ⌃K move; ↵ opens; Esc or backdrop closes.
@@ -199,11 +200,17 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   progress, tool activity; headline shows status, step count (every row:
   thinking, progress, tool), duration; tool rows reveal args/output, thinking
   rows tail-capped text; expanded logs scroll independently; simple replies
-  leave no empty log; interrupted work stays visible. System inputs: one line
-  with type/status chip, opening to the card ([12 §Transcript density](12-ui-shape.md#transcript-density)).
+  leave no empty log; interrupted work stays visible. System inputs
+  (seed, callback, delegation) are one line, opening to the card:
+  `↺ session seed · <reason> · <previous id8>`, `⟵ callback · <state> · <run
+  name> · <model> · <run id8>`, `⟶ delegation · <run name> · <run id8>`. A
+  click or ↵ expands in place; expansion is per row, in memory. A
+  `/status` answer, `Stayed silent — <reason>` and chat command answers stay
+  one open line or card. A compaction (Pi's automatic one) leaves one system
+  line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events; the In progress drawer lists the
-  runs still in flight ([12 §In progress drawer](12-ui-shape.md#in-progress-drawer)). A row whose run
+  runs still in flight. A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the
   message's creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs render as System input rows with a Session link and the run
@@ -227,7 +234,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
   IME composition (`isComposing`/229).
-- **Completion** ([11 §Completion](11-product-shape.md#completion)): a draft
+- **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (`/status`, `/new`, `/stop`, each line
   from `CHAT_COMMANDS`) only in the continuous conversation, then
@@ -237,6 +244,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   command hides the list and Enter sends it; a skill word is never exact. A
   chain row fills `/word`; a skill row fills `/skill:<name> `, whose trailing
   space closes the list for the ask. No skills and no chain commands, no list.
+  The skills are the snapshot's — the set Pi will expand for this session, so
+  a skill switched on appears when the session is next opened, and
+  `disable-model-invocation` skills are listed; the composer reads no
+  `GET /api/packages`.
   The textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills, a
   tap on a row does the same without blurring the textarea (a finger that
   moved is a scroll, not a pick), Esc closes the

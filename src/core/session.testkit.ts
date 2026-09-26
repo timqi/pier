@@ -170,8 +170,6 @@ export function fakeSession(id = "s1", opts: FakeSessionOptions = {}): FakeSessi
       return drained;
     },
     rewindToUserTurn: async (index) => void session.calls.push(`rewind:${index}`),
-    compact: async () => void session.calls.push("compact"),
-    rename: async (name) => void session.calls.push(`rename:${name}`),
     async prompt(text) {
       session.calls.push(`prompt:${text}`);
       session.prompts.push(text);

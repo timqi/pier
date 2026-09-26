@@ -20,15 +20,14 @@ truth.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
   wipes context.
-- A fresh start is explicit: a new thread (its panel drafts the session) or the
-  web UI. The old transcript remains readable from the web workbench.
+- A fresh start is explicit: a new thread (its panel drafts the session) or
+  `/new` in the web conversation. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
 - A long session does not hit a wall: when the context fills, Pi compacts it
   automatically — older turns become a summary. The transcript on disk keeps
   everything, but detail can leave *your* context, so a very old turn is worth
-  re-reading rather than recalling. The web session header shows context used
-  and how much is left.
+  re-reading rather than recalling. The web session header shows context used.
 
 ## The continuous conversation
 

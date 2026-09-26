@@ -79,17 +79,11 @@ function fakePi() {
   /** What each prompt was queued as, kept apart from `calls` so the ordering
    *  assertions elsewhere stay about ordering. */
   const promptOptions: unknown[] = [];
-  /** Held open, so a test can be *inside* a compaction when it dispatches. */
-  let release: ((err?: Error) => void) | undefined;
   return {
     calls,
     promptOptions,
     emit: (event: PiEvent) => {
       for (const fn of listeners) fn(event);
-    },
-    finishCompaction: (err?: Error) => {
-      release?.(err);
-      release = undefined;
     },
     pi: {
       sessionId: "s1",
@@ -99,7 +93,7 @@ function fakePi() {
         listeners.add(fn);
         return () => listeners.delete(fn);
       },
-      // Pi's manager, as far as a rename is concerned: one append, and the
+      // Pi's manager, as far as a title is concerned: one append, and the
       // latest name is what it reads back.
       sessionManager: {
         name: undefined as string | undefined,
@@ -110,12 +104,6 @@ function fakePi() {
         getSessionName() {
           return this.name;
         },
-      },
-      compact: () => {
-        calls.push("compact");
-        return new Promise<void>((resolve, reject) => {
-          release = (err) => (err ? reject(err) : resolve());
-        });
       },
       prompt: (_text: string, options?: unknown) => {
         calls.push("prompt");
@@ -233,13 +221,6 @@ describe("a disposed session", () => {
     expect(fake.calls).toEqual(["dispose"]);
   });
 
-  it("refuses to compact, which Pi would run against a dead listener", async () => {
-    const { fake, session: s } = session();
-    await s.dispose();
-    await expect(s.compact()).rejects.toThrow("closed");
-    expect(fake.calls).toEqual(["dispose"]);
-  });
-
   it("still takes work before that", async () => {
     const { fake, session: s } = session();
     await s.prompt("hi");
@@ -263,21 +244,6 @@ describe("a prompt that races a turn", () => {
     expect(fake.promptOptions).toEqual([{ streamingBehavior: "followUp" }]);
   });
 
-  it("queues the ones the compaction gate released together, not just the first", async () => {
-    const { fake, session: s } = session();
-    const compaction = s.compact();
-    const first = s.prompt("one");
-    const second = s.prompt("two");
-    fake.finishCompaction();
-    await compaction;
-    await Promise.all([first, second]);
-    // Both were decided against an idle session and both reach Pi; without the
-    // option the second is the one that disappears.
-    expect(fake.promptOptions).toEqual([
-      { streamingBehavior: "followUp" },
-      { streamingBehavior: "followUp" },
-    ]);
-  });
 });
 
 it("lists the skills its loader holds — the set /skill: expands — as name and description only", () => {
@@ -328,59 +294,6 @@ describe("a system input handed to a streaming session", () => {
     await s.systemInput("guidance", origin, "followUp");
     // Idle: Pi appended it and started a turn, so the transcript is the answer.
     expect(await s.pendingSystemInputs()).toEqual([]);
-  });
-});
-
-describe("a session that is compacting", () => {
-  const origin = { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null } as const;
-
-  it("runs one compaction at a time — the second is refused, not queued", async () => {
-    const { fake, session: s } = session();
-    const first = s.compact();
-    // Two POSTs both pass the route's idle check; Pi keeps no lock of its own,
-    // so the second would abort the first's work and summarize a transcript
-    // being replaced under it.
-    await expect(s.compact()).rejects.toThrow("already compacting");
-    expect(fake.calls).toEqual(["compact"]);
-    fake.finishCompaction();
-    await first;
-    // The gate releases: a later compaction is a normal one.
-    const again = s.compact();
-    fake.finishCompaction();
-    await again;
-    expect(fake.calls).toEqual(["compact", "compact"]);
-  });
-
-  it("holds a prompt and a system input until the summary lands, losing neither", async () => {
-    const { fake, session: s } = session();
-    const compaction = s.compact();
-    const dispatched = s.prompt("after the check, before the summary");
-    const callback = s.systemInput("a run finished", origin, "followUp");
-    // Nothing has started a turn: that is the race the gate exists for.
-    await Promise.resolve();
-    expect(fake.calls).toEqual(["compact"]);
-    fake.finishCompaction();
-    await compaction;
-    await Promise.all([dispatched, callback]);
-    // Both arrive, in order, after the compaction — not dropped, and not run
-    // against a context being rewritten.
-    expect(fake.calls).toEqual(["compact", "prompt", "sendCustomMessage"]);
-  });
-
-  it("lets everything through again when the compaction *failed*", async () => {
-    const { fake, session: s } = session();
-    const compaction = s.compact();
-    const dispatched = s.prompt("hi");
-    fake.finishCompaction(new Error("nothing to compact"));
-    // The failure is the caller's to report; what must not happen is a session
-    // left gated behind a compaction that will never finish.
-    await expect(compaction).rejects.toThrow("nothing to compact");
-    await dispatched;
-    expect(fake.calls).toEqual(["compact", "prompt"]);
-    // And the gate is open for the next one, rather than stuck on the failure.
-    const retry = s.compact();
-    fake.finishCompaction();
-    await retry;
   });
 });
 
@@ -480,25 +393,6 @@ describe("the moment the seam calls a session idle", () => {
   });
 });
 
-describe("naming a session", () => {
-  it("appends the name to the transcript and answers nothing", async () => {
-    const { fake, session: s } = session();
-    await expect(s.rename("parser work")).resolves.toBeUndefined();
-    expect(fake.calls).toContain("appendSessionInfo:parser work");
-  });
-
-  // The factory keeps a listing for a few seconds, and a rename lands inside
-  // that window: without this, every surface re-reads the old title and keeps
-  // it until something unrelated moves the list again.
-  it("tells the factory its retained listing is out of date", async () => {
-    const wrote = vi.fn();
-    const fake = fakePi();
-    const s = new PiSession(fake.pi as never, () => [], wrote);
-    await s.rename("");
-    expect(wrote).toHaveBeenCalledOnce();
-  });
-});
-
 describe("a session naming itself after its first exchange", () => {
   const exchange = (fake: ReturnType<typeof fakePi>, users = 1): void => {
     for (let i = 0; i < users; i++) {
@@ -540,7 +434,7 @@ describe("a session naming itself after its first exchange", () => {
 
   it("leaves alone a session that has a name, has history, or whose operator picked no model", async () => {
     const suggest = vi.fn(async () => "never");
-    // Named (a task's, or a rename during the turn).
+    // Named (a task's).
     const named = fakePi();
     named.pi.sessionManager.appendSessionInfo("digest");
     named.calls.length = 0;
@@ -559,19 +453,6 @@ describe("a session naming itself after its first exchange", () => {
     expect([...named.calls, ...old.calls, ...off.calls]).not.toContainEqual(expect.stringMatching(/^appendSessionInfo/));
   });
 
-  it("does not overwrite a name a person gave while the model was thinking", async () => {
-    let answer!: (title: string) => void;
-    const fake = fakePi();
-    const s = new PiSession(fake.pi as never, () => [], () => {}, { value: "long" }, () => () => new Promise((r) => (answer = r)));
-    const seen: SessionEventPayload[] = [];
-    s.subscribe((event) => seen.push(event));
-    exchange(fake);
-    await s.rename("my own name");
-    answer("model's name");
-    await settle();
-    expect(fake.pi.sessionManager.getSessionName()).toBe("my own name");
-    expect(seen).not.toContainEqual(expect.objectContaining({ type: "renamed" }));
-  });
 });
 
 describe("a directory reached through a symlink", () => {

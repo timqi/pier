@@ -168,7 +168,7 @@ mirror them. The seams:
   only — an inbound file is saved to `$PIER_HOME/inbox/` by the receiving
   surface and rides the prompt as a `[name](file:///…)` line; bytes in
   `core/inbox.ts`, grammar in `core/inbound-file.ts`), persisted system input,
-  abort, history, rename, model get/set/list, clearQueue, create/resume,
+  abort, history, model get/set/list, clearQueue, create/resume,
   `list`/`find`/`readHistory`, and a payload-only `subscribe`. Must stay
   implementable over RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/
@@ -277,6 +277,6 @@ One line each; the reasoning is in the commit that made it.
 - A subagent is a Task run in a fresh or reused session; context travels as a
   written handoff in the prompt. `fork` was removed; stored runs with
   `sessionMode: "fork"` are refused by name.
-- No project concept: a flat rail, a directory chosen once at creation.
+- No project concept: a session's directory is chosen once, by whoever creates it.
 - The session list never reorders itself: every session by birth; the store keeps only
   the unread mark (`web/session-state.ts`).
