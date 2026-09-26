@@ -67,10 +67,21 @@ no repeating in prompts: *Return the conclusion and the paths it rests on — no
 process, no log of attempts; a deliverable longer than a screen goes to a file
 the result names.* Callback truncation (8 000 chars) is unchanged.
 
-### 4. Model by tier — `DISPATCHER`, the menu's notes
+### 4. Model by tier — the menu, `pier task`, `DISPATCHER`
 
-The operator's menu notes carry a tier word; the dispatcher picks by tier,
-thinking follows the pin:
+The operator assigns tiers on the menu; the dispatcher only ever names a tier.
+No model id appears in any prompt or doc.
+
+- `ModelMenuEntry` gains `tier?: "hardest" | "balanced" | "cheap"`
+  (`settings.ts`); `normalizeModelMenu` rejects a menu with two pins on one
+  tier; config sync carries the field as it does the rest of the entry.
+- Settings → Models: a tier select on each row (none / hardest / balanced /
+  cheap), beside the note; the note presets that say the same thing
+  (`NOTE_PRESETS`, `web/ui/model-menu.ts`) go, the tier is the field.
+- `resolveModel` (`tasks/operations.ts`): a name that equals a tier is that
+  pin, before the substring match; an unassigned tier refuses with the menu,
+  as any miss does. `--model ?` prints the tier in front of the line.
+- The dispatcher picks by tier, thinking follows the pin:
 
 | Work | `--model` |
 | --- | --- |
@@ -78,15 +89,10 @@ thinking follows the pin:
 | coding a feature or a fix; integration | `balanced` |
 | research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
 
-- The lead line becomes `--model hardest --thinking high`.
-- Never `--model ?` per message: a word that matches no pin, or two, is a
-  refusal that prints the menu — the dispatcher picks from that.
-- One pin per tier word: `resolveModel` keeps refusing on several hits.
-  Decided: `hardest` = fable, `balanced` = opus-5-5, `cheap` = gpt-6-luna;
-  gpt-6-astra keeps a note of its own (`gpt reviewer`), the operator writes
-  the notes in Settings → Models.
-- Main runs on the instance default model; 10 §Roles says to pin it balanced.
-- `pier-tasks` §Model choice names the three words.
+- The lead line becomes `--model hardest --thinking high`; never `--model ?`
+  per message.
+- Main runs on the instance default model; 10 §Roles says to set it to the
+  balanced pin. `pier-tasks` §Model choice names the three tiers.
 
 ### 5. Seed ledger, one line per run — `core/chain.ts`
 
@@ -180,13 +186,16 @@ From the heads' transcript usage, over a week of daily use:
 
 ## Build
 
-Three workers, then the fold into 10 and the skill at integration:
+Four workers, then the fold into 10 and the skill at integration:
 
 - rotation on size + the seed line: `core/types.ts`, `core/chain.ts`,
   `agent/events.ts`, `web/ui/main.ts`; `chain.test.ts` — rotates past the
   ceiling with reason `full`, not on `null`, not while streaming, seed carried;
 - the prompts: `agent/roles.ts` (§2, §4), `tasks/agent.ts` (§3),
   `skills/pier-tasks/SKILL.md` (§4); preamble golden test;
+- the tier (§4): `settings.ts`, `web/ui/model-menu.ts`, `tasks/operations.ts`,
+  `docs/design/09-tasks-cli.md` §Models; tests — one pin per tier rejected,
+  `--model balanced` resolves the pin, an unassigned tier refuses;
 - `compactAt` on the seam and in the header (§6): `agent/pi.ts`,
   `core/types.ts`, `core/session.testkit.ts`, `web/ui/session-header.ts`;
   header test — the small worker, or folded into the first;
