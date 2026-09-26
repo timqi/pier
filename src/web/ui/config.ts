@@ -3,7 +3,7 @@
 // drawn here; the package registry's panes are packages-pane.ts.
 
 import { ChevronDown, ChevronRight } from "lucide";
-import type { CatalogEntry, ConfigFile, Package } from "../../core/types.js";
+import type { CatalogEntry, ConfigFile, Package } from "../../agent/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";

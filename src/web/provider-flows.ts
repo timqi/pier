@@ -6,7 +6,7 @@ import type {
   ProviderAuthPrompt,
   ProviderAuthType,
   ProviderManager,
-} from "../core/types.js";
+} from "../agent/types.js";
 import { logger } from "../log.js";
 
 const log = logger("web.providers");

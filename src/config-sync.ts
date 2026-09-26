@@ -5,7 +5,7 @@
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { AgentConfigSnapshot, AgentConfigSync } from "./core/types.js";
+import type { AgentConfigSnapshot, AgentConfigSync } from "./agent/types.js";
 import { transact } from "./db.js";
 import { logger } from "./log.js";
 import { parseModelMenu, type ModelMenuEntry, type SettingsStore } from "./settings.js";

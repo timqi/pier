@@ -1,15 +1,15 @@
 // Getting a provider to work: endpoint/model structure, authentication, and
 // the one request that proves the three of them agree.
 
+import type { ModelRef } from "../../core/types.js";
 import type {
   ModelEffort,
-  ModelRef,
   ProviderApi,
   ProviderAuthType,
   ProviderCheck,
   ProviderInfo,
   ProviderSetup,
-} from "../../core/types.js";
+} from "../../agent/types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { badge, button, CONTROL, empty, field, input, PANEL_HEAD, select, setStatus, textarea } from "./form.js";

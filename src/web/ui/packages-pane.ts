@@ -2,7 +2,7 @@
 // write against it, and the panes that act on a package, a resource or a new
 // source. config.ts draws the nav from `registry` and hands the pane over.
 
-import type { Package, PackageRegistry, PackageResource, PackageResourceKind, PackageScope } from "../../core/types.js";
+import type { Package, PackageRegistry, PackageResource, PackageResourceKind, PackageScope } from "../../agent/types.js";
 import { failure, getJson, postJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { agoLabel, basename, h } from "./dom.js";

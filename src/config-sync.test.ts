@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiConfigStore } from "./agent/config.js";
 import { registerConfigShareRoute } from "./web/config-sync.js";
 import { normalizeAgentSnapshot } from "./agent/config-sync.js";
-import type { AgentConfigSnapshot, AgentConfigSync } from "./core/types.js";
+import type { AgentConfigSnapshot, AgentConfigSync } from "./agent/types.js";
 import { ConfigSync, configJson, configSourceUrl, CONFIG_SYNC_BYTES, downloadConfig, type ConfigDownload } from "./config-sync.js";
 import { openDb } from "./db.js";
 import { SettingsStore } from "./settings.js";

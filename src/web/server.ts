@@ -23,18 +23,20 @@ import type {
   AgentFactory,
   AgentSession,
   BackgroundRun,
-  CatalogEntry,
   ChatTurn,
-  ConfigStore,
   InboundMessage,
   LeadPhase,
-  PackageStore,
   ParkedMessage,
-  ProviderManager,
   SessionEvent,
   SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
+import type {
+  CatalogEntry,
+  ConfigStore,
+  PackageStore,
+  ProviderManager,
+} from "../agent/types.js";
 import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";

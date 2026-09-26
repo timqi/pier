@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PackageError, type Package } from "../core/types.js";
+import { PackageError, type Package } from "./types.js";
 import { openDb } from "../db.js";
 import { SettingsStore } from "../settings.js";
 import { PiConfigStore } from "./config.js";

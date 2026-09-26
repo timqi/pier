@@ -5,7 +5,7 @@ import { isObject } from "./json.js";
  *  so Messages/Responses are spoken here. A gateway serving Messages off
  *  `<base>/v1/messages` breaks in `endpoint()` first. */
 
-import type { RegistryModel, WebContext } from "../core/types.js";
+import type { RegistryModel, WebContext } from "../agent/types.js";
 
 export type Backend = "anthropic" | "openai";
 

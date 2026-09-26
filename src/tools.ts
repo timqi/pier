@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writ
 import { delimiter, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import type { CatalogBinary, CatalogEntry } from "./core/types.js";
+import type { CatalogBinary, CatalogEntry } from "./agent/types.js";
 import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
 import { pierPath, resolveAgentDir } from "./paths.js";

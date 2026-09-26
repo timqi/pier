@@ -1,6 +1,6 @@
 // Render one Pi provider-owned auth interaction after provider setup starts it.
 
-import type { ProviderAuthEvent, ProviderAuthPrompt, ProviderAuthType } from "../../core/types.js";
+import type { ProviderAuthEvent, ProviderAuthPrompt, ProviderAuthType } from "../../agent/types.js";
 import { failure, sendJson } from "./api.js";
 import { copyBtn, h } from "./dom.js";
 import { button, input, STATUS_TONE, type SaveState } from "./form.js";

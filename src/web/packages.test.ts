@@ -1,13 +1,13 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import type { AgentFactory } from "../core/types.js";
 import {
   PackageError,
-  type AgentFactory,
   type Package,
   type PackageErrorReason,
   type PackageRegistry,
   type PackageStore,
-} from "../core/types.js";
+} from "../agent/types.js";
 import { registerPackageRoutes } from "./packages.js";
 
 const PKG: Package = {

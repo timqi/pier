@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { ConfigSync } from "../config-sync.js";
 import { normalizeAgentSnapshot } from "../agent/config-sync.js";
-import type { AgentConfigSnapshot } from "../core/types.js";
+import type { AgentConfigSnapshot } from "../agent/types.js";
 import { openDb } from "../db.js";
 import { SettingsStore } from "../settings.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./auth.js";

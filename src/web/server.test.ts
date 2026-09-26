@@ -24,12 +24,14 @@ import type {
   AgentSession,
   ChatTurn,
   LedgerRun,
+  QueueRecovery,
+} from "../core/types.js";
+import type {
   ConfigScope,
   ConfigStore,
   PackageStore,
   ProviderManager,
-  QueueRecovery,
-} from "../core/types.js";
+} from "../agent/types.js";
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";

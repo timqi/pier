@@ -26,10 +26,12 @@ Slack / Lark                     Web workbench (browser)       Tasks
 
 ```
 src/
-  core/        types.ts (the seams), router.ts, hub.ts, queue.ts, reply.ts,
-               identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
+  core/        types.ts (the conversation seams), router.ts, hub.ts, queue.ts,
+               reply.ts, identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
                continuous conversation: the main_chain table, rotation, seed)
-  agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
+  agent/       types.ts (the Pi-config seams the Console asks for: config
+               files, packages, providers, config sync, `pier web`'s auth),
+               pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
@@ -38,7 +40,7 @@ src/
                and feature lead's contracts, injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
-               (backend + auth over core's `WebContext`), anthropic.ts /
+               (backend + auth over agent's `WebContext`), anthropic.ts /
                openai.ts (the hosted-tool wire formats), content.ts,
                language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
@@ -108,8 +110,9 @@ Dependency rules:
 
 - `channels | web | tasks | boards | websearch → core → agent`. Core never imports platform
   SDKs or Pi; runtime dependencies never go sideways.
+- `agent/types.ts` imports no SDK and no `node:*`; any area may import it.
 - `websearch/` imports no SDK: it speaks Messages/Responses itself over the
-  `WebAuth` seam (`core/types.ts`), which `agent/pi.ts` implements with
+  `WebAuth` seam (`agent/types.ts`), which `agent/pi.ts` implements with
   Pi's `ModelRegistry`; `main.ts` joins the two on the `/web` socket route.
 - `agent/packages.ts` is the second SDK-importing file in `agent/` because the
   registry is a second reason: `pi.ts` opens sessions, `packages.ts` changes
@@ -139,8 +142,9 @@ CJK character. Never per adapter.
 
 ## Core Types
 
-`src/core/types.ts` is the normative contract; this doc does not mirror it. The
-seams:
+`src/core/types.ts` (the conversation) and `src/agent/types.ts` (the Pi
+config the Console asks for) are the normative contract; this doc does not
+mirror them. The seams:
 
 - `Channel` — platform ↔ core: `start(onMessage)`, `send(conversationId,
   reply)`, `notify(conversationId, note)`, `stop()`. One implementation per
@@ -170,7 +174,7 @@ seams:
   `seq`/`ts`/`sessionId`.
 - Pi → Pier event translation lives in `src/agent/events.ts` with golden-table
   tests; changing a mapping is a design decision.
-- `PackageStore` — core ↔ Pi's package registry: `list` (every package with
+- `PackageStore` — Console ↔ Pi's package registry: `list` (every package with
   its resources and switch state, the project scope as view when a `cwd` is
   given), `install`, `remove`, `update` (global scope, answering when done;
   Pi's progress steps are logged at the seam), `setEnabled`, `checkUpdates`.

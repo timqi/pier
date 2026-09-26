@@ -2,7 +2,7 @@
 // the browser's error reports. Nothing here touches a session.
 
 import type { Hono } from "hono";
-import type { CatalogBinary, CatalogEntry } from "../core/types.js";
+import type { CatalogBinary, CatalogEntry } from "../agent/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {

@@ -2,7 +2,8 @@
 // web/fs.ts: a scope is "global" or a cwd Pi already knows, never a browser path.
 
 import type { Hono } from "hono";
-import { isThinkingLevel, type AgentDefaults, type AgentFactory, type ConfigScope, type ConfigStore } from "../core/types.js";
+import { isThinkingLevel, type AgentFactory } from "../core/types.js";
+import type { AgentDefaults, ConfigScope, ConfigStore } from "../agent/types.js";
 import { normalizeModelRef } from "../settings.js";
 import { guarded } from "./route.js";
 

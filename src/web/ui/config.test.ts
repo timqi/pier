@@ -3,7 +3,7 @@
 // operator declared is taken away.
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { CatalogEntry } from "../../core/types.js";
+import type { CatalogEntry } from "../../agent/types.js";
 import { removalStep, writeSettings } from "./config.js";
 
 const realFetch = globalThis.fetch;

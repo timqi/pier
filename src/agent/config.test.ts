@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConfigScope } from "../core/types.js";
+import type { ConfigScope } from "./types.js";
 import { PiConfigStore } from "./config.js";
 import { pierSystemPrompt } from "./pi.js";
 

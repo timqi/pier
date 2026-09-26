@@ -1,12 +1,12 @@
 // HTTP boundary for provider configuration.
 
 import type { Hono } from "hono";
-import { isProviderApi, MODEL_EFFORTS, validateProviderSetup } from "../core/types.js";
-import type { ModelCapability, ModelEffort, ProviderInfo, ProviderManager, ProviderSetup } from "../core/types.js";
+import { isProviderApi, MODEL_EFFORTS, validateProviderSetup } from "../agent/types.js";
+import type { ModelCapability, ModelEffort, ProviderInfo, ProviderManager, ProviderSetup } from "../agent/types.js";
 import { ProviderFlows } from "./provider-flows.js";
 
-/** Shape here; the rules are core's validateProviderSetup, since web/ cannot
- *  import agent/ and must not re-implement them. */
+/** Shape here; the rules are agent/types.ts's validateProviderSetup, which
+ *  web/ must not re-implement. */
 function setupFrom(raw: unknown): ProviderSetup | null {
   if (typeof raw !== "object" || raw === null) return null;
   const input = raw as Record<string, unknown>;

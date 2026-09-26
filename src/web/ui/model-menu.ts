@@ -4,7 +4,8 @@
 
 import { ChevronDown, ChevronUp, Plus, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { MODEL_TIERS, modelKey as key, THINKING_LEVELS, type AgentDefaults, type ModelRef, type ModelTier, type ThinkingLevel } from "../../core/types.js";
+import { MODEL_TIERS, modelKey as key, THINKING_LEVELS, type ModelRef, type ModelTier, type ThinkingLevel } from "../../core/types.js";
+import type { AgentDefaults } from "../../agent/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";

@@ -20,7 +20,7 @@ import {
   type LanguageMode,
 } from "./language.js";
 import { webSearchViaResponses } from "./openai.js";
-import type { WebContext } from "../core/types.js";
+import type { WebContext } from "../agent/types.js";
 import { type Backend, resolveTarget } from "./provider.js";
 
 const DEFAULT_CONTEXT_CHARS = 6_000;

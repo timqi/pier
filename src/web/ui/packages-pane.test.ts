@@ -3,7 +3,7 @@
 // install that shows its row before the answer, and a refusal shown as failed.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Package, PackageRegistry } from "../../core/types.js";
+import type { Package, PackageRegistry } from "../../agent/types.js";
 import { h as make } from "./dom.js";
 import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
 

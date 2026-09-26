@@ -21,7 +21,7 @@ import {
   type PackageResourceKind,
   type PackageStore,
   type PackageSwitch,
-} from "../core/types.js";
+} from "./types.js";
 import { logger } from "../log.js";
 import type { SettingsStore } from "../settings.js";
 import { defaultAgentDir, type PiConfigStore } from "./config.js";

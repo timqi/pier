@@ -23,13 +23,6 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
-  ProviderAuthEvent,
-  ProviderAuthPrompt,
-  ProviderAuthType,
-  ProviderCheck,
-  ProviderInfo,
-  ProviderManager,
-  ProviderSetup,
   SearchHit,
   SessionEventPayload,
   SessionState,
@@ -37,9 +30,18 @@ import type {
   SystemInputOrigin,
   ThinkingLevel,
   TurnMeta,
+} from "../core/types.js";
+import type {
+  ProviderAuthEvent,
+  ProviderAuthPrompt,
+  ProviderAuthType,
+  ProviderCheck,
+  ProviderInfo,
+  ProviderManager,
+  ProviderSetup,
   WebAuth,
   WebContext,
-} from "../core/types.js";
+} from "./types.js";
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { pierPath } from "../paths.js";

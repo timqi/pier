@@ -1,6 +1,7 @@
 // Credential-blind projection of the portable agent configuration.
 
-import { isThinkingLevel, type AgentConfigSnapshot, type ModelRef, type SyncProvider, type ThinkingLevel } from "../core/types.js";
+import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
+import type { AgentConfigSnapshot, SyncProvider } from "./types.js";
 
 /** Never leaves the instance, at any depth of a models.json provider: the
  *  credentials, and the endpoint they authenticate against — a sharing link is

@@ -58,6 +58,7 @@ scheduled tasks, live observability, and static Show pages.
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ | websearch/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only.
+- `agent/types.ts` imports no SDK and no `node:*`; any area may import it.
 - **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
   `core/identity.ts` and `core/inbound-file.ts`, so those four import no
   `node:*`, directly or transitively; `core/` modules that need Node
@@ -145,8 +146,9 @@ non-obvious consequence — in one or two lines. Nothing else:
 - No narration of *what* the code does; the code says that.
 - No essays. A block past ~4 lines is a design note that belongs in `docs/`;
   a file header is one paragraph naming the module's single reason to exist.
-- Doc comments on exported seams (`core/types.ts`, `channels/types.ts`,
-  `tasks/types.ts`) keep their contract wording; that is declaration, not prose.
+- Doc comments on exported seams (`core/types.ts`, `agent/types.ts`,
+  `channels/types.ts`, `tasks/types.ts`) keep their contract wording; that is
+  declaration, not prose.
 
 ## Bug Prevention
 

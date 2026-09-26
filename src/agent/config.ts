@@ -5,9 +5,11 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { isProviderApi, isThinkingLevel, validateEndpoint, validateProviderSetup } from "../core/types.js";
+import { isThinkingLevel } from "../core/types.js";
+import { isProviderApi, validateEndpoint, validateProviderSetup } from "./types.js";
 import { pierPath } from "../paths.js";
 import { mergeSnapshotProviders, normalizeAgentSnapshot, snapshotProviders } from "./config-sync.js";
+import type { ModelRef } from "../core/types.js";
 import type {
   AgentConfigSnapshot,
   AgentConfigSync,
@@ -17,10 +19,9 @@ import type {
   ConfigStore,
   ModelCapability,
   ModelEffort,
-  ModelRef,
   ProviderApi,
   ProviderSetup,
-} from "../core/types.js";
+} from "./types.js";
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];

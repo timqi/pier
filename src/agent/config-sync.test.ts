@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, promises as fs, readFileSync, readdirSync, rmS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentConfigSnapshot } from "../core/types.js";
+import type { AgentConfigSnapshot } from "./types.js";
 import { PiConfigStore } from "./config.js";
 import { normalizeAgentSnapshot } from "./config-sync.js";
 
