@@ -171,6 +171,9 @@ describe("normalizeModelMenu", () => {
     expect(
       normalizeModelMenu([{ provider: "a", id: "x", thinking: "high", note: "hard" }]),
     ).toEqual([{ provider: "a", id: "x", thinking: "high", note: "hard" }]);
+    expect(
+      normalizeModelMenu([{ provider: "a", id: "x", tier: "hardest" }, { provider: "a", id: "y", tier: "cheap" }]),
+    ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "hardest" }, { provider: "a", id: "y", thinking: "medium", tier: "cheap" }]);
   });
 
   it("rejects rather than repairs anything mis-shaped", () => {
@@ -181,6 +184,9 @@ describe("normalizeModelMenu", () => {
       [{ provider: "", id: "x" }],
       [{ provider: "a", id: "x", note: 7 }],
       [{ provider: "a", id: "x", thinking: "warp" }],
+      [{ provider: "a", id: "x", tier: "fastest" }],
+      // One pin per tier: two would make `--model balanced` a guess.
+      [{ provider: "a", id: "x", tier: "balanced" }, { provider: "a", id: "y", tier: "balanced" }],
       Array.from({ length: 33 }, () => ({ provider: "a", id: "x" })),
     ]) {
       expect(normalizeModelMenu(bad)).toBeNull();

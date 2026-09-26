@@ -364,7 +364,9 @@ browser keeps no second session order.
   where its keys are set. Models: Default model is the launch picker written on
   change, redrawn from the server's answer; a pinned row's ∧/∨ arrows move it,
   staged like any menu edit until Save, since the stored order is the one every
-  picker and `pier task --model ?` list. Instance: Public URL, Accent (a
+  picker and `pier task --model ?` list; a row's tier select (none /
+  hardest / balanced / cheap, beside the note) is the pin `--model <tier>`
+  takes, one row per tier, refused on save otherwise. Instance: Public URL, Accent (a
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
   refusal), **Continuous session** (one switch, `PUT {continuous}`; a
