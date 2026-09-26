@@ -2665,7 +2665,7 @@ describe("the continuous conversation's routes", () => {
     for (const id of ["old", "head"]) {
       const res = await post(`/api/sessions/${id}/close`, { closed: true });
       expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ error: "the continuous conversation stays in the rail" });
+      expect(await res.json()).toEqual({ error: "the continuous conversation cannot be closed" });
     }
   });
 });

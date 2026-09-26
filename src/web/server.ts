@@ -393,8 +393,8 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
     const id = c.req.param("id");
-    // The rail's conversation row is drawn from its members; one closed would blank it.
-    if (continuous.chainOf(id)) return c.json({ error: "the continuous conversation stays in the rail" }, 409);
+    // The conversation is drawn from its members; one closed would blank it.
+    if (continuous.chainOf(id)) return c.json({ error: "the continuous conversation cannot be closed" }, 409);
     state.setClosed(id, body.closed);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
@@ -553,7 +553,7 @@ export function createServer(
   // The chain, newest first; the client pages back through it with /history.
   app.get("/api/continuous", (c) => c.json({ chain: continuous.members() }));
 
-  // The rail's Open block.
+  // The drawer's run rows.
   app.get("/api/continuous/open", (c) => c.json(continuous.openItems()));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
@@ -731,11 +731,7 @@ export function createServer(
     onToolsChanged,
     validateCustomTools,
     onUnlocked,
-    // Re-listed too: the switch is what the rail is drawn from.
-    onSettingsChanged: () => {
-      recycle("instance settings");
-      hub.emitWorkspace({ type: "sessions-changed" });
-    },
+    onSettingsChanged: () => recycle("instance settings"),
     passkeys,
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
