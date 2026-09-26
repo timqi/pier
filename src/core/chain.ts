@@ -92,7 +92,7 @@ const runText = (r: OpenRun, now: number): string =>
     ? `run ${r.runId} — ${NOT_IN_LEDGER}`
     : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${workersText(r.workers)}`;
 
-/** The one string every surface shows for the open items: `/status`, the seed, the rail. */
+/** The one string every surface shows for the open items: `/status` and the seed. */
 export function renderOpenItems({ items, unlisted, designs }: OpenItems, now: number): string {
   if (!items.length && !unlisted.length && !designs.length) return "Nothing open.";
   const open = items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.live ? ` (${i.live})` : ""}${i.runs.map((r) => ` · ${runText(r, now)}`).join("")}`);

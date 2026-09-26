@@ -622,7 +622,7 @@ export interface PackageStore {
  *  delegates and opens without the pier-tasks skill (docs/design/10-continuous-session.md). */
 export type AgentRole = "lead" | "worker";
 
-/** A lead's phase, the rail's language-neutral tag: a lead launched with
+/** A lead's phase, the drawer's language-neutral tag: a lead launched with
  *  `launch.design` designs with the user, any other builds. */
 export type LeadPhase = "design" | "build";
 
