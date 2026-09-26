@@ -181,8 +181,8 @@ The routes (`/api/continuous*`), the rail, the pane and its composer are
 
 - In progress is the palette's Running set less the conversation's sessions;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
-- The conversation's ⋯ menu is Session info, New session here, Browse files,
-  Model & reasoning; no Rename, Close or Continue in….
+- The conversation's ⋯ menu is Session info, Browse files,
+  Model & reasoning; no Rename, Close, New session here or Continue in….
 
 ## Not built
 

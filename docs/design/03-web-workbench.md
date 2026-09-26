@@ -271,7 +271,7 @@ browser keeps no second session order.
   never bound.
 - Session menu: Rename / Close / Session info, New session here / Browse files /
   Continue in Lark/Slack…, Model & reasoning. On the continuous conversation's
-  sessions Rename, Close and Continue in… are absent — not a session the user
+  sessions Rename, Close, New session here and Continue in… are absent — not a session the user
   manages. Close takes the row off the rail at once (back if the write fails),
   leaves an open pane open; a message to the session reopens it. Model loading is immediate; a
   cancelled load cannot reopen the panel. A disabled row stays visible with

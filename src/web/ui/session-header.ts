@@ -474,7 +474,7 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       label: "Session info",
       onSelect: () => sessionInfo(anchor, s, () => sessionMenu(anchor, s)),
     },
-    {
+    ...(managed ? [{
       label: "New session here",
       separatorBefore: true,
       hint: basename(s.cwd),
@@ -482,9 +482,10 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         closeMenu();
         deps.createSession(s.cwd);
       },
-    },
+    }] : []),
     {
       label: "Browse files",
+      separatorBefore: !managed,
       hint: current ? chordLabel(FILES_KEY) : "",
       onSelect: () => {
         closeMenu();

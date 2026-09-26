@@ -40,11 +40,11 @@ state it carries.
 | Row | In the group while | Dot |
 | --- | --- | --- |
 | session (lead, IM, any) | streaming, or a run targets it (queued/running), or it launched runs still in flight | green (live) |
-| session | its last turn finished and no client has viewed it | indigo (unread) |
+| session | its last turn finished and no client has viewed it | amber (unread) |
 | run with no session yet | queued or running | grey |
 
 - **Needs you = unread.** A finished lead that asked the user a question
-  stays in the group, dot indigo, until viewed; then it leaves. Nothing else
+  stays in the group, dot amber, until viewed; then it leaves. Nothing else
   marks attention: a failed run's callback reaches main, so a failure is the
   Conversation row's unread dot, never a row of its own; a decision main is
   waiting on is a message in the conversation and a `/status` line.

@@ -141,7 +141,7 @@ it("offers Close after Rename, and neither nor Continue in… on the continuous 
   expect(closeSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
   expect(own.map((i) => i.label)).toContain("Continue in Lark/Slack…");
   expect(items({ ...session(0), id: "head" }).map((i) => i.label))
-    .toEqual(["Session info", "New session here", "Browse files", "Model & reasoning…"]);
+    .toEqual(["Session info", "Browse files", "Model & reasoning…"]);
 });
 
 // A background run is the other kind of "nothing happening": the card sits far
