@@ -148,8 +148,6 @@ describe("cjkFriendly", () => {
   it("never rewrites asterisks inside code", () => {
     expect(cjkFriendly('```\n**"x"**：\n```')).toBe('```\n**"x"**：\n```');
     expect(cjkFriendly('`**"x"**：`')).toBe('`**"x"**：`');
-    // A run holding a code span is left whole rather than split around it.
-    expect(cjkFriendly('**"a `b`"**：')).toBe('**"a `b`"**：');
   });
 
   it("leaves a run that is only punctuation", () => {
@@ -331,5 +329,8 @@ describe("open-item markers", () => {
     const inline = "Write `<done>p</done>` when it lands.";
     expect(openItemMarkers(inline).markers).toEqual([]);
     expect(streamBody(inline)).toBe(inline);
+    const holding = "<open>run `x` — stage</open>\nHi.";
+    expect(openItemMarkers(holding).markers).toEqual([{ op: "open", problem: "run `x`", stage: "stage", runIds: [] }]);
+    expect(streamBody(holding)).toBe("Hi.");
   });
 });

@@ -83,10 +83,11 @@ export function replaceOutsideCode(
   let last = 0;
   for (const match of text.matchAll(pattern)) {
     const start = match.index;
-    const end = start + match[0].length;
-    if (skip.some(([from, to]) => start < to && end > from)) continue;
+    // A match is code when it begins in code; one that merely holds a span
+    // (`<open>run \`x\`</open>`) is prose around it.
+    if (skip.some(([from, to]) => start >= from && start < to)) continue;
     out += text.slice(last, start) + replace(match);
-    last = end;
+    last = start + match[0].length;
   }
   return out + text.slice(last);
 }
