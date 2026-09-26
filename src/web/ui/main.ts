@@ -128,9 +128,6 @@ let currentState: SessionState = "idle";
 let source: EventSource | null = null;
 let lastSeq = 0;
 let turnOpen = false;
-// A session posted to Pi whose id hasn't come back: the pane is already its
-// own (createSession), so the header and the composer say it isn't ready yet.
-let starting = false;
 
 // --- the continuous conversation (docs/design/10-continuous-session.md) -------------
 
@@ -279,11 +276,9 @@ async function createSession(cwd: string): Promise<void> {
   resetHeaderState();
   setHeaderPending(cwd);
   chatLoading(true);
-  starting = true;
   updateComposer();
   const res = await sendJson("/api/sessions", { cwd });
   if (seq !== selectionSeq) return;
-  starting = false;
   if (!res.ok) {
     chatLoading(false);
     setHeaderPending(null);
@@ -467,6 +462,9 @@ function handleEvent(e: SessionEvent): void {
     case "error":
       noteTurnError();
       appendTurn("error", e.message);
+      // A prompt Pi refused before its turn began (no model, no auth) has no
+      // state event to follow: the optimistic streaming would never clear.
+      if (!turnOpen && currentState === "streaming") setState("idle");
       break;
     case "state":
       if (e.state === "idle" && turnOpen) {
@@ -546,7 +544,6 @@ async function select(id: string): Promise<void> {
   if (id === currentId && (source || loading)) return;
   ++selectionSeq; // a create in flight is abandoned; its answer must not land here
   ++loadSeq;
-  starting = false;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   detached = null;
@@ -641,7 +638,6 @@ initChat({
 });
 initComposer({
   sessionId: () => currentId,
-  starting: () => starting,
   sessionState: () => currentState,
   chatVisible: isChatVisible,
   setState,

@@ -58,8 +58,8 @@ beforeEach(async () => {
   vi.stubGlobal("localStorage", storage(stored));
   composer = await import("./composer.js");
   composer.initComposer({
-    sessionId: () => state.id, starting: () => false, sessionState: () => "idle",
-    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload,
+    sessionId: () => state.id, sessionState: () => "idle",
+    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false,
   });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -135,8 +135,8 @@ it("moves drafts left in localStorage into this tab and deletes them", async () 
   vi.resetModules();
   composer = await import("./composer.js");
   composer.initComposer({
-    sessionId: () => state.id, starting: () => false, sessionState: () => "idle",
-    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload,
+    sessionId: () => state.id, sessionState: () => "idle",
+    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false,
   });
 
   expect([...stored.keys()]).toEqual(["pier.filesPrefs"]);
@@ -417,7 +417,7 @@ describe("pending attachments", () => {
 it("ends the optimistic turn a continuous command never starts", async () => {
   const setState = vi.fn();
   composer.initComposer({
-    sessionId: () => "m1", starting: () => false, sessionState: () => "idle",
+    sessionId: () => "m1", sessionState: () => "idle",
     chatVisible: () => true, setState, reload: state.reload, continuous: () => true,
   });
   state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", command: "status" }, { status: 202 }));
@@ -441,7 +441,7 @@ describe("the chat-command completion", () => {
     return ev;
   };
   const continuous = (on: boolean) => composer.initComposer({
-    sessionId: () => "m1", starting: () => false, sessionState: () => "idle",
+    sessionId: () => "m1", sessionState: () => "idle",
     chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => on,
   });
 

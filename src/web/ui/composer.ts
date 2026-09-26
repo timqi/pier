@@ -25,15 +25,14 @@ interface PendingFile {
 /** Everything the composer needs from the orchestrator (main.ts). */
 export interface ComposerDeps {
   sessionId: () => string | null;
-  /** A session is being opened and has no id yet: there is nowhere to send. */
-  starting: () => boolean;
   sessionState: () => SessionState;
   chatVisible: () => boolean;
   setState: (state: SessionState) => void;
   /** Reload the session snapshot if `id` is still the selected session. */
   reload: (id: string) => Promise<void>;
-  /** The continuous conversation is on screen: sends go to its head, whichever that is by then. */
-  continuous?: () => boolean;
+  /** The continuous conversation is on screen: sends go to its head, whichever
+   *  that is by then; otherwise to the child session on screen. */
+  continuous: () => boolean;
   /** The head a continuous send landed on is not the one on screen. */
   headMoved?: () => void;
 }
@@ -130,8 +129,7 @@ export function updateComposer(): void {
   const streaming = deps.sessionState() === "streaming";
   // No id, nothing to send to: send() would drop the prompt on the floor, so
   // the button says so before it is pressed rather than after.
-  const ready = deps.sessionId() !== null || deps.continuous?.() === true;
-  const starting = deps.starting();
+  const ready = deps.sessionId() !== null || deps.continuous();
   sendBtn.disabled = !ready;
   sendBtn.className = `flex h-7 w-7 flex-none items-center justify-center rounded-lg ${
     !ready
@@ -140,10 +138,7 @@ export function updateComposer(): void {
         ? "cursor-pointer bg-amber-100 text-amber-700 hover:bg-amber-200 active:bg-amber-300"
         : "cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50"
   }`;
-  sendBtn.title = !ready
-    ? (starting ? "Starting the session…" : "No session")
-    : streaming ? "Queue — delivered when the turn ends" : "Send";
-  input.placeholder = starting ? "Starting the session…" : "Message…";
+  sendBtn.title = !ready ? "No session" : streaming ? "Queue — delivered when the turn ends" : "Send";
   sendArrow.classList.toggle("hidden", streaming);
   sendQueue.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);
@@ -334,7 +329,7 @@ function commandMatches(): CommandRow[] {
   const draft = input.value;
   if (!draft.startsWith("/") || /\s/.test(draft) || commandDismissed) return [];
   const prefix = draft.slice(1);
-  const chain = deps.continuous?.() === true ? (Object.keys(CHAT_COMMANDS) as ChatCommand[]) : [];
+  const chain = deps.continuous() ? (Object.keys(CHAT_COMMANDS) as ChatCommand[]) : [];
   if (chain.some((c) => c === prefix)) return [];
   return [
     ...chain.filter((c) => c.startsWith(prefix)).map((c) => ({ word: `/${c}`, line: CHAT_COMMANDS[c], fill: `/${c}` })),
@@ -478,7 +473,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
   const typed = (label ?? input.value).trim();
   const files = label === undefined ? pendingFiles : [];
   const id = deps.sessionId();
-  const continuous = deps.continuous?.() === true;
+  const continuous = deps.continuous();
   if ((!typed && files.length === 0) || (!id && !continuous)) return;
   if (label === undefined) {
     if (sending) return;
