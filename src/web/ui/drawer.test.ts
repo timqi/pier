@@ -34,6 +34,7 @@ let drawer: typeof import("./drawer.js");
 let sessions: Row[] = [];
 let chain: ChainMember[] = [];
 let current: string | null = null;
+let open: import("../../core/types.js").OpenItems | null = null;
 const select = vi.fn();
 
 beforeEach(async () => {
@@ -45,7 +46,8 @@ beforeEach(async () => {
   sessions = [];
   chain = [];
   current = null;
-  drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => null });
+  open = null;
+  drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open });
 });
 
 const chip = () => doc.querySelector("#status-chip")!;
@@ -136,4 +138,38 @@ it("does not open with nothing to list, and closes when its rows run out", () =>
   sessions = [row("a")];
   drawer.renderDrawer();
   expect(menu.closeMenu).toHaveBeenCalledOnce();
+});
+
+// ⋯ → Status: the whole of `/status` in one card, its sections in `/status`'s
+// order, a run's name opening its session, refilled as the open items change.
+it("draws /status as one card and refills it while open", () => {
+  const run = (runId: string, over: Partial<import("../../core/types.js").OpenRun> = {}) =>
+    ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: Date.now(), finishedAt: null, ...over });
+  const anchor = document.createElement("button");
+  drawer.openStatus(anchor, document.createElement("header"));
+  const card = () => fake(menu.openPanel.mock.lastCall![1]).querySelectorAll(".system-card");
+  expect(card()).toHaveLength(1);
+  expect(card()[0]!.textContent).toBe("Loading…");
+
+  open = {
+    items: [{ problem: "Bar", stage: "building", live: "running", runs: [run("r1", { workers: { queued: 0, running: 2, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } })] }],
+    unlisted: [run("r2", { state: "succeeded", finishedAt: Date.now() })],
+    designs: [],
+  };
+  drawer.renderDrawer();
+  const text = card()[0]!.textContent;
+  expect(text).toContain("Open");
+  expect(text).toContain("Bar");
+  expect(text).toContain("building");
+  expect(text).toContain("running now · workers: 2 running, 1 succeeded");
+  expect(text).toContain("Not on the list");
+  expect(text).not.toContain("Designs for you to finalize");
+  const name = card()[0]!.querySelectorAll("button").find((b) => b.textContent === "r1")!;
+  name.onclick?.();
+  expect(menu.closeMenu).toHaveBeenCalled();
+  expect(select).toHaveBeenCalledWith("s-r1");
+
+  open = { items: [], unlisted: [], designs: [] };
+  drawer.renderDrawer();
+  expect(card()[0]!.textContent).toBe("Nothing open.");
 });

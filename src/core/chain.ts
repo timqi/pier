@@ -9,7 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import type { EventHub } from "./hub.js";
-import { agoLabel, openItemMarkers, relTime } from "./reply.js";
+import { openItemMarkers, runStatus, workerCounts } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand, LEDGER_WINDOW_MS, NOT_IN_LEDGER, TASK_RUN_STATES } from "./types.js";
 import type {
@@ -78,14 +78,8 @@ function chatCommand(text: string): ChatCommand | undefined {
   return draft.startsWith("/") && isChatCommand(word) ? word : undefined;
 }
 
-const runStatus = (r: LedgerRun, now: number): string =>
-  r.finishedAt === null ? `${r.state} ${relTime(r.queuedAt, now)}` : `${r.state} ${agoLabel(r.finishedAt, now)}`;
-
-function workersText(workers: Record<TaskRunState, number> | undefined): string {
-  if (!workers) return "";
-  const counts = TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`);
-  return ` · workers: ${counts.join(", ") || "none"}`;
-}
+const workersText = (workers: Record<TaskRunState, number> | undefined): string =>
+  workers ? ` · workers: ${workerCounts(workers)}` : "";
 
 const runText = (r: OpenRun, now: number): string =>
   r.state === NOT_IN_LEDGER

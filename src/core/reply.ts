@@ -3,7 +3,8 @@
 // emphasis repair. Web chat and every IM adapter render these, so the wording
 // and units live here.
 
-import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js";
+import { TASK_RUN_STATES } from "./types.js";
+import type { AgentReply, LedgerRun, NoteOrigin, TaskRunState, ThinkingLevel, TurnMeta } from "./types.js";
 
 /** The surface contract handed to every agent Pier launches (main.ts); the
  *  syntax the agent is told to emit sits beside the parser that reads it back. */
@@ -137,6 +138,14 @@ export const agoLabel = (ts: number, now: number): string => {
   const age = relTime(ts, now);
   return age === "now" ? "just now" : `${age} ago`;
 };
+
+/** A run's state and its age: how long it has been going, or how long ago it ended. */
+export const runStatus = (r: LedgerRun, now: number): string =>
+  r.finishedAt === null ? `${r.state} ${relTime(r.queuedAt, now)}` : `${r.state} ${agoLabel(r.finishedAt, now)}`;
+
+/** A lead's launches by state, in the states' own order: "2 running, 1 failed". */
+export const workerCounts = (workers: Record<TaskRunState, number>): string =>
+  TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`).join(", ") || "none";
 
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {

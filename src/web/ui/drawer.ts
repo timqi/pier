@@ -1,13 +1,16 @@
 // The In progress drawer: what is running and what needs you, counted on the
-// bar's status chip and listed in a panel under it. The palette borrows its
-// order, dots and Running set.
+// bar's status chip and listed in a panel under it, and the full list behind
+// it — `/status` as one card from ⋯. The palette borrows its order, dots and
+// Running set.
 
+import { runStatus, workerCounts } from "../../core/reply.js";
 import { $, h, relTime } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
-import { type ChainMember, type LeadPhase, type OpenItems, type OpenRun, type SessionState } from "../../core/types.js";
+import { runCard, STATE_STYLE, stateGlyph } from "./turn-activity.js";
+import { type ChainMember, type LeadPhase, type LedgerRun, type OpenItems, type OpenRun, type SessionState, type TaskRunState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -225,6 +228,7 @@ export function renderDrawer(): void {
     if (!rows.length) closeMenu();
     else fill(list);
   }
+  if (status?.isConnected && !status.closest("[inert]")) fillStatus(status);
   refreshPalette(); // it draws the same rows, from the same list
 }
 
@@ -253,4 +257,64 @@ export function initDrawer(d: DrawerDeps): void {
   chip.onclick = openDrawer;
   // Stands down under a modal: the palette is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
+}
+
+// --- /status as one card ----------------------------------------------------------------
+// The same OpenItems `/status` renders as text (core/chain.ts renderOpenItems),
+// in its sections and order, structured: a run is a line whose name opens its session.
+
+/** The card while its panel is open; a render refills it in place. */
+let status: HTMLElement | null = null;
+
+const isRunState = (s: string): s is TaskRunState => Object.hasOwn(STATE_STYLE, s);
+
+function statusRun(r: OpenRun | LedgerRun): HTMLElement {
+  const state = isRunState(r.state) ? r.state : null;
+  const target = r.targetSessionId;
+  const name = h(target ? "button" : "span", `min-w-0 grow basis-40 truncate text-left text-neutral-800 ${target ? "cursor-pointer hover:text-indigo-700 hover:underline" : ""}`, r.name);
+  if (target) {
+    name.setAttribute("type", "button");
+    name.title = `Open run ${r.runId}'s session`;
+    name.onclick = () => {
+      closeMenu();
+      deps.select(target);
+    };
+  }
+  const workers = "workers" in r && r.workers ? ` · workers: ${workerCounts(r.workers)}` : "";
+  const facts = h("span", `ml-auto font-mono text-[11px] ${state ? STATE_STYLE[state].label : "text-neutral-500"}`,
+    `${state ? runStatus(r, Date.now()) : r.state}${workers}`);
+  return h("li", "flex min-h-8 flex-wrap items-center gap-x-2 pointer-coarse:min-h-11", ...(state ? [stateGlyph(state)] : []), name, facts);
+}
+
+const statusSection = (title: string, children: HTMLElement[]): HTMLElement[] => children.length
+  ? [h("section", "border-t border-neutral-200 pt-2 first:border-t-0 first:pt-0",
+    h("h3", "text-xs font-semibold leading-5 text-neutral-500", title), ...children)]
+  : [];
+
+function fillStatus(card: HTMLElement): void {
+  const open = deps.open();
+  if (!open) return void card.replaceChildren(h("p", "text-neutral-500", "Loading…"));
+  const { items, unlisted, designs } = open;
+  if (!items.length && !unlisted.length && !designs.length) return void card.replaceChildren(h("p", "text-neutral-500", "Nothing open."));
+  const item = (i: OpenItems["items"][number]): HTMLElement => h("div", "py-1.5",
+    h("div", "flex items-start gap-2",
+      h("span", "min-w-0 flex-1 font-medium [overflow-wrap:anywhere] text-neutral-900", i.problem),
+      ...(i.live ? [h("span", "flex flex-none items-center gap-1 text-xs leading-6 text-neutral-500",
+        ...(i.live === "running" ? markDot(WORKING) : []), i.live)] : [])),
+    ...(i.stage ? [h("div", "[overflow-wrap:anywhere] text-neutral-500", i.stage)] : []),
+    ...(i.runs.length ? [h("ul", "mt-0.5", ...i.runs.map(statusRun))] : []));
+  card.replaceChildren(
+    ...statusSection("Open", items.map(item)),
+    ...statusSection("Not on the list", unlisted.length ? [h("ul", "", ...unlisted.map(statusRun))] : []),
+    ...statusSection("Designs for you to finalize", designs.length ? [h("ul", "", ...designs.map(statusRun))] : []),
+  );
+}
+
+/** `head` is the caller's: back to ⋯, the title, close. */
+export function openStatus(anchor: HTMLElement, head: HTMLElement): void {
+  const card = runCard("border-l-cyan-500");
+  card.classList.add("flex", "flex-col", "gap-2", "text-sm", "leading-6");
+  status = card;
+  fillStatus(card);
+  openPanel(anchor, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans", head, card)).setAttribute("aria-label", "Status");
 }

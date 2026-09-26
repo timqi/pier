@@ -7,7 +7,7 @@ import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
-import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, openStatus, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { togglePalette } from "./palette.js";
@@ -138,13 +138,16 @@ const contextLabel = (u: ContextUsage): string =>
     ? `?/${compact(u.compactAt)}`
     : `${compact(u.tokens)}/${compact(u.compactAt)} · ${100 - contextUsed(u.tokens, u)}% left`;
 
-/** Title-row meta: model · reasoning · current context size. */
+/** Title-row meta: model · reasoning · current context size. The
+ *  conversation's model is the default and stays so, so its bar says only the
+ *  context, in full and on one line at every width; ⋯ still changes the model. */
 function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
+  const conversation = deps.continuousOpen();
   const items: HTMLElement[] = [];
-  if (id) {
+  if (id && !conversation) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
       const button = h("button", `cursor-pointer font-mono ${cls}`, text);
       button.title = "Change model or reasoning";
@@ -170,7 +173,12 @@ function renderSessionMeta(): void {
   if (u && tokens !== null) {
     pressure = contextUsed(tokens, u);
     const tone = pressure >= 90 ? "text-red-700" : pressure >= CONTEXT_WARN ? "text-amber-700" : "text-neutral-500";
-    items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
+    if (conversation) {
+      const chip = h("span", `flex-none rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[12px] ${tone}`,
+        `${compact(tokens)}/${compact(u.compactAt)}`.toLowerCase());
+      chip.title = `Context: ${contextLabel(u)} before compaction`;
+      items.push(chip);
+    } else items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }
   const children = items.flatMap((item, i) =>
     i === 0 ? [item] : [h("span", "flex-none text-neutral-300", "·"), item],
@@ -181,6 +189,7 @@ function renderSessionMeta(): void {
   // On a phone only one chip is worth a second line: a context near full,
   // which is acted on. style.css shows only this one below md.
   sessionMeta.toggleAttribute("data-urgent", pressure >= CONTEXT_WARN);
+  sessionMeta.toggleAttribute("data-inline", conversation);
 }
 
 /** Read-only details panel: what this session is and how full its context is.
@@ -248,7 +257,7 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
   // What the panel is showing right now — the placeholder, then the picker the
   // cache drew, then the picker the read reconciled.
   let shown: HTMLElement = loading;
-  if (session) content.prepend(panelHead(anchor, session, "Close model picker"));
+  if (session) content.prepend(panelHead(anchor, session.title ?? untitled(session.cwd), "Close model picker"));
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.
   const visible = (): boolean => shown.isConnected && !shown.closest("[inert]");
@@ -349,15 +358,15 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
-/** Head of a follow-up panel: back to the menu, the session's name, close. */
-function panelHead(anchor: HTMLElement, s: SessionInfo, closeLabel: string): HTMLElement {
+/** Head of a follow-up panel: back to the menu, its title, close. */
+function panelHead(anchor: HTMLElement, text: string, closeLabel: string): HTMLElement {
   const arrow = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
   arrow.setAttribute("aria-label", "Back to session actions");
   arrow.onclick = () => barMenu(anchor);
   const close = h("button", "icon-btn h-11 w-11", icon(X));
   close.setAttribute("aria-label", closeLabel);
   close.onclick = closeMenu;
-  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", s.title ?? untitled(s.cwd));
+  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", text);
   title.title = title.textContent ?? "";
   return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", arrow, title, close);
 }
@@ -378,8 +387,13 @@ export function barMenu(anchor: HTMLElement): void {
       },
     }] : []),
     {
+      label: "Status",
+      hint: "/status",
+      onSelect: () => openStatus(anchor, panelHead(anchor, "Status", "Close status")),
+    },
+    {
       label: "Session info",
-      separatorBefore: conversation,
+      separatorBefore: true,
       onSelect: () => s && sessionInfo(anchor, s, () => barMenu(anchor)),
       ...later,
     },

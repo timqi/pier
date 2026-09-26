@@ -727,12 +727,14 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      strip's height is declared, not measured, so --head-h can be too: the
      transcript pads by what covers it. */
   main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
-  main:has(#bar:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4rem; }
+  main:has(#bar:not(.hidden)):has(#session-meta[data-urgent]:not([data-inline]):not(.hidden)) { --bar-h: 4rem; }
   #bar { flex-wrap: wrap; align-content: center; row-gap: 0; height: var(--bar-h); }
   /* `min-width: 0`: the model chip gives up characters instead of hanging off
      the bar's edge (session-header.ts). */
   #bar #session-meta { order: 1; flex-basis: 100%; height: 1.25rem; min-width: 0; padding-left: 0.5rem; }
   #bar #session-meta:not([data-urgent]) { display: none; }
+  /* The conversation's one chip is the context, short enough to stay beside the title. */
+  #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
   #turns { padding-inline: 0.625rem; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }

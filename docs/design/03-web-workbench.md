@@ -168,8 +168,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Model, reasoning and context chips open model selection.
-- The ⋯ menu contains Search ⌘K, Session info, Browse files, Model & reasoning…, and Settings. Session info and model actions are disabled before the first reply; Search is shown on Conversation.
+- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Conversation shows only its context, `used/compactAt`; a child session's model, reasoning and context chips open model selection.
+- The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings. Status opens the open items as one card ([12 §Status](12-ui-shape.md#status)). Session info and model actions are disabled before the first reply; Search is shown on Conversation.
 - In progress lists live sessions outside the continuous conversation and live runs not represented by a session row. Rows open in the column; a child session's ‹ returns to Conversation. ⌘⇧P opens the drawer.
 - The drawer is a popover under the status chip at widths of 640px and above, and a bottom sheet below 640px. The sheet uses `menu.ts` focus, inertness and backdrop behavior.
 - Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
@@ -186,7 +186,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 - One menu primitive allows one open panel at a time. Outside pointerdown, focus leaving, Esc and page scroll close it. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
-- The bar menu provides Search, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- The bar menu provides Search, Status, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 
 ### Chat pane (`chat.ts`, `composer.ts`)

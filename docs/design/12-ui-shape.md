@@ -22,7 +22,7 @@ final.
 desktop / phone                         viewing a child session
 ┌─────────────────────────────────────┐ ┌─────────────────────────────────────┐
 │ Conversation   [2 running · 1 needs │ │ ‹ Conversation  Sleep worker  build │
-│                 you] [opus-5·low·8k]⋯│ │                 [running] [opus·hi]⋯│
+│                  you] [52k/160k]   ⋯ │ │                 [running] [opus·hi]⋯│
 ├─────────────────────────────────────┤ ├─────────────────────────────────────┤
 │                                     │ │                                     │
 │  ↺ session seed · lost · 01a0dd03   │ │  …the child's transcript…           │
@@ -42,8 +42,8 @@ desktop / phone                         viewing a child session
 | --- | --- | --- |
 | left | **Conversation** (opens Session info) | **‹** back to the conversation, wearing the head's dot when it is streaming or unread; then the session's title and its `phase` tag |
 | status chip | `N running · M needs you` — opens the drawer; absent when both are 0 | the same chip, the same drawer |
-| meta chips | model · reasoning · `used/compactAt` — open the model picker; below md only context ≥ 70% or "starting…" shows, as today | the same |
-| `⋯` | Search ⌘K · Session info · Browse files · Model & reasoning · Settings | Session info · Browse files · Model & reasoning · Settings |
+| meta chips | `used/compactAt` only, at every width beside the title; the model is the default and changes from `⋯` | model · reasoning · used tokens — open the model picker; below md only context ≥ 70% shows |
+| `⋯` | Search ⌘K · Status · Session info · Browse files · Model & reasoning · Settings | Status · Session info · Browse files · Model & reasoning · Settings |
 
 - `N running` counts the drawer's green and grey rows; `M needs you` its
   amber ones plus design leads waiting on Finalize. The chip is the drawer's
@@ -74,6 +74,21 @@ chip is right and the reading column keeps its left edge.
   walks.
 - Focus, inertness and the phone sheet's backdrop follow the menu primitive;
   the drawer uses `menu.ts` (§Deletions).
+
+## Status
+
+`⋯` → Status opens `/status` as one card in a panel (the drawer's placement:
+popover ≥ 640px, sheet below), headed ← back to `⋯`, Status, ✕.
+
+- One `system-card`, `/status`'s sections in its order: Open (per item its
+  problem, stage, `running`/`idle`, and its runs), Not on the list, Designs for
+  you to finalize; empty → `Nothing open.`
+- A run is a line: state glyph, name, `<state> <age>` and a lead's
+  `workers: …` (`runStatus`/`workerCounts`, core/reply.ts, the text's own
+  words); a name with a session opens it and closes the panel.
+- Same source as the drawer (`GET /api/continuous/open`, re-read on
+  `sessions-changed`, `task-run-changed` and `open-items-changed`), refilled in
+  place while open. It posts nothing to the transcript; typing `/status` still does.
 
 ## Child session
 

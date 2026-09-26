@@ -17,11 +17,12 @@ vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./chat.js", () => ({ appendTurn: vi.fn() }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
 vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
-const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
+const drawer = vi.hoisted(() => ({ head: undefined as unknown, openStatus: vi.fn() }));
 vi.mock("./drawer.js", () => ({
   headSession: () => drawer.head,
   phaseTag: (s: SessionInfo) => (s.phase ? [Object.assign(document.createElement("span"), { textContent: s.phase })] : []),
   stateDot: () => [document.createElement("i")],
+  openStatus: drawer.openStatus,
   // Marked so the chip's title proves it uses the drawer's words, which
   // drawer.test.ts owns, rather than spelling its own second copy.
 }));
@@ -144,16 +145,18 @@ it("offers Search first on the conversation, and the rest without it on a child"
   current = session(0);
   header.renderHeader();
   const items = await menuItems();
-  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect(items.map((i) => i.label)).toEqual(["Search", "Status", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
   expect(items[0]!.hint).toBe("⌘K");
   items[0]!.onSelect();
   expect(palette.togglePalette).toHaveBeenCalledOnce();
-  items[4]!.onSelect();
+  items[1]!.onSelect();
+  expect(drawer.openStatus).toHaveBeenCalledOnce();
+  items[5]!.onSelect();
   expect(openSettings).toHaveBeenCalledOnce();
 
   conversation = false;
   header.renderHeader();
-  expect((await menuItems()).map((i) => i.label)).toEqual(["Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect((await menuItems()).map((i) => i.label)).toEqual(["Status", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
 });
 
 // Before the conversation's first reply there is no session to describe or
@@ -199,6 +202,21 @@ it("keeps the meta row to model, reasoning and context, urgent only under contex
   expect(meta().hasAttribute("data-urgent")).toBe(false);
   header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 90_000, compactAt: 100_000 }, "high", null);
   expect(meta().hasAttribute("data-urgent")).toBe(true);
+});
+
+// The conversation's model is the default and never moves: its bar reads the
+// context in full, inline at every width, and ⋯ keeps the model picker.
+it("shows only the context, used/compactAt, on the conversation's bar", () => {
+  conversation = true;
+  current = session(0);
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 52_000, compactAt: 160_000 }, "high", null);
+  expect(chips()).toHaveLength(0);
+  expect(meta().textContent).toBe("52k/160k");
+  expect(meta().hasAttribute("data-inline")).toBe(true);
+  conversation = false;
+  header.renderHeader();
+  expect(chips().map((c) => c.textContent)).toEqual([model.id, "high"]);
+  expect(meta().hasAttribute("data-inline")).toBe(false);
 });
 
 it("draws the second open from cache, before the read answers", async () => {
