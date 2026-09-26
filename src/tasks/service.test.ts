@@ -543,14 +543,14 @@ describe("task service", () => {
     (factory.availableModels as ReturnType<typeof vi.fn>).mockResolvedValue([
       { provider: "test", id: "model" },
     ]);
-    const menu: { provider: string; id: string; note?: string }[] = [];
+    const menu: { provider: string; id: string; tier?: "cheap" }[] = [];
     const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { modelMenu: () => menu });
     expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
       "the live catalog (no model pinned) — --model takes a tier, a provider/id or a unique substring of one:\ntest/model",
     );
-    menu.push({ provider: "test", id: "model", note: "the one we pay for" });
+    menu.push({ provider: "test", id: "model", tier: "cheap" });
     expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
-      "the operator's menu — --model takes a tier, a provider/id or a unique substring of one:\ntest/model — the one we pay for",
+      "the operator's menu — --model takes a tier, a provider/id or a unique substring of one:\ncheap · test/model",
     );
   });
 
@@ -1062,6 +1062,33 @@ describe("task service", () => {
       targetSessionId: "fresh-child",
       sessionMode: "fresh",
     });
+  });
+
+  it("launches a tier's first pin the catalog still has, in menu order", async () => {
+    const menu = [
+      { provider: "a", id: "gone", thinking: "high" as const, tier: "balanced" as const },
+      { provider: "b", id: "other", thinking: "low" as const, tier: "cheap" as const },
+      { provider: "b", id: "here", thinking: "low" as const, tier: "balanced" as const },
+      { provider: "c", id: "last", thinking: "max" as const, tier: "balanced" as const },
+    ];
+    const { cwd, service, factory } = setup(fakeSession(), { modelMenu: () => menu });
+    vi.mocked(factory.create).mockResolvedValue(fakeSession("child"));
+    const launched = async (available: { provider: string; id: string }[], launch: Record<string, unknown> = {}) => {
+      vi.mocked(factory.availableModels).mockResolvedValue(available);
+      const { runId } = await service.handle({ operation: "run", prompt: "Work", cwd, launch: { model: "balanced", ...launch } }, "s1") as { runId: string };
+      await service.waitForRun(runId);
+      const { model, thinking } = vi.mocked(factory.create).mock.lastCall![0];
+      return { model, thinking };
+    };
+    const all = [{ provider: "a", id: "gone" }, { provider: "b", id: "here" }, { provider: "c", id: "last" }];
+    expect(await launched(all)).toEqual({ model: { provider: "a", id: "gone" }, thinking: "high" });
+    // The first is gone: the next pin on the tier, at its own level — never another tier's.
+    expect(await launched(all.slice(1))).toEqual({ model: { provider: "b", id: "here" }, thinking: "low" });
+    expect(await launched(all.slice(2))).toEqual({ model: { provider: "c", id: "last" }, thinking: "max" });
+    // The caller's level holds on a fallback too.
+    expect(await launched(all.slice(1), { thinking: "minimal" })).toEqual({ model: { provider: "b", id: "here" }, thinking: "minimal" });
+    // None left: the first, so the failure names the model the operator ranked first.
+    expect(await launched([])).toEqual({ model: { provider: "a", id: "gone" }, thinking: "high" });
   });
 
   it("refuses a definition stored with the removed fork mode instead of guessing a directory", async () => {

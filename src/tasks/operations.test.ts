@@ -39,9 +39,10 @@ const group = (id: string, memberRunIds: string[], over: Partial<TaskGroup> = {}
 });
 
 const menu = [
-  { provider: "anthropic", id: "claude-opus-4", thinking: "high", note: "hardest reasoning" },
-  { provider: "openai", id: "gpt-5", thinking: "medium", note: "second opinion", tier: "balanced" },
-  { provider: "openai", id: "gpt-5-mini", thinking: "low", note: "cheap bulk" },
+  { provider: "anthropic", id: "claude-opus-4", thinking: "high" },
+  { provider: "openai", id: "gpt-5", thinking: "medium", tier: "balanced" },
+  { provider: "openai", id: "gpt-5-mini", thinking: "low" },
+  { provider: "xai", id: "grok-4", thinking: "high", tier: "balanced" },
 ];
 
 /** A store with these rows and a host that only knows how to read them: the
@@ -268,10 +269,9 @@ describe("task operations", () => {
       await ask({ operation: "run", prompt: "Work", launch });
       return (ask.created.at(-1)!.action as { launch: unknown }).launch;
     };
-    // One hit: id, provider or note, any case.
+    // One hit: id or provider, any case.
     expect(await launchOf({ model: "Opus" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
     expect(await launchOf({ model: "anthropic" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
-    expect(await launchOf({ model: "cheap bulk" })).toEqual({ model: { provider: "openai", id: "gpt-5-mini" }, thinking: "low" });
     // The caller's thinking wins over the pin's.
     expect(await launchOf({ model: "mini", thinking: "off" })).toEqual({ model: { provider: "openai", id: "gpt-5-mini" }, thinking: "off" });
     // An exact provider/id is its pin even where the substring would be ambiguous.
@@ -280,18 +280,27 @@ describe("task operations", () => {
     expect(await launchOf({ model: "openrouter/meta/llama-4" })).toEqual({ model: { provider: "openrouter", id: "meta/llama-4" } });
     // Many or none: the lines to pick from, and the run does not start.
     await expect(launchOf({ model: "gpt" })).rejects.toThrow(
-      'model "gpt" matches 2 of the menu:\nbalanced · openai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk',
+      'model "gpt" matches 2 of the menu:\nbalanced · openai/gpt-5 · medium\nopenai/gpt-5-mini · low',
     );
-    // A tier is its pin, never a substring: "cheap" names no pin here though a note says it.
-    expect(await launchOf({ model: "Balanced" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium" });
+    // A tier is its first pin in menu order, the later ones its fallbacks, each at its own level.
+    expect(await launchOf({ model: "Balanced" })).toEqual({
+      model: { provider: "openai", id: "gpt-5" }, thinking: "medium",
+      fallbacks: [{ model: { provider: "xai", id: "grok-4" }, thinking: "high" }],
+    });
+    // The caller's level is every candidate's: the fallbacks carry none of their own.
+    expect(await launchOf({ model: "balanced", thinking: "low" })).toEqual({
+      model: { provider: "openai", id: "gpt-5" }, thinking: "low",
+      fallbacks: [{ model: { provider: "xai", id: "grok-4" } }],
+    });
+    // Never a substring: "cheap" names no pin here.
     await expect(launchOf({ model: "cheap" })).rejects.toThrow(
-      /^model "cheap": tier cheap is unassigned — the operator's menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\nbalanced · openai/,
+      /^model "cheap": tier cheap is unassigned — the operator's menu:\nanthropic\/claude-opus-4 · high\nbalanced · openai/,
     );
-    await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\n/);
+    await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high\n/);
     // `?` is the menu itself, in the same lines a refusal lists, in place of a run.
     expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toBe(
       "the operator's menu — --model takes a tier, a provider/id or a unique substring of one:\n"
-      + "anthropic/claude-opus-4 · high — hardest reasoning\nbalanced · openai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk",
+      + "anthropic/claude-opus-4 · high\nbalanced · openai/gpt-5 · medium\nopenai/gpt-5-mini · low\nbalanced · xai/grok-4 · high",
     );
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });

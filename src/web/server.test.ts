@@ -1350,8 +1350,12 @@ describe("workbench server", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ modelMenu }),
       });
-    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", thinking: "high", note: "hard problems" }];
-    const ok = await put(menu);
+    // Two pins on one tier are its first choice and fallback; a note an older Console sends is dropped.
+    const menu = [
+      { provider: "anthropic", id: "claude-opus-4-5", thinking: "high", tier: "hardest" },
+      { provider: "openai", id: "gpt-5", thinking: "high", tier: "hardest" },
+    ];
+    const ok = await put([{ ...menu[0], note: "hard problems" }, menu[1]]);
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({
       ...SETTINGS_JSON,
@@ -1360,7 +1364,10 @@ describe("workbench server", () => {
     });
 
     expect((await put("nope")).status).toBe(400);
-    expect((await put([{ provider: "a" }])).status).toBe(400);
+    // The refusal names the row and the field.
+    const bad = await put([...menu, { provider: "a", id: "b", tier: "fastest" }]);
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "modelMenu row 3 (a/b): tier must be one of hardest, balanced, cheap, or none" });
     expect(settings.get().modelMenu).toEqual(menu);
 
     // Neither field is also "no request".

@@ -6,7 +6,7 @@ import { openDb } from "./db.js";
 import {
   ACCENTS,
   normalizeAccent,
-  normalizeModelMenu,
+  parseModelMenu,
   normalizePublicUrl,
   normalizeTools,
   SettingsStore,
@@ -101,9 +101,12 @@ describe("SettingsStore", () => {
     const db = openDb(":memory:");
     const store = new SettingsStore(db);
     const menu = [
-      { provider: "anthropic", id: "claude-opus-4-5", thinking: "high" as const, note: "hardest reasoning" },
+      { provider: "anthropic", id: "claude-opus-4-5", thinking: "high" as const, tier: "hardest" as const },
     ];
     expect(store.setModelMenu(menu).modelMenu).toEqual(menu);
+    // A note an older Pier stored loads, dropped.
+    db.prepare(`UPDATE settings SET value = '[{"provider":"a","id":"x","thinking":"low","note":"cheap bulk"}]' WHERE key = 'modelMenu'`).run();
+    expect(store.get().modelMenu).toEqual([{ provider: "a", id: "x", thinking: "low" }]);
     // A hand-edited row must not take get() down with it.
     db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'modelMenu'").run();
     expect(store.get().modelMenu).toEqual([]);
@@ -161,35 +164,38 @@ describe("managed tools", () => {
   });
 });
 
-describe("normalizeModelMenu", () => {
-  it("accepts entries, trims, and drops an empty note", () => {
+describe("parseModelMenu", () => {
+  it("accepts entries, trims, and drops a note", () => {
     // A level is required, so an entry stored before it was — or exported by an
     // instance that predates it — keeps its pin at the shared default.
     expect(
-      normalizeModelMenu([{ provider: " anthropic ", id: " claude-opus-4-5 ", note: "  " }]),
+      parseModelMenu([{ provider: " anthropic ", id: " claude-opus-4-5 ", note: "  " }]),
     ).toEqual([{ provider: "anthropic", id: "claude-opus-4-5", thinking: "medium" }]);
     expect(
-      normalizeModelMenu([{ provider: "a", id: "x", thinking: "high", note: "hard" }]),
-    ).toEqual([{ provider: "a", id: "x", thinking: "high", note: "hard" }]);
+      parseModelMenu([{ provider: "a", id: "x", thinking: "high", note: 7 }]),
+    ).toEqual([{ provider: "a", id: "x", thinking: "high" }]);
     expect(
-      normalizeModelMenu([{ provider: "a", id: "x", tier: "hardest" }, { provider: "a", id: "y", tier: "cheap" }]),
+      parseModelMenu([{ provider: "a", id: "x", tier: "hardest" }, { provider: "a", id: "y", tier: "cheap" }]),
     ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "hardest" }, { provider: "a", id: "y", thinking: "medium", tier: "cheap" }]);
   });
 
-  it("rejects rather than repairs anything mis-shaped", () => {
-    for (const bad of [
-      "not a list",
-      [{ provider: "a" }],
-      [{ provider: "a", id: 42 }],
-      [{ provider: "", id: "x" }],
-      [{ provider: "a", id: "x", note: 7 }],
-      [{ provider: "a", id: "x", thinking: "warp" }],
-      [{ provider: "a", id: "x", tier: "fastest" }],
-      // One pin per tier: two would make `--model balanced` a guess.
-      [{ provider: "a", id: "x", tier: "balanced" }, { provider: "a", id: "y", tier: "balanced" }],
-      Array.from({ length: 33 }, () => ({ provider: "a", id: "x" })),
-    ]) {
-      expect(normalizeModelMenu(bad)).toBeNull();
+  it("keeps several pins on one tier, in order: the later ones are fallbacks", () => {
+    expect(
+      parseModelMenu([{ provider: "a", id: "x", tier: "balanced" }, { provider: "a", id: "y", tier: "balanced" }]),
+    ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "balanced" }, { provider: "a", id: "y", thinking: "medium", tier: "balanced" }]);
+  });
+
+  it("rejects rather than repairs anything mis-shaped, naming the row and field", () => {
+    for (const [bad, error] of [
+      ["not a list", "modelMenu must be a list"],
+      [[{ provider: "a" }], "modelMenu row 1: provider and id must be non-empty strings"],
+      [[{ provider: "a", id: "x" }, { provider: "a", id: 42 }], "modelMenu row 2: provider and id must be non-empty strings"],
+      [[{ provider: "", id: "x" }], "modelMenu row 1: provider and id must be non-empty strings"],
+      [[{ provider: "a", id: "x", thinking: "warp" }], "modelMenu row 1 (a/x): thinking must be one of off, minimal, low, medium, high, xhigh, max"],
+      [[{ provider: "a", id: "x" }, { provider: "a", id: "y", tier: "fastest" }], "modelMenu row 2 (a/y): tier must be one of hardest, balanced, cheap, or none"],
+      [Array.from({ length: 33 }, () => ({ provider: "a", id: "x" })), "modelMenu has 33 rows; at most 32"],
+    ] as [unknown, string][]) {
+      expect(parseModelMenu(bad)).toBe(error);
     }
   });
 });

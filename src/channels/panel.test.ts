@@ -16,7 +16,6 @@ const ref = (i: number): ModelRef => ({ provider: "anthropic", id: `model-${i}` 
 const PINS: ModelMenuEntry[] = Array.from({ length: 10 }, (_, i) => ({
   ...ref(i === 9 ? 0 : i),
   thinking: (i === 0 ? "off" : "high") as ThinkingLevel,
-  ...(i === 1 ? {} : { note: `note-${i}` }),
 }));
 
 const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => ({
@@ -315,10 +314,9 @@ describe("slack panel with a session", () => {
     await tap(panel, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*Model & reasoning* · page 1/2");
-    expect(text(blocks[0]!)).toContain("1. ✓ model-0 · Off — note-0");
-    // A pin with no note stops after the level.
+    expect(text(blocks[0]!)).toContain("1. ✓ model-0 · Off\n");
     expect(text(blocks[0]!)).toContain("2. model-1 · High\n");
-    expect(text(blocks[0]!)).toContain("8. model-7 · High — note-7");
+    expect(text(blocks[0]!)).toContain("8. model-7 · High");
     expect(text(blocks[0]!)).not.toContain("9. ");
     expect(labels(blocks[1]!)).toHaveLength(8);
     expect(labels(blocks[1]!)[0]).toBe("1 model-0");
@@ -330,7 +328,7 @@ describe("slack panel with a session", () => {
     await tap(panel, "cfg:pins:1");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("page 2/2");
-    expect(text(blocks[0]!)).toContain("10. model-0 · High — note-9");
+    expect(text(blocks[0]!)).toContain("10. model-0 · High");
     expect(text(blocks[0]!)).not.toContain("✓");
     expect(labels(blocks[1]!)).toEqual(["9 model-8", "10 model-0"]);
     expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);

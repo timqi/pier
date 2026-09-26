@@ -392,9 +392,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
           ? slice.map((pin, i) => {
             const ticked = current.model?.provider === pin.provider && current.model.id === pin.id
               && current.thinking === pin.thinking;
-            return `${String(from + i + 1)}. ${ticked ? "✓ " : ""}${this.esc(pin.id)} · ${
-              thinkingLabel(pin.thinking)
-            }${pin.note ? ` — ${this.esc(pin.note)}` : ""}`;
+            return `${String(from + i + 1)}. ${ticked ? "✓ " : ""}${this.esc(pin.id)} · ${thinkingLabel(pin.thinking)}`;
           })
           : ["No pinned models — Settings → Models → Model menu."],
       }],

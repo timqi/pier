@@ -222,7 +222,7 @@ function fakeControl() {
     created: [] as ({ key: string } & Partial<AgentLaunchOptions>)[],
     pins_: [
       { provider: "anthropic", id: "claude-opus-4-5", thinking: "medium" },
-      { provider: "openai", id: "gpt-5", thinking: "high", note: "hardest reasoning" },
+      { provider: "openai", id: "gpt-5", thinking: "high" },
     ] as ModelMenuEntry[],
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel | undefined,

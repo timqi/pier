@@ -372,8 +372,9 @@ browser keeps no second session order.
   change, redrawn from the server's answer; a pinned row's ∧/∨ arrows move it,
   staged like any menu edit until Save, since the stored order is the one every
   picker and `pier task --model ?` list; a row's tier select (none /
-  hardest / balanced / cheap, beside the note) is the pin `--model <tier>`
-  takes, one row per tier, refused on save otherwise. Instance: Public URL, Accent (a
+  hardest / balanced / cheap) puts it on that tier: `--model <tier>` takes the
+  first row on it, the rows below are its fallbacks in order; a refused save
+  shows the server's error, which names the row and field. Instance: Public URL, Accent (a
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
   refusal), **Continuous session** (one switch, `PUT {continuous}`; a

@@ -71,7 +71,7 @@ describe("configuration subscription", () => {
   it("rejects malformed/version/secret-bearing documents without replacing a good configuration or ETag", async () => {
     const r = rig(); await r.enable();
     for (const body of ["{bad", JSON.stringify({ ...document(), schemaVersion: 2 }), JSON.stringify({ ...document(), settings: {} }),
-      JSON.stringify({ ...document(), modelMenu: [...document().modelMenu, { provider: "a", id: "b", thinking: "low", tier: "balanced" }] }),
+      JSON.stringify({ ...document(), modelMenu: [...document().modelMenu, { provider: "a", id: "b", thinking: "low", tier: "fastest" }] }),
       JSON.stringify({ ...document(), agent: { ...agent(), providers: { evil: { models: [], apiKey: "secret" } } } })]) {
       r.download.mockResolvedValueOnce({ status: 200, etag: '"bad"', body });
       await expect(r.sync.sync()).rejects.toThrow();

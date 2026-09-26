@@ -338,29 +338,31 @@ function nameFrom(text: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
 
-/** `launch.model` by name (docs/design/09-tasks-cli.md §Models). Anything but
- *  one pin or an unpinned `provider/id` is refused with the lines to pick
- *  from, so the agent never guesses an id. A tier is never a substring:
- *  "cheap" matching a note would pick a pin the operator did not assign. */
-function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
+/** `launch.model` by name (docs/design/09-tasks-cli.md §Models): the pins it
+ *  names, first choice first. Anything but a tier, one pin or an unpinned
+ *  `provider/id` is refused with the lines to pick from, so the agent never
+ *  guesses an id. A tier is never a substring: "cheap" matching an id would
+ *  pick a pin the operator did not assign. */
+function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string }[] {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
+  const pick = (pin: MenuEntry) => ({ model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking });
   if (isModelTier(needle)) {
-    const pin = menu.find((p) => p.tier === needle);
-    if (pin) return { model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking };
+    const pins = menu.filter((p) => p.tier === needle);
+    if (pins.length) return pins.map(pick);
     throw new Error(`model "${name}": tier ${needle} is unassigned — the operator's menu:\n${menuLines(menu)}`);
   }
   const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
-  const hits = exact ? [exact] : menu.filter((pin) => `${full(pin)} ${pin.note ?? ""}`.toLowerCase().includes(needle));
-  if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
+  const hits = exact ? [exact] : menu.filter((pin) => full(pin).toLowerCase().includes(needle));
+  if (hits.length === 1) return [pick(hits[0]!)];
   const slash = name.indexOf("/");
-  if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
+  if (!hits.length && slash > 0 && slash < name.length - 1) return [{ model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } }];
   throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${menuLines(hits.length ? hits : menu)}`);
 }
 
 /** One pin per line, the only shape a menu is ever printed in. */
 const menuLines = (menu: MenuEntry[]): string =>
-  menu.map((pin) => `${pin.tier ? `${pin.tier} · ` : ""}${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`).join("\n")
+  menu.map((pin) => `${pin.tier ? `${pin.tier} · ` : ""}${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}`).join("\n")
   || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
@@ -391,8 +393,15 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
   if (draft.name === undefined && typeof label === "string") draft = { ...draft, name: nameFrom(label) };
   const launch = record(action?.launch);
   if (typeof launch?.model === "string") {
-    const { model, thinking } = resolveModel(launch.model, await menu());
-    const resolved = { ...launch, model, ...(launch.thinking === undefined && thinking ? { thinking } : {}) };
+    const [first, ...rest] = resolveModel(launch.model, await menu());
+    // A pin's level only where the caller named none; the launch falls back to it.
+    const level = (pin: { thinking?: string }) => launch.thinking === undefined && pin.thinking ? { thinking: pin.thinking } : {};
+    const resolved = {
+      ...launch,
+      model: first!.model,
+      ...level(first!),
+      ...(rest.length ? { fallbacks: rest.map((pin) => ({ model: pin.model, ...level(pin) })) } : {}),
+    };
     draft = { ...draft, action: { ...record(draft.action), launch: resolved } };
   }
   return draft;

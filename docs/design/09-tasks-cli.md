@@ -94,16 +94,18 @@ continuous conversation — in flight plus finished in the last 24h, at most 200
 against the operator's menu (`settings.modelMenu`; the live catalog when
 none is pinned):
 
-- a tier (`hardest`, `balanced`, `cheap`) is the one pin the operator assigned
-  it, `--thinking` defaulting to the pin's, never a substring match; an
-  unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
+- a tier (`hardest`, `balanced`, `cheap`) is the first pin on it in menu
+  order, `--thinking` defaulting to the pin's, never a substring match; the
+  tier's later pins ride as `launch.fallbacks` (`{model, thinking?}`, a level
+  only where `--thinking` named none), and the launch takes the first of
+  `model` then `fallbacks` that `AgentFactory.availableModels()` lists — none
+  listed, `model`; an unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
   operator's menu:` then the whole menu, exit 1;
 - an exact `provider/id` on the menu is that pin;
-- else one case-insensitive substring hit over `provider/id` and `note` is
-  that pin, `--thinking` defaulting to the pin's;
+- else one case-insensitive substring hit over `provider/id` is that pin, `--thinking` defaulting to the pin's;
 - else no hit and a `provider/id` shape is taken as written, no thinking;
 - else `task: model "<name>" matches <n> of the menu:` then one line per pin
-  (`tier · provider/id · thinking — note`, the tier only on a pin that has
+  (`tier · provider/id · thinking`, the tier only on a pin that has
   one; the hits when several, the whole menu
   when none), exit 1.
 

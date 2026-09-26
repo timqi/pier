@@ -308,6 +308,9 @@ export interface ModelRef {
   id: string;
 }
 
+/** The one spelling a model is compared and printed by. */
+export const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
+
 /** Every level Pi accepts, in order. The union is derived so the two cannot
  *  drift, and boundary validators use isThinkingLevel instead of their own copy. */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -317,8 +320,8 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const isThinkingLevel = (v: unknown): v is ThinkingLevel =>
   typeof v === "string" && (THINKING_LEVELS as readonly string[]).includes(v);
 
-/** The work classes a dispatcher names instead of a model; the operator pins
- *  at most one menu entry to each. Here, not in settings.ts, so the browser shares it. */
+/** The work classes a dispatcher names instead of a model; a tier's menu
+ *  entries are tried in order. Here, not in settings.ts, so the browser shares it. */
 export const MODEL_TIERS = ["hardest", "balanced", "cheap"] as const;
 
 export type ModelTier = (typeof MODEL_TIERS)[number];

@@ -37,8 +37,8 @@ it("keeps the newly selected effort when a launch model is chosen afterwards", a
   expect(onChange).toHaveBeenLastCalledWith({ model: models[0], thinking: "high" });
 });
 
-it("keeps pinned effort and intent while isolating radio groups across pickers", async () => {
-  vi.mocked(mustGetJson).mockResolvedValue({ modelMenu: [{ ...models[0], thinking: "high", note: "Complex work" }] });
+it("keeps pinned effort while isolating radio groups across pickers", async () => {
+  vi.mocked(mustGetJson).mockResolvedValue({ modelMenu: [{ ...models[0], thinking: "high" }] });
   const onPick = vi.fn();
   const props = { models, current: models[0], thinkingLevel: "low" as const,
     thinkingLevels: ["low", "high"] as ("low" | "high")[], onPick, onThinkingPick: vi.fn() };
@@ -52,7 +52,6 @@ it("keeps pinned effort and intent while isolating radio groups across pickers",
   expect([...firstNames].some((name) => secondNames.has(name))).toBe(false);
   expect(first.textContent).not.toMatch(/Starred|[★☆]/);
   const pin = button(first, /test-model/)!;
-  expect(pin.title).toBe("Complex work");
   pin.onclick!();
   expect(onPick).toHaveBeenLastCalledWith(models[0], "high");
 });

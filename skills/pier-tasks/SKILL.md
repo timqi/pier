@@ -46,7 +46,8 @@ members by hand.
 ## Model choice
 
 Default: your model. `--model hardest | balanced | cheap` are tiers the
-operator pinned on the menu; thinking follows the pin, `--thinking` overrides
+operator pinned on the menu — the first pin on the tier, the next one when it is
+not available; thinking follows the pin, `--thinking` overrides
 (`off/minimal/low/medium/high/xhigh/max`).
 
 | Work | `--model` |
@@ -55,7 +56,7 @@ operator pinned on the menu; thinking follows the pin, `--thinking` overrides
 | coding a feature or a fix; integration | `balanced` |
 | research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
 
-Any other name is a substring of provider, id or note ("let gpt review it" is
+Any other name is a substring of provider or id ("let gpt review it" is
 `--model gpt`); none or several hits lists the pins. `--model ?` prints the
 menu, the tier in front of each pinned line; an unassigned tier refuses with
 the menu. Never name a model id from memory.

@@ -8,7 +8,7 @@ import type { SecretsMode } from "../secrets.js";
 import {
   ACCENTS,
   normalizeAccent,
-  normalizeModelMenu,
+  parseModelMenu,
   normalizeModelRef,
   normalizePublicUrl,
   type SettingsStore,
@@ -240,8 +240,8 @@ export function registerInstanceRoutes(
       writes.push(() => settings.setAccent(accent));
     }
     if (body?.modelMenu !== undefined) {
-      const menu = normalizeModelMenu(body.modelMenu);
-      if (menu === null) return refuse("modelMenu must be [{provider, id, thinking?, note?, tier?}] (≤32 entries, one pin per tier)");
+      const menu = parseModelMenu(body.modelMenu);
+      if (typeof menu === "string") return refuse(menu);
       writes.push(() => settings.setModelMenu(menu));
     }
     if (body?.titleModel !== undefined) {

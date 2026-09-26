@@ -213,7 +213,7 @@ session… settles on carries it.
   in place; nothing is posted.
 - "Model & reasoning" (`cfg:pins:<page>`) lists the operator's pinned models
   (`settings.modelMenu`, read per tap through `ChannelControl.pins`), eight a
-  page, each a numbered line `<id> · <level> — <note>` (no note, no dash) with
+  page, each a numbered line `<id> · <level>` with
   ✓ on the pin matching the session's (or the draft's) model *and* level, and
   one button each (`cfg:pin:<i>`, labelled `<n> <id>` — a platform truncates a
   long label). A tap applies both (`setModel`, then `setThinking`) and the

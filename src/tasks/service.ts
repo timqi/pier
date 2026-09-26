@@ -55,7 +55,7 @@ export class TaskService {
     private readonly hub: EventHub,
     /** Structural: tasks/ must not import settings.ts. Absent in bare test rigs. */
     private readonly instance?: {
-      modelMenu(): { provider: string; id: string; thinking?: string; note?: string; tier?: ModelTier }[];
+      modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous?: TaskChain;
     },
@@ -417,7 +417,7 @@ export class TaskService {
   /** An agent picks from names that exist right now, never from memory. */
   async models(): Promise<{
     source: "menu" | "catalog";
-    models: { provider: string; id: string; thinking?: string; note?: string; tier?: ModelTier }[];
+    models: { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
   }> {
     const menu = this.instance?.modelMenu() ?? [];
     if (menu.length) return { source: "menu", models: menu };

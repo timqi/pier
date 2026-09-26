@@ -8,7 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AgentConfigSnapshot, AgentConfigSync } from "./core/types.js";
 import { transact } from "./db.js";
 import { logger } from "./log.js";
-import { normalizeModelMenu, type ModelMenuEntry, type SettingsStore } from "./settings.js";
+import { parseModelMenu, type ModelMenuEntry, type SettingsStore } from "./settings.js";
 import type { ConfigSyncStatus } from "./web/types.js";
 
 const log = logger("config-sync");
@@ -195,8 +195,8 @@ export class ConfigSync {
     }
     if (typeof object.instanceId !== "string" || !object.instanceId || object.instanceId.length > 100) throw new Error("Invalid source instance ID");
     if (object.instanceId === this.#state.instanceId) throw new Error("An instance cannot subscribe to itself");
-    const modelMenu = normalizeModelMenu(object.modelMenu);
-    if (!modelMenu) throw new Error("Invalid model menu");
+    const modelMenu = parseModelMenu(object.modelMenu);
+    if (typeof modelMenu === "string") throw new Error(`Invalid model menu: ${modelMenu}`);
     return { agent: this.deps.normalizeAgent(object.agent), modelMenu };
   }
 

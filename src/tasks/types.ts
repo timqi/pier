@@ -17,6 +17,9 @@ export type AgentSessionPolicy =
 export interface AgentLaunchPolicy {
   model?: ModelRef;
   thinking?: ThinkingLevel;
+  /** A tier's later pins, in menu order: launched instead when `model` is not
+   *  in the catalog. A missing level is `thinking`'s. */
+  fallbacks?: { model: ModelRef; thinking?: ThinkingLevel }[];
   /** A feature lead: may delegate to workers, opens with the lead contract. */
   role?: "lead";
 }

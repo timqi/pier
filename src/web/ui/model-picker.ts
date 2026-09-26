@@ -4,7 +4,7 @@
 
 import { Check, ChevronRight } from "lucide";
 import { icon } from "./icons.js";
-import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
+import { modelKey, THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { mustGetJson } from "./api.js";
 import { h } from "./dom.js";
@@ -27,10 +27,8 @@ export interface ModelPickerProps {
 // Radio names only need to distinguish picker instances within this page.
 let reasoningGroup = 0;
 
-const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
-
-/** A pinned model with its reasoning level and the operator's intent. */
-type Entry = ModelRef & { thinking: ThinkingLevel; note?: string };
+/** A pinned model with its reasoning level. */
+type Entry = ModelRef & { thinking: ThinkingLevel };
 
 // Settings → Models: the operator's instance-wide shortlist.
 // The last known menu renders instantly; the fetch reconciles it.
@@ -48,8 +46,6 @@ async function loadPinned(): Promise<Entry[]> {
 function modelRow(opts: {
   label: string;
   hint?: string;
-  /** Tooltip on the label — the pin's line of intent, when it has one. */
-  title?: string;
   checked: boolean;
   onSelect: () => void;
 }): HTMLElement {
@@ -60,7 +56,6 @@ function modelRow(opts: {
     h("span", "truncate", opts.label),
   );
   if (opts.hint) pick.append(h("span", "ml-auto flex-none text-[11.5px] text-neutral-400", opts.hint));
-  if (opts.title) pick.title = opts.title;
   pick.onclick = () => opts.onSelect();
   return pick;
 }
@@ -132,7 +127,6 @@ export function modelPicker({
         modelRow({
           label: model.id,
           hint: thinkingLabel(e.thinking),
-          title: e.note,
           checked: !!current && modelKey(current) === modelKey(model) && level === e.thinking,
           onSelect: () => onPick(model, e.thinking),
         })
@@ -226,7 +220,7 @@ export function launchField(
     summary,
     `${CONTROL_TRIGGER} flex items-center gap-1.5 ${choice.model ? "text-neutral-700" : "text-neutral-400"}`,
   );
-  open.title = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Whatever the project and Pi pick";
+  open.title = choice.model ? modelKey(choice.model) : "Whatever the project and Pi pick";
   open.onclick = () => {
     const panel = modelPicker({
       models,

@@ -11,7 +11,7 @@ import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel, modalOpen } from "./shortcut.js";
 import { renameSession, runsLabel, type SessionInfo } from "./sidebar.js";
-import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
+import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
 import type { HandoffTarget } from "../../channels/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -60,7 +60,6 @@ const sessionMeta = $("#session-meta");
 /** Backend facts, not session facts, so the first read warms every later picker. */
 let catalog: ModelRef[] | null = null;
 const levelsByModel = new Map<string, ThinkingLevel[]>();
-const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
 
 /** Model + context usage of the *current* session (from its snapshot). */
 let currentModel: ModelRef | null = null;

@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { Cron } from "croner";
-import type { AgentFactory, ThinkingLevel } from "../core/types.js";
+import type { AgentFactory, ModelRef, ThinkingLevel } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
@@ -95,24 +95,34 @@ export function nextRunAt(trigger: TaskTrigger, from: number): number | null {
   return new Cron(trigger.expression, { timezone: trigger.timezone }).nextRun(new Date(from))?.getTime() ?? null;
 }
 
+function parseModel(raw: unknown): ModelRef {
+  const model = record(raw);
+  if (!model) throw new Error("agent model must be an object");
+  return {
+    provider: requiredString(model.provider, "model provider"),
+    id: requiredString(model.id, "model id"),
+  };
+}
+
+function parseThinking(raw: unknown): ThinkingLevel {
+  if (!isThinkingLevel(raw)) throw new Error("invalid agent thinking level");
+  return raw;
+}
+
 function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
   if (raw === undefined) return undefined;
   const value = record(raw);
   if (!value) throw new Error("agent launch policy must be an object");
   const launch: AgentLaunchPolicy = {};
-  if (value.model !== undefined) {
-    const model = record(value.model);
-    if (!model) throw new Error("agent model must be an object");
-    launch.model = {
-      provider: requiredString(model.provider, "model provider"),
-      id: requiredString(model.id, "model id"),
-    };
-  }
-  if (value.thinking !== undefined) {
-    if (!isThinkingLevel(value.thinking)) {
-      throw new Error("invalid agent thinking level");
-    }
-    launch.thinking = value.thinking as ThinkingLevel;
+  if (value.model !== undefined) launch.model = parseModel(value.model);
+  if (value.thinking !== undefined) launch.thinking = parseThinking(value.thinking);
+  if (value.fallbacks !== undefined) {
+    if (!launch.model || !Array.isArray(value.fallbacks)) throw new Error("agent fallbacks must be a list beside a model");
+    launch.fallbacks = value.fallbacks.map((raw) => {
+      const entry = record(raw);
+      if (!entry) throw new Error("agent fallback must be an object");
+      return { model: parseModel(entry.model), ...(entry.thinking !== undefined ? { thinking: parseThinking(entry.thinking) } : {}) };
+    });
   }
   if (value.role !== undefined) {
     if (value.role !== "lead") throw new Error("agent role must be lead");
