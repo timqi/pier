@@ -32,8 +32,7 @@ export function h(tag: string, cls: string, ...children: (Node | string)[]): HTM
 /** Last path segment — how every surface names a cwd or a file. */
 export const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
-/** A session with no title has had no first message yet; the header and
- *  Activity must spell it the same way. */
+/** A session with no title has had no first message yet; every surface spells it this way. */
 export const untitled = (cwd: string): string => `New session in ${basename(cwd)}`;
 
 /** `2026-08-30 19:41:07`: written out rather than left to a locale, which
@@ -45,16 +44,9 @@ export function stampTime(ms: number): string {
   return `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** "42s" under a minute, "3m 12s" over — run durations everywhere. */
-export function fmtDuration(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
 /** What main.ts's view switcher needs from every Console view. */
 export interface ConsoleView {
-  /** `arg` is the route's path segment (a task, a run, a folder); `query` its
-   *  `?k=v` tail, for the one view (Runs) whose state is a filter set. */
+  /** `arg` is the route's path segment (a tab, a folder); `query` its `?k=v` tail. */
   show(arg?: string, query?: string): void;
   hide(): void;
   visible: boolean;

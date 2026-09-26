@@ -1,6 +1,6 @@
 // What a task *is* before it ever runs: the id it is minted with, the draft
 // validated into a definition, and when its trigger is next due. Every way a
-// definition can be created — HTTP, `pier task`, Pier's own owned task —
+// definition can be created — `pier task`, Pier's own owned task —
 // arrives here, so a field is checked in one place or nowhere.
 
 import { randomBytes } from "node:crypto";

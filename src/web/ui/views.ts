@@ -1,22 +1,17 @@
 // Chat ↔ Console switching and the hash router: the Console views, which chat
 // elements hide while one is open, and the address bar's copy of "where am I".
 
-import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
-import { button, pageTitle, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { projectCwds } from "../../core/identity.js";
 import { orderSessions, renderSessions, type SessionInfo } from "./sidebar.js";
-import type { RunsView } from "./runs.js";
-import type { TasksView } from "./tasks.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 export interface ViewsDeps {
   sessions: () => SessionInfo[];
-  loadSessions: () => Promise<void>;
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
@@ -40,11 +35,8 @@ const chatEls = [chatHeader, turnsPane, composerForm];
 
 export const isChatVisible = (): boolean => openName === null;
 
-export type ConsoleName = "tasks" | "runs" | "activity" | "boards" | "settings" | "files";
+export type ConsoleName = "settings" | "files";
 
-let tasksView: TasksView | undefined;
-let runsView: RunsView | undefined;
-let activityView: ActivityView | undefined;
 /** Built so far — a view arrives with its own chunk the first time it opens. */
 const views = new Map<ConsoleName, ConsoleView>();
 /** In-flight builds, so leaving and reopening a loading view cannot construct
@@ -62,54 +54,14 @@ const OVERLAYS: ConsoleName[] = ["files"];
 const origins = new Map<ConsoleName, Route>();
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
-  tasks: "Tasks",
-  runs: "Runs",
-  activity: "Activity",
-  boards: "Boards",
   settings: "Settings",
   files: "Files",
 };
 
-// Three views, one page: they share a sidebar row, a title and a tab strip,
-// and each keeps its own route so deep links (#/runs/<id>, #/tasks/<id>)
-// and Back still name the tab.
-const AUTOMATION: readonly ConsoleName[] = ["tasks", "runs", "activity"];
-const AUTOMATION_LABEL = "Automation";
-const automationPane = $("#automation-view");
-const automationTabs = $("#automation-tabs");
-/** The sidebar row a view lights up: the hub's for its tabs, its own otherwise. */
-const sidebarEntry = (name: ConsoleName): ConsoleName => (AUTOMATION.includes(name) ? "tasks" : name);
-
-function syncAutomation(name: ConsoleName | null, arg?: string): void {
-  const open = name !== null && AUTOMATION.includes(name);
-  automationPane.classList.toggle("hidden", !open);
-  automationPane.classList.toggle("flex", open);
-  if (!open) return;
-  const actions: HTMLElement[] = [];
-  if (name === "tasks" && !arg) {
-    const create = button("New task", true);
-    create.classList.add("ml-auto");
-    create.disabled = !tasksView;
-    create.onclick = () => tasksView?.create();
-    actions.push(create);
-  }
-  automationTabs.replaceChildren(
-    pageTitle(AUTOMATION_LABEL),
-    ...AUTOMATION.map((tab) => pill(CONSOLE_LABELS[tab], tab === name, () => showConsole(tab))),
-    ...actions,
-  );
-}
-
-// Workspace events fan into whichever of these views is open — and into none
-// while a view has never been opened: its first show() loads what it missed.
-export const refreshTasks = (taskId?: string): void => tasksView?.refresh(taskId);
-export const refreshRuns = (): void => runsView?.refresh();
-export const refreshActivity = (): void => activityView?.refresh();
-
 /** Mobile top bar mirrors the route: a Console view's name, or the chat title
  *  plus its ⋯ menu (the chat header itself is hidden below md). */
 export function syncBar(): void {
-  if (openName) setBarTitle(AUTOMATION.includes(openName) ? AUTOMATION_LABEL : CONSOLE_LABELS[openName], false);
+  if (openName) setBarTitle(CONSOLE_LABELS[openName], false);
   else setBarTitle(chatTitle.textContent ?? "", deps.currentSession() !== undefined);
 }
 
@@ -127,9 +79,8 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
-  for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === sidebarEntry(name));
+  for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === name);
   renderSessions(); // the open session's row goes dark while a view covers it
-  syncAutomation(name, arg);
   syncBar();
   void openView(name, arg, query, ++openRequest);
 }
@@ -162,13 +113,7 @@ async function openView(name: ConsoleName, arg: string | undefined, query: strin
   // The same view may have been left and reopened with a different argument.
   if (openName !== name || request !== openRequest) return;
   view.show(arg, query);
-  if (name === "tasks") syncAutomation(name, arg);
 }
-
-const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
-export const showRuns = (filters: Record<string, string> = {}, id?: string): void =>
-  showConsole("runs", id, new URLSearchParams(filters).toString());
-export const showRun = (id: string): void => showRuns({}, id);
 
 /** Entry for the ⋯ menus (session header, project row): browse a cwd — or
  *  none, which reopens where the current session left off. `select` names a
@@ -205,7 +150,6 @@ export function showChat(): void {
   for (const view of views.values()) view.hide();
   for (const btn of consoleBtns.values()) btn.classList.remove("bg-indigo-50");
   renderSessions();
-  syncAutomation(null);
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
   syncBar();
@@ -304,21 +248,6 @@ export function applyRoute(): void {
 /** One dynamic import per view, with the deps it is built from. `deps` is read
  *  when a view opens, not when this table is written, so it is already set. */
 const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = {
-  tasks: async (root) =>
-    (tasksView = (await import("./tasks.js")).createTasksView(
-      root,
-      () => deps.sessions().map(({ id, cwd, title }) => ({ id, cwd, title })),
-      deps.loadSessions,
-      deps.select,
-      () => deps.currentId(),
-      showRuns,
-      showTasks,
-    )),
-  runs: async (root) =>
-    (runsView = (await import("./runs.js")).createRunsView(root, deps.select, showRuns, showTasks)),
-  activity: async (root) =>
-    (activityView = (await import("./activity.js")).createActivityView(root, deps.select, showRun)),
-  boards: async (root) => (await import("./boards.js")).createBoardsView(root, deps.select),
   files: async (root) =>
     (await import("./explorer.js")).createExplorerView(
       root,
@@ -341,11 +270,9 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
 
 export function initViews(d: ViewsDeps): void {
   deps = d;
-  for (const name of ["tasks", "boards", "settings"] as const) {
-    const btn = $(`#open-${name}`);
-    consoleBtns.set(name, btn);
-    btn.onclick = () => showConsole(name);
-  }
+  const settingsBtn = $("#open-settings");
+  consoleBtns.set("settings", settingsBtn);
+  settingsBtn.onclick = () => showConsole("settings");
   const consoleSection = $<HTMLDetailsElement>("#console-section");
   consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
   consoleSection.ontoggle = () =>

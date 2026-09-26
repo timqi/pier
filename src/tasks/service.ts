@@ -17,7 +17,7 @@ import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import type { TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
-import type { CallbackMode, GroupJoinMode, RunPage, RunQuery, RunView, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { CallbackMode, GroupJoinMode, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -227,51 +227,19 @@ export class TaskService {
     return this.definitions.create(raw, creator);
   }
 
-  /** `by` is how owning code says so; the routes and `pier task` have none (definitions.ts). */
+  /** `by` is how owning code says so; `pier task` has none (definitions.ts). */
   update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
     return this.definitions.update(id, raw, by);
-  }
-
-  setEnabled(id: string, enabled: boolean, by?: string): TaskDefinition {
-    return this.definitions.setEnabled(id, enabled, by);
   }
 
   archive(id: string, by?: string): TaskDefinition {
     return this.definitions.archive(id, by);
   }
 
-  listRuns(taskId: string, limit = 50, offset = 0): TaskRun[] {
-    this.get(taskId);
-    return this.store.listRuns(taskId, Math.min(Math.max(limit, 1), 200), Math.max(offset, 0));
-  }
-
   getRun(id: string): TaskRun {
     const run = this.store.getRun(id);
     if (!run) throw new Error(`unknown task run: ${id}`);
     return run;
-  }
-
-  getRunView(id: string): RunView {
-    const run = this.getRun(id);
-    return { ...run,
-      groupCallbackState: run.groupId ? this.store.getGroup(run.groupId)?.callbackState ?? null : null };
-  }
-
-  listMessages(runId: string): TaskMessage[] {
-    this.getRun(runId);
-    return this.messages.list(runId);
-  }
-
-  queryRuns(query: RunQuery = {}): RunPage {
-    return this.store.queryRuns(query);
-  }
-
-  activityRuns(since?: number): TaskRun[] {
-    return this.store.activityRuns(since);
-  }
-
-  recentMessages(since: number): TaskMessage[] {
-    return this.messages.recent(since);
   }
 
   /** Every run, not the last hour's: the card is a message in the transcript. */

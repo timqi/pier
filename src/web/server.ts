@@ -343,7 +343,7 @@ export function createServer(
   });
 
   // One session by id, the listing's filters aside: a task run's own session is
-  // never a row (allSessions), and the pane that opened it from Runs still has
+  // never a row (allSessions), and the pane that opened it from a run card still has
   // a header to name and a session info panel to fill.
   app.get("/api/sessions/:id", async (c) => {
     const id = c.req.param("id");

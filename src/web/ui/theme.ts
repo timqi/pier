@@ -37,8 +37,6 @@ function apply(): void {
   // Installed window chrome follows the same canvas as the page's outer edge.
   const canvas = getComputedStyle(document.documentElement).getPropertyValue("--workbench-canvas").trim();
   $('meta[name="theme-color"]').setAttribute("content", canvas);
-  // The Activity graph paints with SVG attributes, which cannot carry var().
-  window.dispatchEvent(new Event("pier:theme"));
 }
 
 export function initTheme(): void {

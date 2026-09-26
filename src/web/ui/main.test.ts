@@ -54,9 +54,8 @@ vi.mock("./views.js", () => ({
   // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).
   applyRoute: vi.fn(() => { if (h.views.continuousOn() && !location.hash) h.views.openContinuous(); }),
   initViews: (deps: typeof h.views) => { h.views = deps; }, isChatVisible: vi.fn(() => true),
-  refreshActivity: vi.fn(), refreshTasks: vi.fn(), refreshRuns: vi.fn(),
   setConversationHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
-  showConsole: vi.fn(), showFiles: vi.fn(), showRun: vi.fn(),
+  showConsole: vi.fn(), showFiles: vi.fn(),
   syncBar: vi.fn(), toggleFiles: vi.fn(),
 }));
 
@@ -140,7 +139,7 @@ describe("session loads", () => {
     expect(h.setSkills).toHaveBeenLastCalledWith(skills);
   });
 
-  // Opened from Runs or Activity: a task run's own session is never a row, and
+  // Opened from a run card's session chip: a task run's own session is never a row, and
   // the header would otherwise have nothing to name or to open its info panel on.
   it("fetches the summary of a selected session the listing does not carry", async () => {
     h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
@@ -318,10 +317,8 @@ describe("session loads", () => {
   });
 });
 
-// A reconnect follows a gap whose events are gone. Sessions were re-listed;
-// tasks, runs and activity ride the same stream and were left stale.
-it("re-lists every view the workspace stream feeds when it reconnects", async () => {
-  const views = await import("./views.js");
+// A reconnect follows a gap whose events are gone: the session list re-lists.
+it("re-lists the sessions when the workspace stream reconnects", async () => {
   const workspace = Stream.all.find((s) => s.url === "/api/events");
   vi.clearAllMocks();
   (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockClear();
@@ -329,9 +326,6 @@ it("re-lists every view the workspace stream feeds when it reconnects", async ()
   workspace?.onopen?.();
   await settled();
 
-  expect(vi.mocked(views.refreshTasks)).toHaveBeenCalledWith();
-  expect(vi.mocked(views.refreshRuns)).toHaveBeenCalledOnce();
-  expect(vi.mocked(views.refreshActivity)).toHaveBeenCalledOnce();
   expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
 });
 

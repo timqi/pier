@@ -1,7 +1,7 @@
 // The ⌘K launcher. The answer is always a session (or a place to go); a
 // matched message is the reason a session is listed, not a result of its own.
 
-import { FolderPlus, LayoutDashboard, ListTodo, MessageSquare, Settings, type IconNode } from "lucide";
+import { FolderPlus, MessageSquare, Settings, type IconNode } from "lucide";
 import { getJson } from "./api.js";
 import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
@@ -49,10 +49,6 @@ interface Target {
 // Searchable by what they are called *and* by what is inside them: "password"
 // and "channel" are how someone looks for Settings.
 const CONSOLE_TARGETS: { name: ConsoleName; icon: IconNode; label: string; detail: string }[] = [
-  { name: "tasks", icon: ListTodo, label: "Tasks", detail: "Automation — task definitions and schedules" },
-  { name: "runs", icon: ListTodo, label: "Runs", detail: "Automation — executions, subagents and callbacks" },
-  { name: "activity", icon: ListTodo, label: "Activity", detail: "Automation — sessions and relationships" },
-  { name: "boards", icon: LayoutDashboard, label: "Boards", detail: "Console — the static pages Pier publishes" },
   { name: "settings", icon: Settings, label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },
 ];
 

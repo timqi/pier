@@ -111,13 +111,11 @@ export function runHead(o: RunHead): HTMLElement {
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
-  // Grey opens the run, indigo the session (boards.ts's session-chip colour);
-  // what each is stays in its tooltip.
-  const runId = o.runId;
-  if (runId) {
-    const run = h("button", "flex-none hover:underline", shortId(runId));
-    run.title = `Run ${runId}`;
-    run.onclick = () => deps.showRun(runId);
+  // The run id is text; the indigo session chip is the link. What each is
+  // stays in its tooltip.
+  if (o.runId) {
+    const run = h("span", "flex-none", shortId(o.runId));
+    run.title = `Run ${o.runId}`;
     meta.append(run);
   }
   if (o.sessionId && o.sessionId !== "console") {

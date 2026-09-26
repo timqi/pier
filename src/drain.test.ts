@@ -215,6 +215,7 @@ const processScript = `
   const db = openDb(join(process.env.PIER_HOME, "db", "pier.db"));
   const ledger = new RestartLedger(db);
   const store = new TaskStore(db);
+  const allRuns = () => db.prepare("SELECT json FROM task_runs ORDER BY queued_at DESC, id DESC").all().map(row => JSON.parse(row.json));
   const hub = new EventHub();
   const inputs = [];
   const notes = [];
@@ -270,7 +271,7 @@ const processScript = `
   if (mode.startsWith("recover")) {
     const recovered = deferred();
     const complete = () => {
-      if (store.queryRuns({ showUnmatched: true }).runs.every(run => run.state === "interrupted" &&
+      if (allRuns().every(run => run.state === "interrupted" &&
           (!run.callbackSessionId || run.callbackState === "delivered")) && store.listOpenGroups().length === 0) recovered.resolve();
     };
     const unsubscribe = hub.subscribeWorkspace(complete);
@@ -285,7 +286,7 @@ const processScript = `
       notes.push({ id: entry.conversationId, text: entry.note });
       return true;
     });
-    await send({ phase: "recovered", runs: store.queryRuns({ showUnmatched: true }).runs, inputs, notes, attempted, ledger: ledger.list() });
+    await send({ phase: "recovered", runs: allRuns(), inputs, notes, attempted, ledger: ledger.list() });
   } else {
     tasks.start(60_000);
     const task = await tasks.create({ name: "worker", action: {
@@ -338,7 +339,7 @@ const processScript = `
       await tasks.waitForRun(child.id);
     }
     await draining;
-    await send({ phase: "drained", runs: store.queryRuns({ showUnmatched: true }).runs, ledger: ledger.list() });
+    await send({ phase: "drained", runs: allRuns(), ledger: ledger.list() });
   }
   // Like main shutdown(false), do not cancel task runs at a drain deadline.
   tasks.pause();

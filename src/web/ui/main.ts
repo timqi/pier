@@ -69,15 +69,11 @@ import {
   applyRoute,
   initViews,
   isChatVisible,
-  refreshActivity,
-  refreshTasks,
-  refreshRuns,
   setConversationHash,
   setSessionHash,
   showChat,
   showConsole,
   showFiles,
-  showRun,
   syncBar,
   toggleFiles,
 } from "./views.js";
@@ -121,7 +117,7 @@ declare const __PIER_VERSION__: string; // injected by vite.config.ts
 
 let sessions: SessionInfo[] = [];
 // The selected session when it is not a row — a task run's own, opened from
-// Runs or Activity. Fetched by id so the header can name it and its info panel
+// its run card's session chip. Fetched by id so the header can name it and its info panel
 // can be opened like any other session's.
 let detached: SessionInfo | null = null;
 let selectionSeq = 0;
@@ -486,14 +482,8 @@ function handleEvent(e: SessionEvent): void {
 
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
-  // Any (re)connect may follow a gap, and the events it missed drove every
-  // view on this stream — each re-lists instead of replaying.
-  src.onopen = () => {
-    void refreshSessions();
-    refreshTasks();
-    refreshRuns();
-    refreshActivity();
-  };
+  // Any (re)connect may follow a gap: re-list instead of replaying.
+  src.onopen = () => void refreshSessions();
   src.onerror = () => streamDied(src, "Workspace");
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
@@ -502,9 +492,6 @@ function connectWorkspace(): void {
       return;
     }
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
-      refreshTasks(e.type === "task-run-changed" ? e.taskId : undefined);
-      refreshRuns();
-      refreshActivity();
       // A run starting or settling changes its launcher's activeRuns dot.
       if (e.type === "task-run-changed") void refreshSessions();
       return;
@@ -513,7 +500,6 @@ function connectWorkspace(): void {
       void refreshOpenItems();
       return;
     }
-    refreshActivity();
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
     const s = sessions.find((x) => x.id === e.sessionId);
@@ -552,7 +538,7 @@ async function select(id: string): Promise<void> {
     earlier = [];
     unstarted = false;
   }
-  // A session named from Activity or Runs is usually not in the list; the
+  // A session named from a run card is usually not in the list; the
   // snapshot's 404 says whether the id exists and why.
   showChat();
   closeDrawer(); // on mobile the drawer is how you got here
@@ -646,7 +632,6 @@ initChat({
   sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
   select: (id) => void select(id),
-  showRun,
   send: (mode, label) => void send(mode, label),
   ownTurn: (text) => {
     markOptimisticUser(text);
@@ -709,7 +694,6 @@ initHeader({
 });
 initViews({
   sessions: () => sessions,
-  loadSessions: refreshSessions,
   currentId: () => currentId,
   currentSession,
   select: (id) => void select(id),

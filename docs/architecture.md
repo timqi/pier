@@ -48,7 +48,7 @@ src/
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
                also -outbound)
-  boards/      boards.ts (scan + manifest + static serving), pier.css
+  boards/      boards.ts (manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +

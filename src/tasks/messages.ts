@@ -79,14 +79,6 @@ export class TaskMessenger {
     for (const message of this.store.expirePendingMessages()) this.changed(message);
   }
 
-  list(runId: string): TaskMessage[] {
-    return this.store.listMessages(runId);
-  }
-
-  recent(since: number): TaskMessage[] {
-    return this.store.listRecentMessages(since);
-  }
-
   async control(
     run: TaskRun,
     fromSessionId: string,

@@ -95,8 +95,8 @@ describe("coalesce", () => {
 describe("refused", () => {
   it("answers nothing when the write took", async () => {
     answering({});
-    await expect(refused("/api/boards/x", "DELETE", "Could not delete x")).resolves.toBeUndefined();
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/boards/x", { method: "DELETE" });
+    await expect(refused("/api/vault/x", "DELETE", "Could not remove it")).resolves.toBeUndefined();
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/vault/x", { method: "DELETE" });
   });
 
   it("answers the server's sentence for a refusal", async () => {
@@ -108,8 +108,8 @@ describe("refused", () => {
 
   it("answers a sentence, not a rejection, when the request never answered", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))) as unknown as typeof fetch;
-    await expect(refused("/api/tasks/t/retry", "POST", "Task update failed")).resolves.toBe(
-      "Task update failed: TypeError: Failed to fetch",
+    await expect(refused("/api/passkeys/p", "DELETE", "Could not remove it")).resolves.toBe(
+      "Could not remove it: TypeError: Failed to fetch",
     );
   });
 });

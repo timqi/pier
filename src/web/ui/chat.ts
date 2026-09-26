@@ -47,7 +47,6 @@ export interface ChatDeps {
   sessionChannel: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
-  showRun: (runId: string) => void;
   send: (mode: "auto" | "steer", label?: string) => void;
   /** A user turn this client just drew itself: ledger it so the `user-message`
    *  event reconciles instead of drawing it twice, and show the run as live. */

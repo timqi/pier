@@ -116,8 +116,8 @@ export function setHeaderPending(cwd: string | null): void {
 export function renderHeader(): void {
   const s = deps.currentSession();
   if (s) pending = null;
-  // Selected but not a row — a task run's own session, opened from Runs or
-  // Activity — is named by its id: "no session" would be untrue of a pane
+  // Selected but not a row — a task run's own session, opened from its run
+  // card — is named by its id: "no session" would be untrue of a pane
   // with a transcript in it.
   // The conversation rotates sessions and spans topics: its name is the rail's, not the head's title.
   chatTitle.textContent = deps.continuousOpen()
@@ -226,8 +226,7 @@ function renderSessionMeta(): void {
 }
 
 /** Read-only details panel: what this session is and how full its context is.
- *  Opened from the ⋯ menu, from either title bar, from a project row, or on
- *  hover from Activity's graph — which has these four facts and no rail row.
+ *  Opened from the ⋯ menu, from either title bar, or from a project row.
  *  `back` puts a return arrow in the head; returns the floated panel. */
 export function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "createdAt" | "title">, back?: () => void): HTMLElement {
   // The trailing relative time is supporting text, not part of the value.
