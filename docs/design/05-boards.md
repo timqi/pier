@@ -17,7 +17,9 @@ boundary.
 3. Private unless asked: `public` defaults `false`; the agent sets it only when
    the user asked for a public board in that request.
 4. The agent is the surface: listing, publishing, unpublishing and deleting are
-   file operations the skill describes; Settings → Boards
+   file operations the skill describes; a requested list puts public boards
+   first with their share URL, then private boards, each with title and age.
+   Publishing says anyone with the link can read it. Settings → Boards
    ([03](03-web-workbench.md)) lists them and writes only `public` or the
    delete rename.
 5. HTML only: no markdown source, no renderer, no content negotiation.

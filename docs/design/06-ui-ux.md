@@ -106,8 +106,7 @@ updates this document.
   resends the question and replaces subsequent replies. Reject stale or
   busy-session edits; allow cancel; on failure restore the server's history
   with a visible reason.
-- Primary actions belong with the page heading or navigation, not in filters
-  (`New task` beside the Tasks tabs).
+- Primary actions belong with the page heading or navigation, not in filters.
 - Visible labels, one grid. Secondary filters disclose progressively; active
   conditions are always discoverable (an active date range expands and counts
   toward reset). URL state, reset, Back and restored fields agree. Background

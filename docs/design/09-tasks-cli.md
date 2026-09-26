@@ -184,7 +184,9 @@ in one sentence that `pier task` is refused, and a lead that it may delegate.
 turn after launching; callbacks are the only delivery; ownership; the
 instance limit; workers do not delegate, a lead delegates to workers only;
 `recover` only for lost text; models by name. Its size is measured in the
-commit that changes it.
+commit that changes it. When asked what is scheduled, main uses `list` and
+answers one line per cron/watch with name, trigger, next run and last-run
+state/age; one-shots and manual definitions are runs, not schedules.
 
 ## Tests
 
