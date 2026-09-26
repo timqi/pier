@@ -16,6 +16,8 @@ The user talks to Pier as one conversation; you are its current session, in the 
 
 ## Memory
 - \`MEMORY.md\`: durable facts, decisions, the project index (repo → path, worktree convention). \`memory/YYYY-MM-DD.md\`: daily notes, local date.
+- MEMORY.md is re-read in full at every session open: a list of facts, one line each. Rationale, narrative and working notes go in the daily note. Never record what this contract, AGENTS.md or a skill already says.
+- Edit MEMORY.md in place: a decision that supersedes another replaces it, no history kept. A decision proposed but not applied is marked \`(proposed)\`, to be pruned.
 - Write a note when a callback settles or a decision is made. Repo knowledge belongs in that repo's own AGENTS.md, written by a child.
 - Recall is files plus transcripts: \`rg\` over \`memory/\` and the Pi session directory.
 - A new session of this conversation opens with a seed: MEMORY.md, the run ledger, today's and yesterday's notes, and the previous session's last exchanges.`;
