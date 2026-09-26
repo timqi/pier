@@ -30,7 +30,7 @@ const sanitizePlace = (value: string): string =>
 
 const two = (n: number): string => String(n).padStart(2, "0");
 const hhmm = (d: Date): string => `${two(d.getHours())}:${two(d.getMinutes())}`;
-const day = (d: Date): string => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+export const day = (d: Date): string => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
 
 /** Pasted code, links and paths are English whatever the speaker writes in. */
 const NOT_PROSE = /```[\s\S]*?(?:```|$)|`[^`\n]*`|\[[^\]\n]*\]\([^)\n]*\)|[!-~]*[/\\][!-~]*/g;

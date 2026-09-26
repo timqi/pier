@@ -3,6 +3,7 @@
 // emphasis repair. Web chat and every IM adapter render these, so the wording
 // and units live here.
 
+import { replaceOutsideCode } from "./inbound-file.js";
 import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js";
 
 /** The surface contract handed to every agent Pier launches (main.ts); the
@@ -83,14 +84,9 @@ const LIFTABLE = /[\u201c\u201d"\u2018\u2019'()\uff08\uff09\u300c\u300d\u300e\u3
 /** CommonMark's right-flanking rule does not count CJK punctuation, so
  *  `**“怎么做”**：` never closes (a spec hole, not a platform bug, and constant
  *  in model output). Moving the punctuation outside — `“**怎么做**”：` — lands
- *  the `**` against a letter. Fences and code spans are content, protected first. */
+ *  the `**` against a letter. Fences and code spans are content, never touched. */
 export function cjkFriendly(markdown: string): string {
-  const stash: string[] = [];
-  const keep = (text: string): string => `\uE010${stash.push(text) - 1}\uE011`;
-  let out = markdown
-    .replace(/```[\s\S]*?```/g, (m) => keep(m))
-    .replace(/`[^`\n]+`/g, (m) => keep(m));
-  out = out.replace(/\*\*(\S|\S[\s\S]*?\S)\*\*/g, (whole, inner: string) => {
+  return replaceOutsideCode(markdown, /\*\*(\S|\S[\s\S]*?\S)\*\*/g, ([whole, inner = ""]) => {
     let lead = "";
     let trail = "";
     let body = inner;
@@ -104,7 +100,6 @@ export function cjkFriendly(markdown: string): string {
     }
     return lead || trail ? `${lead}**${body}**${trail}` : whole;
   });
-  return out.replace(/\uE010(\d+)\uE011/g, (_m, i: string) => stash[Number(i)] ?? "");
 }
 
 /** The reason arrives pre-escaped: each surface escapes for its own markup,
@@ -177,10 +172,12 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 
 /** Main's open-item markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back by core/chain.ts on the head's turn end. Code is
- *  content, so a marker inside a fence is neither. */
-const OPEN = new RegExp(`${tag("<open>")}([\\s\\S]*?)${tag("</open>")}[ \\t]*\\n?`, "gi");
-const DONE = new RegExp(`${tag("<done>")}([\\s\\S]*?)${tag("</done>")}[ \\t]*\\n?`, "gi");
-const FENCE = /(`{3,}|~{3,})[\s\S]*?(?:\1|$)/g;
+ *  content, so a marker inside a fence or a code span is neither. Group 1 is an
+ *  `<open>` body, group 2 a `<done>` body. */
+const MARKER = new RegExp(
+  `${tag("<open>")}([\\s\\S]*?)${tag("</open>")}[ \\t]*\\n?|${tag("<done>")}([\\s\\S]*?)${tag("</done>")}[ \\t]*\\n?`,
+  "gi",
+);
 const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
 
 /** `open` adds or replaces the item keyed by `problem`; `done` removes it. */
@@ -188,47 +185,34 @@ export type OpenItemMarker =
   | { op: "open"; problem: string; stage: string; runIds: string[] }
   | { op: "done"; problem: string };
 
-function unfenced(markdown: string, fn: (text: string) => string): string {
-  let out = "";
-  let at = 0;
-  for (const m of markdown.matchAll(FENCE)) {
-    out += fn(markdown.slice(at, m.index)) + m[0];
-    at = m.index + m[0].length;
-  }
-  return out + fn(markdown.slice(at));
-}
-
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** The markers in reply order; `dropped` holds the ones with no problem text,
  *  for the caller to log. */
 export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; dropped: string[] } {
-  const found: { at: number; marker: OpenItemMarker }[] = [];
+  const markers: OpenItemMarker[] = [];
   const dropped: string[] = [];
-  let offset = 0;
-  unfenced(markdown, (text) => {
-    for (const m of text.matchAll(OPEN)) {
-      let rest = oneLine(m[1] ?? "");
-      const runIds: string[] = [];
-      for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
-        runIds.unshift(run[1]!);
-        rest = rest.slice(0, run.index);
-      }
-      const dash = rest.indexOf("\u2014");
-      const problem = (dash < 0 ? rest : rest.slice(0, dash)).trim();
-      const stage = dash < 0 ? "" : rest.slice(dash + 1).trim();
-      if (problem) found.push({ at: offset + m.index, marker: { op: "open", problem, stage, runIds } });
+  replaceOutsideCode(markdown, MARKER, (m) => {
+    if (m[1] === undefined) {
+      const problem = oneLine(m[2] ?? "");
+      if (problem) markers.push({ op: "done", problem });
       else dropped.push(m[0].trim());
+      return "";
     }
-    for (const m of text.matchAll(DONE)) {
-      const problem = oneLine(m[1] ?? "");
-      if (problem) found.push({ at: offset + m.index, marker: { op: "done", problem } });
-      else dropped.push(m[0].trim());
+    let rest = oneLine(m[1]);
+    const runIds: string[] = [];
+    for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
+      runIds.unshift(run[1]!);
+      rest = rest.slice(0, run.index);
     }
-    offset += text.length;
-    return text;
+    const dash = rest.indexOf("\u2014");
+    const problem = (dash < 0 ? rest : rest.slice(0, dash)).trim();
+    const stage = dash < 0 ? "" : rest.slice(dash + 1).trim();
+    if (problem) markers.push({ op: "open", problem, stage, runIds });
+    else dropped.push(m[0].trim());
+    return "";
   });
-  return { markers: found.sort((a, b) => a.at - b.at).map((f) => f.marker), dropped };
+  return { markers, dropped };
 }
 
 /** Why the agent stayed quiet; hidden from the chat, shown on the workbench,
@@ -257,7 +241,7 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
 /** For rendering mid-turn: everything `splitReply` repairs, minus the
  *  next-step block, which is only one at the very end of a turn. */
 export const streamBody = (markdown: string): string =>
-  cjkFriendly(unfenced(markdown.replace(SILENT, ""), (text) => text.replace(OPEN, "").replace(DONE, "")).trim());
+  cjkFriendly(replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim());
 
 /** Lines a blank line does not necessarily separate (a loose list is still one
  *  list). Over-matching is fine: one boundary too few costs only a repaint. */

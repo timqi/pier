@@ -6,7 +6,7 @@ import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
-import { splitReply } from "./reply.js";
+import { cut, splitReply } from "./reply.js";
 import type {
   AgentSession,
   Channel,
@@ -23,10 +23,6 @@ const log = logger("core");
  *  plus a transcript read. */
 const IDLE_TTL_MS = 30 * 60_000;
 const SWEEP_MS = 5 * 60_000;
-
-/** An error goes into a chat window, so it is trimmed to something readable. */
-const truncate = (message: string): string =>
-  message.length > 600 ? `${message.slice(0, 600)}…` : message;
 
 /** What a chat window gets of a system input; a task callback carries up to
  *  8000 characters of result text (tasks/callbacks.ts). */
@@ -131,7 +127,7 @@ export class Router {
     this.hub.emit(sessionId, { type: "error", message });
     const channel = this.channels.get(key.channelId);
     // Never recursive: if telling the chat also fails, the hub has the original.
-    channel?.notify(key.conversationId, { text: truncate(message), origin: { kind: "error" } })
+    channel?.notify(key.conversationId, { text: cut(message, 600), origin: { kind: "error" } })
       .catch((err) => {
         log.error(`could not report the failure to ${key.channelId}`, err);
         this.hub.emit(sessionId, {
@@ -266,7 +262,7 @@ export class Router {
           log.error(`${keyOf(key)} session ${session.id} reported: ${payload.message}`);
           const channel = this.channels.get(key.channelId);
           channel?.notify(key.conversationId, {
-            text: truncate(payload.message),
+            text: cut(payload.message, 600),
             origin: { kind: "error" },
           }).catch((err) => log.error(`notify ${key.channelId} failed`, err));
         }
@@ -593,7 +589,7 @@ export class Router {
    *  that is waiting. Either way the waiting side is not left with nothing. */
   private unopened(key: ConversationKey, err: unknown): void {
     log.error(`could not open a session for ${keyOf(key)}`, err);
-    const message = truncate(`could not open a session: ${String(err)}`);
+    const message = cut(`could not open a session: ${String(err)}`, 600);
     if (key.channelId === "web" || key.channelId === "task") {
       this.reportTo(key.conversationId, message);
       return;

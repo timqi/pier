@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import type { EventHub } from "./hub.js";
+import { day } from "./identity.js";
 import { agoLabel, openItemMarkers, relTime } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand, LEDGER_WINDOW_MS, NOT_IN_LEDGER, TASK_RUN_STATES } from "./types.js";
@@ -55,9 +56,6 @@ export class ChatCommandRefused extends Error {}
 type Head = { session: AgentSession; rotated?: ChainReason };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
-
-const localDate = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** The last `n` user turns and the replies after them, text only. */
 function lastExchanges(turns: ChatTurn[], n: number): string {
@@ -279,7 +277,7 @@ export class MainChain {
   /** Read fresh at every rotation; a part that cannot be read says so in the seed. */
   private async seed(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
     const today = new Date(this.now());
-    const days = [new Date(today.getTime() - 86_400_000), today].map(localDate);
+    const days = [new Date(today.getTime() - 86_400_000), today].map(day);
     const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now());
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
     return [
@@ -287,7 +285,7 @@ export class MainChain {
       section("MEMORY.md", await this.read("MEMORY.md")),
       section("Open", renderOpenItems(this.openItems(), this.now())),
       section("Runs — in flight, and finished since the previous session started", runs.map(ledgerLine).join("\n") || "none"),
-      ...(await Promise.all(days.map(async (day) => section(`memory/${day}.md`, await this.read(join("memory", `${day}.md`)))))),
+      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, await this.read(join("memory", `${date}.md`)))))),
       section("The previous session's last exchanges", open ? lastExchanges(await open.history(), EXCHANGES) : ""),
     ].filter(Boolean).join("\n\n");
   }

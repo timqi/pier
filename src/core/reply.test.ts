@@ -148,6 +148,8 @@ describe("cjkFriendly", () => {
   it("never rewrites asterisks inside code", () => {
     expect(cjkFriendly('```\n**"x"**：\n```')).toBe('```\n**"x"**：\n```');
     expect(cjkFriendly('`**"x"**：`')).toBe('`**"x"**：`');
+    // A run holding a code span is left whole rather than split around it.
+    expect(cjkFriendly('**"a `b`"**：')).toBe('**"a `b`"**：');
   });
 
   it("leaves a run that is only punctuation", () => {
@@ -320,11 +322,14 @@ describe("open-item markers", () => {
     expect(streamBody(raw)).toBe("Hi.");
   });
 
-  it("never reads or strips a marker inside a fence", () => {
+  it("never reads or strips a marker inside a fence or a code span", () => {
     const raw = "Syntax:\n\n```\n<open>problem — stage</open>\n```\n~~~\n<done>p</done>\n~~~\n<done>real</done>";
     expect(openItemMarkers(raw).markers).toEqual([{ op: "done", problem: "real" }]);
     expect(streamBody(raw)).toBe("Syntax:\n\n```\n<open>problem — stage</open>\n```\n~~~\n<done>p</done>\n~~~");
     // A fence still streaming is code until it closes.
     expect(streamBody("```\n<open>a — b</open>")).toBe("```\n<open>a — b</open>");
+    const inline = "Write `<done>p</done>` when it lands.";
+    expect(openItemMarkers(inline).markers).toEqual([]);
+    expect(streamBody(inline)).toBe(inline);
   });
 });

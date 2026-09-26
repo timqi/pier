@@ -253,7 +253,7 @@ describe("channel fan-out", () => {
     await router.ensure(KEY);
     fake.emit({ type: "error", message: "x".repeat(2000) });
     await new Promise((r) => setTimeout(r, 0));
-    expect(notes[0]![1].text).toHaveLength(601);
+    expect(notes[0]![1].text).toHaveLength(600);
     expect(notes[0]![1].text.endsWith("\u2026")).toBe(true);
   });
 });
