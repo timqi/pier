@@ -70,8 +70,9 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 - the lead's last run still running, or a drain: pending, asked again in 10 s;
 - nobody waiting on that run, or a resume that cannot be filed (logged): plain.
 
-A lead's own run owes main a callback only when it was a milestone resume or
-its result carries a `Design final:` line, or it did not succeed; otherwise it settles as
+A lead's own run owes main a callback only when it was a milestone resume,
+its result carries a `Design final:` line, it is a build lead's and leaves no
+result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwise it settles as
 `--callback none` does, `LEAD_TURN` (`tasks/callbacks.ts`) the reason on its record.
 
 ## Home and memory

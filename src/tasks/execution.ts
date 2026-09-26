@@ -97,7 +97,7 @@ export class TaskExecution {
       if (run.state === "failed") log.error(settled, cause);
       else if (run.matched === false) log.debug(`${settled} (watch did not match)`);
       else log.info(settled);
-      settleCallback(run);
+      settleCallback(run, this.store);
       this.controllers.delete(run.id);
       try {
         this.store.saveRun(run);

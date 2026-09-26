@@ -27,12 +27,16 @@ export const LEAD_TURN = "a lead's turn, not a milestone";
 
 /** Decided once, as the run finishes. A lead reports milestones only: any
  *  other turn of its the user reads in its session, and settles as `--callback none`.
+ *  A build lead's turn that leaves nothing coming to it is its milestone: it
+ *  declares its own completion, where only the user finalizes a design.
  *  A turn that did not succeed is not a turn the user read: it calls back. */
-export function settleCallback(run: TaskRun): void {
+export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf" | "awaitsResults">): void {
   if (!run.callbackSessionId) return;
-  const milestone = run.context.resumePrompt?.startsWith(MILESTONE) === true ||
-    (run.result?.type === "agent" && /^Design final:/m.test(run.result.text));
-  if (createdRole(run) === "lead" && run.state === "succeeded" && !milestone) run.callbackError = LEAD_TURN;
+  const lead = run.targetSessionId;
+  const milestone = (): boolean => run.context.resumePrompt?.startsWith(MILESTONE) === true ||
+    (run.result?.type === "agent" && /^Design final:/m.test(run.result.text)) ||
+    (lead !== null && store.leadPhaseOf(lead) === "build" && !store.awaitsResults(lead));
+  if (createdRole(run) === "lead" && run.state === "succeeded" && !milestone()) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";
 }
 

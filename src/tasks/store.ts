@@ -279,6 +279,19 @@ export class TaskStore {
     return row.n;
   }
 
+  /** Whether a result is still coming to the session: a run in flight owed
+   *  to it, or a finished run's or group's callback not yet delivered. */
+  awaitsResults(sessionId: string): boolean {
+    if (this.countOwedTo(sessionId) > 0) return true;
+    const row = this.sql(`
+      SELECT EXISTS (SELECT 1 FROM task_runs WHERE callback_state IN ('pending', 'failed')
+          AND json_extract(json, '$.callbackSessionId') = ?)
+        OR EXISTS (SELECT 1 FROM task_groups WHERE callback_state IN ('pending', 'failed')
+          AND json_extract(json, '$.callbackSessionId') = ?) AS owed
+    `).get(sessionId, sessionId) as { owed: number };
+    return row.owed === 1;
+  }
+
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs

@@ -11,7 +11,7 @@ import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
-import type { AgentFactory, AgentLaunchOptions } from "../core/types.js";
+import { BUILD_PROMPT, type AgentFactory, type AgentLaunchOptions } from "../core/types.js";
 import { LEAD_TURN, MILESTONE } from "./callbacks.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
@@ -44,13 +44,13 @@ function rig() {
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, router, hub, { modelMenu: () => [] });
-  const agent = (name: string, role?: "lead") => service.create({
+  const agent = (name: string, role?: "lead", prompt = `be ${name}`) => service.create({
     name, trigger: { type: "manual" },
-    action: { type: "agent", session: { mode: "fresh", cwd }, prompt: `be ${name}`, ...(role ? { launch: { role } } : {}) },
+    action: { type: "agent", session: { mode: "fresh", cwd }, prompt, ...(role ? { launch: { role } } : {}) },
   });
   /** The lead as main left it: one finished run on the lead session, owed to main. */
-  const leadRan = async (state: TaskRun["state"] = "succeeded"): Promise<TaskDefinition> => {
-    const task = await agent("feature", "lead");
+  const leadRan = async (state: TaskRun["state"] = "succeeded", prompt?: string): Promise<TaskDefinition> => {
+    const task = await agent("feature", "lead", prompt);
     store.saveRun({
       id: "lead-run", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null, resumedFromRunId: null,
       triggerSource: "agent", invokedBySessionId: "main", sourceSessionId: "main", targetSessionId: "lead",
@@ -264,6 +264,14 @@ describe("a feature lead", () => {
     expect(other.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("Design final: /repo/docs/design.md")]);
     other.service.stop();
 
+    // A build lead declares its own completion: a turn that leaves nothing coming to it reports.
+    const build = rig();
+    await build.leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    const built = build.service.resume("lead-run", "also fold in the steer", owed);
+    await vi.waitFor(() => expect(build.store.getRun(built.id)!.callbackState).toBe("delivered"));
+    expect(build.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("lead says done")]);
+    build.service.stop();
+
     // A failure is not a turn the user read in the lead's session.
     const broken = rig();
     await broken.leadRan();
@@ -273,6 +281,21 @@ describe("a feature lead", () => {
     expect(broken.store.getRun(failed.id)!.state).toBe("failed");
     expect(broken.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("provider down")]);
     broken.service.stop();
+  });
+
+  it("holds a build lead's turn back while a worker's result is still coming, and reports the wave once", async () => {
+    const { service, sessions, store, bash, leadRan } = rig();
+    await leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    const slow = await bash("sleep 0.3; echo worker done");
+    const worker = service.run(slow.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };
+    const turn = await service.waitForRun(service.resume("lead-run", "a steer", owed).id);
+    expect(store.getRun(turn.id)).toMatchObject({ callbackState: null, callbackError: LEAD_TURN });
+    await vi.waitFor(() => expect(store.getRun(worker.id)!.callbackState).toBe("delivered"));
+    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sessions.get("main")!.systemInputs).toHaveLength(1);
+    service.stop();
   });
 
   it("is a session of the user's, not one of the runs' own the rail hides", async () => {

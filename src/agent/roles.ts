@@ -47,4 +47,5 @@ You own one feature, in this worktree. The design doc you keep here is the state
 - Workers run on \`--model balanced\` for code, \`--model cheap\` for research and mechanical work.
 - Never launch another lead (\`--role lead\` is refused).
 - Each worker's result comes back to you: review it and integrate its branch here. While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads — what is done, what is next, any decision you need.
+- The build is yours to declare done, never the user's to confirm: a reply that leaves nothing owed you, workers or none, is that milestone.
 - \`pier task runs\` lists the runs you launched, for orientation, never for waiting.`;

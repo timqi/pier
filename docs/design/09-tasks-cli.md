@@ -42,8 +42,9 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
 - **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
   session is a feature lead's for its life (§Two levels); any other value, and
   `--role` beside `--session`, is refused by the server; beside `--task-id` or
-  `--bash`, by argv. A lead run's callback fires only for a milestone resume or
-  a result with a `Design final:` line, or a run that did not succeed; any
+  `--bash`, by argv. A lead run's callback fires only for a milestone resume,
+  a result with a `Design final:` line, a build lead's run that leaves no result
+  coming to it, or a run that did not succeed; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a
   milestone".
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
