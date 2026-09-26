@@ -245,8 +245,8 @@ export abstract class ChatPanel<S extends PanelState, C> {
   }
 
   private sessionLines(status: ConversationStatus): string[] {
-    const usage = status.tokens !== null && status.contextWindow
-      ? `${compact(status.tokens)}/${compact(status.contextWindow)} tok`
+    const usage = status.tokens !== null && status.compactAt
+      ? `${compact(status.tokens)}/${compact(status.compactAt)} tok`
       : "not measured yet";
     const fresh = status.empty && status.state === "idle";
     return [

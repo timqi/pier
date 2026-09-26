@@ -26,12 +26,13 @@ export const MILESTONE = "[Pier: the last result you were waiting on follows; no
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
 /** Decided once, as the run finishes. A lead reports milestones only: any
- *  other turn of its the user reads in its session, and settles as `--callback none`. */
+ *  other turn of its the user reads in its session, and settles as `--callback none`.
+ *  A turn that did not succeed is not a turn the user read: it calls back. */
 export function settleCallback(run: TaskRun): void {
   if (!run.callbackSessionId) return;
   const milestone = run.context.resumePrompt?.startsWith(MILESTONE) === true ||
     (run.result?.type === "agent" && /^Design final:/m.test(run.result.text));
-  if (createdRole(run) === "lead" && !milestone) run.callbackError = LEAD_TURN;
+  if (createdRole(run) === "lead" && run.state === "succeeded" && !milestone) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";
 }
 

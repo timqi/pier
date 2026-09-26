@@ -27,7 +27,7 @@ const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => (
   model: ref(0),
   thinking: "off",
   tokens: 1200,
-  contextWindow: 200_000,
+  compactAt: 200_000,
   ...over,
 });
 

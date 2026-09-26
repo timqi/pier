@@ -259,6 +259,16 @@ describe("a feature lead", () => {
     await vi.waitFor(() => expect(other.store.getRun(final.id)!.callbackState).toBe("delivered"));
     expect(other.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("Design final: /repo/docs/design.md")]);
     other.service.stop();
+
+    // A failure is not a turn the user read in the lead's session.
+    const broken = rig();
+    await broken.leadRan();
+    broken.sessions.set("lead", fakeSession("lead", { error: "provider down" }));
+    const failed = broken.service.resume("lead-run", "go", owed);
+    await vi.waitFor(() => expect(broken.store.getRun(failed.id)!.callbackState).toBe("delivered"));
+    expect(broken.store.getRun(failed.id)!.state).toBe("failed");
+    expect(broken.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("provider down")]);
+    broken.service.stop();
   });
 
   it("is a session of the user's, not one of the runs' own the rail hides", async () => {
