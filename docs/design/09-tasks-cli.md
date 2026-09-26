@@ -101,8 +101,10 @@ none is pinned):
   `model` then `fallbacks` that `AgentFactory.availableModels()` lists — none
   listed, `model`; an unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
   operator's menu:` then the whole menu, exit 1;
-- an exact `provider/id` on the menu is that pin;
-- else one case-insensitive substring hit over `provider/id` is that pin, `--thinking` defaulting to the pin's;
+- an exact `provider/id` on the menu is that pin — its first row, where the
+  model is pinned at several levels;
+- else case-insensitive substring hits over `provider/id` that are all one
+  model are its first pin, `--thinking` defaulting to the pin's;
 - else no hit and a `provider/id` shape is taken as written, no thinking;
 - else `task: model "<name>" matches <n> of the menu:` then one line per pin
   (`tier · provider/id · thinking`, the tier only on a pin that has

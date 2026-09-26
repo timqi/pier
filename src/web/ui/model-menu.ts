@@ -33,8 +33,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let titleModel: ModelRef | undefined;
   let defaults: LaunchChoice = { model: null, thinking: null };
   // A move redraws the list, so the arrow that was pressed has to be handed
-  // its focus back or a keyboard walk up the list ends after one step.
-  let focusAfter: { at: string; step: -1 | 1 } | null = null;
+  // its focus back or a keyboard walk up the list ends after one step. Held by
+  // the entry, not its key: one model may be pinned on several rows.
+  let focusAfter: { at: MenuEntry; step: -1 | 1 } | null = null;
 
   const status = h("span", "text-[11.5px]", "");
   const titleStatus = h("span", "text-[11.5px]", "");
@@ -67,7 +68,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     el.disabled = to < 0 || to >= entries.length;
     el.onclick = () => {
       entries.splice(to, 0, ...entries.splice(at, 1));
-      focusAfter = { at: key(entry), step };
+      focusAfter = { at: entry, step };
       markDirty();
       render();
     };
@@ -111,7 +112,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     name.title = key(entry);
     const up = moveButton(entry, -1, ChevronUp, "Move up");
     const down = moveButton(entry, 1, ChevronDown, "Move down");
-    if (focusAfter?.at === key(entry)) {
+    if (focusAfter?.at === entry) {
       // At an end that arrow is disabled; the focus goes to the way back.
       const [moved, back] = focusAfter.step === -1 ? [up, down] : [down, up];
       focusAfter = null;
@@ -129,28 +130,33 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   }
 
   /** Picking is the pinning, level and all: a pin has a reasoning level from
-   *  the moment it exists. */
+   *  the moment it exists. A pinned model stays pickable — the same model at
+   *  another level is another pin (opus high on one tier, opus low on another). */
   function renderAdder(): void {
-    const pickable = catalog.filter((m) => !entries.some((e) => key(e) === key(m)));
     const add = button("Pin model");
     add.prepend(icon(Plus));
     add.classList.add("inline-flex", "items-center", "gap-1.5", "flex-none", "whitespace-nowrap");
-    add.disabled = pickable.length === 0;
+    add.disabled = catalog.length === 0;
     add.onclick = () => {
       let thinking = DEFAULT_THINKING;
       openPanel(add, modelPicker({
-        models: pickable,
+        models: catalog,
         current: null,
         thinkingLevel: thinking,
         thinkingLevels: [...THINKING_LEVELS],
         onThinkingPick: (level) => {
           thinking = level;
         },
-        // No pinned row can be picked here — what is pinned is not offered —
-        // so the level is always the selector's.
-        onPick: (model) => {
+        // A pinned row picked here passes its own level, which is always a twin.
+        onPick: (model, pinnedAt) => {
           closeMenu();
-          entries.push({ provider: model.provider, id: model.id, thinking });
+          const level = pinnedAt ?? thinking;
+          const twin = entries.findIndex((e) => key(e) === key(model) && e.thinking === level);
+          if (twin >= 0) {
+            setStatus(status, "failed", `${key(model)} is already pinned at ${thinkingLabel(level)} (row ${String(twin + 1)})`);
+            return;
+          }
+          entries.push({ provider: model.provider, id: model.id, thinking: level });
           markDirty();
           render();
         },
@@ -291,7 +297,10 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
           + "balanced rows below it are tried in turn when it is not in the catalog. The arrows set that order, "
           + "the order pickers and `pier task --model ?` list.",
       }),
-      field("Add", adder, { hint: "The list is the live catalog — only models that exist right now can be pinned." }),
+      field("Add", adder, {
+        hint: "The list is the live catalog — only models that exist right now can be pinned. "
+          + "A model may be pinned again at another reasoning level, each row with its own tier.",
+      }),
       h("div", "flex items-center gap-3", save, status),
     ),
     card(

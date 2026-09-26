@@ -1,5 +1,5 @@
-// Pinning goes through the shared picker: it offers what is not pinned yet,
-// and a pick stages a row — with the reasoning level the picker was left on,
+// Pinning goes through the shared picker: it offers the whole catalog, pinned
+// models too, and a pick stages a row — with the reasoning level the picker was left on,
 // because a pin never has none — that Save writes.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ModelRef, ThinkingLevel } from "../../core/types.js";
@@ -44,13 +44,13 @@ async function pane(): Promise<FakeElement> {
   return fake(built.el);
 }
 
-it("offers only what is not pinned yet, and a pick stages the row", async () => {
+it("offers the whole catalog, and a pick stages the row", async () => {
   const el = await pane();
   button(el, /Pin model/)!.onclick!();
   expect(openPanel).toHaveBeenCalledTimes(1);
   const props = vi.mocked(modelPicker).mock.lastCall![0];
   expect(props).toMatchObject({
-    models: [free], // the pinned one is not offered a second time
+    models: [pinned, free], // a pinned model can be pinned again at another level
     current: null,
     thinkingLevel: "medium", // the level a new pin starts at
   });
@@ -113,11 +113,38 @@ it("reorders the menu by the row arrows, ends included, and saves the new order"
   });
 });
 
-it("has nothing to pin once every model is pinned", async () => {
+it("pins a pinned model again at another level, refusing the same level twice by row", async () => {
+  const el = await pane();
+  const pick = (thinking: ThinkingLevel, pinnedAt?: ThinkingLevel): void => {
+    button(el, /Pin model/)!.onclick!();
+    const props = vi.mocked(modelPicker).mock.lastCall![0];
+    props.onThinkingPick(thinking);
+    props.onPick(pinned, pinnedAt);
+  };
+  pick("high");
+  expect(el.textContent).toContain("anthropic/pinned-model is already pinned at High (row 1)");
+  // A pinned row picked in the list passes its own level: the same twin.
+  pick("low", "high");
+  expect(el.textContent).toContain("already pinned");
+  pick("low");
+  expect(el.textContent).toContain("unsaved changes");
+
+  vi.mocked(sendJson).mockResolvedValue({ ok: true, json: async () => ({ modelMenu: [] }) } as unknown as Response);
+  button(el, /Save menu/)!.onclick!();
+  await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
+  expect(vi.mocked(sendJson).mock.lastCall![1]).toEqual({
+    modelMenu: [
+      { provider: "anthropic", id: "pinned-model", thinking: "high" },
+      { provider: "anthropic", id: "pinned-model", thinking: "low" },
+    ],
+  });
+});
+
+it("has nothing to pin when the catalog is empty", async () => {
   vi.mocked(getJson).mockImplementation((url: string) =>
     Promise.resolve(
       url.startsWith("/api/models")
-        ? { ok: true, value: [pinned] }
+        ? { ok: false, error: "no catalog" }
         : url.startsWith("/api/config/defaults")
         ? { ok: true, value: { defaultModel: null, defaultThinkingLevel: null } }
         : { ok: true, value: { modelMenu: [stored] } },

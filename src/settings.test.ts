@@ -185,6 +185,18 @@ describe("parseModelMenu", () => {
     ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "balanced" }, { provider: "a", id: "y", thinking: "medium", tier: "balanced" }]);
   });
 
+  it("pins one model at several levels, each on its own tier, but never the same level twice", () => {
+    expect(
+      parseModelMenu([{ provider: "a", id: "x", thinking: "high", tier: "balanced" }, { provider: "a", id: "x", thinking: "low", tier: "cheap" }]),
+    ).toEqual([{ provider: "a", id: "x", thinking: "high", tier: "balanced" }, { provider: "a", id: "x", thinking: "low", tier: "cheap" }]);
+    expect(
+      parseModelMenu([{ provider: "a", id: "x", thinking: "high" }, { provider: "a", id: "y" }, { provider: "a", id: "x", thinking: "high", tier: "cheap" }]),
+    ).toBe("modelMenu row 3 (a/x): already pinned at high by row 1");
+    // A row with no level is the default level, so it can be the twin.
+    expect(parseModelMenu([{ provider: "a", id: "x" }, { provider: "a", id: "x", thinking: "medium" }]))
+      .toBe("modelMenu row 2 (a/x): already pinned at medium by row 1");
+  });
+
   it("rejects rather than repairs anything mis-shaped, naming the row and field", () => {
     for (const [bad, error] of [
       ["not a list", "modelMenu must be a list"],

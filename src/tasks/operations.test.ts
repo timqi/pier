@@ -305,6 +305,13 @@ describe("task operations", () => {
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
     expect(ask.created).toHaveLength(8);
+    // One model at several levels is one model: its first row, by id or substring.
+    menu.push({ provider: "anthropic", id: "claude-opus-4", thinking: "low", tier: "cheap" });
+    onTestFinished(() => void menu.pop());
+    expect(await launchOf({ model: "anthropic/claude-opus-4" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
+    expect(await launchOf({ model: "opus" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
+    // Its tier is that row's, at that row's level.
+    expect(await launchOf({ model: "cheap" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "low" });
     await expect(ask({ operation: "models" })).rejects.toThrow("unknown task operation");
   });
 

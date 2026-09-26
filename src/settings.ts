@@ -88,7 +88,9 @@ export function normalizePublicUrl(raw: string): string | null {
 
 /** Rejecting rather than repairing: a "fixed" entry would advertise a model the
  *  operator never picked. The refusal names the row (1-based, as the Console
- *  lists them) and the field. A `note` left by an older Pier is dropped. */
+ *  lists them) and the field. A `note` left by an older Pier is dropped. One
+ *  model may be pinned at several levels; the same model at the same level twice
+ *  is refused, naming both rows. */
 export function parseModelMenu(raw: unknown): ModelMenuEntry[] | string {
   if (!Array.isArray(raw)) return "modelMenu must be a list";
   if (raw.length > 32) return `modelMenu has ${String(raw.length)} rows; at most 32`;
@@ -103,6 +105,8 @@ export function parseModelMenu(raw: unknown): ModelMenuEntry[] | string {
     const level = thinking === undefined ? "medium" : thinking;
     if (!isThinkingLevel(level)) return `${row} (${ref.provider}/${ref.id}): thinking must be one of ${THINKING_LEVELS.join(", ")}`;
     if (tier !== undefined && !isModelTier(tier)) return `${row} (${ref.provider}/${ref.id}): tier must be one of ${MODEL_TIERS.join(", ")}, or none`;
+    const twin = menu.findIndex((e) => e.provider === ref.provider && e.id === ref.id && e.thinking === level);
+    if (twin >= 0) return `${row} (${ref.provider}/${ref.id}): already pinned at ${level} by row ${String(twin + 1)}`;
     menu.push({ ...ref, thinking: level, ...(tier !== undefined ? { tier } : {}) });
   }
   return menu;

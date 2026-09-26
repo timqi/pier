@@ -352,9 +352,10 @@ function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; think
     if (pins.length) return pins.map(pick);
     throw new Error(`model "${name}": tier ${needle} is unassigned — the operator's menu:\n${menuLines(menu)}`);
   }
-  const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
-  const hits = exact ? [exact] : menu.filter((pin) => full(pin).toLowerCase().includes(needle));
-  if (hits.length === 1) return [pick(hits[0]!)];
+  const exact = menu.filter((pin) => full(pin).toLowerCase() === needle);
+  const hits = exact.length ? exact : menu.filter((pin) => full(pin).toLowerCase().includes(needle));
+  // One model pinned at several levels is still one model: its first row, as with a tier.
+  if (hits.length && hits.every((pin) => full(pin) === full(hits[0]!))) return [pick(hits[0]!)];
   const slash = name.indexOf("/");
   if (!hits.length && slash > 0 && slash < name.length - 1) return [{ model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } }];
   throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${menuLines(hits.length ? hits : menu)}`);
