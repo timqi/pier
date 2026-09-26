@@ -18,7 +18,7 @@ export interface AgentLaunchPolicy {
   model?: ModelRef;
   thinking?: ThinkingLevel;
   /** A feature lead: may delegate to workers, opens with the lead contract. */
-  role?: AgentRole;
+  role?: "lead";
 }
 
 export type AgentTaskAction = {
@@ -252,3 +252,8 @@ export const isTerminal = (state: TaskRunState): boolean =>
 /** A definition whose runs are a feature lead's. */
 export const isLead = (task: TaskDefinition): boolean =>
   task.action.type === "agent" && task.action.launch?.role === "lead";
+
+/** The role a fresh run's session is created with and keeps: a lead's, or a
+ *  worker's when a session launched it; a cron or watch run's has none. */
+export const createdRole = (run: TaskRun): AgentRole | undefined =>
+  isLead(run.context.definition) ? "lead" : run.invokedBySessionId !== null ? "worker" : undefined;

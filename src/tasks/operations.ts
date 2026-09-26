@@ -191,10 +191,13 @@ export async function handleTask(
   // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
   // what a supervised run launched would report to a session no run owns. A
   // queued run has not taken the session's turn, so it gates nothing yet.
-  // A feature lead is the one delegated run that may, and never to a lead, so depth stays 2.
-  const lead = store.roleOf(callerSessionId) === "lead";
+  // The role is the session's, for its life: a worker never delegates, and a
+  // feature lead delegates to workers only, so depth stays 2.
+  const role = store.roleOf(callerSessionId);
+  const lead = role === "lead";
   const active = store.findActiveRunForTarget(callerSessionId);
   if (active?.state === "running" && store.supervised(active) && !lead) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
+  if (role === "worker") throw new Error("a worker's session never delegates, in a run or after it; say what needs another agent and let the session that launched it run it");
   // Read off a draft before it is filed; a saved definition has the same shape under `action`.
   const notLead = <T>(draft: T): T => {
     const role = record(record(draft)?.launch)?.role ?? record(record(record(draft)?.action)?.launch)?.role;

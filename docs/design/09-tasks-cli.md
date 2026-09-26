@@ -104,16 +104,18 @@ result; the supervisor answers with `pier task run --run <id> --prompt
 A run with a supervisor (a `callbackSessionId` — its own, or its group's) may
 not call `pier task` while it is `running` on the caller's session: `task: a
 delegated run cannot delegate; ask in your result and let your supervisor run
-it`, exit 1. A queued run gates nothing. A top-level session, a run nobody
-waits on (`--callback none`; a cron, watch or Console run whose definition
-names no `--callback-session`), and a feature lead may; a lead launching a lead
-is refused (`task: a feature lead cannot launch a lead; …`), so depth stays 2.
+it`, exit 1. A queued run gates nothing. A worker's session — one a run
+launched from a session created, not a lead — is refused at any time, in a run
+or reopened after it (`task: a worker's session never delegates, …`). A
+top-level session, a cron or watch run's session, and a feature lead may; a
+lead launching a lead is refused (`task: a feature lead cannot launch a lead;
+…`), so depth stays 2.
 
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session of the continuous conversation counts as the one
 that launched it. `parentRunId` links only a `task` action's child, which a cancel
-walks. The run preamble (`tasks/agent.ts`) tells a supervised run in one
-sentence that `pier task` is refused, and a lead that it may delegate.
+walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
+in one sentence that `pier task` is refused, and a lead that it may delegate.
 
 ## Skill
 

@@ -527,9 +527,10 @@ export interface PackageStore {
   checkUpdates(): Promise<PackageRegistry>;
 }
 
-/** A session's role beyond an ordinary one: a feature lead may delegate to
- *  workers, and opens with the lead contract (docs/design/10-continuous-session.md). */
-export type AgentRole = "lead";
+/** A task-run session's role, kept for the session's life: a feature lead
+ *  delegates to workers and opens with the lead contract; a worker never
+ *  delegates and opens without the pier-tasks skill (docs/design/10-continuous-session.md). */
+export type AgentRole = "lead" | "worker";
 
 export interface AgentLaunchOptions {
   cwd: string;

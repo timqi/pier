@@ -84,8 +84,9 @@ session; `pier task list` shows definitions, never runs.
 
 ## Limits
 
-- A delegated run does not delegate: `pier task` is refused inside a run
-  someone waits on — ask in your result; your supervisor runs it.
+- A worker does not delegate: `pier task` is refused in a session a delegated
+  run created (a lead's aside), in its run and after it, and in any run someone
+  waits on — say what needs another agent; the supervisor runs it.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
   those slots; the rest queue until cancelled or a restart marks them
   `interrupted` (callbacks still fire).

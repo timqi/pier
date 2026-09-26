@@ -714,7 +714,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   }
 
   private async resourceLoader(cwd: string, role?: AgentRole): Promise<DefaultResourceLoader> {
-    const { skillsOff } = this.pier();
+    // A worker never delegates (tasks/operations.ts refuses it), so it is not taught how.
+    const skillsOff = role === "worker" ? [...this.pier().skillsOff, "pier-tasks"] : this.pier().skillsOff;
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(),

@@ -46,6 +46,14 @@ function setup(session = fakeSession(), instance?: ConstructorParameters<typeof 
   return { cwd, session, factory, hub, router, store, service };
 }
 
+/** The caller asks twice: its child's session must not be its own, or the
+ *  caller would be a worker (docs/design/10-continuous-session.md §Feature lead). */
+function callerAndChild() {
+  const rig = setup();
+  vi.mocked(rig.factory.create).mockResolvedValue(fakeSession("child"));
+  return rig;
+}
+
 /** A stored run row. The literal is long and a dozen tests need one, differing
  *  only in the handful of fields each is about. */
 function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<TaskRun> = {}): TaskRun {
@@ -1311,7 +1319,7 @@ describe("task service", () => {
   });
 
   it("runs inline subagent drafts atomically and filters them from lists", async () => {
-    const { cwd, service } = setup();
+    const { cwd, service } = callerAndChild();
     const queued = await service.handle({
       operation: "run",
       task: {
@@ -1344,7 +1352,7 @@ describe("task service", () => {
   });
 
   it("runs a prompt shorthand in the caller's directory with a name from the prompt", async () => {
-    const { cwd, service } = setup();
+    const { cwd, service } = callerAndChild();
     mkdirSync(join(cwd, "sub"));
     const summary = await service.handle({
       operation: "run",
@@ -1387,7 +1395,7 @@ describe("task service", () => {
   });
 
   it("takes timeoutSeconds from the prompt shorthand, defaulting to an hour", async () => {
-    const { service } = setup();
+    const { service } = callerAndChild();
     const long = await service.handle({ operation: "run", prompt: "Slow work", timeoutSeconds: 7200 }, "s1") as RunSummary;
     expect(service.get(long.taskId).timeoutSeconds).toBe(7200);
     const plain = await service.handle({ operation: "run", prompt: "Ordinary work" }, "s1") as RunSummary;

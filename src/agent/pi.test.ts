@@ -188,6 +188,25 @@ describe("the pier package's skills off-list", () => {
       "/pier/skills/pier-tasks/SKILL.md",
     ]);
   });
+
+  it("leaves pier-tasks out of a worker, created or reopened, and in a lead and an ordinary session", async () => {
+    const factory = new PiAgentFactory(undefined, ["/pier/skills"], undefined, undefined, undefined, undefined, undefined, {
+      scan: async () => ["worker-1", "lead-1"].map((id) => ({ id, path: join(mkdtempSync(join(tmpdir(), "pier-role-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 })),
+    }, (id) => (id === "worker-1" ? "worker" : id === "lead-1" ? "lead" : undefined));
+    const skills = [
+      { name: "pier-tasks", filePath: "/pier/skills/pier-tasks/SKILL.md" },
+      { name: "pier-help", filePath: "/pier/skills/pier-help/SKILL.md" },
+    ];
+    const names = () => loaders.at(-1)!.skillsOverride({ skills }).skills.map((s) => s.name);
+    await (await factory.create({ cwd: "/tmp/wt", role: "worker" })).dispose();
+    expect(names()).toEqual(["pier-help"]);
+    await (await factory.resume("worker-1")).dispose();
+    expect(names()).toEqual(["pier-help"]);
+    await (await factory.resume("lead-1")).dispose();
+    expect(names()).toEqual(["pier-tasks", "pier-help"]);
+    await (await factory.create({ cwd: "/tmp/wt" })).dispose();
+    expect(names()).toEqual(["pier-tasks", "pier-help"]);
+  });
 });
 
 describe("a disposed session", () => {

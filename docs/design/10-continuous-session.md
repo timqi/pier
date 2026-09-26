@@ -45,12 +45,14 @@ Three roles, not three mandatory tiers: main (dispatcher) → feature lead
 | --- | --- | --- | --- |
 | main | the chain head, cwd `$PIER_HOME/home` | instance default, `low` | leads and workers |
 | lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`); `high` to design, `medium` to build | workers only |
-| worker | an ordinary child, one worktree each | as launched | never |
+| worker | any session a run launched from a session (`invokedBySessionId`) created, unless a lead; one worktree each | as launched | never |
 
-- The role does not depend on the instance switch: `--role lead`, its
-  delegation, ledger and milestones work from any session with the switch on
-  or off; off, the lead is an ordinary rail session at the instance's
-  compaction.
+- A role is the session's for its life, with the switch on or off: `pier
+  task` is refused in a worker's session at any time, reopened on the web
+  included, and it opens without the `pier-tasks` skill; a lead's delegation,
+  ledger and milestones work from any session (switch off, the lead is an
+  ordinary rail session at the instance's compaction); top-level sessions and
+  cron or watch run sessions have no role and keep 09's rules.
 - A lead never rotates; auto-compaction stays on at the children's cap
   (§Main session lifecycle), since its state is the design doc on disk.
 - "I want X" → main launches a lead (`pier task run --role lead`). On the web
@@ -79,19 +81,23 @@ Mechanics:
 - Role marking: `--role lead` rides as `launch.role: "lead"`
   (`AgentLaunchPolicy`, `tasks/types.ts`; `parseLaunch` accepts `lead` only,
   and a reused session takes no launch policy); `AgentLaunchOptions.role`
-  (`core/types.ts`) carries it to the factory, and a reopened session gets it
-  from `roleOf(sessionId)`, injected into the factory and answered from
-  `task_runs` (a run on that session whose definition has the role; a resume
-  keeps the definition).
+  (`core/types.ts`) carries it, `lead` or `worker`, to the factory; a reopened
+  session gets it from `roleOf(sessionId)`, injected into the factory and
+  answered by the run that created the session (`createdRole`,
+  `tasks/types.ts`), which a resume or a `--session` continuation never
+  changes. `agent/pi.ts` drops `pier-tasks` from a worker's skills; the refusal
+  in `tasks/operations.ts` is the gate.
 - A lead's session is not one of the runs' own (`taskOwnedSessionIds`,
   `tasks/store.ts`): the web lists it and marks it unread like a workbench
   session; it keeps the children's compaction cap.
 - Delegation: the refusal for a running supervised run (`tasks/operations.ts`)
-  passes a lead session; a lead launching a lead — `--role lead`, a saved lead
-  definition, or a lead member of a batch — is refused before its draft is
-  filed (`task: a feature lead cannot launch a lead; …`), so depth stays 2.
-- The run preamble (`tasks/agent.ts`) tells a lead it may delegate to workers
-  instead of "`pier task` is refused".
+  passes a lead session, and a worker's session is refused outside a run too
+  (`task: a worker's session never delegates, …`); a lead launching a lead —
+  `--role lead`, a saved lead definition, or a lead member of a batch — is
+  refused before its draft is filed (`task: a feature lead cannot launch a
+  lead; …`), so depth stays 2.
+- The run preamble (`tasks/agent.ts`) tells a lead it may delegate to workers,
+  and a worker or a supervised run that "`pier task` is refused".
 - `pier task runs` in a lead session lists the runs that lead launched.
 - Milestones: every run and group callback to a lead session asks
   `TaskService.milestone` (`tasks/callbacks.ts`, `tasks/groups.ts`):

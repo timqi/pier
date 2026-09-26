@@ -1,5 +1,5 @@
-// The feature lead (docs/design/10-continuous-session.md §Feature lead): the one
-// delegated run that may delegate, never to a lead; its workers' results wake
+// Session roles (docs/design/10-continuous-session.md §Feature lead): a worker
+// never delegates; a lead delegates, never to a lead; its workers' results wake
 // it, and only the last of a wave reaches its supervisor, as one resumed run.
 // No rig here turns the continuous switch on: the role does not need it.
 
@@ -224,5 +224,32 @@ describe("a feature lead", () => {
       name: "w", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd: store.getRun("lead-run")!.context.cwd! }, prompt: "w" },
     })), sessionId: "worker" } });
     expect([...service.taskSessions()]).toEqual(["worker"]);
+  });
+});
+
+describe("a session's role, kept for its life", () => {
+  it("makes a session a delegated run created a worker: refused in its run and reopened after it, told so, opened as one", async () => {
+    const { service, store, created } = rig();
+    const receipt = await service.handle({ operation: "run", prompt: "fix it" }, "main") as { runId: string };
+    const run = await service.waitForRun(receipt.runId);
+    const worker = run.targetSessionId!;
+    expect(created.at(-1)).toMatchObject({ role: "worker" });
+    expect(run.context.renderedPrompt).toContain("`pier task` is refused");
+    expect(store.roleOf(worker)).toBe("worker");
+    await expect(service.handle({ operation: "run", prompt: "deeper" }, worker)).rejects.toThrow(/worker's session never delegates, in a run or after it/);
+    await expect(service.handle({ operation: "list" }, worker)).rejects.toThrow(/worker's session never delegates/);
+    service.stop();
+  });
+
+  it("leaves a cron run's session and a lead's able to delegate once their runs are over", async () => {
+    const { service, store, cwd, leadRan } = rig();
+    const nightly = await service.create({ name: "nightly", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "sweep" } });
+    const cron = await service.waitForRun(service.run(nightly.id, null, "cron").id);
+    expect(store.roleOf(cron.targetSessionId!)).toBeUndefined();
+    expect(cron.context.renderedPrompt).not.toContain("`pier task` is refused");
+    await expect(service.handle({ operation: "run", prompt: "follow up" }, cron.targetSessionId!)).resolves.toMatchObject({ runId: expect.any(String) });
+    await leadRan();
+    await expect(service.handle({ operation: "run", prompt: "a worker" }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });
+    service.stop();
   });
 });

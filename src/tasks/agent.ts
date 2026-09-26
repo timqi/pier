@@ -2,14 +2,14 @@
 // before the prompt, and how many may run at once (an agent run costs a
 // model's context and someone's rate limit, so the caps are here).
 
-import type { AgentFactory, AgentSession } from "../core/types.js";
+import type { AgentFactory, AgentRole, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskStore } from "./store.js";
-import { isLead, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
+import { createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
 
 // Agent runs are I/O-bound: the cap is there for API pressure and runaway
 // fan-out, not for this machine's CPU.
@@ -18,7 +18,7 @@ const log = logger("tasks");
 
 /** Every session gets the chat-surface contract, task runs included, so the
  *  delegation prompt says which of it does not apply. Skipped on resume. */
-const preamble = (run: TaskRun, supervised: boolean): string => {
+const preamble = (run: TaskRun, supervised: boolean, role: AgentRole | undefined): string => {
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
     ? "read by the agent that delegated this run"
@@ -28,9 +28,9 @@ const preamble = (run: TaskRun, supervised: boolean): string => {
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
     `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.` +
-    (isLead(run.context.definition)
+    (role === "lead"
       ? " You are a feature lead: you may delegate to workers with `pier task run` (never `--role lead`), and their results come back to you."
-      : supervised ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
+      : supervised || role === "worker" ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
     "\n\n";
 };
 
@@ -80,7 +80,8 @@ export class AgentTaskRunner {
         const input = run.input === undefined || run.input === null
           ? ""
           : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
-        const prompt = run.context.resumePrompt ?? `${preamble(run, this.store.supervised(run))}${action.prompt}${input}`;
+        const role = reused ? this.store.roleOf(session.id) : createdRole(run);
+        const prompt = run.context.resumePrompt ?? `${preamble(run, this.store.supervised(run), role)}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
         // The level the session settled on: an unspecified effort inherits the caller's.
@@ -171,7 +172,7 @@ export class AgentTaskRunner {
       model: action.launch?.model ??
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
-      role: action.launch?.role,
+      role: createdRole(run),
     };
     const opening = this.factory.create(opts).then(async (session) => {
       // SDK creation cannot be cancelled; a late session still belongs to this

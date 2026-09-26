@@ -4,7 +4,7 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
 import type { AgentRole } from "../core/types.js";
-import type { RunPage, RunQuery, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import { createdRole, type RunPage, type RunQuery, type RunView, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -227,13 +227,15 @@ export class TaskStore {
     return new Set(rows.map((row) => row.id));
   }
 
-  /** A lead's session is one a lead run made; a resume keeps the definition,
-   *  and a `--session` continuation cannot carry a launch policy. */
+  /** Answered by the run that made the session; a resume or a `--session`
+   *  continuation never changes it. */
   roleOf(sessionId: string): AgentRole | undefined {
-    return this.sql(`
-      SELECT 1 FROM task_runs
-      WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.context.definition.action.launch.role') = 'lead' LIMIT 1
-    `).get(sessionId) === undefined ? undefined : "lead";
+    const run = this.#one<TaskRun>(`
+      SELECT json FROM task_runs
+      WHERE json_extract(json, '$.context.sessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh'
+      ORDER BY queued_at LIMIT 1
+    `, sessionId);
+    return run && createdRole(run);
   }
 
   /** What a milestone resumes, and whose supervisor it reports to. */
