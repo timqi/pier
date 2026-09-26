@@ -232,8 +232,17 @@ export class TaskService {
     return this.definitions.update(id, raw, by);
   }
 
+  setEnabled(id: string, enabled: boolean, by?: string): TaskDefinition {
+    return this.definitions.setEnabled(id, enabled, by);
+  }
+
   archive(id: string, by?: string): TaskDefinition {
     return this.definitions.archive(id, by);
+  }
+
+  /** `pier task list`'s last run: the newest `limit` of a definition's runs. */
+  listRuns(taskId: string, limit = 1): TaskRun[] {
+    return this.store.listRuns(taskId, limit, 0);
   }
 
   getRun(id: string): TaskRun {
