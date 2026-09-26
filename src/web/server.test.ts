@@ -443,7 +443,7 @@ describe("workbench server", () => {
       const task = await tasks.create({
         name: "feature",
         trigger: { type: "manual" },
-        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt, launch: { role: "lead" } },
+        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt, launch: prompt === "design" ? { role: "lead", design: true } : { role: "lead" } },
       });
       new TaskStore(db).saveRun(storedRun(task, runId, {
         sourceSessionId: "s1", targetSessionId: sessionId, sessionMode: "fresh", callbackSessionId: "s1",

@@ -29,20 +29,22 @@ the one validator of the params object.
 
 ```
 pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
-        [--model <name|?>] [--thinking <level>] [--role lead] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+        [--model <name|?>] [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
   caller's), or `--bash` (a one-shot script action in the same `--cwd`, no
-  session and no model — `--prompt`, `--model`, `--thinking`, `--role` and
+  session and no model — `--prompt`, `--model`, `--thinking`, `--role`, `--design` and
   `--session` beside it are refused), or `--task-id` (a saved definition, as
   is), or `--session <id>` with `--prompt` (continue an idle session; `--cwd`
   refused).
 - **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
   session is a feature lead's for its life (§Two levels); any other value, and
   `--role` beside `--session`, is refused by the server; beside `--task-id` or
-  `--bash`, by argv. A lead run's callback fires only for a milestone resume,
+  `--bash`, by argv. `--design` rides as `launch.design: true` and tags the
+  lead `design` (the user finalizes it); the server refuses it without
+  `--role lead`. A lead run's callback fires only for a milestone resume,
   a result with a `Design final:` line, a build lead's run that leaves no result
   coming to it, or a run that did not succeed; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a

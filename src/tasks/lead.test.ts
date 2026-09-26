@@ -11,7 +11,7 @@ import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
-import { BUILD_PROMPT, type AgentFactory, type AgentLaunchOptions } from "../core/types.js";
+import type { AgentFactory, AgentLaunchOptions } from "../core/types.js";
 import { LEAD_TURN, MILESTONE } from "./callbacks.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
@@ -44,13 +44,13 @@ function rig() {
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, router, hub, { modelMenu: () => [] });
-  const agent = (name: string, role?: "lead", prompt = `be ${name}`) => service.create({
+  const agent = (name: string, role?: "lead", design?: true) => service.create({
     name, trigger: { type: "manual" },
-    action: { type: "agent", session: { mode: "fresh", cwd }, prompt, ...(role ? { launch: { role } } : {}) },
+    action: { type: "agent", session: { mode: "fresh", cwd }, prompt: `be ${name}`, ...(role ? { launch: { role, ...(design ? { design } : {}) } } : {}) },
   });
-  /** The lead as main left it: one finished run on the lead session, owed to main. */
-  const leadRan = async (state: TaskRun["state"] = "succeeded", prompt?: string): Promise<TaskDefinition> => {
-    const task = await agent("feature", "lead", prompt);
+  /** The lead as main left it: one finished run on the lead session, owed to main; a design lead unless `build`. */
+  const leadRan = async (state: TaskRun["state"] = "succeeded", phase: "design" | "build" = "design"): Promise<TaskDefinition> => {
+    const task = await agent("feature", "lead", phase === "design" || undefined);
     store.saveRun({
       id: "lead-run", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null, resumedFromRunId: null,
       triggerSource: "agent", invokedBySessionId: "main", sourceSessionId: "main", targetSessionId: "lead",
@@ -80,7 +80,7 @@ async function laterBy(ms: number, then: () => Promise<unknown>): Promise<void> 
 describe("a feature lead", () => {
   it("is launched with --role lead, opened with its role, and told it may delegate", async () => {
     const { service, created, store } = rig();
-    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { role: "lead" } }, "main") as { runId: string };
+    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { role: "lead", design: true } }, "main") as { runId: string };
     const run = await service.waitForRun(receipt.runId);
     expect(created.at(-1)).toMatchObject({ role: "lead" });
     expect(run.context.renderedPrompt).toContain("You are a feature lead: you may delegate to workers");
@@ -90,9 +90,12 @@ describe("a feature lead", () => {
     const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
     expect(store.leadPhaseOf("main")).toBeUndefined();
+    // A lead that plans and builds itself is not a design, whatever its prompt says.
+    const direct = await service.waitForRun((await service.handle({ operation: "run", prompt: "review and simplify it", launch: { role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leads()).toEqual(new Map([
       [run.targetSessionId!, { phase: "design", runId: run.id, runLive: false, designOpen: true }],
       [build.targetSessionId!, { phase: "build", runId: build.id, runLive: false, designOpen: false }],
+      [direct.targetSessionId!, { phase: "build", runId: direct.id, runLive: false, designOpen: false }],
     ]));
     expect(service.openDesigns().map((r) => [r.runId, r.targetSessionId])).toEqual([[run.id, run.targetSessionId]]);
     // Only a line that opens with it is the milestone; one mid-sentence is not.
@@ -102,6 +105,7 @@ describe("a feature lead", () => {
     expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(false);
     expect(service.openDesigns()).toEqual([]);
     await expect(service.handle({ operation: "run", prompt: "x", launch: { role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
+    await expect(service.handle({ operation: "run", prompt: "x", launch: { design: true } }, "main")).rejects.toThrow(/design must be true, on a lead/);
   });
 
   it("may delegate from its running run, never to a lead; a worker still may not delegate", async () => {
@@ -277,7 +281,7 @@ describe("a feature lead", () => {
 
     // A build lead declares its own completion: a turn that leaves nothing coming to it reports.
     const build = rig();
-    await build.leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    await build.leadRan("succeeded", "build");
     const built = build.service.resume("lead-run", "also fold in the steer", owed);
     await vi.waitFor(() => expect(build.store.getRun(built.id)!.callbackState).toBe("delivered"));
     expect(build.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("lead says done")]);
@@ -324,7 +328,7 @@ describe("a feature lead", () => {
     expect(other.store.latestRunForTarget("main")).toBeUndefined();
     other.service.stop();
     const build = rig();
-    await build.leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    await build.leadRan("succeeded", "build");
     build.router.attach({ channelId: "web", conversationId: "lead" }, build.sessions.get("lead")!);
     build.sessions.get("lead")!.emit({ type: "turn-end", text: "Design final: /repo/docs/design.md" });
     expect(build.store.latestRunForTarget("lead")!.id).toBe("lead-run");
@@ -360,7 +364,7 @@ describe("a feature lead", () => {
 
   it("holds a build lead's turn back while a worker's result is still coming, and reports the wave once", async () => {
     const { service, sessions, store, bash, leadRan } = rig();
-    await leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    await leadRan("succeeded", "build");
     const slow = await bash("sleep 0.3; echo worker done");
     const worker = service.run(slow.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
     const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };

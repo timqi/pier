@@ -619,11 +619,9 @@ export interface PackageStore {
  *  delegates and opens without the pier-tasks skill (docs/design/10-continuous-session.md). */
 export type AgentRole = "lead" | "worker";
 
-/** A lead's phase, the rail's language-neutral tag: a lead whose run prompt
- *  opens with `BUILD_PROMPT` builds per a design doc, any other designs. */
+/** A lead's phase, the rail's language-neutral tag: a lead launched with
+ *  `launch.design` designs with the user, any other builds. */
 export type LeadPhase = "design" | "build";
-/** The dispatcher contract's build-lead prompt opening (agent/roles.ts). */
-export const BUILD_PROMPT = "Build per ";
 
 export interface AgentLaunchOptions {
   cwd: string;

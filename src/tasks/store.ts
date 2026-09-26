@@ -3,7 +3,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
-import { BUILD_PROMPT, type AgentRole, type LeadPhase } from "../core/types.js";
+import type { AgentRole, LeadPhase } from "../core/types.js";
 import { createdRole, type RunPage, type RunQuery, type RunView, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -256,7 +256,7 @@ export class TaskStore {
   leadPhaseOf(sessionId: string): LeadPhase | undefined {
     const run = this.creatorOf(sessionId);
     if (!run || createdRole(run) !== "lead" || run.context.definition.action.type !== "agent") return undefined;
-    return run.context.definition.action.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
+    return run.context.definition.action.launch?.design ? "design" : "build";
   }
 
   /** Every lead session with its phase (as `leadPhaseOf`), its creating run,
@@ -265,10 +265,10 @@ export class TaskStore {
    *  design on the user; in one statement for the rail's listing. */
   leads(): Map<string, { phase: LeadPhase; runId: string; runLive: boolean; designOpen: boolean }> {
     const rows = this.sql(`
-      SELECT c.id, c.run_id, c.prompt, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
+      SELECT c.id, c.run_id, c.design, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
         SELECT id AS run_id, json_extract(json, '$.targetSessionId') AS id,
           json_extract(json, '$.context.definition.action.launch.role') AS role,
-          json_extract(json, '$.context.definition.action.prompt') AS prompt,
+          json_extract(json, '$.context.definition.action.launch.design') AS design,
           ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.targetSessionId') ORDER BY queued_at) AS n
         FROM task_runs
         WHERE json_extract(json, '$.sessionMode') = 'fresh' AND json_extract(json, '$.targetSessionId') IS NOT NULL
@@ -282,9 +282,9 @@ export class TaskStore {
           AND instr(char(10) || json_extract(json, '$.result.text'), char(10) || 'Design final:') > 0
       ) f ON f.id = c.id
       WHERE c.n = 1 AND c.role = 'lead'
-    `).all() as unknown as { id: string; run_id: string; prompt: string; live: number; final: number }[];
+    `).all() as unknown as { id: string; run_id: string; design: number | null; live: number; final: number }[];
     return new Map(rows.map((r) => {
-      const phase: LeadPhase = r.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
+      const phase: LeadPhase = r.design === 1 ? "design" : "build";
       return [r.id, { phase, runId: r.run_id, runLive: r.live === 1, designOpen: phase === "design" && r.final === 0 }];
     }));
   }

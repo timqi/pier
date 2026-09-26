@@ -120,6 +120,10 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     if (value.role !== "lead") throw new Error("agent role must be lead");
     launch.role = "lead";
   }
+  if (value.design !== undefined) {
+    if (value.design !== true || launch.role !== "lead") throw new Error("agent design must be true, on a lead");
+    launch.design = true;
+  }
   return Object.keys(launch).length ? launch : undefined;
 }
 

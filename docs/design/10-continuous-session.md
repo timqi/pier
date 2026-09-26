@@ -28,7 +28,7 @@ child, and callbacks are the only delivery.
   [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes main a callback (§Milestones); main launches a new build lead on that
-  doc, its prompt opening `Build per ` (`BUILD_PROMPT`).
+  doc, its prompt opening `Build per `.
 - A design lead's turn outside any run (the user confirmed in its session)
   that carries the line is recorded as a finished run of the lead — reuse,
   resumed from its latest run, that run's callback target, the reply its
@@ -36,8 +36,9 @@ child, and callbacks are the only delivery.
   on `Router.onTurnEnd`); a failed turn, a run's own turn and a build lead's
   record nothing.
 - A run's `--name` is its session's title; a lead's rail row carries its
-  phase, `design` or `build` (`TaskStore.leads`, `build` when the prompt
-  opens with `BUILD_PROMPT`).
+  phase (`TaskStore.leads`): `design` when its creating run carries
+  `launch.design` (`--design`, set by main only for a product or architecture
+  design the user finalizes), `build` for any other lead.
 - Models are the tiers of [pier-tasks §Model
   choice](../../skills/pier-tasks/SKILL.md#model-choice); a lead is `hardest`,
   `--thinking high` to design and `medium` to build.

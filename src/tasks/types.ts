@@ -19,6 +19,9 @@ export interface AgentLaunchPolicy {
   thinking?: ThinkingLevel;
   /** A feature lead: may delegate to workers, opens with the lead contract. */
   role?: "lead";
+  /** A lead for a product or architecture design the user finalizes with
+   *  `Design final:`; with `role: "lead"` only. Any other lead builds. */
+  design?: true;
 }
 
 export type AgentTaskAction = {
