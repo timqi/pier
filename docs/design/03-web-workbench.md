@@ -10,7 +10,7 @@ surface owns its routes and is mounted beside it.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the rail's ordering key |
+| `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the drawer's ordering key |
 | `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from its run card names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
@@ -61,7 +61,7 @@ surface owns its routes and is mounted beside it.
   [04-im-channels.md](04-im-channels.md#continue-from-web-and-from-a-thread-handoffts)):
   the ⋯ menu's *Continue in Lark/Slack…* lists the DMs the bot has seen (a
   group's thread belongs to the group, so it is never a target); a pick posts the
-  handoff and the rail's chip follows from `sessions-changed`. A session
+  handoff and the status chip follows from `sessions-changed`. A session
   already answering a chat has the row disabled with `answers in <platform>`;
   a refusal stays under the picked row in the server's words.
 
@@ -145,11 +145,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 `.select`, `.md`, …). `npm run dev:web` gives HMR with an `/api` proxy to
 :3141; `tsconfig.web.json` is the typecheck gate.
 
-`main.ts` orchestrates (session state, SSE streams, routing, header); surface
-modules (`sidebar.ts`, `chat.ts`, `composer.ts`, the Console views) receive
-explicit deps and never import main back. No state, router or component
-library. Working-set rank and unread state live in `web/session-state.ts`; the
-browser keeps no second session order.
+`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Working-set rank and unread state live in `web/session-state.ts`.
 
 ### Data flow
 
@@ -170,102 +166,28 @@ browser keeps no second session order.
 - Auto-scroll sticks to the bottom only when already near it; own sends
   force-scroll.
 
-### Sessions rail (`sidebar.ts`)
+### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- Order: working set first, then by creation time. Creating or speaking to a
-  session promotes it; background activity never reorders. Pagination and the
-  palette reach the rest.
-- Title: the first message. If Settings → Models names a title model, one bare
-  request after the first reply renames the session (`renamed` event re-lists
-  every surface); a failed request is reported in the session.
-- **New session** menu: recent distinct directories (current ticked, at most
-  eight), then Browse…. Browse…: focus starts on the editable path line; ↓
-  first folder, ↑ last, ↵ descends, Home/End are the caret's; Use and New
-  folder are Tab's.
-- Worktrees (`<repo>.<branch>` whose `<repo>` sibling is also listed) are left
-  out of directory lists, here and in the palette; compared on `realpath`ed
-  paths.
-- Chords: ⌘⇧[ / ⌘⇧] previous / next row (wrapping); ⌘⇧O New session menu; ⌘K
-  palette. All stand down under a modal.
-- The list is the **Conversation** row (the head's dot), then **In progress** — the palette's
-  Running set in rail order, less the conversation's own sessions — one set,
-  so the rail and ⌘K never disagree — then the open items'
-  ([10 §Open items](10-continuous-session.md#open-items)) live (running,
-  queued) runs no session row stands for, as rows of the same shape:
-  `<name>` + `run` tag + the run state's dot, opening the run's session (the
-  conversation, for one with none yet). What waits on the user is not a row.
-  Nothing else
-  of the open items is in the rail — `/status` is the full list — and the
-  group disappears when empty; the "Sessions" label and Load more go,
-  everything else is ⌘K's. The phone drawer is the same list; picking a row
-  closes it.
-  The chords walk these rows. The chat header (and the phone bar) titles it
-  **Conversation**, never the head's own title. Its route is
-  `#/conversation`, whichever session is the head; a bare or unknown hash and
-  `#/session/<member>` land there too, the address rewritten to it.
-- The open-item rows re-read `GET /api/continuous/open` on `sessions-changed`
-  and `open-items-changed`.
-- One row is lit, the route's: a session row or Conversation only while the
-  chat is on screen, a Console row while its view is.
-- A lead's session (it carries a `phase`) is live while `runLive` (a run targeting
-  it queued or running; grey dot "lead — run queued" when nothing else marks
-  it) or `designOpen` (a design lead no run of which has reported
-  `Design final:`; grey dot "design — waiting for you to finalize").
-  Needs you = unread: a finished lead stays in In progress while its last turn
-  is unread (amber dot) and leaves once viewed, then it is the palette's Recent
-  and `/status`'s. Its `phase` (`design` | `build`) is a trailing tag before the dot, in the
-  rail and the palette.
-- Focus: refreshes retain the focused control; Load more focuses the first
-  added row; an open menu reuses its trigger across refreshes. The mobile
-  drawer removes hidden controls from the tab order, contains focus, restores
-  the toggle on dismissal or breakpoint change; Escape dismisses it before the
-  stop shortcut.
+- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Model, reasoning and context chips open model selection.
+- The ⋯ menu contains Search ⌘K, Session info, Browse files, Model & reasoning…, and Settings. Session info and model actions are disabled before the first reply; Search is shown on Conversation.
+- In progress lists live sessions outside the continuous conversation and live runs not represented by a session row. Rows open in the column; a child session's ‹ returns to Conversation. ⌘⇧P opens the drawer.
+- The drawer is a popover under the status chip at widths of 640px and above, and a bottom sheet below 640px. The sheet uses `menu.ts` focus, inertness and backdrop behavior.
+- Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
 
 ### Search palette (`palette.ts`, ⌘K)
 
-- Empty: Running (streaming, unread or subagents in flight — everything the
-  rail's dot marks), the first seven of the rest as Recent, Actions (New session
-  here; New session in… → the rail's directory menu), Console destinations.
-- Typed: Actions (matching directories, Console entries) and one Sessions
-  list — title/directory/channel matches from the list in hand, then content
-  hits from `GET /api/search?q=` (user messages and replies, never steps;
-  indexed by `agent/listing.ts`; one hit per session; matched line under the
-  name).
-- Whitespace splits the query into terms, both locally and on the server:
-  every term must be there, in any order, within the one row or message.
-  Each term is marked in the snippet.
-- Local rows render on the keystroke; the server is asked after 80ms with the
-  previous request aborted. States: `Searching messages…`, `No sessions match`,
-  `Message search unavailable` (reason on hover).
-- A content hit selects the session, scrolls to the turn stamped with the hit's
-  time and rings it; a turn no longer there just opens the session.
-- Keys: ↑↓ / ⌃N ⌃P / ⌃J ⌃K walk, ↵ opens, Esc or backdrop closes; hover never
-  moves the selection.
+- Empty query: Conversation, Running, Recent and Actions. Actions contains Settings. Running uses the drawer's sessions; Recent contains finished sessions.
+- Typed query: Conversation when matched, Settings actions, named sessions, then content hits from `GET /api/search?q=`. Content hits search user messages and replies, not steps.
+- Whitespace splits the query into terms; every term must match. Local rows render immediately and content search starts after 80ms.
+- A content hit opens the session at the matched turn when it remains in the transcript.
+- Keys: ↑↓ / ⌃N ⌃P / ⌃J ⌃K move; ↵ opens; Esc or backdrop closes.
 
 ### Menus (`menu.ts`, `model-picker.ts`)
 
-- One anchored popover primitive, one open at a time; closed by outside
-  pointerdown, focus leaving, Esc, page scroll (not scroll inside). Below 640px
-  a bottom sheet with title and close button; its backdrop consumes the click.
-- Focus a control on open; arrow / ⌃N ⌃P / ⌃J ⌃K / Home / End (the palette's
-  `listStep`), from wherever the focus sits rather than only from inside the
-  panel; return focus on dismissal. A panel that is not all list marks the part
-  that is (`data-list`, the directory tree's folders) and keeps Home/End for
-  its text field. An open menu owns those keys: ⌘K/⌃K stands down. ⌘N/⌘P are
-  never bound.
-- Session menu: Rename / Close / Session info, New session here / Browse files /
-  Continue in Lark/Slack…, Model & reasoning. On the continuous conversation's
-  sessions Rename, Close, New session here and Continue in… are absent — not a session the user
-  manages. Close takes the row off the rail at once (back if the write fails),
-  leaves an open pane open; a message to the session reopens it. Model loading is immediate; a
-  cancelled load cannot reopen the panel. A disabled row stays visible with
-  its hint and is skipped by the arrow keys. Manual compaction is API-only.
-- Session info: directory/ID (copy buttons), model/context, time groups; a
-  return button when opened from the menu.
-- `model-picker.ts`: grouped by provider, Settings-managed Pinned combinations
-  first, no browser-local favorites. A pin is model + level, created here with
-  the picker's current level; selecting one sets both. Groups collapse except
-  the current model's. Reasoning effort: inline styled radios.
+- One menu primitive allows one open panel at a time. Outside pointerdown, focus leaving, Esc and page scroll close it. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
+- Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
+- The bar menu provides Search, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 
 ### Chat pane (`chat.ts`, `composer.ts`)
 
@@ -364,8 +286,7 @@ browser keeps no second session order.
 
 ### Console views
 
-The Console is Settings, with Files as its overlay; the rail's Console
-section is one row.
+The Console views are overlays: Settings and Files open over their origin, and ✕ or Esc returns to it. Settings is a full-column view whose header carries `#version` and `#theme-toggle`; Files remains a directory tree and viewer. `views.ts` owns the overlay routes.
 
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
   switch, sticky in the topic's scroller; the chats card names the current bot,

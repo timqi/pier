@@ -20,11 +20,11 @@ child, and callbacks are the only delivery.
 | worker | any other run's launched from a session | never |
 
 - The run that made a session fixes its role for the session's life
-  (`createdRole`, `TaskStore.roleOf`); the gate is
-  [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
+  (`createdRole`, `TaskStore.roleOf`); when its session appears in In progress is
+  [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk; when its session shows in the rail is
-  [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).
+  (`LEAD`), never on disk; its session appears in In progress as described in
+  [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes main a callback (§Milestones); main launches a new build lead on that
   doc, its prompt opening `Build per `.
@@ -34,7 +34,7 @@ child, and callbacks are the only delivery.
   result — so it reports and clears the same way (`TaskService.designFinal`,
   on `Router.onTurnEnd`); a failed turn, a run's own turn and a build lead's
   record nothing.
-- A run's `--name` is its session's title; a lead's rail row carries its
+- A run's `--name` is its session's title; a lead's session carries its
   phase (`TaskStore.leads`): `design` when its creating run carries
   `launch.design` (`--design`, set by main only for a product or architecture
   design the user finalizes), `build` for any other lead.
@@ -135,8 +135,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run and listed design that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the `/status` card and the rail's In progress rows
-  (`GET /api/continuous/open`), [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).
+- Surfaces: the `/status` card and the In progress drawer
+  (`GET /api/continuous/open`), [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
 
 ## Chat commands
 
@@ -177,8 +177,9 @@ The tables are `main_chain` and `open_items` in `db.ts`.
 
 ## Web
 
-The routes (`/api/continuous*`), the rail, the pane and its composer are
-[03](03-web-workbench.md)'s. An earlier member is read off disk, never opened.
+The routes (`/api/continuous*`), the In progress drawer, the pane and its
+composer are [03](03-web-workbench.md)'s. An earlier member is read off disk,
+never opened.
 
 - In progress is the palette's Running set less the conversation's sessions;
   needs you = unread: a finished lead stays while unread and leaves once viewed.

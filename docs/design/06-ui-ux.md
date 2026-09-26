@@ -22,7 +22,7 @@ updates this document.
 - **Glass + hairline + shadow**: navigation and floating controls only. One
   token set — canvas one step darker than the panel, neutral translucent
   hairline (light in dark mode), top-edge highlight, two-part shadow (wide
-  ambient + tight contact) — shared by sidebar, chat heading and menus; the
+  ambient + tight contact) — shared by the bar, floating controls and menus; the
   composer and the open drawer take it one step raised.
 - Corner radii coordinate with nesting. Reuse the shared palette, controls,
   menus and time labels; no page-specific styles.
@@ -38,35 +38,11 @@ updates this document.
 
 ## Layout
 
-- **Sidebar (desktop)**: one inset floating panel (8px inset, 20px radius,
-  glass, thin border, soft shadow); flat rows, selection by tint and medium
-  weight; system sans-serif 0.875rem at 1.4, 2rem minimum rows; sentence-case
-  section labels; restrained gaps; one-line titles; sessions in their own
-  scrolling list.
-- **Drawer (phone)**: full height, no exterior margins, rounded outer corners,
-  0.9375rem at 1.5. Closed, inert; open, owns focus, supports Escape, returns
-  focus on dismissal.
-- **Headings**: chat heading (≥ md) and mobile top bar (< md) are the same slim
-  8px-inset rounded glass strip floating over the transcript, which runs the
-  full pane and pads its ends by what covers them. A phone's Console view
-  starts below the bar. A Console page's head (title, tabs, primary action) is
-  that same strip at both widths; on a phone it hides the title and wraps.
-- **Meta chips** (running runs, model, reasoning, context, "starting…"): one
-  element hosted by whichever heading is on screen; gone when a Console view
-  takes over. Below md shown only for a session still opening, a subagent still
-  running or context ≥ 70%; otherwise the title alone, which opens the info
-  panel. The transcript pads by the row when present. Desktop chips open the
-  model picker; ⋯ reaches the same. The running chip is the rail dot's count for
-  the session on screen and scrolls its newest Background Run card into view.
-- **Dock cards** (queue, recovery): the composer's inset at both widths; on a
-  coarse pointer 44px controls grow the header row rather than clipping it.
-- **Rail rows**: title left edges aligned; trailing status marks take space
-  only when present; hidden actions reclaim width. Hover/keyboard focus reveal
-  desktop row actions; touch keeps the current session's visible. Actions
-  reachable by keyboard and touch.
-- **New session / Search row**: New session labeled, primary blue fill; Search
-  a magnifier with muted neutral fill, contrasting icon, accessible name and
-  shortcut hint.
+- **One column**: the conversation fills the width without a permanent rail.
+- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens In progress; model, reasoning and context are metadata chips. ⋯ opens the bar menu.
+- **In progress**: a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
+- **Settings and Files**: overlays that return to their origin with ✕ or Esc. Settings' head contains the version link and theme toggle.
+- **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.
 - **Palette**: solid panel with floating-chrome edge and raised shadow; flat
   rows; keyboard selection a tinted pill, medium weight, no edge bar;
   sentence-case section labels; matches marked by ink and weight. 0.9375rem

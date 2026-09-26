@@ -111,8 +111,8 @@ Both directions share the guards and the binding, in this order:
 Post before row: a row for a thread that does not exist is worse than a root
 with no row. `unbound(limit)` is the picker's list: the backend's listing
 minus `conversations.boundSessions()` and the sessions task runs created for
-themselves (`taskSessions`), in the web rail's order: its working set
-(`SessionStateStore.flags()` rank) first, then newest first.
+themselves (`taskSessions`), ordered by the web's working-set rank and then
+newest first.
 
 - The note is `{title, url}`: `sessionLabel` (`core/identity.ts`) and
   `<publicUrl>/#/session/<id>`, `""` without a public URL, which the root says

@@ -57,7 +57,7 @@ desktop / phone                         viewing a child session
 The rail's In progress list ([03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts))
 as an overlay: a panel anchored under the chip at the right ≥ md (the
 sidebar's material, 20rem, over the transcript, not beside it), a bottom
-sheet below md (the menu primitive's sheet, `menu.ts`). Right because the
+sheet below 640px (the menu primitive's sheet, `menu.ts`). Right because the
 chip is right and the reading column keeps its left edge.
 
 - Rows unchanged: `<name>` · `phase` tag · dot (green live, amber unread,
