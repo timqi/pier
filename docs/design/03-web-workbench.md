@@ -17,7 +17,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/close` | body `{closed}` → keep the session out of `GET /api/sessions` (and out of the working set), or back in; returns `{ok}` and broadcasts `sessions-changed`; 409 on a continuous-conversation member. Nothing is deleted: the by-id route, the URL and search still reach it, and a human message to it clears the flag |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
-| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
 | `GET /api/continuous/open` | `MainChain.openItems()`: `{items: [{problem, stage, runs}], unlisted}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text, 409 with the refusal when `/new` meets a replying head. A rotation re-lists every surface (`sessions-changed`) |
@@ -322,16 +322,22 @@ browser keeps no second session order.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
   IME composition (`isComposing`/229).
-- **Chat commands** ([10 §Chat commands](10-continuous-session.md#chat-commands)):
-  in the continuous conversation a draft that is `/` followed by a prefix of a
-  command lists the matching ones above the input, each word with its line
-  from `CHAT_COMMANDS`; the exact word hides the list and Enter sends it.
-  Anywhere else the list never opens: `/status` is a message there. The
-  textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills the draft
-  with the row's word, a pointer on a row does the same without blurring the
-  textarea, Esc closes the list until the draft changes. Rows are the
-  palette's (`.palette-row`, the `bg-indigo-50` selection), `role=listbox`/
-  `option` with `aria-selected`, 44px on touch.
+- **Completion** ([11 §Completion](11-product-shape.md#completion)): a draft
+  that is `/` followed by a prefix with no whitespace lists, above the input,
+  one flat list — the chain commands (`/status`, `/new`, `/stop`, each line
+  from `CHAT_COMMANDS`) only in the continuous conversation, then
+  `/skill:<name>` for every skill on the snapshot's `skills`, its
+  `description` as the line. A row matches on a prefix of its word or of the
+  skill name alone (`/pier-t` → `/skill:pier-tasks`). The exact word of a chain
+  command hides the list and Enter sends it; a skill word is never exact. A
+  chain row fills `/word`; a skill row fills `/skill:<name> `, whose trailing
+  space closes the list for the ask. No skills and no chain commands, no list.
+  The textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills, a
+  pointer on a row does the same without blurring the textarea, Esc closes the
+  list until the draft changes. Rows are the palette's (`.palette-row`, the
+  `bg-indigo-50` selection), word in mono, line truncated, `role=listbox`/
+  `option` with `aria-selected`, 44px on touch; past eight rows the list
+  scrolls inside itself.
 - **Queue panel**: `queue-state` snapshots with mode chips; **Send now**
   (steer), **Abort & send** (abort, fresh prompt), **Recall all** (append to the
   composer draft). Queued messages join with newlines.

@@ -38,6 +38,7 @@ import {
   restoreDraft,
   saveDraft,
   send,
+  setSkills,
   updateComposer,
 } from "./composer.js";
 import { initPush } from "./notifications.js";
@@ -111,6 +112,7 @@ interface SessionSnapshot {
   queueRecovery: QueueRecovery[];
   queueUncertain: boolean;
   backgroundRuns: BackgroundRun[];
+  skills: { name: string; description: string }[];
 }
 
 declare const __PIER_VERSION__: string; // injected by vite.config.ts
@@ -575,6 +577,7 @@ function resetPane(): void {
   resetChat();
   renderQueue([], [], []);
   renderRecovery([]);
+  setSkills([]);
   resetHeaderState();
   turnOpen = false;
   clearOptimistic();
@@ -614,6 +617,7 @@ async function loadSession(id: string, keep = false): Promise<void> {
   setState(snap.state);
   renderQueue(snap.queue.steering, snap.queue.followUp, snap.queue.parked);
   renderRecovery(snap.queueRecovery, snap.queueUncertain);
+  setSkills(snap.skills);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).
   const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);

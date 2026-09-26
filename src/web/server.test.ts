@@ -840,6 +840,7 @@ describe("workbench server", () => {
     const { app, hub, session } = setup();
     hub.emit("s1", { type: "turn-start" });
     session.setState("streaming");
+    session.skills = () => [{ name: "pier-tasks", description: "Delegate work." }];
     const res = await app.request("/api/sessions/s1/history");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -857,6 +858,7 @@ describe("workbench server", () => {
       queueRecovery: [],
       queueUncertain: false,
       backgroundRuns: [],
+      skills: [{ name: "pier-tasks", description: "Delegate work." }],
     });
     session.setState("idle");
     // ensure() attached the session: its events now reach the hub
@@ -2682,7 +2684,7 @@ describe("the continuous conversation's routes", () => {
     restarted();
     const history = await app.request("/api/sessions/old/history");
     expect(await history.json()).toEqual({
-      turns: [{ role: "user", text: "on disk: old" }, { role: "assistant", text: "ok" }], backgroundRuns: [], readonly: true,
+      turns: [{ role: "user", text: "on disk: old" }, { role: "assistant", text: "ok" }], backgroundRuns: [], skills: [], readonly: true,
     });
     expect((await app.request("/api/sessions/old/turns/1/steps")).status).toBe(200);
     const edit = await post("/api/sessions/old/turns/0/edit", { text: "rewrite" });

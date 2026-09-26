@@ -293,6 +293,10 @@ export class PiSession implements AgentSession {
     return Math.max(window - this.cap, this.instanceReserve);
   }
 
+  skills(): { name: string; description: string }[] {
+    return this.pi.resourceLoader.getSkills().skills.map(({ name, description }) => ({ name, description }));
+  }
+
   async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {
     return {
       steering: [...this.pi.getSteeringMessages()],

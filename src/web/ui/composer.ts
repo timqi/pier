@@ -310,19 +310,37 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
   return markers.every((m): m is string => m !== null) ? markers : null;
 }
 
-// --- chat commands ---------------------------------------------------------------------
-// Offered while the draft is a `/` prefix of one and the continuous conversation
-// is on screen — anywhere else `/status` is a message (core/chain.ts). The
-// exact word hides the list: Enter then sends it.
+// --- chat commands and skills ---------------------------------------------------------
+// One list while the draft is `/` plus a prefix: the chain commands where the
+// continuous conversation is on screen — anywhere else `/status` is a message
+// (core/chain.ts) — then the skills Pi loaded for the open session, which it
+// expands as `/skill:<name>` anywhere. A chain command's exact word hides the
+// list (Enter then sends it); a skill's never does, since it still needs the ask.
 
+interface CommandRow { word: string; line: string; fill: string }
+
+let skills: { name: string; description: string }[] = [];
 let commandRows: HTMLElement[] = [];
 let commandActive = 0;
 let commandDismissed = false; // Esc, until the draft changes
 
-function commandMatches(): ChatCommand[] {
+/** The open session's skills, from its history snapshot. */
+export function setSkills(next: { name: string; description: string }[]): void {
+  skills = next;
+  renderCommandMenu();
+}
+
+function commandMatches(): CommandRow[] {
   const draft = input.value;
-  if (deps.continuous?.() !== true || !draft.startsWith("/") || /\s/.test(draft) || commandDismissed) return [];
-  return (Object.keys(CHAT_COMMANDS) as ChatCommand[]).filter((c) => `/${c}`.startsWith(draft) && `/${c}` !== draft);
+  if (!draft.startsWith("/") || /\s/.test(draft) || commandDismissed) return [];
+  const prefix = draft.slice(1);
+  const chain = deps.continuous?.() === true ? (Object.keys(CHAT_COMMANDS) as ChatCommand[]) : [];
+  if ((chain as string[]).includes(prefix)) return [];
+  return [
+    ...chain.filter((c) => c.startsWith(prefix)).map((c) => ({ word: `/${c}`, line: CHAT_COMMANDS[c], fill: `/${c}` })),
+    ...skills.filter((s) => `skill:${s.name}`.startsWith(prefix) || s.name.startsWith(prefix))
+      .map((s) => ({ word: `/skill:${s.name}`, line: s.description, fill: `/skill:${s.name} ` })),
+  ];
 }
 
 const commandMenuOpen = (): boolean => commandRows.length > 0;
@@ -334,10 +352,12 @@ function setCommandActive(index: number): void {
     el.classList.toggle("bg-indigo-50", i === commandActive); // the palette's selection vocabulary (style.css)
     el.setAttribute("aria-selected", String(i === commandActive));
   }
+  commandRows[commandActive]!.scrollIntoView({ block: "nearest" }); // past eight rows the list scrolls
 }
 
-function pickCommand(command: ChatCommand): void {
-  input.value = `/${command}`; // assignment parks the caret at the end
+/** A skill's fill ends in a space: that closes the list, and the caret waits for the ask. */
+function pickCommand(row: CommandRow): void {
+  input.value = row.fill; // assignment parks the caret at the end
   input.focus();
   autosize();
   saveDraft();
@@ -346,15 +366,15 @@ function pickCommand(command: ChatCommand): void {
 
 function renderCommandMenu(): void {
   const matches = commandMatches();
-  commandRows = matches.map((command) => {
+  commandRows = matches.map((row) => {
     const li = h("li", "palette-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-[14px] leading-5 text-neutral-800",
-      h("span", "font-mono", `/${command}`),
-      h("span", "min-w-0 truncate text-[13px] text-neutral-500", CHAT_COMMANDS[command]));
+      h("span", "font-mono", row.word),
+      h("span", "min-w-0 truncate text-[13px] text-neutral-500", row.line));
     li.setAttribute("role", "option");
     // pointerdown, not click: a click first blurs the textarea, which on a phone drops the keyboard.
     li.onpointerdown = (ev) => {
       ev.preventDefault();
-      pickCommand(command);
+      pickCommand(row);
     };
     return li;
   });
