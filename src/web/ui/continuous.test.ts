@@ -106,7 +106,7 @@ const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
   ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
 const labels = () => list().querySelectorAll("div").map((d) => d.textContent.trim()).filter((t) => ["Open", "Not on the list", "In progress"].includes(t));
 
-it("lists the open items in progress: a worker's live run as a row, an item with no live run as yours, never a lead twice", () => {
+it("lists the open items in progress: a worker's live run as a row, nothing that waits on you, never a lead twice", () => {
   state.chain = [member("h1")];
   sessions = [row("h1"), row("s-lead1abcdef", { role: "lead" })];
   state.items = {
@@ -127,18 +127,34 @@ it("lists the open items in progress: a worker's live run as a row, an item with
     ["s-lead1abcdef", "s-lead1abcdef"],
     ["run:w1", "Review src/authrun"],
     ["run:q1", "Queued onerun"],
-    ["item:model menu", "model menuyou"],
   ]);
   expect(list().textContent).not.toContain("workers");
   expect(list().textContent).not.toContain("Old review");
+  expect(list().textContent).not.toContain("model menu");
   const byId = (id: string) => list().querySelectorAll("[data-session-id]").find((el) => el.dataset.sessionId === id)!;
   expect(byId("run:w1").querySelectorAll("span").map((el) => el.title)).toEqual(["", "run w1 · running", "working…"]);
   byId("run:w1").querySelector("button")!.onclick?.();
   expect(select).toHaveBeenLastCalledWith("s-w1");
   openContinuous.mockClear();
   byId("run:q1").querySelector("button")!.onclick?.();
-  byId("item:model menu").querySelector("button")!.onclick?.();
-  expect(openContinuous).toHaveBeenCalledTimes(2);
+  expect(openContinuous).toHaveBeenCalledOnce();
+});
+
+// A finished lead stays in the rail unless an open item names its run: then it waits in `/status`.
+it("leaves an open item's finished run's session out, unless a live run still targets it", () => {
+  state.chain = [member("h1")];
+  sessions = [row("h1"), row("s-lead2", { role: "lead" }), row("s-lead3", { role: "lead" })];
+  state.items = {
+    items: [
+      { problem: "/new /stop", stage: "waiting on you: merge?", runs: [ledgerRun("lead2", { state: "succeeded", finishedAt: 1 })] },
+      { problem: "rerun", stage: "lead running", runs: [ledgerRun("lead3", { state: "succeeded", finishedAt: 1 }), ledgerRun("lead3b", { targetSessionId: "s-lead3" })] },
+    ],
+    unlisted: [],
+  };
+  sidebar.renderSessions();
+  const rows = list().querySelectorAll("[data-session-id]").map((el) => el.dataset.sessionId);
+  expect(rows).toEqual(["continuous", "s-lead3"]);
+  expect(sidebar.inProgress(sessions, state.chain, state.items).map((s) => s.id)).toEqual(["s-lead3"]);
 });
 
 it("adds no row when nothing is open, and none while the switch is off", () => {

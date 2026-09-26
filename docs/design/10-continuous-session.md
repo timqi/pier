@@ -143,7 +143,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the web card and the rail's In progress rows — a live run with no session row, an item with no live run ([03](03-web-workbench.md),
+- Surfaces: the web card and the rail's In progress rows — only running work: a live run with no session row; an item waiting on the user, and its finished runs' sessions, are `/status`'s alone ([03](03-web-workbench.md),
   `GET /api/continuous/open`).
 
 ## Run ledger
@@ -174,7 +174,7 @@ and never opened (`AgentFactory.readHistory`); no paging within a session; the
 divider between members names the rotation's reason (`DIVIDER`,
 `web/ui/main.ts`). Children show as Background Run rows opening their sessions.
 `/status` in the composer answers with §Open items' text as a card, no model
-call; the rail's In progress shows what of them is live or waiting on you. `/new` and `/stop`, and the
+call; the rail's In progress shows what of them is running or queued. `/new` and `/stop`, and the
 composer's completion of the three, are
 [open items §Chat commands](continuous-open-items.md#chat-commands).
 

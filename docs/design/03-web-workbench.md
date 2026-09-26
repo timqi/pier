@@ -205,12 +205,13 @@ browser keeps no second session order.
   palette. All stand down under a modal.
 - **Continuous session on** (Settings → Instance): the list is the
   **Conversation** row (the head's dot), then **In progress** — the palette's
-  Running set in rail order, less the conversation's own sessions, then the
-  open items ([10 §Open items](10-continuous-session.md#open-items)) as rows
-  of the same shape: a live (running, queued) run no session row stands for,
+  Running set in rail order, less the conversation's own sessions and the
+  sessions of an open item's finished runs, then the open items'
+  ([10 §Open items](10-continuous-session.md#open-items)) live (running,
+  queued) runs no session row stands for, as rows of the same shape:
   `<name>` + `run` tag + the run state's dot, opening the run's session (the
-  conversation, for one with none yet); then an item with no live run,
-  `<problem>` + `you` tag + amber dot, opening the conversation. Nothing else
+  conversation, for one with none yet). What waits on the user is not a row.
+  Nothing else
   of the open items is in the rail — `/status` is the full list — and the
   group disappears when empty; the "Sessions" label and Load more go,
   everything else is ⌘K's. The phone drawer is the same list; picking a row

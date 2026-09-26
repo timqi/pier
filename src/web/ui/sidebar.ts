@@ -223,11 +223,18 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 const renderKey = (): string =>
   `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
+const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
+
 /** Switch on, the rail below the conversation: the palette's Running set in
- *  rail order, less the conversation's own sessions, which its row stands for. */
-export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
+ *  rail order, less the conversation's own sessions, which its row stands for,
+ *  and the sessions of an open item's finished runs, which wait on the user in
+ *  `/status`. */
+export function inProgress(list: SessionInfo[], chain: ChainMember[], open: OpenItems | null = null): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
-  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id)));
+  const runs = open?.items.flatMap((i) => i.runs) ?? [];
+  const running = new Set(runs.filter(live).map((r) => r.targetSessionId));
+  const folded = new Set(runs.filter((r) => !live(r) && !running.has(r.targetSessionId)).map((r) => r.targetSessionId));
+  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id) && !folded.has(s.id)));
   return [...top, ...rest];
 }
 
@@ -248,15 +255,13 @@ function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: Sessi
   entry.dataset.sessionId = "continuous";
   entry.title = "The continuous conversation — one per instance";
   entry.append(button);
-  return { entry, live: inProgress(deps.sessions(), chain) };
+  return { entry, live: inProgress(deps.sessions(), chain, deps.open()) };
 }
 
 // --- open items in progress (docs/design/10-continuous-session.md) ------------------
 
-const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
-
-/** A row shaped like a session's, for a thing that has no session row: the
- *  problem, a tag, the dot, one target. */
+/** A row shaped like a session's, for a run that has no session row: the
+ *  name, a tag, the dot, one target. */
 function plainRow(label: string, tag: HTMLElement[], dot: HTMLElement[], id: string, title: string, open: () => void): HTMLElement {
   const li = h("li", "flex items-center gap-1 hover:bg-neutral-100");
   const button = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
@@ -275,23 +280,18 @@ const tag = (text: string, title: string): HTMLElement[] => {
   return [el];
 };
 
-/** The open items as In progress rows, after the session rows: a live run
- *  no session row stands for (a worker's), and an item with no live run — it
- *  waits on the user, and opens the conversation. `/status` keeps the rest. */
+/** The open items' live runs no session row stands for (a worker's), as In
+ *  progress rows after the session rows; what waits on the user is `/status`'s. */
 function openRows(listed: Set<string>): HTMLElement[] {
   const open = deps.open();
   if (!open) return [];
-  const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted]
-    .filter((r) => live(r) && !(r.targetSessionId && listed.has(r.targetSessionId)));
-  const rows = runs.map((r) => {
-    const target = r.targetSessionId;
-    return plainRow(r.name, tag("run", `run ${r.runId} · ${r.state}`), runDot(r), `run:${r.runId}`, `run ${r.runId} · ${r.state}${r.cwd ? `\n${r.cwd}` : ""}`,
-      () => (target ? deps.select(target) : deps.openContinuous()));
-  });
-  const yours = open.items.filter((i) => !i.runs.some(live)).map((i) =>
-    plainRow(i.problem, tag("you", "waiting on you — open the conversation"), markDot(["bg-amber-500", "waiting on you"]), `item:${i.problem}`,
-      `${i.problem}${i.stage ? ` — ${i.stage}` : ""}`, deps.openContinuous));
-  return [...rows, ...yours];
+  return [...open.items.flatMap((i) => i.runs), ...open.unlisted]
+    .filter((r) => live(r) && !(r.targetSessionId && listed.has(r.targetSessionId)))
+    .map((r) => {
+      const target = r.targetSessionId;
+      return plainRow(r.name, tag("run", `run ${r.runId} · ${r.state}`), runDot(r), `run:${r.runId}`, `run ${r.runId} · ${r.state}${r.cwd ? `\n${r.cwd}` : ""}`,
+        () => (target ? deps.select(target) : deps.openContinuous()));
+    });
 }
 
 let drawn = "";
@@ -383,7 +383,7 @@ export function initSidebar(d: SidebarDeps): void {
       return;
     }
     // Switch on, the rail's rows are the conversation and what is in progress.
-    const ids = ["continuous", ...inProgress(deps.sessions(), chain).map((s) => s.id)];
+    const ids = ["continuous", ...inProgress(deps.sessions(), chain, deps.open()).map((s) => s.id)];
     const at = deps.continuousOpen() ? 0 : ids.indexOf(deps.currentId() ?? "");
     const next = ids[(Math.max(at, 0) + by + ids.length) % ids.length];
     if (next === "continuous") deps.openContinuous();
