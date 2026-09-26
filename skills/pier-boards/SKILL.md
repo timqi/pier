@@ -15,11 +15,11 @@ Before editing, read the board's README if present; change sources and rebuild.
 Create `<boards folder>/<slug>/board.json` and `site/index.html`:
 
 ```json
-{"title":"Weekly digest","description":"What changed and needs a decision","sessions":["<session id>"],"public":false}
+{"title":"Weekly digest","description":"What changed and needs a decision","public":false}
 ```
 
 Slug: `[a-z0-9][a-z0-9-]{0,63}`, meaningful without random suffixes. Description
-is Console list text; append your session id, preserving existing provenance.
+is one line on what the board is for.
 
 `public: true` removes the password. Set it only when this request asks for a
 public/shareable board; otherwise keep it private. Never publish personal data
@@ -34,7 +34,17 @@ Return one bare URL using the configured instance address:
 Never return both URLs, link labels or filesystem paths. Without a configured
 address, return the path and point to Console → Settings; never guess a host.
 For publish-only requests, set visibility/token and return the URL; skip layout
-checks and narration. Console → Boards can also publish.
+checks and narration.
+
+## Answering the user
+
+- List: read every `<boards folder>/*/board.json` (skip names with
+  `.deleted-`); public boards first with `/p/<slug>-<token>/`, then private
+  with `/boards/<slug>/`; one row each, title and how long ago `site/` changed.
+- Publish or unpublish: set `public` in `board.json` by the token rule above,
+  keep every other field, and answer with the resulting URL.
+- When publishing, say: "anyone with the link can read it".
+- Delete: rename the directory to `<slug>.deleted-<unix ms>`; never remove it.
 
 ## Page
 
@@ -53,7 +63,7 @@ viewport metadata, a descriptive title and:
 - Put decisions and evidence first; fold supplementary detail with `<details>`.
   End with data date, checkable sources and refresh instructions, not a recap.
 - No secrets, credentials, internal hostnames or private paths, even in folds:
-  private boards can become public with one toggle.
+  private boards can become public with one edit.
 - Assets belong under `site/`, using relative URLs except the shared stylesheet.
   Illustrate freely with inline SVG or images you draw, render or save into
   `site/`: CSP allows `img-src 'self' data:`. No CDN, external fonts, analytics

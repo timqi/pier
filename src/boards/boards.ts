@@ -1,11 +1,11 @@
-// Boards: static pages an agent writes, derived by scanning $PIER_HOME/boards,
-// never registered (docs/design/05-boards.md). Only <board>/site is reachable
+// Boards: static pages an agent writes under $PIER_HOME/boards, never
+// registered (docs/design/05-boards.md). Only <board>/site is reachable
 // over HTTP, so a public board leaks nothing about how it was made. Bytes are
 // served on two password-free prefixes, `/p/*` (published) and `/b/*` (a
 // signed prefix the boundary mints), stylesheet included, and run sandboxed.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
 import { logger } from "../log.js";
@@ -14,7 +14,7 @@ import { pierPath } from "../paths.js";
 export const defaultBoardsDir = (): string => pierPath("boards");
 
 /** Deleted boards keep their bytes under `<slug>.deleted-<ts>`, which this
- *  pattern excludes from every scan — one rename is the whole delete path. */
+ *  pattern refuses on every route — one rename is the whole delete path. */
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Without the 32 bits after the slug, `/p/` could be walked with a dictionary.
@@ -25,14 +25,8 @@ const mintToken = (): string => randomBytes(4).toString("hex");
 export interface BoardManifest {
   title: string;
   description: string;
-  sessions: string[];
   public: boolean;
   token: string;
-}
-
-export interface BoardSummary extends BoardManifest {
-  slug: string;
-  updatedAt: string;
 }
 
 // A board ships fonts and images, so the list is wider than the attachment
@@ -79,17 +73,29 @@ export const rotateBoardViews = (): void => {
   viewKey = randomBytes(32);
 };
 
-const sign = (slug: string, expires: number): string =>
-  createHmac("sha256", viewKey).update(`${slug}\0${String(expires)}`).digest("base64url").slice(0, 22);
+const sign = (board: string, expires: number, key = viewKey): string =>
+  createHmac("sha256", key).update(`${board}\0${String(expires)}`).digest("base64url").slice(0, 22);
 
 /** `<expiry in base36>-<signature>`: its own path segment, so the first hyphen
  *  is the cut and a hyphenated slug stays unambiguous. */
-const mintView = (slug: string): string => {
+const mintView = (board: string, key: typeof viewKey): string => {
   const expires = Date.now() + VIEW_TTL_MS;
-  return `${expires.toString(36)}-${sign(slug, expires)}`;
+  return `${expires.toString(36)}-${sign(board, expires, key)}`;
 };
 
-function validView(slug: string, view: string): boolean {
+/** What a prefix is signed for: the slug and its directory, because a delete
+ *  renames the board away and frees the slug, and a prefix must not open the
+ *  successor. Null when there is no such directory. */
+async function boardOf(dir: string, slug: string): Promise<string | null> {
+  try {
+    return `${slug}\0${String((await stat(join(dir, slug))).ino)}`;
+  } catch (err) {
+    if ((err as { code?: string }).code !== "ENOENT") logger("boards").warn(`cannot stat board ${slug}`, err);
+    return null;
+  }
+}
+
+function validView(board: string, view: string): boolean {
   const cut = view.indexOf("-");
   if (cut < 1) return false;
   const stamp = view.slice(0, cut);
@@ -98,10 +104,10 @@ function validView(slug: string, view: string): boolean {
   // make one signature valid under several spellings of its own prefix.
   if (!Number.isSafeInteger(expires) || expires.toString(36) !== stamp) return false;
   if (expires <= Date.now()) return false;
-  return sameToken(sign(slug, expires), view.slice(cut + 1));
+  return sameToken(sign(board, expires), view.slice(cut + 1));
 }
 
-/** Malformed boards are reported once, not on every scan. */
+/** Malformed boards are reported once, not on every request. */
 const warned = new Set<string>();
 
 /** The one place a slug becomes a path, so it is validated here (`../../etc`,
@@ -130,7 +136,6 @@ async function readManifest(
     ...m,
     title: typeof m.title === "string" && m.title ? m.title : slug,
     description: typeof m.description === "string" ? m.description : "",
-    sessions: Array.isArray(m.sessions) ? m.sessions.filter((s): s is string => typeof s === "string") : [],
     public: m.public === true,
     token: typeof m.token === "string" && TOKEN.test(m.token) ? m.token : "",
   };
@@ -150,41 +155,6 @@ async function readManifest(
 
 const writeManifest = (dir: string, slug: string, manifest: BoardManifest & Record<string, unknown>) =>
   writeFile(join(dir, slug, "board.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-
-/** Freshness is the site's mtime, not a manifest field — the filesystem
- *  already knows, and an agent rewriting a page cannot forget to say so. */
-async function updatedAt(dir: string, slug: string): Promise<string> {
-  const info =
-    (await stat(join(dir, slug, "site")).catch(() => null)) ??
-    (await stat(join(dir, slug)).catch(() => null));
-  return (info?.mtime ?? new Date()).toISOString();
-}
-
-export async function listBoards(dir: string): Promise<BoardSummary[]> {
-  let entries: string[];
-  try {
-    entries = (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.isDirectory() && SLUG.test(e.name))
-      .map((e) => e.name);
-  } catch (err) {
-    // No directory is no boards yet; anything else hides every board at once.
-    if ((err as { code?: string }).code !== "ENOENT") logger("boards").warn(`cannot scan ${dir}`, err);
-    return [];
-  }
-  // One board's manifest says nothing about the next one's, so the scan waits
-  // once for all of them rather than once per board.
-  const boards = await Promise.all(entries.map(async (slug): Promise<BoardSummary | null> => {
-    const manifest = await readManifest(dir, slug);
-    if (!manifest) return null;
-    const { title, description, sessions, public: isPublic, token } = manifest;
-    return { slug, title, description, sessions, public: isPublic, token, updatedAt: await updatedAt(dir, slug) };
-  }));
-  // Freshest first: the board someone just wrote is the one they came to see.
-  // Slug breaks ties so equal mtimes still list in a stable order.
-  return boards
-    .filter((board): board is BoardSummary => board !== null)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.slug.localeCompare(b.slug));
-}
 
 /** Containment, not normalization: the resolved realpath must sit inside the
  *  board's own site dir or nothing is served. */
@@ -252,34 +222,6 @@ async function serveFile(c: Context, dir: string, slug: string, rest: string) {
 }
 
 export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir()): void {
-  app.get("/api/boards", async (c) => c.json(await listBoards(dir)));
-
-  // Publishing is the one decision a human owns; every other field belongs to
-  // the agent that wrote the board.
-  app.patch("/api/boards/:slug", async (c) => {
-    const slug = c.req.param("slug");
-    const body = (await c.req.json().catch(() => null)) as { public?: unknown } | null;
-    if (typeof body?.public !== "boolean") return c.json({ error: "public must be a boolean" }, 400);
-    const manifest = await readManifest(dir, slug);
-    if (!manifest) return c.json({ error: "no such board" }, 404);
-    manifest.public = body.public;
-    // Publishing an unpublished board is the case readManifest cannot mint for:
-    // it read the manifest while it was still private.
-    if (manifest.public && !manifest.token) manifest.token = mintToken();
-    await writeManifest(dir, slug, manifest);
-    return c.json({ public: manifest.public, token: manifest.token });
-  });
-
-  app.delete("/api/boards/:slug", async (c) => {
-    const slug = c.req.param("slug");
-    if (!(await readManifest(dir, slug))) return c.json({ error: "no such board" }, 404);
-    await rename(join(dir, slug), join(dir, `${slug}.deleted-${Date.now()}`));
-    // A capability names a slug, and a slug can be taken again: the prefixes
-    // handed out for the board that just died must not open its successor.
-    rotateBoardViews();
-    return c.json({ deleted: slug });
-  });
-
   // Declared before the wildcards below: `_assets` is not a slug.
   app.get("/p/_assets/pier.css", async (c) => {
     const file = new URL("./pier.css", import.meta.url);
@@ -307,10 +249,12 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
   // needs no cookie and can be sandboxed into an opaque origin.
   const mint = async (c: Context) => {
     const slug = c.req.param("slug") ?? "";
-    // Signed before the read: a sign-out landing during it would otherwise
-    // hand this request a capability made with the key that replaced the
-    // revoked one.
-    const view = SLUG.test(slug) ? mintView(slug) : "";
+    // The key as this request found it: a sign-out landing during the reads
+    // would otherwise hand it a capability made with the key that replaced
+    // the revoked one.
+    const key = viewKey;
+    const board = SLUG.test(slug) ? await boardOf(dir, slug) : null;
+    const view = board ? mintView(board, key) : "";
     // A board that is gone says so here, rather than after a redirect.
     if (!view || !(await readManifest(dir, slug))) return c.notFound();
     const rest = c.req.path.slice(`/boards/${slug}`.length).replace(/^\//, "");
@@ -325,10 +269,12 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
     const view = c.req.param("view");
     const rest = c.req.path.slice(`/b/${slug}/${view}/`.length);
     if (!SLUG.test(slug)) return c.notFound();
-    // Expired, forged, or signed with a key that has since rotated: send it
-    // back through the boundary, which re-mints for a live session in one hop
-    // and asks a stranger for the password. Existence stays unsaid either way.
-    if (!validView(slug, view)) {
+    // Expired, forged, signed with a key that has since rotated, or for a
+    // board since renamed away: send it back through the boundary, which
+    // re-mints for a live session in one hop and asks a stranger for the
+    // password. Existence stays unsaid either way.
+    const board = await boardOf(dir, slug);
+    if (!board || !validView(board, view)) {
       return c.redirect(`/boards/${slug}/${rest}${new URL(c.req.url).search}`);
     }
     if (!(await readManifest(dir, slug))) return c.notFound();

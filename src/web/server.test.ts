@@ -31,7 +31,6 @@ import type {
   QueueRecovery,
 } from "../core/types.js";
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
-import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import type { TaskDefinition, TaskRun } from "../tasks/types.js";
@@ -252,9 +251,7 @@ function setup(
     ? { apply: update.updater.apply, problem: update.updater.problem ?? (() => null) }
     : null;
   const tasks = new TaskService(new TaskStore(db), factory, router, hub);
-  // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
-  registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
   // Stands in for channels/conversations.ts: session id → the IM channel that owns it.
   const imOwners = new Map<string, string>();
@@ -404,7 +401,7 @@ describe("workbench server", () => {
   // A run's own session is the agent talking to itself: not the operator's
   // conversation, so not a row. A run that *borrowed* a session (reuse) made
   // nothing, and the session it ran in stays the operator's. Still readable by
-  // id — Runs and Activity link there — which is /history's business.
+  // id — a run card's session chip links there — which is /history's business.
   it("leaves the sessions task runs created out of the list", async () => {
     const { app, db, factory, tasks } = setup();
     vi.mocked(factory.list).mockResolvedValue([
@@ -1933,34 +1930,6 @@ describe("workbench server", () => {
     await reader.cancel();
     expect(chunk).toContain('"seq":2');
     expect(chunk).not.toContain('"seq":1,');
-  });
-
-  it("reports recent session dependencies from task provenance", async () => {
-    const { app, tasks } = setup();
-    const task = await tasks.create({
-      name: "delegate",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "work" },
-    });
-    const run = tasks.run(task.id, null, "agent", null, {
-      invokedBySessionId: "source-session",
-      background: true,
-      callbackSessionId: null,
-    });
-    await tasks.waitForRun(run.id);
-    const res = await app.request("/api/activity?scope=recent");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
-      sessions: expect.arrayContaining([
-        expect.objectContaining({ id: "s1", createdAt: 1 }),
-        expect.objectContaining({ id: "source-session", createdAt: null }),
-      ]),
-      runs: [expect.objectContaining({
-        id: run.id,
-        invokedBySessionId: "source-session",
-        targetSessionId: "s1",
-      })],
-    });
   });
 
   it("lists available models for a session", async () => {

@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
@@ -14,7 +13,6 @@ import type {
 import { runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
-import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
 import type { GroupSummary, RunSummary } from "./operations.js";
 import { TaskStore } from "./store.js";
@@ -41,9 +39,10 @@ function setup(session = fakeSession(), instance?: ConstructorParameters<typeof 
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
-  const store = new TaskStore(openDb(":memory:"));
+  const db = openDb(":memory:");
+  const store = new TaskStore(db);
   const service = new TaskService(store, factory, router, hub, instance);
-  return { cwd, session, factory, hub, router, store, service };
+  return { cwd, session, factory, hub, router, db, store, service };
 }
 
 /** The caller asks twice: its child's session must not be its own, or the
@@ -86,85 +85,6 @@ const bashDraft = (cwd: string, script: string) => ({
   trigger: { type: "manual" },
   action: { type: "bash", cwd, script },
   timeoutSeconds: 5,
-});
-
-describe("global run queries", () => {
-  it("filters before limiting and keyset-pages timestamp ties without hiding child failures", async () => {
-    const { cwd, service, store } = setup();
-    const task = await service.create(bashDraft(cwd, "true"));
-    for (let i = 0; i < 620; i++) store.saveRun(storedRun(`noise-${i}`, task, 1000 + i));
-    for (const id of ["a", "b", "c"]) store.saveRun(storedRun(id, task, 10, {
-      state: "failed", triggerSource: "watch", parentRunId: "parent", groupId: "group",
-    }));
-    const query = { state: "failed" as const, source: "watch" as const, taskId: task.id, since: 10, until: 10, limit: 2 };
-    const first = service.queryRuns(query);
-    expect(first.runs.map((r) => r.id)).toEqual(["c", "b"]);
-    expect(first.nextCursor).toEqual({ queuedAt: 10, id: "b" });
-    store.saveRun(storedRun("newer", task, 20, { state: "failed", triggerSource: "watch" }));
-    const second = service.queryRuns({ ...query, cursor: first.nextCursor! });
-    expect(second.runs.map((r) => r.id)).toEqual(["a"]);
-    expect(second.nextCursor).toBeNull();
-    // Children are rows like any other: a failed child is never folded away.
-    expect(service.queryRuns({ state: "failed" }).runs.map((r) => r.parentRunId)).toContain("parent");
-    expect(service.queryRuns({ taskId: "' OR 1=1 --" }).runs).toHaveLength(0);
-  });
-
-  it("hides only successful unmatched probes without returning a hidden count", async () => {
-    const { cwd, service, store } = setup();
-    const task = await service.create(bashDraft(cwd, "true"));
-    store.saveRun(storedRun("no-match", task, 5, { matched: false, result: { type: "watch", matched: false }, triggerSource: "watch" }));
-    store.saveRun(storedRun("failed-probe", task, 4, { state: "failed", matched: false, triggerSource: "watch" }));
-    store.saveRun(storedRun("skipped", task, 3, { state: "skipped", matched: false, triggerSource: "watch" }));
-    store.saveRun(storedRun("action", task, 2, { matched: true }));
-    store.saveRun(storedRun("ordinary", task, 1));
-    const page = service.queryRuns({ limit: 1 });
-    expect(page.runs.map((r) => r.id)).toEqual(["failed-probe"]);
-    expect(Object.keys(page).sort()).toEqual(["nextCursor", "runs"]);
-    expect(service.queryRuns({ cursor: page.nextCursor! }).runs.map((r) => r.id)).toEqual(["skipped", "action", "ordinary"]);
-    expect(service.queryRuns().runs.map((r) => r.id)).toEqual(["failed-probe", "skipped", "action", "ordinary"]);
-    expect(service.queryRuns({ showUnmatched: true }).runs).toHaveLength(5);
-    expect(service.queryRuns({ source: "agent" }).runs.map((r) => r.id)).toEqual(["action", "ordinary"]);
-    expect(service.queryRuns({ state: "failed" }).runs).toHaveLength(1);
-  });
-
-  it("joins the group's callback state beside a member", async () => {
-    const { cwd, service, store } = setup();
-    const task = await service.create(bashDraft(cwd, "true"));
-    store.saveRun(storedRun("run", task, 1, { callbackState: "failed", callbackError: "unreachable" }));
-    store.saveRun(storedRun("other", task, 2, { callbackState: "abandoned" }));
-    store.saveRun(storedRun("member", task, 3, { groupId: "group" }));
-    store.saveGroup({ id: "group", join: "all", invokedBySessionId: "supervisor", callbackSessionId: "supervisor",
-      memberRunIds: ["member"], winnerRunId: null, createdAt: 1, finishedAt: 2,
-      callbackState: "failed", callbackAttempts: 1, callbackError: "unreachable", callbackNextAttemptAt: 3 });
-    const page = service.queryRuns();
-    expect(page.runs.find((r) => r.id === "run")).toMatchObject({ callbackState: "failed", groupCallbackState: null });
-    expect(page.runs.find((r) => r.id === "other")!.groupCallbackState).toBeNull();
-    expect(page.runs.find((r) => r.id === "member")!.groupCallbackState).toBe("failed");
-    expect(service.getRunView("member").groupCallbackState).toBe("failed");
-    const app = new Hono(); registerTaskRoutes(app, service);
-    const detail = await (await app.request("/api/task-runs/member")).json();
-    expect(detail.groupCallbackState).toBe("failed");
-  });
-
-  it("validates HTTP filters and leaves the Activity snapshot as it was", async () => {
-    const { cwd, service, store, factory, router } = setup();
-    const task = await service.create(bashDraft(cwd, "true"));
-    store.saveRun(storedRun("active", task, 1, { state: "running" }));
-    store.saveRun(storedRun("old", task, 2));
-    store.saveRun(storedRun("new", task, Date.now()));
-    const app = new Hono(); registerTaskRoutes(app, service, { factory, router });
-    for (const query of ["state=unknown", "source=console", "limit=NaN", "limit=0", "limit=201", "since=x", "since=9&until=1", "cursor={}", "cursor=garbage", "showUnmatched=yes"]) {
-      expect((await app.request(`/api/task-runs?${query}`)).status, query).toBe(400);
-    }
-    const activity = await (await app.request("/api/activity")).json();
-    expect(activity.runs.map((r: TaskRun) => r.id)).toEqual(["active"]);
-    const recent = await (await app.request("/api/activity?scope=recent")).json();
-    expect(recent.runs.map((r: TaskRun) => r.id)).toEqual(["new", "active"]);
-    const list = await (await app.request("/api/task-runs?state=running&limit=1")).json();
-    expect(list.runs[0].id).toBe("active");
-    expect(list.runs[0].triggerSource).toBe("agent");
-    expect(Object.keys(list).sort()).toEqual(["nextCursor", "runs"]);
-  });
 });
 
 describe("newId", () => {
@@ -631,7 +551,7 @@ describe("task service", () => {
   });
 
   it("hands off a control message without awaiting the recipient, then sweeps a failed one", async () => {
-    const { cwd, service, factory } = setup();
+    const { cwd, service, factory, store } = setup();
     const child = fakeSession("steer-child", { hold: true });
     const hangingInput = child.systemInput;
     child.systemInput = async (text, origin, mode) => {
@@ -655,7 +575,7 @@ describe("task service", () => {
     // hand-off, not a delivery: `delivered` needs the recipient's transcript to
     // show it, and this injection is rejected before anything is recorded.
     expect(await service.control(run.id, "owner", "steer", "Change direction")).toMatchObject({ state: "pending" });
-    await vi.waitFor(() => expect(service.listMessages(run.id)[0]).toMatchObject({
+    await vi.waitFor(() => expect(store.listMessages(run.id)[0]).toMatchObject({
       state: "failed",
       error: expect.stringContaining("session gone"),
     }));
@@ -664,7 +584,7 @@ describe("task service", () => {
     service.cancel(run.id);
     await service.waitForRun(run.id);
     service.start(20);
-    await vi.waitFor(() => expect(service.listMessages(run.id)[0]).toMatchObject({
+    await vi.waitFor(() => expect(store.listMessages(run.id)[0]).toMatchObject({
       state: "expired",
       error: expect.stringContaining("run finished"),
     }));
@@ -1320,7 +1240,7 @@ describe("task service", () => {
   });
 
   it("persists steering and resumes a completed Agent run in the same session", async () => {
-    const { service, session } = setup();
+    const { service, session, store } = setup();
     const advance = skewClock();
     service.start(20);
     onTestFinished(() => service.stop());
@@ -1338,10 +1258,10 @@ describe("task service", () => {
       mode: "steer",
     })));
     // Delivered once the recipient's own transcript carries it, not before.
-    expect(service.listMessages(queued.id)[0]?.state).toBe("pending");
+    expect(store.listMessages(queued.id)[0]?.state).toBe("pending");
     session.deliverSteering();
     advance(retryDelay(1) + 100);
-    await vi.waitFor(() => expect(service.listMessages(queued.id)[0]?.state).toBe("delivered"));
+    await vi.waitFor(() => expect(store.listMessages(queued.id)[0]?.state).toBe("delivered"));
     session.setState("idle");
     const done = await service.waitForRun(queued.id);
     const resumed = await service.waitForRun(service.resume(done.id, "Check one more edge case").id);
@@ -1355,7 +1275,7 @@ describe("task service", () => {
   });
 
   it("runs inline subagent drafts atomically and filters them from lists", async () => {
-    const { cwd, service } = callerAndChild();
+    const { cwd, service, store } = callerAndChild();
     const queued = await service.handle({
       operation: "run",
       task: {
@@ -1372,7 +1292,7 @@ describe("task service", () => {
     // Definition is persisted (auditable, taskId resolves) but kind-tagged.
     const task = service.get(run.taskId);
     expect(task).toMatchObject({ kind: "subagent", trigger: { type: "manual" }, createdBySessionId: "s1" });
-    expect(service.listRuns(task.id).map((row) => row.id)).toContain(run.runId);
+    expect(store.listRuns(task.id).map((row) => row.id)).toContain(run.runId);
 
     // Hidden from the agent-facing list; visible in the unfiltered service list.
     expect(await service.handle({ operation: "list" }, "s1")).toEqual([]);
@@ -1572,14 +1492,14 @@ describe("task service", () => {
   });
 
   it("runs paused tasks on demand and lists a task's run history", async () => {
-    const { cwd, service } = setup();
+    const { cwd, service, store } = setup();
     const task = await service.create(bashDraft(cwd, "echo paused"));
     // enabled:false pauses scheduling only — manual and agent triggers still fire.
-    service.setEnabled(task.id, false);
+    await service.update(task.id, { ...bashDraft(cwd, "echo paused"), enabled: false });
     const run = await service.waitForRun(service.run(task.id).id);
     expect(run.state).toBe("succeeded");
 
-    const history = service.listRuns(task.id);
+    const history = store.listRuns(task.id);
     expect(history.map((row) => row.id)).toEqual([run.id]);
     expect(history[0]).toMatchObject({ state: "succeeded", triggerSource: "manual" });
 
@@ -1608,7 +1528,7 @@ describe("task service", () => {
   });
 
   it("observes cancellation reentered from a child's queued event", async () => {
-    const { cwd, service, hub } = setup();
+    const { cwd, service, hub, store } = setup();
     const childTask = await service.create(bashDraft(cwd, "sleep 1"));
     const parentTask = await service.create({ name: "parent", action: { type: "task", taskId: childTask.id } });
     const unsubscribe = hub.subscribeWorkspace((event) => {
@@ -1619,7 +1539,7 @@ describe("task service", () => {
     onTestFinished(() => { unsubscribe(); service.stop(); });
     const parent = service.run(parentTask.id);
     expect(await service.waitForRun(parent.id)).toMatchObject({ state: "cancelled" });
-    const child = service.listRuns(childTask.id)[0]!;
+    const child = store.listRuns(childTask.id)[0]!;
     expect(await service.waitForRun(child.id)).toMatchObject({ state: "cancelled" });
   });
 
@@ -1766,7 +1686,7 @@ describe("task service", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-01-01T00:00:59.000Z"));
-      const { service, session } = setup();
+      const { service, session, store } = setup();
       const task = await service.create({
         name: "cron agent",
         trigger: { type: "cron", expression: "* * * * *", timezone: "UTC" },
@@ -1776,7 +1696,7 @@ describe("task service", () => {
       expect(service.get(task.id).nextRunAt).toBe(Date.parse("2026-01-01T00:01:00.000Z"));
       await vi.advanceTimersByTimeAsync(1000);
       await Promise.resolve();
-      const runs = service.listRuns(task.id);
+      const runs = store.listRuns(task.id);
       expect(runs).toHaveLength(1);
       expect(runs[0]).toMatchObject({ triggerSource: "cron", state: "succeeded" });
       service.stop();
@@ -1806,8 +1726,8 @@ describe("task service", () => {
       service.start(1000);
       await vi.advanceTimersByTimeAsync(1000);
       await Promise.resolve();
-      expect(service.listRuns(healthy.id)).toHaveLength(1);
-      expect(service.listRuns(broken.id)).toEqual([]);
+      expect(store.listRuns(healthy.id)).toHaveLength(1);
+      expect(store.listRuns(broken.id)).toEqual([]);
       // The failed insert rolled its advance back, so the occurrence is retried.
       expect(service.get(broken.id).nextRunAt).toBe(due);
       expect(service.get(healthy.id).nextRunAt).toBe(due + 60_000);
@@ -1820,32 +1740,8 @@ describe("task service", () => {
 });
 
 describe("task admission and delivery regressions", () => {
-  it("keeps all live Activity runs when newer history exceeds the page limit", async () => {
-    const { cwd, service, store, factory, router } = setup();
-    const task = await service.create(bashDraft(cwd, "true"));
-    const now = Date.now();
-    for (let i = 0; i < 240; i++) store.saveRun(storedRun(`live-${i}`, task, now - 2 * 86_400_000 + i, {
-      state: i % 2 ? "queued" : "running", finishedAt: null, result: null,
-      invokedBySessionId: "supervisor", targetSessionId: "worker",
-    }));
-    for (let i = 0; i < 210; i++) store.saveRun(storedRun(`done-${i}`, task, now - 2000 + i));
-    for (let i = 0; i < 260; i++) store.saveRun(storedRun(`probe-${i}`, task, now - 1000 + i, { matched: false }));
-    const app = new Hono(); registerTaskRoutes(app, service, { factory, router });
-    const active = await (await app.request("/api/activity")).json();
-    expect(active.runs).toHaveLength(240);
-    expect(new Set(active.sessions.map((s: { id: string }) => s.id))).toEqual(new Set(["supervisor", "worker"]));
-    const recent = await (await app.request("/api/activity?scope=recent")).json();
-    expect(recent.runs).toHaveLength(440);
-    const ids = new Set(recent.runs.map((run: TaskRun) => run.id));
-    expect(ids.size).toBe(440);
-    for (let i = 0; i < 240; i++) expect(ids.has(`live-${i}`)).toBe(true);
-    expect(ids.has("done-209")).toBe(true);
-    expect(ids.has("done-0")).toBe(false);
-    expect(recent.runs.some((run: TaskRun) => run.matched === false)).toBe(false);
-  });
-
   it.each(["all", "first"] as const)("rejects an entire %s group before creating sessions or starting scripts", async (joinMode) => {
-    const { cwd, service, store, factory, hub, session } = setup();
+    const { cwd, db, service, store, factory, hub, session } = setup();
     onTestFinished(() => { service.stop(); rmSync(cwd, { recursive: true, force: true }); });
     const good = await service.create(bashDraft(cwd, "echo ran > marker"));
     const archived = await service.create(bashDraft(cwd, "true"));
@@ -1861,7 +1757,7 @@ describe("task admission and delivery regressions", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(factory.create).not.toHaveBeenCalled();
     expect(existsSync(join(cwd, "marker"))).toBe(false);
-    expect(store.queryRuns({ showUnmatched: true }).runs).toEqual([]);
+    expect(db.prepare("SELECT 1 FROM task_runs").all()).toEqual([]);
     expect(store.listOpenGroups()).toEqual([]);
     expect(saves).not.toHaveBeenCalled();
     expect(changed).toEqual([]);
@@ -1871,7 +1767,7 @@ describe("task admission and delivery regressions", () => {
   });
 
   it("does not execute a group when persisting a later member fails", async () => {
-    const { cwd, service, store, factory } = setup();
+    const { cwd, service, store, factory, db } = setup();
     const task = await service.create({ name: "member", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
     const save = store.saveRun.bind(store);
     let attempts = 0;
@@ -1881,7 +1777,7 @@ describe("task admission and delivery regressions", () => {
     });
     expect(() => service.runGroup([task, task], "all", "s1", "s1", "followUp"))
       .toThrow("fixture disk failure");
-    expect(store.queryRuns({ showUnmatched: true }).runs).toEqual([]);
+    expect(db.prepare("SELECT 1 FROM task_runs").all()).toEqual([]);
     expect(store.listOpenGroups()).toEqual([]);
     expect(factory.create).not.toHaveBeenCalled();
   });
@@ -1964,78 +1860,15 @@ describe("task admission and delivery regressions", () => {
   });
 });
 
-describe("task HTTP routes", () => {
-  it("creates, runs, lists and reads a task result", async () => {
-    const { cwd, service } = setup();
-    const app = new Hono();
-    registerTaskRoutes(app, service);
-    const created = await app.request("/api/tasks", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ task: bashDraft(cwd, "echo api"), runNow: true }),
-    });
-    expect(created.status).toBe(201);
-    const { task, runId } = await created.json() as { task: { id: string }; runId: string };
-    const done = await service.waitForRun(runId);
-    const result = await app.request(`/api/task-runs/${done.id}`);
-    expect(await result.json()).toMatchObject({ state: "succeeded", result: { stdout: "api\n" } });
-    const list = await app.request("/api/tasks?state=active");
-    expect(await list.json()).toEqual([expect.objectContaining({ id: task.id, lastRun: expect.objectContaining({ id: runId }) })]);
-  });
-
-  it("exposes steer, message history, wait, and resume over HTTP", async () => {
-    const { service, session } = setup();
-    const app = new Hono();
-    registerTaskRoutes(app, service);
-    const task = await service.create({
-      name: "http agent",
+describe("task definitions from a public surface", () => {
+  it("refuses a session policy that is not a mode at all", async () => {
+    const { service } = setup();
+    // Refused by the parser, not stored and run into the runner.
+    await expect(service.create({
+      name: "fork",
       trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
-    });
-    session.setState("streaming");
-    const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner" });
-    const steered = await app.request(`/api/task-runs/${run.id}/steer`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "Focus on tests", sourceSessionId: "owner" }),
-    });
-    expect(steered.status).toBe(202);
-    session.setState("idle");
-    const done = await service.waitForRun(run.id);
-    const ledger = await app.request(`/api/task-runs/${done.id}/messages`);
-    expect(await ledger.json()).toEqual([expect.objectContaining({ kind: "steer", content: "Focus on tests" })]);
-
-    const resumed = await app.request(`/api/task-runs/${done.id}/resume`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "Check another case", wait: true, sourceSessionId: "owner" }),
-    });
-    expect(resumed.status).toBe(200);
-    const resumedRun = await resumed.json() as TaskRun;
-    expect(resumedRun).toMatchObject({ state: "succeeded", resumedFromRunId: done.id });
-    // A session policy that is not a mode at all is refused by the parser, not
-    // stored and run into the runner.
-    const invalid = await app.request("/api/tasks", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: "http fork",
-        trigger: { type: "manual" },
-        action: { type: "agent", session: { mode: "fork" }, prompt: "Use context" },
-      }),
-    });
-    expect(invalid.status).toBe(400);
-    expect(await invalid.text()).toContain("agent session policy required");
-
-    // Nor as a run-time override: silently ignoring it would run the stored
-    // policy — on a reuse definition, into a live session.
-    const overridden = await app.request(`/api/tasks/${task.id}/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionMode: "fork", sourceSessionId: "owner" }),
-    });
-    expect(overridden.status).toBe(400);
-    expect(await overridden.text()).toContain("unsupported sessionMode");
+      action: { type: "agent", session: { mode: "fork" }, prompt: "Use context" },
+    })).rejects.toThrow("agent session policy required");
   });
 });
 
@@ -2068,15 +1901,13 @@ describe("owned system actions", () => {
     expect(factory.create).not.toHaveBeenCalled();
     expect(factory.resume).not.toHaveBeenCalled();
     expect(service.get(task.id)).toMatchObject({ enabled: false, nextRunAt: null });
-    expect(service.setEnabled(task.id, true, "config-sync").nextRunAt).not.toBeNull();
+    expect((await service.update(task.id, { ...draft(), enabled: true }, "config-sync")).nextRunAt).not.toBeNull();
     expect(service.archive(task.id, "config-sync")).toMatchObject({ enabled: false, archived: true, nextRunAt: null });
   });
 
-  it("rejects HTTP, `pier task` and inline spoofing while preserving owner guards", async () => {
+  it("rejects an unnamed owner, `pier task` and inline spoofing while preserving owner guards", async () => {
     const handler = vi.fn(async () => "applied");
     const { cwd, service } = setup(fakeSession(), instance(handler));
-    const app = new Hono();
-    registerTaskRoutes(app, service);
     const task = await service.create(draft(), "config-sync");
     const publicTask = await service.create(bashDraft(cwd, "echo public"));
     const spoofed = { ...draft(), creator: "config-sync", by: "config-sync", id: task.id };
@@ -2090,12 +1921,9 @@ describe("owned system actions", () => {
       const rig = setup(fakeSession(), { modelMenu: () => [], systemActions: { [name]: handler } });
       await expect(rig.service.create(draft(name), name)).rejects.toThrow(/trusted owner/);
     }
-    for (const [method, url] of [["POST", "/api/tasks"], ["PATCH", `/api/tasks/${task.id}`], ["PATCH", `/api/tasks/${publicTask.id}`]]) {
-      const response = await app.request(url!, {
-        method, headers: { "content-type": "application/json" }, body: JSON.stringify(spoofed),
-      });
-      expect(response.status).toBe(400);
-    }
+    await expect(service.create(spoofed)).rejects.toThrow(/trusted owner/);
+    await expect(service.update(task.id, spoofed)).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.update(publicTask.id, spoofed)).rejects.toThrow(/trusted owner/);
     for (const operation of ["save", "run"]) {
       await expect(service.handle({ operation, task: { ...spoofed, trigger: { type: "manual" } }, creator: "config-sync" }, "s1")).rejects.toThrow(/trusted owner/);
       await expect(service.handle({ operation, task: { ...draft("unknown"), trigger: { type: "manual" } } }, "s1")).rejects.toThrow(/trusted owner/);
@@ -2105,21 +1933,17 @@ describe("owned system actions", () => {
     await expect(service.update(publicTask.id, draft(), "config-sync")).rejects.toThrow(/trusted owner/);
     await expect(service.update(task.id, draft(), "other")).rejects.toThrow(/reconciled by Pier/);
     await expect(service.update(task.id, draft("unknown"), "config-sync")).rejects.toThrow(/trusted owner/);
-    for (const route of ["pause", "resume", "archive"]) {
-      expect((await app.request(`/api/tasks/${task.id}/${route}`, { method: "POST" })).status).toBe(400);
-    }
+    expect(() => service.archive(task.id)).toThrow(/reconciled by Pier/);
     expect(service.get(task.id)).toEqual(task);
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("reports handler errors through the persisted run and HTTP", async () => {
+  it("reports handler errors through the persisted run", async () => {
     const { service } = setup(fakeSession(), instance(async () => { throw new Error("apply failed"); }));
     const task = await service.create(draft(), "config-sync");
     const done = await service.waitForRun(service.run(task.id).id);
     expect(done).toMatchObject({ state: "failed", error: "Error: apply failed", result: null });
-    const app = new Hono();
-    registerTaskRoutes(app, service);
-    expect(await (await app.request(`/api/task-runs/${done.id}`)).json()).toMatchObject({ state: "failed", error: "Error: apply failed" });
+    expect(service.getRun(done.id)).toMatchObject({ state: "failed", error: "Error: apply failed" });
   });
 
   it.each(["cancel", "timeout", "stop"] as const)("observes %s even when the cooperative handler resolves after abort", async (operation) => {
@@ -2160,11 +1984,8 @@ describe("owned system actions", () => {
     expect(restarted.getRun("interrupted-system")).toMatchObject({ state: "interrupted", error: "Pier restarted while the run was active" });
     expect(restarted.get(task.id)).toMatchObject({ enabled: true, creator: "config-sync" });
     expect(restarted.get(task.id).nextRunAt).toBeGreaterThan(now);
-    const app = new Hono();
-    registerTaskRoutes(app, restarted);
-    const response = await app.request(`/api/tasks/${task.id}/run`, { method: "POST" });
-    const { runId } = await response.json() as { runId: string };
-    expect(await restarted.waitForRun(runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
+    const manual = restarted.run(task.id, null, "manual");
+    expect(await restarted.waitForRun(manual.id)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
     const cliRun = await restarted.handle({ operation: "run", task_id: task.id, callback: "none" }, "s1") as RunSummary;
     expect(await restarted.waitForRun(cliRun.runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
     expect(handler).not.toHaveBeenCalled();
@@ -2175,14 +1996,8 @@ describe("owned system actions", () => {
     const { service, store } = setup(fakeSession(), instance(handler));
     const task = await service.create(draft(), "config-sync");
     store.saveTask({ ...task, creator });
-    const app = new Hono();
-    registerTaskRoutes(app, service);
-    const response = await app.request(`/api/tasks/${task.id}/run`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ creator: "config-sync", action: draft().action }),
-    });
-    const { runId } = await response.json() as { runId: string };
-    expect(await service.waitForRun(runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
+    const manual = service.run(task.id, null, "manual");
+    expect(await service.waitForRun(manual.id)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
     const cliRun = await service.handle({ operation: "run", task_id: task.id, callback: "none", creator: "config-sync" }, "s1") as RunSummary;
     expect(await service.waitForRun(cliRun.runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
     expect(handler).not.toHaveBeenCalled();
@@ -2196,23 +2011,11 @@ describe("a definition Pier's own code created", () => {
   // on saying Pier keeps the tools current.
   it("is reconciled by its owner and edited, paused or archived by neither surface", async () => {
     const { cwd, service } = setup();
-    const app = new Hono();
-    registerTaskRoutes(app, service);
     // Created the way main.ts creates the tools update task.
     const owned = await service.create(bashDraft(cwd, "echo tools sync"), "tools");
     const mine = await service.create(bashDraft(cwd, "echo hi"));
-    const json = (body: unknown) => ({
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const patched = await app.request(`/api/tasks/${owned.id}`, json(bashDraft(cwd, "echo something else")));
-    expect(patched.status).toBe(400);
-    expect(await patched.json()).toMatchObject({ error: expect.stringContaining("reconciled by Pier") });
-    for (const route of ["pause", "resume", "archive"]) {
-      expect((await app.request(`/api/tasks/${owned.id}/${route}`, { method: "POST" })).status).toBe(400);
-    }
+    await expect(service.update(owned.id, bashDraft(cwd, "echo something else"))).rejects.toThrow(/reconciled by Pier/);
+    expect(() => service.archive(owned.id)).toThrow(/reconciled by Pier/);
     // The other way in: `pier task`, which has no owner to name either.
     await expect(service.handle({
       operation: "save",
@@ -2229,7 +2032,7 @@ describe("a definition Pier's own code created", () => {
     // Running it is not editing it — that is what a flipped switch does.
     expect((await service.waitForRun(service.run(owned.id).id)).state).toBe("succeeded");
     // A task a person wrote is nobody's but theirs.
-    expect((await app.request(`/api/tasks/${mine.id}/pause`, { method: "POST" })).status).toBe(200);
+    expect(service.archive(mine.id).archived).toBe(true);
 
     // And the owner reconciles it, which is the whole point of the exception.
     const repaired = await service.update(owned.id, bashDraft(cwd, "echo repaired"), "tools");

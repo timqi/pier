@@ -4,7 +4,7 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
 import type { AgentRole, LeadPhase } from "../core/types.js";
-import { createdRole, type RunPage, type RunQuery, type RunView, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
+import { createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -109,57 +109,6 @@ export class TaskStore {
         ORDER BY r.queued_at DESC, r.id DESC LIMIT -1 OFFSET ?
       )
     `).run(taskId, taskId, KEPT_PROBES);
-  }
-
-  /** The id breaks timestamp ties so a page boundary never repeats or skips a
-   *  row. Built per call, not cached: the filter set makes it. */
-  queryRuns(query: RunQuery = {}): RunPage {
-    const where: string[] = [];
-    const params: (string | number)[] = [];
-    const add = (sql: string, value: string | number | undefined): void => {
-      if (value !== undefined) { where.push(sql); params.push(value); }
-    };
-    add("r.state = ?", query.state);
-    add("r.task_id = ?", query.taskId);
-    add("json_extract(r.json, '$.triggerSource') = ?", query.source);
-    add("r.queued_at >= ?", query.since);
-    add("r.queued_at <= ?", query.until);
-    // Keep this predicate identical to migration 17's partial index.
-    if (!query.showUnmatched) where.push("NOT (r.state = 'succeeded' AND json_extract(r.json, '$.matched') IS 0)");
-    if (query.cursor) {
-      where.push("(r.queued_at, r.id) < (?, ?)");
-      params.push(query.cursor.queuedAt, query.cursor.id);
-    }
-    const limit = clamp(query.limit ?? 50, 200);
-    const rows = this.db.prepare(`
-      SELECT r.json, g.callback_state AS group_callback_state
-      FROM task_runs r LEFT JOIN task_groups g ON g.id = json_extract(r.json, '$.groupId')
-      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-      ORDER BY r.queued_at DESC, r.id DESC LIMIT ?
-    `).all(...params, limit + 1) as unknown as { json: string; group_callback_state: RunView["groupCallbackState"] }[];
-    const runs: RunView[] = rows.slice(0, limit).map((row) => ({
-      ...JSON.parse(row.json) as TaskRun, groupCallbackState: row.group_callback_state,
-    }));
-    const last = runs.at(-1);
-    return {
-      runs,
-      nextCursor: rows.length > limit && last ? { queuedAt: last.queuedAt, id: last.id } : null,
-    };
-  }
-
-  /** Activity never limits live work; only its optional history is bounded. */
-  activityRuns(since?: number): TaskRun[] {
-    const active = this.#many<TaskRun>(
-      "SELECT json FROM task_runs WHERE state IN ('queued', 'running') ORDER BY queued_at DESC, id DESC",
-    );
-    if (since === undefined) return active;
-    const recent = this.#many<TaskRun>(`
-      SELECT json FROM task_runs
-      WHERE state NOT IN ('queued', 'running') AND queued_at >= ?
-        AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
-      ORDER BY queued_at DESC, id DESC LIMIT 200
-    `, since);
-    return [...active, ...recent].sort((a, b) => b.queuedAt - a.queuedAt || b.id.localeCompare(a.id));
   }
 
   /** Runs launched by any of `sessionIds`: in flight, or finished at or after `since`. */
@@ -387,13 +336,6 @@ export class TaskStore {
       WHERE run_id = ? AND state = 'pending' AND json_extract(json, '$.kind') = 'follow_up'
     `).get(runId) as { n: number };
     return row.n;
-  }
-
-  listRecentMessages(since: number): TaskMessage[] {
-    return this.#many(
-      "SELECT json FROM task_messages WHERE created_at >= ? ORDER BY created_at DESC LIMIT 200",
-      since,
-    );
   }
 
   /** Each beside its run, so the sweep costs one query. A message whose run is

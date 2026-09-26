@@ -23,11 +23,6 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
 export const pageTitle = (label: string): HTMLElement =>
   h("span", "mr-1 flex-none font-medium max-md:hidden", label);
 
-/** Draws no rule of its own on the canvas; as a card's first row style.css
- *  gives it the divider. */
-export const toolbar = (...children: (HTMLElement | SVGElement | string)[]): HTMLElement =>
-  h("div", "toolbar flex min-h-10 flex-none flex-wrap items-center gap-2 px-4 py-2", ...children);
-
 /** Smaller than a pill strip: it sits under one, and two rows of the same
  *  chrome would read as two levels of one navigation. An option with an icon
  *  shows only that; its label becomes the accessible name and the tooltip. */
@@ -102,7 +97,7 @@ export function swatches(options: [string, string][], value: string, onChange: (
   return group;
 }
 
-/** A pill tab — the topic strips (Settings, Automation, Channels platforms).
+/** A pill tab — the topic strips (Settings, Channels platforms).
  * One chrome, so two strips on the same page read as the same control. */
 export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
   const el = btn(

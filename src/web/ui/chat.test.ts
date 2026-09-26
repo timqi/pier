@@ -17,7 +17,7 @@ beforeEach(async () => {
   chat = await import("./chat.js");
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
-    select, showRun: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}),
+    select, send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}),
   });
 });
 

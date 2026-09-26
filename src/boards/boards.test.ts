@@ -1,15 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listBoards, registerBoardRoutes, rotateBoardViews } from "./boards.js";
+import { registerBoardRoutes, rotateBoardViews } from "./boards.js";
 
 let dir: string;
 let app: Hono;
 
 /** A published board is addressed by `<slug>-<token>`; fixtures pin the token
- *  so a test can build the URL without publishing through the API first. */
+ *  so a test can build the URL. */
 const TOKEN = "0123abcd";
 const published = { public: true, token: TOKEN };
 const key = (slug: string): string => `${slug}-${TOKEN}`;
@@ -45,55 +45,21 @@ beforeEach(() => {
   registerBoardRoutes(app, dir);
 });
 
-describe("scanning", () => {
-  it("lists the freshest board first, slug breaking ties", async () => {
-    const stale = makeBoard("stale");
-    const fresh = makeBoard("fresh");
-    const tied = makeBoard("a-tied");
-    utimesSync(join(stale, "site"), new Date(1e9), new Date(1e9));
-    utimesSync(join(fresh, "site"), new Date(2e9), new Date(2e9));
-    utimesSync(join(tied, "site"), new Date(2e9), new Date(2e9));
-
-    expect((await listBoards(dir)).map((b) => b.slug)).toEqual(["a-tied", "fresh", "stale"]);
-  });
-
-  it("lists boards with manifest defaults and skips non-boards", async () => {
-    makeBoard("weekly-digest", { description: "what changed", sessions: ["s1"] });
-    makeBoard("no-title", {});
-    mkdirSync(join(dir, "not-a-board")); // no manifest
-    mkdirSync(join(dir, "_toolchain"));
-
-    const boards = await listBoards(dir);
-    expect(boards.map((b) => b.slug)).toEqual(["no-title", "weekly-digest"]);
-    const digest = boards[1];
-    expect(digest).toMatchObject({
-      title: "weekly-digest",
-      description: "what changed",
-      sessions: ["s1"],
-      public: false,
-    });
-    expect(Date.parse(digest?.updatedAt ?? "")).toBeGreaterThan(0);
-    // A missing title falls back to the slug rather than rendering blank.
-    expect(boards[0]?.title).toBe("no-title");
-  });
-
-  it("skips an unparsable manifest instead of half-listing it", async () => {
+describe("which directories are boards", () => {
+  it("skips an unparsable manifest instead of half-serving it", async () => {
     makeBoard("broken", "{ not json");
     makeBoard("fine");
-    expect((await listBoards(dir)).map((b) => b.slug)).toEqual(["fine"]);
+    expect((await app.request("/boards/broken/")).status).toBe(404);
+    expect((await app.request("/boards/fine/")).status).toBe(302);
   });
 
   it("ignores directories whose name is not a slug", async () => {
-    makeBoard("weekly-digest.deleted-1700000000000");
-    makeBoard("Upper");
-    expect(await listBoards(dir)).toEqual([]);
-  });
-
-  it("returns nothing when the boards dir does not exist, or cannot be scanned", async () => {
-    expect(await listBoards(join(dir, "missing"))).toEqual([]);
-    // Not a directory: an empty answer with a warning, not a throw or a 500.
-    writeFileSync(join(dir, "file"), "");
-    expect(await listBoards(join(dir, "file"))).toEqual([]);
+    makeBoard("weekly-digest.deleted-1700000000000", published);
+    makeBoard("Upper", published);
+    for (const slug of ["weekly-digest.deleted-1700000000000", "Upper"]) {
+      expect((await app.request(`/boards/${slug}/`)).status).toBe(404);
+      expect((await app.request(`/p/${key(slug)}/`)).status).toBe(404);
+    }
   });
 });
 
@@ -156,7 +122,7 @@ describe("serving", () => {
     expect((await app.request(`${live}/`)).status).toBe(302);
     // A board deleted while a prefix is live cannot be reopened under its slug.
     const reused = await view("digest");
-    await app.request("/api/boards/digest", { method: "DELETE" });
+    renameSync(join(dir, "digest"), join(dir, "digest.deleted-1"));
     makeBoard("digest", {}, "<h1>someone else</h1>");
     expect((await app.request(`${reused}/`)).status).toBe(302);
   });
@@ -172,19 +138,12 @@ describe("serving", () => {
     makeBoard("digest");
     expect((await app.request("/p/digest/")).status).toBe(404);
 
-    const patch = await app.request("/api/boards/digest", {
-      method: "PATCH",
-      body: JSON.stringify({ public: true }),
-      headers: { "content-type": "application/json" },
-    });
-    expect(patch.status).toBe(200);
-    const { token } = (await patch.json()) as { token: string };
-    expect(token).toMatch(/^[a-f0-9]{8}$/);
+    makeBoard("digest", published);
     // The slug alone stays a non-answer: publishing hides the door, it does
     // not put the board back on a guessable name.
     expect((await app.request("/p/digest/")).status).toBe(404);
 
-    const res = await app.request(`/p/digest-${token}/`);
+    const res = await app.request(`/p/${key("digest")}/`);
     expect(res.status).toBe(200);
     const csp = res.headers.get("content-security-policy");
     expect(csp).toContain("sandbox allow-scripts;");
@@ -223,13 +182,8 @@ describe("serving", () => {
     ]) {
       expect((await app.request(path)).status).toBe(404);
     }
-    // The decoy above the boards dir must not be readable *or* writable.
-    const patch = await app.request("/api/boards/..%2F", {
-      method: "PATCH",
-      body: JSON.stringify({ public: false }),
-      headers: { "content-type": "application/json" },
-    });
-    expect(patch.status).toBe(404);
+    // The decoy above the boards dir must not be readable *or* written: a
+    // public manifest without a token is one a read would mint for.
     expect(readFileSync(join(dir, "board.json"), "utf8")).toBe('{"public":true}');
   });
 
@@ -281,67 +235,36 @@ describe("serving", () => {
 });
 
 describe("manifest writes", () => {
-  it("rejects a non-boolean public and an unknown slug", async () => {
-    makeBoard("digest");
-    const bad = await app.request("/api/boards/digest", {
-      method: "PATCH",
-      body: JSON.stringify({ public: "yes" }),
-      headers: { "content-type": "application/json" },
-    });
-    expect(bad.status).toBe(400);
-
-    const missing = await app.request("/api/boards/nope", {
-      method: "PATCH",
-      body: JSON.stringify({ public: true }),
-      headers: { "content-type": "application/json" },
-    });
-    expect(missing.status).toBe(404);
-  });
-
-  it("preserves agent-owned fields when publishing", async () => {
-    makeBoard("digest", { description: "keep me", sessions: ["s1"], note: "agent data" });
-    await app.request("/api/boards/digest", {
-      method: "PATCH",
-      body: JSON.stringify({ public: true }),
-      headers: { "content-type": "application/json" },
-    });
-    const boards = await listBoards(dir);
-    expect(boards[0]).toMatchObject({ public: true, description: "keep me", sessions: ["s1"] });
-    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).toMatchObject({
-      note: "agent data",
-    });
-    const raw = await app.request("/api/boards");
-    expect(await raw.json()).toHaveLength(1);
-  });
-
   it("mints a token for a board an agent published itself, once and for good", async () => {
-    // No PATCH: the manifest arrives public with no token, the way an agent
-    // writing board.json leaves it.
-    makeBoard("digest", { public: true });
-    const [board] = await listBoards(dir);
-    expect(board?.token).toMatch(/^[a-f0-9]{8}$/);
-    // Persisted, or the next request would hand out a different URL.
-    const stored = JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8")) as {
-      token: string;
-    };
-    expect(stored.token).toBe(board?.token);
-    expect((await listBoards(dir))[0]?.token).toBe(board?.token);
-    expect((await app.request(`/p/digest-${board?.token}/`)).status).toBe(200);
+    // The manifest arrives public with no token, the way an agent writing
+    // board.json without the skill's `openssl rand` leaves it.
+    makeBoard("digest", { public: true, description: "keep me", note: "agent data" });
+    expect((await app.request("/boards/digest/")).status).toBe(302);
+    const stored = (): Record<string, unknown> =>
+      JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8")) as Record<string, unknown>;
+    const token = stored().token;
+    expect(token).toMatch(/^[a-f0-9]{8}$/);
+    // Persisted, or the next request would hand out a different URL; the
+    // agent's own fields survive the write.
+    await app.request("/p/digest-00000000/");
+    expect(stored()).toMatchObject({ token, public: true, description: "keep me", note: "agent data" });
+    expect((await app.request(`/p/digest-${String(token)}/`)).status).toBe(200);
   });
 
   it("keeps a private board's manifest untouched", async () => {
     makeBoard("digest");
-    expect((await listBoards(dir))[0]?.token).toBe("");
+    await app.request("/boards/digest/");
+    await app.request(`/p/${key("digest")}/`);
     expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).not.toHaveProperty(
       "token",
     );
   });
 
-  it("deletes by renaming, so the bytes survive and the scan forgets it", async () => {
-    makeBoard("digest");
-    expect((await app.request("/api/boards/digest", { method: "DELETE" })).status).toBe(200);
-    expect(await listBoards(dir)).toEqual([]);
+  it("deletes by renaming, so the bytes survive and every route forgets it", async () => {
+    makeBoard("digest", published);
+    renameSync(join(dir, "digest"), join(dir, "digest.deleted-1700000000000"));
     expect((await app.request("/boards/digest/")).status).toBe(404);
-    expect((await app.request("/api/boards/digest", { method: "DELETE" })).status).toBe(404);
+    expect((await app.request(`/p/${key("digest")}/`)).status).toBe(404);
+    expect(readFileSync(join(dir, "digest.deleted-1700000000000", "site", "index.html"), "utf8")).toBe("<h1>hi</h1>");
   });
 });

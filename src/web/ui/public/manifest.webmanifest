@@ -19,8 +19,6 @@
     { "src": "/app/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Tasks", "url": "/app/#/tasks", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Activity", "url": "/app/#/activity", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] },
     { "name": "Settings", "url": "/app/#/settings", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] }
   ]
 }

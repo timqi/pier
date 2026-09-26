@@ -133,32 +133,6 @@ export interface TaskRun extends CallbackFields {
   finishedAt: number | null;
 }
 
-export interface RunCursor {
-  queuedAt: number;
-  id: string;
-}
-
-/** The global run list's filters; `since`/`until` are inclusive epoch ms. */
-export interface RunQuery {
-  state?: TaskRunState;
-  source?: TaskRun["triggerSource"];
-  taskId?: string;
-  since?: number;
-  until?: number;
-  showUnmatched?: boolean;
-  cursor?: RunCursor;
-  limit?: number;
-}
-
-export interface RunView extends TaskRun {
-  groupCallbackState: CallbackFields["callbackState"];
-}
-
-export interface RunPage {
-  runs: RunView[];
-  nextCursor: RunCursor | null;
-}
-
 export type GroupJoinMode = "all" | "first";
 
 /** A fan-out join owned by core: one aggregated callback when the join
