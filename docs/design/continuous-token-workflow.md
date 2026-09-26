@@ -92,6 +92,32 @@ thinking follows the pin:
 per run: the same fields the dispatcher uses (`--run`, `--session`), a third
 of the tokens.
 
+### 6. Context shown against the compaction point — `core/types.ts`, `web/ui/session-header.ts`
+
+`ContextUsage` gains `compactAt` (the window minus the session's reserve: 100K
+for a head, 150K for a lead or worker, the instance's for any other session),
+and the header prints `used/compactAt` instead of `used/window` — `50K/100K`
+rather than `50K/1000K`, so the number shown is the distance to compaction (or,
+for a head, past the `full` ceiling). `contextWindow` stays on the seam for
+the percentage.
+
+### Caps stay: home 100K, lead and worker 150K
+
+A design session consuming 300–500K tokens is a *cumulative* figure; the cap
+bounds what is *in the context at once*. A lead at 150K reaches 500K spent
+long before it compacts, because every call re-reads its whole context.
+
+- 1M-context models price input and cache reads 2× above 200K in the
+  context; a turn at 300K costs ~4× a turn at 150K (double the tokens at
+  double the rate), and quality degrades past 200K.
+- The lead's state is its doc by contract, so compaction loses nothing the
+  build needs; the summary plus the doc is what a lead resumes from anyway.
+- Not split by role: a worker at 150K and a lead at 150K compact for the same
+  reason (§`CHILD_COMPACTION_CAP`); a second constant needs a second reason.
+
+Room to move without crossing the price tier: 150K → 180K for children, if
+compaction proves too frequent in a week of use; measured, not assumed.
+
 ### Cache — invariants, not changes
 
 - The head's system prompt is the same bytes every turn: nothing per-turn goes
@@ -120,7 +146,10 @@ Two workers, then the fold into 10 and the skill at integration:
   `agent/events.ts`, `web/ui/main.ts`; `chain.test.ts` — rotates past the
   ceiling with reason `full`, not on `null`, not while streaming, seed carried;
 - the prompts: `agent/roles.ts` (§2, §4), `tasks/agent.ts` (§3),
-  `skills/pier-tasks/SKILL.md` (§4); preamble golden test.
+  `skills/pier-tasks/SKILL.md` (§4); preamble golden test;
+- `compactAt` on the seam and in the header (§6): `agent/pi.ts`,
+  `core/types.ts`, `core/session.testkit.ts`, `web/ui/session-header.ts`;
+  header test — the small worker, or folded into the first.
 
 ## Parked
 
