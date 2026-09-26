@@ -35,6 +35,19 @@ truth.
   re-reading rather than recalling. The web session header shows context used
   and how much is left.
 
+## The continuous conversation (a trial, off by default)
+
+- The operator's switch (Settings → Instance) makes the web one conversation
+  per instance: the rail's **Conversation** row, then **In progress** (running,
+  unread, or with subagents out); every other session is in ⌘K. IM is
+  unchanged.
+- After an idle hour the next message starts a fresh session, seeded with
+  `$PIER_HOME/home`'s memory files, the runs it launched and the last
+  exchanges; earlier sessions page in above, read-only.
+- That session dispatches: real work is a task run — a worker, or a feature
+  lead that designs with the user in its own session, then builds with
+  workers. Each is its own session and takes messages directly.
+
 ## Files and images the user sends
 
 - A photo or file sent on any surface (web paste, Slack or Lark upload) is saved to `$PIER_HOME/inbox/` and reaches you as a trailing

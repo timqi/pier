@@ -31,7 +31,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | `--session <id> --prompt …` | continue an idle session (it keeps its cwd and model) |
 | `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt's `delivery` says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
-| `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--session` beside it are refused |
+| `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--role`/`--session` beside it are refused |
 
 `--bash` is for a command whose output needs no model **and** runs too long to
 hold your turn; a quick one belongs in your own shell, where `&` and `wait`
@@ -67,8 +67,8 @@ as JSON. For orientation, never to wait on a result.
 
 ## Feature leads
 
-`--role lead` launches a feature lead: a long-lived child in the feature's own
-worktree that designs with the user, then builds with workers. It is the one
+`--role lead` on a fresh `--prompt` run launches a feature lead: a long-lived
+child in the feature's own worktree that designs with the user, then builds with workers. It is the one
 delegated run that may delegate, never to a lead; only its reply to the last
 result owed it reaches its supervisor.
 
