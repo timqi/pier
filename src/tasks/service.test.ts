@@ -514,6 +514,7 @@ describe("task service", () => {
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
     expect(manual.context.renderedPrompt).toContain("read by the operator");
     expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
+    expect(manual.context.renderedPrompt).toContain("render there. Return the conclusion and the paths it rests on — no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. A question");
     // Nobody waits on a manual run, so it may delegate and is not told otherwise.
     expect(manual.context.renderedPrompt).not.toContain("You cannot delegate from here");
 
