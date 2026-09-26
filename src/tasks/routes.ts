@@ -6,15 +6,15 @@ import type { AgentFactory } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { record, requiredString } from "./definitions.js";
 import type { TaskService } from "./service.js";
+import { TASK_RUN_STATES } from "../core/types.js";
 import type { RunQuery, TaskRunState, TaskRun } from "./types.js";
 
 /** Reject malformed filters instead of silently widening a global query. */
 function runQuery(params: Record<string, string>): RunQuery {
   const query: RunQuery = {};
-  const states: TaskRunState[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"];
   const sources: TaskRun["triggerSource"][] = ["manual", "cron", "watch", "agent", "task"];
   if (params.state) {
-    if (!states.includes(params.state as TaskRunState)) throw new Error("invalid state");
+    if (!(TASK_RUN_STATES as readonly string[]).includes(params.state)) throw new Error("invalid state");
     query.state = params.state as TaskRunState;
   }
   if (params.source) {

@@ -282,16 +282,9 @@ describe("task operations", () => {
     await expect(launchOf({ model: "gpt" })).rejects.toThrow(
       'model "gpt" matches 2 of the menu:\nbalanced · openai/gpt-5 · medium\nopenai/gpt-5-mini · low',
     );
-    // A tier is its first pin in menu order, the later ones its fallbacks, each at its own level.
-    expect(await launchOf({ model: "Balanced" })).toEqual({
-      model: { provider: "openai", id: "gpt-5" }, thinking: "medium",
-      fallbacks: [{ model: { provider: "xai", id: "grok-4" }, thinking: "high" }],
-    });
-    // The caller's level is every candidate's: the fallbacks carry none of their own.
-    expect(await launchOf({ model: "balanced", thinking: "low" })).toEqual({
-      model: { provider: "openai", id: "gpt-5" }, thinking: "low",
-      fallbacks: [{ model: { provider: "xai", id: "grok-4" } }],
-    });
+    // A tier is its first pin in menu order, at its level unless the caller named one.
+    expect(await launchOf({ model: "Balanced" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium" });
+    expect(await launchOf({ model: "balanced", thinking: "low" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "low" });
     // Never a substring: "cheap" names no pin here.
     await expect(launchOf({ model: "cheap" })).rejects.toThrow(
       /^model "cheap": tier cheap is unassigned — the operator's menu:\nanthropic\/claude-opus-4 · high\nbalanced · openai/,

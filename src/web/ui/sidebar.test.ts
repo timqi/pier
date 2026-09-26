@@ -62,16 +62,16 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   // so the flag alone is the dot — a turn that answered Slack never carries it.
   expect(dot({ unread: true })?.cls).toContain("bg-amber-500");
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
-  expect(dot({ role: "lead" })).toBeUndefined();
-  expect(dot({ role: "lead", runLive: true })).toMatchObject({ title: "lead — run queued" });
+  expect(dot({ phase: "design" })).toBeUndefined();
+  expect(dot({ phase: "design", runLive: true })).toMatchObject({ title: "lead — run queued" });
 });
 
 // The phase is English whatever the title's language; no phase, no tag.
 it("tags a lead's row with its phase, and nothing else", () => {
   const tag = (over: Partial<Row>) => sidebar.phaseTag(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;
   expect(tag({})).toBeUndefined();
-  expect(tag({ role: "lead", phase: "design" })).toMatchObject({ title: "lead — designing with you" });
-  expect(tag({ role: "lead", phase: "build" })).toMatchObject({ title: "lead — building per the design" });
+  expect(tag({ phase: "design" })).toMatchObject({ title: "lead — designing with you" });
+  expect(tag({ phase: "build" })).toMatchObject({ title: "lead — building per the design" });
 });
 
 // ⌘⇧[ / ⌘⇧] step through the rail as it is drawn — working set, then the

@@ -343,10 +343,30 @@ it("re-reads the open items when a turn end wrote a marker", async () => {
   expect(vi.mocked(sidebar.renderSessions)).toHaveBeenCalled();
 });
 
+// A lead's session is saved after its run-changed refetch, so its first state names an unlisted id.
+it("re-lists sessions on a state change for an unknown session, and updates a known one in place", async () => {
+  const sidebar = await import("./sidebar.js");
+  const workspace = Stream.all.find((s) => s.url === "/api/events")!;
+  const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  const sessionsFetches = () => fetcher.mock.calls.filter(([url]) => url === "/api/sessions").length;
+  const state = (sessionId: string) => workspace.onmessage?.({ data: JSON.stringify({ type: "session-state", sessionId, state: "running" }) });
+  fetcher.mockClear();
+  vi.mocked(sidebar.renderSessions).mockClear();
+
+  state("b");
+  await settled();
+  expect(sessionsFetches()).toBe(0);
+  expect(h.sidebar.sessions().find((s) => s.id === "b")?.state).toBe("running");
+  expect(vi.mocked(sidebar.renderSessions)).toHaveBeenCalled();
+
+  state("lead");
+  await settled();
+  expect(sessionsFetches()).toBe(1);
+});
+
 describe("the continuous conversation", () => {
   const member = (sessionId: string, reason = "idle", startedAt = 1) => ({ sessionId, startedAt, reason });
   let chain: ReturnType<typeof member>[] = [];
-  const posts: string[] = [];
   const earlier = (id: string) => Response.json({ turns: [{ role: "user", text: `said in ${id}` }], backgroundRuns: [], readonly: true });
 
   async function boot(members: ReturnType<typeof member>[]) {
@@ -355,12 +375,7 @@ describe("the continuous conversation", () => {
     Stream.all = [];
     Object.assign(installPage(), { hidden: true });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
-    const fetcher = vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/api/continuous" && init?.method === "POST") {
-        posts.push(url);
-        chain = [member("h1", "first", Date.now())];
-        return Promise.resolve(Response.json({ sessionId: "h1", rotated: "first" }));
-      }
+    const fetcher = vi.fn((url: string) => {
       if (url === "/api/continuous") return Promise.resolve(Response.json({ chain }));
       if (url.endsWith("/history")) return h.history(url);
       return Promise.resolve(Response.json(rows));
@@ -420,22 +435,16 @@ describe("the continuous conversation", () => {
     expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true);
   });
 
-  it("opens before its first session exists, and is on the first session before its first message is sent", async () => {
-    posts.length = 0;
+  it("opens before its first session exists, and follows the head its first message made", async () => {
     await boot([]);
     expect(h.composer.sessionId()).toBeNull();
     expect(h.composer.continuous?.()).toBe(true);
     expect(h.content).toContain("The continuous conversation — your first message starts it.");
-    await h.composer.prepareHead?.();
-    expect(posts).toEqual(["/api/continuous"]);
+    chain = [member("h1", "first")];
+    h.composer.headMoved?.();
+    await settled();
+    await settled();
     expect(h.composer.sessionId()).toBe("h1");
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
-  });
-
-  it("sends straight through the alias when the head is not due to rotate", async () => {
-    posts.length = 0;
-    await boot([member("h1", "idle", Date.now())]);
-    await h.composer.prepareHead?.();
-    expect(posts).toEqual([]);
   });
 });

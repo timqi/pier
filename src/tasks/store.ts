@@ -259,6 +259,26 @@ export class TaskStore {
     return run.context.definition.action.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
   }
 
+  /** Every lead session with its phase (as `leadPhaseOf`) and whether a run
+   *  targeting it is queued or running, in one statement for the rail's listing. */
+  leads(): Map<string, { phase: LeadPhase; runLive: boolean }> {
+    const rows = this.sql(`
+      SELECT c.id, c.prompt, l.id IS NOT NULL AS live FROM (
+        SELECT json_extract(json, '$.targetSessionId') AS id,
+          json_extract(json, '$.context.definition.action.launch.role') AS role,
+          json_extract(json, '$.context.definition.action.prompt') AS prompt,
+          ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.targetSessionId') ORDER BY queued_at) AS n
+        FROM task_runs
+        WHERE json_extract(json, '$.sessionMode') = 'fresh' AND json_extract(json, '$.targetSessionId') IS NOT NULL
+      ) c
+      LEFT JOIN (
+        SELECT DISTINCT json_extract(json, '$.targetSessionId') AS id FROM task_runs WHERE state IN ('queued', 'running')
+      ) l ON l.id = c.id
+      WHERE c.n = 1 AND c.role = 'lead'
+    `).all() as unknown as { id: string; prompt: string; live: number }[];
+    return new Map(rows.map((r) => [r.id, { phase: r.prompt.startsWith(BUILD_PROMPT) ? "build" : "design", runLive: r.live === 1 }]));
+  }
+
   /** What a milestone resumes, and whose supervisor it reports to. */
   latestRunForTarget(sessionId: string): TaskRun | undefined {
     return this.#one(`

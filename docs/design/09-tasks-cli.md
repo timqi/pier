@@ -85,7 +85,7 @@ the Console's.
 pier task runs
 ```
 
-No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/chain.ts`),
+No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`),
 the runs the caller launched — every chain member's, for a member of the
 continuous conversation — in flight plus finished in the last 24h, at most 200.
 
@@ -96,11 +96,8 @@ against the operator's menu (`settings.modelMenu`; the live catalog when
 none is pinned):
 
 - a tier (`hardest`, `balanced`, `cheap`) is the first pin on it in menu
-  order, `--thinking` defaulting to the pin's, never a substring match; the
-  tier's later pins ride as `launch.fallbacks` (`{model, thinking?}`, a level
-  only where `--thinking` named none), and the launch takes the first of
-  `model` then `fallbacks` that `AgentFactory.availableModels()` lists — none
-  listed, `model`; an unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
+  order, `--thinking` defaulting to the pin's, never a substring match; an
+  unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
   operator's menu:` then the whole menu, exit 1;
 - an exact `provider/id` on the menu is that pin — its first row, where the
   model is pinned at several levels;
@@ -138,13 +135,13 @@ Who may call `pier task`, by the caller's session; each refusal exits 1:
   delegate; …`); a queued run gates nothing;
 - otherwise — a top-level session, a cron or watch run's — may.
 
-The run that made a session answers its role (`TaskStore.roleOf`); a resume or
-a `--session` continuation never changes it.
+A session's role is fixed by the run that made it, for the session's life
+([10 §Roles](10-continuous-session.md#roles)).
 
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session of the continuous conversation counts as the one
-that launched it. `parentRunId` links only a `task` action's child, which a
-cancel walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
+that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
+`parentRunId` links only a `task` action's child, which a cancel walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
 in one sentence that `pier task` is refused, and a lead that it may delegate.
 
 ## Skill

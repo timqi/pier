@@ -121,6 +121,21 @@ export const thinkingLabel = (level: ThinkingLevel): string =>
 /** `max` characters, the last one an ellipsis when something was cut. */
 export const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+/** Compact age of `ts` at `now` ("now", "12m", "3h", "2d"): every surface ages things the same way. */
+export function relTime(ts: number, now: number): string {
+  const mins = Math.round((now - ts) / 60_000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${String(mins)}m`;
+  if (mins < 1440) return `${String(Math.round(mins / 60))}h`;
+  return `${String(Math.round(mins / 1440))}d`;
+}
+
+/** The age as it reads beside a wall clock, where "now" would be a fragment. */
+export const agoLabel = (ts: number, now: number): string => {
+  const age = relTime(ts, now);
+  return age === "now" ? "just now" : `${age} ago`;
+};
+
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {
   if (n < 1000) return String(n);

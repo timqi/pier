@@ -16,8 +16,8 @@ export interface ModelMenuEntry {
   /** Advice, not a lock — but never absent: a pin with no level is a third
    *  state every picker would need a fallback for. */
   thinking: ThinkingLevel;
-  /** The work class `pier task --model <tier>` resolves to; several pins on one
-   *  tier are its fallbacks, in menu order. */
+  /** The work class `pier task --model <tier>` resolves to; of several pins on
+   *  one tier, the first in menu order. */
   tier?: ModelTier;
 }
 

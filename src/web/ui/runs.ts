@@ -2,6 +2,7 @@
 // route's query string, so Back walks filters too.
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
+import { TASK_RUN_STATES } from "../../core/types.js";
 import type { RunPage, TaskDefinition } from "../../tasks/types.js";
 import { coalesce, getJson, refused } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
@@ -85,7 +86,7 @@ export function createRunsView(
       box.append(h("label", `filter-field ${key === "taskId" ? "filter-wide" : ""}`, h("span", "", label), input));
       return input;
     };
-    filter("State", "state", [["All states", ""], ...["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"].map((v): [string, string] => [v, v])]);
+    filter("State", "state", [["All states", ""], ...TASK_RUN_STATES.map((v): [string, string] => [v, v])]);
     filter("Source", "source", [["All sources", ""], ...["manual", "agent", "cron", "watch", "task"].map((v): [string, string] => [v, v])]);
     taskSelect = filter("Task", "taskId", taskChoices());
     const dates = h("details", "filter-dates") as HTMLDetailsElement;

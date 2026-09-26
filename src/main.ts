@@ -362,8 +362,7 @@ app.route("/", createServer({
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   parkedMessages: (id) => tasks.parkedMessages(id),
   taskSessions: () => tasks.taskSessions(),
-  leadPhaseOf: (id) => taskStore.leadPhaseOf(id),
-  runLiveFor: (id) => taskStore.findActiveRunForTarget(id) !== undefined,
+  leads: () => taskStore.leads(),
   channelOf: (id) => conversations.keyOf(id)?.channelId,
   continuous: chain,
 }));

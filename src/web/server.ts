@@ -149,10 +149,9 @@ export interface WebDeps {
   parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** `TaskStore.leadPhaseOf`: a lead's session is tagged by its phase in the rail and the palette. */
-  leadPhaseOf?: (sessionId: string) => LeadPhase | undefined;
-  /** A run targeting the session is queued or running (`TaskStore.findActiveRunForTarget`). */
-  runLiveFor?: (sessionId: string) => boolean;
+  /** `TaskStore.leads`: every lead session, tagged by its phase in the rail and
+   *  the palette, `runLive` while a run targeting it is queued or running. */
+  leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -211,8 +210,7 @@ export function createServer(
     activeBackgroundRunCounts,
     parkedMessages,
     taskSessions,
-    leadPhaseOf,
-    runLiveFor,
+    leads,
     channelOf,
     continuous,
   }: WebDeps,
@@ -314,19 +312,16 @@ export function createServer(
 
   // `rank` is the place in the rail's working set; `modified` is for the
   // row's tooltip and orders nothing.
-  const leadOf = (id: string) => {
-    const phase = leadPhaseOf?.(id);
-    if (!phase) return {};
-    return { role: "lead" as const, phase, ...(runLiveFor?.(id) ? { runLive: true } : {}) };
-  };
-  const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
+  const leadOf = (lead: { phase: LeadPhase; runLive: boolean } | undefined) =>
+    (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}) } : {});
+  const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>, lead: ReturnType<NonNullable<WebDeps["leads"]>>) => ({
     ...s,
     ...(own?.rank === undefined ? {} : { rank: own.rank }),
     state: router.stateOf(s.id) ?? "idle",
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
     activeRuns: active.get(s.id) ?? 0,
-    ...leadOf(s.id),
+    ...leadOf(lead.get(s.id)),
   });
 
   // The rail's top rows are maintained here and nowhere else: a session a
@@ -340,9 +335,10 @@ export function createServer(
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
     const active = activeRuns();
+    const lead = leads?.() ?? new Map();
     // A closed session is out of the list only: its URL, the by-id read below
     // and search still reach it.
-    return c.json((await allSessions()).filter((s) => !flags.get(s.id)?.closed).map((s) => present(s, flags.get(s.id), active)));
+    return c.json((await allSessions()).filter((s) => !flags.get(s.id)?.closed).map((s) => present(s, flags.get(s.id), active, lead)));
   });
 
   // One session by id, the listing's filters aside: a task run's own session is
@@ -353,7 +349,7 @@ export function createServer(
     const n = nascent.get(id);
     const summary = n ? { id, ...n } : (await listSessions()).find((s) => s.id === id);
     if (!summary) return c.json({ error: `no session ${id}` }, 404);
-    return c.json(present(summary, state.flags().get(id), activeRuns()));
+    return c.json(present(summary, state.flags().get(id), activeRuns(), leads?.() ?? new Map()));
   });
 
   // What was said, across every session: the palette's Messages section. The
@@ -559,11 +555,6 @@ export function createServer(
 
   // The rail's Open block.
   app.get("/api/continuous/open", (c) => (continuous?.enabled() ? c.json(continuous.openItems()) : chainOff(c)));
-
-  // Resolved ahead of a send the client expects to rotate, so it watches the
-  // new head before the message lands there.
-  guarded(app, "POST", "/api/continuous", 400, async (c) =>
-    (continuous?.enabled() ? c.json(reached(await continuous.resolve())) : chainOff(c)));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.

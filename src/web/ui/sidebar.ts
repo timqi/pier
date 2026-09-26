@@ -31,9 +31,8 @@ export interface SessionInfo {
   channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
-  /** A feature lead's session (`pier task run --role lead`). */
-  role?: "lead";
-  /** That lead's phase: designing with the user, or building per a doc. */
+  /** A feature lead's session (`pier task run --role lead`): its phase,
+   *  designing with the user or building per a doc. */
   phase?: LeadPhase;
   /** That lead's: a run targeting its session is queued or running. */
   runLive?: true;
@@ -150,9 +149,7 @@ function markDot([cls, title]: [string, string]): HTMLElement[] {
  *  truncated title never hides it. */
 export const phaseTag = (s: SessionInfo): HTMLElement[] => {
   if (!s.phase) return [];
-  const tag = h("span", "flex-none rounded bg-neutral-100 px-1 text-[0.6875rem] font-medium leading-4 text-neutral-500", s.phase);
-  tag.title = s.phase === "design" ? "lead — designing with you" : "lead — building per the design";
-  return [tag];
+  return tag(s.phase, s.phase === "design" ? "lead — designing with you" : "lead — building per the design");
 };
 
 /** A worker's session is never a row, so its run's state picks the mark. */
@@ -228,7 +225,7 @@ const renderKey = (): string =>
 /** No run of its queued or running, no subagent, no turn streaming: what is
  *  left waits on the user, and `/status` and search reach it. */
 const leadFinished = (s: SessionInfo): boolean =>
-  s.role === "lead" && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0;
+  s.phase !== undefined && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0;
 
 /** Switch on, the rail below the conversation: the palette's Running set in
  *  rail order, less the conversation's own sessions, which its row stands for,

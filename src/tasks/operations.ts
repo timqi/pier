@@ -4,7 +4,7 @@
 // who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
-import { isModelTier, type ModelRef } from "../core/types.js";
+import { isModelTier, LEDGER_WINDOW_MS, type ModelRef } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -159,8 +159,6 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[]): GroupSummary => d
 });
 
 const CANCEL_WAIT_MS = 2000;
-/** `pier task runs`: in flight, plus what finished in the last day. */
-const RUNS_WINDOW_MS = 24 * 60 * 60_000;
 
 /** The run once terminal, or as it stands after `ms`. */
 function cancelledOrCurrent(host: TaskService, id: string, ms: number): Promise<TaskRun> {
@@ -203,7 +201,7 @@ export async function handleTask(
   };
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
-  if (input.operation === "runs") return host.ledger(launchers(), Date.now() - RUNS_WINDOW_MS);
+  if (input.operation === "runs") return host.ledger(launchers(), Date.now() - LEDGER_WINDOW_MS);
   if (input.operation === "save") {
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
@@ -338,26 +336,26 @@ function nameFrom(text: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
 
-/** `launch.model` by name (docs/design/09-tasks-cli.md §Models): the pins it
- *  names, first choice first. Anything but a tier, one pin or an unpinned
+/** `launch.model` by name (docs/design/09-tasks-cli.md §Models): the one pin
+ *  it names, a tier its first. Anything but a tier, one pin or an unpinned
  *  `provider/id` is refused with the lines to pick from, so the agent never
  *  guesses an id. A tier is never a substring: "cheap" matching an id would
  *  pick a pin the operator did not assign. */
-function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string }[] {
+function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
   const pick = (pin: MenuEntry) => ({ model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking });
   if (isModelTier(needle)) {
-    const pins = menu.filter((p) => p.tier === needle);
-    if (pins.length) return pins.map(pick);
+    const pin = menu.find((p) => p.tier === needle);
+    if (pin) return pick(pin);
     throw new Error(`model "${name}": tier ${needle} is unassigned — the operator's menu:\n${menuLines(menu)}`);
   }
   const exact = menu.filter((pin) => full(pin).toLowerCase() === needle);
   const hits = exact.length ? exact : menu.filter((pin) => full(pin).toLowerCase().includes(needle));
   // One model pinned at several levels is still one model: its first row, as with a tier.
-  if (hits.length && hits.every((pin) => full(pin) === full(hits[0]!))) return [pick(hits[0]!)];
+  if (hits.length && hits.every((pin) => full(pin) === full(hits[0]!))) return pick(hits[0]!);
   const slash = name.indexOf("/");
-  if (!hits.length && slash > 0 && slash < name.length - 1) return [{ model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } }];
+  if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
   throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${menuLines(hits.length ? hits : menu)}`);
 }
 
@@ -394,15 +392,9 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
   if (draft.name === undefined && typeof label === "string") draft = { ...draft, name: nameFrom(label) };
   const launch = record(action?.launch);
   if (typeof launch?.model === "string") {
-    const [first, ...rest] = resolveModel(launch.model, await menu());
-    // A pin's level only where the caller named none; the launch falls back to it.
-    const level = (pin: { thinking?: string }) => launch.thinking === undefined && pin.thinking ? { thinking: pin.thinking } : {};
-    const resolved = {
-      ...launch,
-      model: first!.model,
-      ...level(first!),
-      ...(rest.length ? { fallbacks: rest.map((pin) => ({ model: pin.model, ...level(pin) })) } : {}),
-    };
+    const { model, thinking } = resolveModel(launch.model, await menu());
+    // A pin's level only where the caller named none.
+    const resolved = { ...launch, model, ...(launch.thinking === undefined && thinking ? { thinking } : {}) };
     draft = { ...draft, action: { ...record(draft.action), launch: resolved } };
   }
   return draft;

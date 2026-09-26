@@ -116,14 +116,6 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
   const launch: AgentLaunchPolicy = {};
   if (value.model !== undefined) launch.model = parseModel(value.model);
   if (value.thinking !== undefined) launch.thinking = parseThinking(value.thinking);
-  if (value.fallbacks !== undefined) {
-    if (!launch.model || !Array.isArray(value.fallbacks)) throw new Error("agent fallbacks must be a list beside a model");
-    launch.fallbacks = value.fallbacks.map((raw) => {
-      const entry = record(raw);
-      if (!entry) throw new Error("agent fallback must be an object");
-      return { model: parseModel(entry.model), ...(entry.thinking !== undefined ? { thinking: parseThinking(entry.thinking) } : {}) };
-    });
-  }
   if (value.role !== undefined) {
     if (value.role !== "lead") throw new Error("agent role must be lead");
     launch.role = "lead";

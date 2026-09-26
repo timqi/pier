@@ -4,19 +4,15 @@ The contract for one continuous conversation per instance, in front of a
 dispatcher session that routes work to task-run children: a trial behind the
 instance switch `continuous` (`settings.ts`, Settings → Instance), default off.
 Behaviour not named here is [03](03-web-workbench.md)'s,
-[04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s.
-
-- Built: Phase 1 (the web conversation), Phase 2 (the feature lead), §Open
-  items with `/status` and its In progress rows, the chat commands of [open
-  items](continuous-open-items.md).
-- Not built: Phase 3 (§IM), §Not built, [open items §IM](continuous-open-items.md#im).
+[04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s; what is not built is
+§Not built.
 
 ## Roles
 
-The **main session** (dispatcher) answers, remembers and launches work, never
-edits code; real work, multi-step research included, is a task-run child, one `wt` worktree per feature, and
-a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
-`agent/roles.ts`). Callbacks stay the only delivery.
+The behavioural contract of each role is `agent/roles.ts` (`DISPATCHER`,
+`LEAD`); this section holds what code enforces. The **main session**
+(dispatcher) answers, remembers and launches work; real work is a task-run
+child, and callbacks are the only delivery.
 
 | Role | Session | Delegates |
 | --- | --- | --- |
@@ -28,33 +24,17 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
   on or off (`createdRole`, `TaskStore.roleOf`); the gate is
   [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk; its session is in the rail's In progress while a
-  run targeting it is queued or running, its subagents are in flight or a turn
-  streams; once all are finished it leaves, `/status` and search still reach it.
-- The user designs with the lead in its session, main not in that path; only
-  the user finalizes: the lead asks (a `[Finalize design]` button) and writes
-  `Design final: <absolute path>` once they confirm, which has main launch a
-  new build lead on that doc, its prompt opening `Build per ` (`BUILD_PROMPT`),
-  which launches and integrates workers; main gets milestones only.
-- Every run main or a lead launches is `--name`d with a few words that hit its
-  intent; the name is the session's title. A lead's rail row carries its phase,
-  `design` or `build` (`TaskStore.leadPhaseOf`), in English whatever the title's language.
-- Before the first tool call on a message main decides: answer from context,
-  or dispatch; one command may answer, a second means a worker.
-- A callback writes no note; a note records a decision or a fact the ledger
-  does not hold.
-- Main's reply to a callback says what it means and what is next, never
-  repeats it.
-- Models by tier: the dispatcher names `--model hardest|balanced|cheap`, the
-  operator assigns the tiers on the menu ([09 §Models](09-tasks-cli.md#models)),
-  a lead is `hardest --thinking high`; no model id appears in a prompt or here.
-  A tier follows the change's difficulty, not the task's kind: a review takes
-  the builder's tier, `hardest` only for a seam diff or a builder-reported risk
-  or unverified part; a model the user names overrides both ([pier-tasks §Model
-  choice](../../skills/pier-tasks/SKILL.md#model-choice)).
-- Every delegated run's preamble (`tasks/agent.ts`) asks for the conclusion and
-  the paths it rests on, no process; a deliverable longer than a screen goes
-  to a file the result names.
+  (`LEAD`), never on disk; when its session shows in the rail is
+  [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).
+- A lead's run whose result carries a `Design final: <absolute path>` line
+  owes main a callback (§Milestones); main launches a new build lead on that
+  doc, its prompt opening `Build per ` (`BUILD_PROMPT`).
+- A run's `--name` is its session's title; a lead's rail row carries its
+  phase, `design` or `build` (`TaskStore.leads`, `build` when the prompt
+  opens with `BUILD_PROMPT`).
+- Models are the tiers of [pier-tasks §Model
+  choice](../../skills/pier-tasks/SKILL.md#model-choice); a lead is `hardest`,
+  `--thinking high` to design and `medium` to build.
 
 ### Milestones
 
@@ -143,8 +123,26 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the web card and the rail's In progress rows — only running work: a live run with no session row; an item waiting on the user, and a finished lead's session, are `/status`'s alone ([03](03-web-workbench.md),
-  `GET /api/continuous/open`).
+- Surfaces: the `/status` card and the rail's In progress rows
+  (`GET /api/continuous/open`), [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).
+
+## Chat commands
+
+The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
+input, mode `append`, no turn); an unknown `/word` is a message, never an
+error: the composer is not a shell.
+
+| Command | Does | Card |
+| --- | --- | --- |
+| `/new` | rotates now, reason `new` (the idle seed, the divider names it); a head the send already rotated for its own reason is not rotated twice | the new head's seed card is the answer; a streaming head refuses with the send's 409, `the conversation is replying — /stop first`, shown as the composer's error row |
+| `/stop` | aborts the head's running turn (`AgentSession.abort`), children untouched | `stopped` · `nothing running` |
+
+- The table is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
+  composer's completion shows; `chatCommand` (`core/chain.ts`), the transcript
+  rebuild (`agent/events.ts`) and the completion
+  ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)) all read it.
+- Tests: `core/chain.test.ts` (`/new`, `/stop`), `web/server.test.ts` (the
+  409), `web/ui/composer.test.ts` (the completion).
 
 ## Run ledger
 
@@ -158,50 +156,37 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
 ## Storage
 
-- `main_chain` (`db.ts` migration 28): one row per session, `started_at`,
-  `reason`; the head is the newest, the transcripts are the record.
-- `open_items` (migration 31): `problem` the key, `stage`, `run_ids` a JSON
-  array, `updated_at` the order; Pier's store, never MEMORY.md.
+The tables are `main_chain` and `open_items` in `db.ts`.
+
+- The head is the newest `main_chain` row; the transcripts are the record.
+- `open_items` is Pier's store of the open items, never MEMORY.md.
 - Surfaces reach the conversation through `MainChain`, which dispatches to the
   head's own `web:<id>` key; the router knows nothing of the chain.
 
 ## Web
 
-The routes (`/api/continuous*`), the rail and the pane are
-[03](03-web-workbench.md)'s. A bare address, `#/conversation` (its one address)
-or any chain member opens the conversation at its head; earlier members page in read-only, read off disk
-and never opened (`AgentFactory.readHistory`); no paging within a session; the
-divider between members names the rotation's reason (`DIVIDER`,
-`web/ui/main.ts`). Children show as Background Run rows opening their sessions.
-`/status` in the composer answers with §Open items' text as a card, no model
-call; the rail's In progress shows what of them is running or queued. `/new` and `/stop`, and the
-composer's completion of the three, are
-[open items §Chat commands](continuous-open-items.md#chat-commands).
-
-## IM
-
-Phase 3, not built: a platform-level switch, effective only while the
-instance switch is on; group chats never change.
-
-| DM inbound (switch on) | Goes to | Reply posts |
-| --- | --- | --- |
-| top-level message, or a reply in an unbound thread | main session | the DM's main flow |
-| reply in a bound thread (a card's, a handoff's) | that session | the thread |
-| `/status` (Slack: `status`) | answered from the ledger: `<name> · <state> · <age> · <thread link>` | the main flow |
-
-- A run reporting its session posts a card (`<task name> · <state>`, cwd, web
-  link) as a thread root bound to the child, edited in place on each state
-  change; the settled callback is one dispatcher line in the main flow.
-- Gaps: a chat-level DM id in both adapters; replies to more than one
-  attached chat; the card root and its edit in `handoff.ts`.
+The routes (`/api/continuous*`), the rail, the pane and its composer are
+[03](03-web-workbench.md)'s. An earlier member is read off disk, never opened.
 
 ## Not built
 
-- A callback to a cold head (>1h) deferred to the next seed.
-- A rotation on a callback to a full head.
+- Phase 3, the IM DM: a platform-level switch, effective only while the
+  instance switch is on, sends a DM's top-level messages and unbound-thread
+  replies to the main session (answers in the DM's main flow), a bound
+  thread's replies to its session, and the chat commands bare on Slack
+  (`status`, as `stop` and `settings` are) to one message in the main flow;
+  group chats never change.
+- With it, a run reporting its session posts a card (`<task name> · <state>`,
+  cwd, web link) as a thread root bound to the child, edited in place; it
+  needs a chat-level DM id in both adapters, replies to more than one attached
+  chat, and the card root and its edit in `handoff.ts`.
+- A callback to a cold head (>1h) deferred to the next seed; a rotation on a
+  callback to a full head.
 - A lead keeping the 1h cache TTL while its workers run.
 - The seed capped near 8K.
 - `pier search <q>` over the CLI socket (the index is `GET /api/search` only).
+- Out of this design: workers nested under their lead in In progress (the
+  text's `workers` counts are that), a stage derived from git, a done list.
 
 ## Acceptance
 
@@ -214,3 +199,6 @@ instance switch is on; group chats never change.
 - From the heads' transcript usage: main averages ≤ 2 model calls per user
   message; uncached input stays under 2% of input; no head compacts; `full`
   rotations lose nothing the user has to repeat.
+- After a day of use, `/status` names every problem in flight or waiting on
+  the user, in their words, with a stage matching the transcript and no
+  backlog; a stale stage is fixed in `DISPATCHER`, never in the view.

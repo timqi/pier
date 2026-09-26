@@ -202,14 +202,6 @@ describe("the continuous conversation's chain", () => {
     await head.abort();
   });
 
-  it("resolves the head ahead of a send, rotating when due and dispatching nothing", async () => {
-    const r = rig();
-    expect(await r.chain.resolve()).toEqual({ sessionId: "m1", rotated: "first" });
-    expect(r.sessions.get("m1")!.prompts).toEqual([]);
-    expect(await r.say("then this")).toEqual({ sessionId: "m1" });
-    expect(r.created).toHaveLength(1);
-  });
-
   it("rotates once when two messages race an idle head", async () => {
     const r = rig();
     const [a, b] = await Promise.all([r.say("one"), r.say("two")]);
@@ -294,7 +286,7 @@ describe("the open items", () => {
     expect(r.ledger[0]!.since).toBe(now - 86_400_000);
     expect(renderOpenItems(open, now)).toBe([
       "Open",
-      "- the problem · run r-named failed <1m ago",
+      "- the problem · run r-named failed just now",
       "Not on the list",
       "- Build it — running 5m",
       "- Review src/auth — failed 2h ago",

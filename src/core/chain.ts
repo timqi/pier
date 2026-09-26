@@ -9,9 +9,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import type { EventHub } from "./hub.js";
-import { openItemMarkers } from "./reply.js";
+import { agoLabel, openItemMarkers, relTime } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand, NOT_IN_LEDGER } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand, LEDGER_WINDOW_MS, NOT_IN_LEDGER, TASK_RUN_STATES } from "./types.js";
 import type {
   AgentFactory, AgentRole, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItems,
   OpenRun, TaskRunState,
@@ -20,8 +20,6 @@ import type {
 const log = logger("core");
 
 const EXCHANGES = 3;
-/** The `pier task runs` window: what the open items join against and call recent. */
-const WINDOW_MS = 24 * 60 * 60_000;
 
 export interface ChainDeps {
   factory: AgentFactory;
@@ -75,21 +73,12 @@ function chatCommand(text: string): ChatCommand | undefined {
   return draft.startsWith("/") && isChatCommand(word) ? word : undefined;
 }
 
-const STATES: TaskRunState[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"];
-
-function age(ms: number): string {
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return "<1m";
-  if (mins < 60) return `${String(mins)}m`;
-  return mins < 1440 ? `${String(Math.floor(mins / 60))}h` : `${String(Math.floor(mins / 1440))}d`;
-}
-
 const runStatus = (r: LedgerRun, now: number): string =>
-  r.finishedAt === null ? `${r.state} ${age(now - r.queuedAt)}` : `${r.state} ${age(now - r.finishedAt)} ago`;
+  r.finishedAt === null ? `${r.state} ${relTime(r.queuedAt, now)}` : `${r.state} ${agoLabel(r.finishedAt, now)}`;
 
 function workersText(workers: Record<TaskRunState, number> | undefined): string {
   if (!workers) return "";
-  const counts = STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`);
+  const counts = TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`);
   return ` · workers: ${counts.join(", ") || "none"}`;
 }
 
@@ -167,14 +156,14 @@ export class MainChain {
   }
 
   openItems(): OpenItems {
-    const since = this.now() - WINDOW_MS;
+    const since = this.now() - LEDGER_WINDOW_MS;
     const ids = this.members().map((m) => m.sessionId);
     const runs = ids.length ? this.deps.ledger(ids, since) : [];
     const byId = new Map(runs.map((r) => [r.runId, r]));
     const named = new Set<string>();
     const withWorkers = (r: LedgerRun): OpenRun => {
       if (!r.targetSessionId || this.deps.roleOf(r.targetSessionId) !== "lead") return r;
-      const workers = Object.fromEntries(STATES.map((s) => [s, 0])) as Record<TaskRunState, number>;
+      const workers = Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>;
       for (const w of this.deps.ledger([r.targetSessionId], since)) {
         if (w.state in workers) workers[w.state as TaskRunState] += 1;
       }
@@ -221,12 +210,6 @@ export class MainChain {
         .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes
       : this.db.prepare("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes), 0));
     if (changes > 0) this.deps.hub.emitWorkspace({ type: "open-items-changed" });
-  }
-
-  /** The head a message sent now would reach, rotated first when due — so a
-   *  surface can be watching the new head before its first message fails there. */
-  resolve(): Promise<{ sessionId: string; rotated?: ChainReason }> {
-    return this.serial(async () => {});
   }
 
   /** `then` may rotate again and return the head it made; the caller's answer is that one. */

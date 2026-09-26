@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { agoLabel as agoAt, relTime as ageAt } from "../../core/reply.js";
 
 /** Repaint budget for anything painted from a stream — the reply text
  *  (ui/chat.ts) and the thinking row (ui/turn-activity.ts). Text arrives far
@@ -16,21 +17,10 @@ export const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
-/** Compact age of a timestamp ("now", "12m", "3h", "2d"). Shared so the
- *  sidebar and the Console views age things the same way. */
-export function relTime(ts: number): string {
-  const mins = Math.round((Date.now() - ts) / 60_000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h`;
-  return `${Math.round(mins / 1440)}d`;
-}
+/** `core/reply.ts`'s compact age, as of now. */
+export const relTime = (ts: number): string => ageAt(ts, Date.now());
 
-/** The age as it reads *beside* a wall clock, where "now" would be a fragment. */
-export const agoLabel = (ts: number): string => {
-  const age = relTime(ts);
-  return age === "now" ? "just now" : `${age} ago`;
-};
+export const agoLabel = (ts: number): string => agoAt(ts, Date.now());
 
 export function h(tag: string, cls: string, ...children: (Node | string)[]): HTMLElement {
   const node = document.createElement(tag);

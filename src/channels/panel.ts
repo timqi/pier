@@ -7,7 +7,7 @@
 
 import { sessionLabel, splitSpeaker } from "../core/identity.js";
 import { splitInboundFiles } from "../core/inbound-file.js";
-import { compact, cut, splitReply, thinkingLabel } from "../core/reply.js";
+import { compact, cut, relTime, splitReply, thinkingLabel } from "../core/reply.js";
 import {
   type ConversationKey,
   isThinkingLevel,
@@ -105,15 +105,6 @@ const excerpt = (text: string, role: "user" | "assistant"): string => {
 };
 
 const shortTitle = (s: SessionSummary): string => cut(sessionLabel(s), TITLE_CHARS);
-
-/** Compact age, as the web sidebar spells it ("now", "12m", "3h", "2d"). */
-const age = (ts: number, now: number): string => {
-  const mins = Math.round((now - ts) / 60_000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${String(mins)}m`;
-  if (mins < 1440) return `${String(Math.round(mins / 60))}h`;
-  return `${String(Math.round(mins / 1440))}d`;
-};
 
 /** Page `page` of `items`, clamped: a stale Next past the end lands on the last page. */
 const paged = <T>(items: T[], page: number): { at: number; pages: number; slice: T[]; from: number } => {
@@ -417,7 +408,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
           ? slice.map((s, i) =>
             `${String(from + i + 1)}. ${this.esc(shortTitle(s))} · ${
               this.code(shortDir(s.cwd))
-            } · ${age(s.modified ?? s.createdAt, now)}`)
+            } · ${relTime(s.modified ?? s.createdAt, now)}`)
           : [unavailable ?? "No unbound sessions."],
       }],
       picks: slice.map((s, i) => btn(`${String(from + i + 1)} ${shortTitle(s)}`, `session:${String(from + i)}`)),

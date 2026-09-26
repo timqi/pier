@@ -90,6 +90,10 @@ describe("a feature lead", () => {
     const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
     expect(store.leadPhaseOf("main")).toBeUndefined();
+    expect(store.leads()).toEqual(new Map([
+      [run.targetSessionId!, { phase: "design", runLive: false }],
+      [build.targetSessionId!, { phase: "build", runLive: false }],
+    ]));
     await expect(service.handle({ operation: "run", prompt: "x", launch: { role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
   });
 
@@ -281,6 +285,33 @@ describe("a feature lead", () => {
     expect(broken.store.getRun(failed.id)!.state).toBe("failed");
     expect(broken.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("provider down")]);
     broken.service.stop();
+  });
+
+  // The session's creator fixes the role: a follow-up from main carries no launch config of its own.
+  it("settles main's --session and --run follow-ups on a design lead as the lead's: a plain turn owes nothing, Design final: and a failure call back", async () => {
+    const paths = {
+      session: { operation: "run", task: { action: { type: "agent", session: { mode: "reuse", sessionId: "lead" }, prompt: "what now?" } } },
+      run: { operation: "message", run_id: "lead-run", message: "what now?" },
+    };
+    for (const [path, request] of Object.entries(paths)) {
+      for (const reply of [{ reply: "lead says done" }, { reply: "Design final: /repo/docs/design.md" }, { error: "provider down" }]) {
+        const { service, sessions, store, leadRan } = rig();
+        await leadRan();
+        sessions.set("lead", fakeSession("lead", reply));
+        const receipt = await service.handle(request, "main") as { runId?: string; run?: { runId: string } };
+        const run = await service.waitForRun(receipt.runId ?? receipt.run!.runId);
+        expect(run, path).toMatchObject({ targetSessionId: "lead", callbackSessionId: "main" });
+        if ("reply" in reply && reply.reply === "lead says done") {
+          expect(store.getRun(run.id), path).toMatchObject({ state: "succeeded", callbackState: null, callbackError: LEAD_TURN });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          expect(sessions.get("main")!.systemInputs, path).toEqual([]);
+        } else {
+          await vi.waitFor(() => expect(store.getRun(run.id)!.callbackState, path).toBe("delivered"));
+          expect(sessions.get("main")!.systemInputs.map((i) => i.text), path).toEqual([expect.stringContaining("reply" in reply ? "Design final:" : "provider down")]);
+        }
+        service.stop();
+      }
+    }
   });
 
   it("holds a build lead's turn back while a worker's result is still coming, and reports the wave once", async () => {

@@ -323,8 +323,7 @@ function setup(
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
     parkedMessages: (id) => tasks.parkedMessages(id),
     taskSessions: () => tasks.taskSessions(),
-    leadPhaseOf: (id) => tasks.store.leadPhaseOf(id),
-    runLiveFor: (id) => tasks.store.findActiveRunForTarget(id) !== undefined,
+    leads: () => tasks.store.leads(),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -432,8 +431,8 @@ describe("workbench server", () => {
   });
 
   // The rail keeps a lead in progress while a run of its is live (ui/sidebar.ts);
-  // the role is the task store's, only a lead's row says one, tagged by its phase.
-  it("marks a lead's session with its role, phase and live run", async () => {
+  // the role is the task store's, only a lead's row carries a phase.
+  it("marks a lead's session with its phase and live run", async () => {
     const { app, db, factory, tasks } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
@@ -456,8 +455,8 @@ describe("workbench server", () => {
     await lead("build-run", "builder", "Build per /tmp/design.md: go", true);
     expect(await (await app.request("/api/sessions")).json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 1, channel: "web" },
-      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "design" },
-      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "build", runLive: true },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design" },
+      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "build", runLive: true },
     ]);
   });
 
@@ -2619,7 +2618,6 @@ describe("the continuous conversation's routes", () => {
     const { app, post } = chainRig(false);
     expect((await app.request("/api/continuous")).status).toBe(404);
     expect((await post("/api/continuous/messages", { text: "hi" })).status).toBe(404);
-    expect((await post("/api/continuous", {})).status).toBe(404);
     expect((await app.request("/api/continuous/open")).status).toBe(404);
     const put = (body: unknown) => app.request("/api/settings", { method: "PUT", body: JSON.stringify(body) });
     expect((await put({ continuous: "yes" })).status).toBe(400);
@@ -2677,14 +2675,6 @@ describe("the continuous conversation's routes", () => {
     const refused = await post("/api/continuous/messages", { text: "/new" });
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({ error: "the conversation is replying \u2014 /stop first" });
-  });
-
-  it("resolves the head ahead of a send, so the send that follows lands there without rotating", async () => {
-    const { sessions, post } = chainRig();
-    const resolved = await post("/api/continuous", {});
-    expect(await resolved.json()).toEqual({ sessionId: "m1", rotated: "first" });
-    expect(sessions.get("m1")!.prompts).toEqual([]);
-    expect(await (await post("/api/continuous/messages", { text: "one" })).json()).toEqual({ sessionId: "m1" });
   });
 
   it("reads an earlier session off disk without opening it, and refuses to edit it", async () => {

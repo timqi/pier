@@ -5,7 +5,7 @@ import type { SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import { createdRole, type TaskCallback, type TaskRun } from "./types.js";
+import type { TaskCallback, TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
  *  deep link to it, and without this that costs a second call. */
@@ -32,11 +32,13 @@ export const LEAD_TURN = "a lead's turn, not a milestone";
  *  A turn that did not succeed is not a turn the user read: it calls back. */
 export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf" | "awaitsResults">): void {
   if (!run.callbackSessionId) return;
+  // The session's creator fixes its role: a `--session` or `--run` turn on a lead's session is a lead's.
   const lead = run.targetSessionId;
+  const phase = lead === null ? undefined : store.leadPhaseOf(lead);
   const milestone = (): boolean => run.context.resumePrompt?.startsWith(MILESTONE) === true ||
     (run.result?.type === "agent" && /^Design final:/m.test(run.result.text)) ||
-    (lead !== null && store.leadPhaseOf(lead) === "build" && !store.awaitsResults(lead));
-  if (createdRole(run) === "lead" && run.state === "succeeded" && !milestone()) run.callbackError = LEAD_TURN;
+    (phase === "build" && lead !== null && !store.awaitsResults(lead));
+  if (phase !== undefined && run.state === "succeeded" && !milestone()) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";
 }
 

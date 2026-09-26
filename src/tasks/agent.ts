@@ -2,7 +2,7 @@
 // before the prompt, and how many may run at once (an agent run costs a
 // model's context and someone's rate limit, so the caps are here).
 
-import { modelKey, type AgentFactory, type AgentRole, type AgentSession, type ModelRef, type ThinkingLevel } from "../core/types.js";
+import type { AgentFactory, AgentRole, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -157,17 +157,15 @@ export class AgentTaskRunner {
       : (await this.untilAborted(this.factory.find(policy.sessionId), signal))?.cwd ?? "";
     signal.throwIfAborted();
     if (!cwd) throw new Error("could not resolve child working directory");
-    const launch = await this.untilAborted(this.launchModel(run, action), signal);
-    signal.throwIfAborted();
     const opts = {
       cwd,
       // The rail's title: the caller's `--name`, else the prompt's first line.
       name: run.context.definition.name,
       // Unspecified model inherits the caller's live model, not the global
       // default; falls back to the default when the caller isn't attached.
-      model: launch.model ??
+      model: action.launch?.model ??
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
-      thinking: launch.thinking,
+      thinking: action.launch?.thinking,
       role: createdRole(run),
     };
     const opening = this.factory.create(opts).then(async (session) => {
@@ -195,20 +193,6 @@ export class AgentTaskRunner {
     const session = await this.untilAborted(opening, signal);
     signal.throwIfAborted();
     return session;
-  }
-
-  /** A tier's first pin the catalog still has, in menu order. None left: the
-   *  first, so the launch fails naming the model the operator ranked first. */
-  private async launchModel(run: TaskRun, action: AgentTaskAction): Promise<{ model?: ModelRef; thinking?: ThinkingLevel }> {
-    const launch = action.launch;
-    if (!launch?.model || !launch.fallbacks?.length) return { model: launch?.model, thinking: launch?.thinking };
-    const pins = [{ model: launch.model, thinking: launch.thinking }, ...launch.fallbacks];
-    const available = new Set((await this.factory.availableModels()).map(modelKey));
-    const index = pins.findIndex((pin) => available.has(modelKey(pin.model)));
-    if (index <= 0) return pins[0]!;
-    const pick = pins[index]!;
-    log.warn(`run ${run.id}: ${pins.slice(0, index).map((pin) => modelKey(pin.model)).join(", ")} not in the catalog; launching ${modelKey(pick.model)}`);
-    return { model: pick.model, thinking: pick.thinking ?? launch.thinking };
   }
 
   private async acquireSlot(run: TaskRun, signal: AbortSignal): Promise<void> {

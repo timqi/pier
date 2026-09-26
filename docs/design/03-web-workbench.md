@@ -11,7 +11,7 @@ surface owns its routes and is mounted beside it.
 | Route | Behavior |
 | ----- | -------- |
 | `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the rail's ordering key |
-| `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#feature-lead)), and the header that opened it from Runs names it and fills its info panel from here; 404 if unknown |
+| `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from Runs names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
@@ -20,7 +20,6 @@ surface owns its routes and is mounted beside it.
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
 | `GET /api/continuous/open` | `MainChain.openItems()`: `{items: [{problem, stage, runs}], unlisted}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
-| `POST /api/continuous` | resolve the head a send now would reach, rotating first when due: `{sessionId, rotated?}` |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text, 409 with the refusal when `/new` meets a replying head. A rotation re-lists every surface (`sessions-changed`) |
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
@@ -224,7 +223,7 @@ browser keeps no second session order.
   and `open-items-changed`.
 - One row is lit, the route's: a session row or Conversation only while the
   chat is on screen, a Console row while its view is.
-- A lead's session (`role: "lead"`) is live while `runLive` (a run targeting
+- A lead's session (it carries a `phase`) is live while `runLive` (a run targeting
   it queued or running; grey dot "lead — run queued" when nothing else marks
   it). It is in In progress only while `runLive`, its subagents or a streaming
   turn hold it — unread alone does not; finished, it is the palette's and
@@ -308,21 +307,28 @@ browser keeps no second session order.
 - **Continuous conversation**: the head's snapshot under earlier sessions
   paged in read-only (no pencil, no next-step buttons), each closed by a
   divider naming the rotation. **Earlier session**, or scrolling to the top,
-  pages one more in, keeping the reader's position, the pane as it is until
+  pages one more in whole, keeping the reader's position, the pane as it is until
   the head's snapshot is back, and keyboard focus on the pager; the trim cap
-  stands down meanwhile. Sends take the alias route; one expected to rotate
-  resolves the head first (`POST /api/continuous`), and a rotation seen on
-  `sessions-changed` moves the pane to the new head, the session just left
-  paged in above. A seed is a system input card linking the previous session;
+  stands down meanwhile. Sends take the alias route; a send whose 202 names
+  another head, or a rotation seen on `sessions-changed`, moves the pane to
+  the new head, the session just left paged in above. A seed is a system input card linking the previous session;
   a `/status` answer is a card of the same material whose every `run <id8>…`
   links that run's session, from the run → session map the answer carries in
   its origin (`sessions`), so a reloaded transcript links the same;
   an empty chain's pane says the first message starts it.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
-  IME composition (`isComposing`/229). In the continuous conversation a `/`
-  draft lists the chat commands with their lines from `CHAT_COMMANDS`
-  ([open items §Composer completion](continuous-open-items.md#composer-completion)).
+  IME composition (`isComposing`/229).
+- **Chat commands** ([10 §Chat commands](10-continuous-session.md#chat-commands)):
+  in the continuous conversation a draft that is `/` followed by a prefix of a
+  command lists the matching ones above the input, each word with its line
+  from `CHAT_COMMANDS`; the exact word hides the list and Enter sends it.
+  Anywhere else the list never opens: `/status` is a message there. The
+  textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills the draft
+  with the row's word, a pointer on a row does the same without blurring the
+  textarea, Esc closes the list until the draft changes. Rows are the
+  palette's (`.palette-row`, the `bg-indigo-50` selection), `role=listbox`/
+  `option` with `aria-selected`, 44px on touch.
 - **Queue panel**: `queue-state` snapshots with mode chips; **Send now**
   (steer), **Abort & send** (abort, fresh prompt), **Recall all** (append to the
   composer draft). Queued messages join with newlines.
@@ -397,8 +403,8 @@ browser keeps no second session order.
   change, redrawn from the server's answer; a pinned row's ∧/∨ arrows move it,
   staged like any menu edit until Save, since the stored order is the one every
   picker and `pier task --model ?` list; a row's tier select (none /
-  hardest / balanced / cheap) puts it on that tier: `--model <tier>` takes the
-  first row on it, the rows below are its fallbacks in order; Pin model offers
+  hardest / balanced / cheap) puts it on that tier: the first row on a
+  tier is what `--model <tier>` takes; Pin model offers
   the whole catalog, so one model may be pinned at several levels (each row its
   own tier), and only the same model at the same level twice is refused; a refused save
   shows the server's error, which names the row and field. Instance: Public URL, Accent (a

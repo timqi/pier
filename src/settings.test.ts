@@ -179,7 +179,7 @@ describe("parseModelMenu", () => {
     ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "hardest" }, { provider: "a", id: "y", thinking: "medium", tier: "cheap" }]);
   });
 
-  it("keeps several pins on one tier, in order: the later ones are fallbacks", () => {
+  it("keeps several pins on one tier, in order: the first is what the tier takes", () => {
     expect(
       parseModelMenu([{ provider: "a", id: "x", tier: "balanced" }, { provider: "a", id: "y", tier: "balanced" }]),
     ).toEqual([{ provider: "a", id: "x", thinking: "medium", tier: "balanced" }, { provider: "a", id: "y", thinking: "medium", tier: "balanced" }]);

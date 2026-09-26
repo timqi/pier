@@ -161,6 +161,9 @@ export type ChainReason = "first" | "idle" | "lost" | "full" | "new";
  *  interactive sessions request, past which the cache is cold anyway. */
 export const CHAIN_IDLE_MS = 60 * 60_000;
 
+/** The run ledger's recent window: what `pier task runs` lists and the open items join against. */
+export const LEDGER_WINDOW_MS = 24 * 60 * 60_000;
+
 /** How large the continuous conversation's head's context may grow before the
  *  next user message starts a new session: past it, a turn costs more than the
  *  rotation's one cache write pays back. */
@@ -173,8 +176,11 @@ export interface ChainMember {
   reason: ChainReason;
 }
 
-/** Declared here, not in tasks/, because core counts runs by state too (a lead's workers, core/chain.ts). */
-export type TaskRunState = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
+/** Declared here, not in tasks/, because core counts runs by state too (a lead's workers, core/chain.ts).
+ *  In order: the Console lists them so, and a worker count reads so. */
+export const TASK_RUN_STATES = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"] as const;
+
+export type TaskRunState = (typeof TASK_RUN_STATES)[number];
 
 /** One run of the ledger, as `pier task runs` prints it. */
 export interface LedgerRun {

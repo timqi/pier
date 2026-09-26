@@ -89,7 +89,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
       entry.thinking = thinking.value as ThinkingLevel;
       markDirty();
     };
-    // `pier task --model <tier>` resolves to the first row on the tier; later ones are its fallbacks.
+    // `pier task --model <tier>` resolves to the first row on the tier.
     const tier = select(
       [["tier: none", ""], ...MODEL_TIERS.map((t): [string, string] => [`tier: ${t}`, t])],
       entry.tier ?? "",

@@ -99,7 +99,7 @@ it("leaves the conversation's own sessions out of In progress", () => {
 
 // A lead is in progress while something of it runs; after that, seen or not, it is `/status`'s and search's.
 it("keeps a lead in progress only while a run, a subagent or a turn of it is live", () => {
-  const lead = (id: string, over: Partial<Row> = {}) => row(id, { role: "lead", ...over });
+  const lead = (id: string, over: Partial<Row> = {}) => row(id, { phase: "design", ...over });
   const rows = [
     lead("done"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
     lead("workers", { activeRuns: 1 }), lead("talking", { state: "streaming", unread: true }),
@@ -113,7 +113,7 @@ const labels = () => list().querySelectorAll("div").map((d) => d.textContent.tri
 
 it("lists the open items in progress: a worker's live run as a row, nothing that waits on you, never a lead twice", () => {
   state.chain = [member("h1")];
-  sessions = [row("h1"), row("s-lead1abcdef", { role: "lead", runLive: true })];
+  sessions = [row("h1"), row("s-lead1abcdef", { phase: "design", runLive: true })];
   state.items = {
     items: [
       { problem: "open items 视图", stage: "lead designing", runs: [
@@ -129,7 +129,7 @@ it("lists the open items in progress: a worker's live run as a row, nothing that
   const rows = list().querySelectorAll("[data-session-id]").map((el) => [el.dataset.sessionId, el.textContent.trim()]);
   expect(rows).toEqual([
     ["continuous", "Conversation"],
-    ["s-lead1abcdef", "s-lead1abcdef"],
+    ["s-lead1abcdef", "s-lead1abcdefdesign"],
     ["run:w1", "Review src/authrun"],
     ["run:q1", "Queued onerun"],
   ]);

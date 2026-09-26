@@ -34,8 +34,6 @@ export interface ComposerDeps {
   reload: (id: string) => Promise<void>;
   /** The continuous conversation is on screen: sends go to its head, whichever that is by then. */
   continuous?: () => boolean;
-  /** Before a continuous send: may move the pane to the head the send will reach. */
-  prepareHead?: () => Promise<void>;
   /** The head a continuous send landed on is not the one on screen. */
   headMoved?: () => void;
 }
@@ -452,7 +450,7 @@ let sending = false; // uploads await; a second Enter meanwhile must not double-
 export async function send(mode: "auto" | "steer", label?: string): Promise<void> {
   const typed = (label ?? input.value).trim();
   const files = label === undefined ? pendingFiles : [];
-  let id = deps.sessionId();
+  const id = deps.sessionId();
   const continuous = deps.continuous?.() === true;
   if ((!typed && files.length === 0) || (!id && !continuous)) return;
   if (label === undefined) {
@@ -486,10 +484,6 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
       markers = uploaded;
     }
     const text = [typed, ...markers].filter(Boolean).join("\n");
-    if (continuous) {
-      await deps.prepareHead?.();
-      id = deps.sessionId();
-    }
     const startsTurn = deps.sessionState() === "idle" && mode === "auto";
     if (startsTurn) deps.setState("streaming");
     else updateComposer();

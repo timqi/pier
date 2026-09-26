@@ -82,7 +82,6 @@ import {
 } from "./views.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
-import { CHAIN_IDLE_MS } from "../../core/types.js";
 import type {
   BackgroundRun,
   ChainMember,
@@ -147,8 +146,6 @@ let paging = false;
 let pagedAt = 0;
 /** What it is solving, for the rail's Open block; null while the switch is off. */
 let openItems: OpenItems | null = null;
-/** When the head last heard the user, as far as this tab knows: whether a send is likely to rotate. */
-let headSpokeAt: number | null = null;
 
 const headId = (): string | null => chain?.[0]?.sessionId ?? null;
 const inConversation = (id: string): boolean => chain?.some((m) => m.sessionId === id) ?? false;
@@ -212,20 +209,6 @@ function openContinuous(): void {
   renderHeader();
   updateComposer();
   focusInput();
-}
-
-/** A send the server will rotate is resolved first, so this tab is on the new
- *  head's stream before the message — and any failure of it — lands there.
- *  The server still decides: a send it rotates anyway is followed after. */
-async function prepareHead(): Promise<void> {
-  const head = chain?.[0];
-  const due = !head || unstarted || Date.now() - (headSpokeAt ?? head.startedAt) >= CHAIN_IDLE_MS;
-  headSpokeAt = Date.now();
-  if (!due) return;
-  const got = await getJson<{ sessionId: string }>("/api/continuous", "Could not open the conversation", { method: "POST" });
-  if (!got.ok) return void appendTurn("error", got.error);
-  await refreshSessions();
-  if (currentId !== got.value.sessionId) await followHead(got.value.sessionId);
 }
 
 /** The session just left stays in view above the new head. */
@@ -345,14 +328,15 @@ const refreshSessions = coalesce(async () => {
     loadChain(),
     loadOpenItems(),
   ]);
-  const was = continuousOpen() ? headId() : null;
+  const following = continuousOpen();
+  const was = headId();
   chain = next;
   openItems = open;
   if (!chain) unstarted = false;
   commitSessions(rows);
-  // A rotation — this tab's send or another's — moves the open conversation to the new head.
+  // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   const head = headId();
-  if (was && head && head !== was) await followHead(head);
+  if (following && head && head !== was) await followHead(head);
 });
 
 /** Focus, not just visibility: an installed workbench behind another app is
@@ -438,7 +422,6 @@ function handleEvent(e: SessionEvent): void {
       // what was typed, and a session name is not a timestamp. Only the turn
       // itself keeps the header — chat.ts renders it as the row's caption.
       const typed = splitSpeaker(e.text).text;
-      if (continuousOpen()) headSpokeAt = e.ts;
       maybeSetTitle(e.sessionId, typed); // first prompt names the session
       // Already on screen from our own optimistic render? Just reconcile.
       if (reconcileOptimisticUser(typed)) break;
@@ -532,7 +515,11 @@ function connectWorkspace(): void {
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
     const s = sessions.find((x) => x.id === e.sessionId);
-    if (!s) return;
+    // A run's session can be saved after the run-changed refetch listed sessions.
+    if (!s) {
+      void refreshSessions();
+      return;
+    }
     s.state = e.state;
     renderSessions();
   };
@@ -618,10 +605,7 @@ async function loadSession(id: string, keep = false): Promise<void> {
     return;
   }
   const snap = got.value;
-  if (continuousOpen()) {
-    renderEarlier();
-    headSpokeAt = snap.turns.reduce<number | null>((at, t) => (t.role === "user" && t.at ? t.at : at), null);
-  }
+  if (continuousOpen()) renderEarlier();
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
@@ -674,7 +658,6 @@ initComposer({
   setState,
   reload: reloadIfCurrent,
   continuous: continuousOpen,
-  prepareHead,
   // The re-list sees the rotation and moves the pane to the new head.
   headMoved: () => void refreshSessions(),
 });
