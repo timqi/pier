@@ -34,6 +34,8 @@ export interface HeaderDeps {
   closeSession: (s: SessionInfo) => void;
   /** One of the continuous conversation's sessions, which its row stands for. */
   inConversation: (id: string) => boolean;
+  /** The continuous conversation is what the pane shows. */
+  continuousOpen: () => boolean;
 }
 
 let deps: HeaderDeps;
@@ -117,7 +119,10 @@ export function renderHeader(): void {
   // Selected but not a row — a task run's own session, opened from Runs or
   // Activity — is named by its id: "no session" would be untrue of a pane
   // with a transcript in it.
-  chatTitle.textContent = s ? (s.title ?? untitled(s.cwd)) : (pending ?? deps.currentId() ?? "no session");
+  // The conversation rotates sessions and spans topics: its name is the rail's, not the head's title.
+  chatTitle.textContent = deps.continuousOpen()
+    ? "Conversation"
+    : s ? (s.title ?? untitled(s.cwd)) : (pending ?? deps.currentId() ?? "no session");
   // The title is what the panel is *about*, so it is also the way in — a click,
   // not a hover: the same gesture works on the mobile bar's title (shell.ts).
   chatTitle.classList.toggle("cursor-pointer", !!s);

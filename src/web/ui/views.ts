@@ -9,7 +9,7 @@ import { button, pageTitle, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { projectCwds } from "../../core/identity.js";
-import { orderSessions, type SessionInfo } from "./sidebar.js";
+import { orderSessions, renderSessions, type SessionInfo } from "./sidebar.js";
 import type { RunsView } from "./runs.js";
 import type { TasksView } from "./tasks.js";
 
@@ -123,6 +123,7 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
   for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === sidebarEntry(name));
+  renderSessions(); // the open session's row goes dark while a view covers it
   syncAutomation(name, arg);
   syncBar();
   void openView(name, arg, query, ++openRequest);
@@ -198,6 +199,7 @@ export function showChat(): void {
   openName = null;
   for (const view of views.values()) view.hide();
   for (const btn of consoleBtns.values()) btn.classList.remove("bg-indigo-50");
+  renderSessions();
   syncAutomation(null);
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();

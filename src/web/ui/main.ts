@@ -667,6 +667,7 @@ initSidebar({
   chain: () => chain,
   continuousOpen,
   openContinuous,
+  chatVisible: isChatVisible,
 });
 initPalette({
   sessions: () => sessions,
@@ -685,6 +686,7 @@ initHeader({
   toggleFiles,
   closeSession: (s) => void closeSession(s),
   inConversation: (id) => chain?.some((m) => m.sessionId === id) ?? false,
+  continuousOpen,
 });
 initViews({
   sessions: () => sessions,

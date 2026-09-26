@@ -49,6 +49,8 @@ export interface SidebarDeps {
   /** The continuous conversation is what the pane shows. */
   continuousOpen: () => boolean;
   openContinuous: () => void;
+  /** No Console view covers the chat: a row lights up only for the route on screen. */
+  chatVisible: () => boolean;
 }
 
 let deps: SidebarDeps;
@@ -160,7 +162,7 @@ const channelChip = (s: SessionInfo): HTMLElement[] =>
   s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
 function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis))): HTMLElement {
-  const active = s.id === deps.currentId();
+  const active = deps.chatVisible() && s.id === deps.currentId();
   const li = h(
     "li",
     `flex items-center gap-1 hover:bg-neutral-100 ${
@@ -196,7 +198,7 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 /** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}`;
+  `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}`;
 
 /** Switch on, the rail below the conversation: the palette's Running set in
  *  rail order, less the conversation's own sessions, which its row stands for. */
@@ -210,7 +212,7 @@ export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionIn
  *  other session is the palette's. */
 function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: SessionInfo[] } {
   const head = deps.sessions().find((s) => s.id === chain[0]?.sessionId);
-  const open = deps.continuousOpen();
+  const open = deps.chatVisible() && deps.continuousOpen();
   const entry = h("li", `flex items-center gap-1 hover:bg-neutral-100 ${open ? "bg-indigo-50 hover:bg-indigo-50" : ""}`);
   const button = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
     icon(MessagesSquare, "h-3.5 w-3.5 flex-none text-neutral-400"),

@@ -19,7 +19,7 @@ const member = (sessionId: string): ChainMember => ({ sessionId, startedAt: 1, r
 
 let doc: FakeDocument;
 let sidebar: typeof import("./sidebar.js");
-const state = { chain: null as ChainMember[] | null, open: false, current: null as string | null };
+const state = { chain: null as ChainMember[] | null, open: false, current: null as string | null, chat: true };
 const openContinuous = vi.fn();
 const select = vi.fn();
 let sessions: Row[] = [];
@@ -28,10 +28,11 @@ beforeEach(async () => {
   vi.resetModules();
   doc = installPage();
   sidebar = await import("./sidebar.js");
-  Object.assign(state, { chain: null, open: false, current: null });
+  Object.assign(state, { chain: null, open: false, current: null, chat: true });
   sidebar.initSidebar({
     sessions: () => sessions, currentId: () => state.current, select, sessionMenu: vi.fn(), createSession: vi.fn(),
     onTitleChanged: vi.fn(), chain: () => state.chain, continuousOpen: () => state.open, openContinuous,
+    chatVisible: () => state.chat,
   });
 });
 
@@ -65,6 +66,30 @@ it("puts the conversation first, then only what is in progress, and collapses th
   sidebar.renderSessions();
   expect(texts()).toEqual(["Conversation"]);
   expect(list().textContent).not.toContain("In progress");
+});
+
+// A Console view (Settings) covers the chat: its own row is the lit one, so no
+// session row may stay lit beside it, switch on or off.
+it("lights the open conversation or session only while the chat is on screen", () => {
+  const lit = () => list().querySelectorAll(".session-open")
+    .filter((b) => b.getAttribute("aria-current") === "page").map((b) => b.textContent.trim());
+  sessions = [row("a"), row("b")];
+  state.current = "a";
+  sidebar.renderSessions();
+  expect(lit()).toEqual(["a"]);
+  state.chat = false;
+  sidebar.renderSessions();
+  expect(lit()).toEqual([]);
+
+  state.chain = [member("a")];
+  state.open = true;
+  sidebar.renderSessions();
+  expect(lit()).toEqual([]);
+  expect(list().querySelector("li")!.classList.contains("bg-indigo-50")).toBe(false);
+  state.chat = true;
+  sidebar.renderSessions();
+  expect(lit()).toEqual(["Conversation"]);
+  expect(list().querySelector("li")!.classList.contains("bg-indigo-50")).toBe(true);
 });
 
 it("leaves the conversation's own sessions out of In progress", () => {

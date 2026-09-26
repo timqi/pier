@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("./chat.js", () => ({ turnsPane: document.querySelector("#turns") }));
 vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
 vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
-vi.mock("./sidebar.js", () => ({ orderSessions: () => ({ top: [], rest: [] }) }));
+vi.mock("./sidebar.js", () => ({ orderSessions: () => ({ top: [], rest: [] }), renderSessions: vi.fn() }));
 vi.mock("./tasks.js", () => ({ createTasksView: () => mocks.tasks }));
 vi.mock("./runs.js", () => ({ createRunsView: () => mocks.runs }));
 vi.mock("./activity.js", () => ({ createActivityView: () => mocks.activity }));
@@ -59,6 +59,14 @@ it("hosts Tasks, Runs and Activity as tabs of one Automation entry", async () =>
   expect(litRows()).toEqual(["boards"]);
   expect(shown(pane)).toBe(false);
   expect(bar()).toEqual(["Boards", false]);
+});
+// The rail lights the open session only while the chat shows, so both switches repaint it.
+it("repaints the rail when a Console view covers the chat and when the chat returns", async () => {
+  const { renderSessions } = await import("./sidebar.js");
+  views.showConsole("settings", "models"); await settled();
+  expect(renderSessions).toHaveBeenCalledOnce();
+  views.showChat();
+  expect(renderSessions).toHaveBeenCalledTimes(2);
 });
 it("round-trips run deep links with standard query filters and Back", async () => {
   views.showRuns({ taskId: "task/a?b", state: "failed" }, "run/a"); await settled();

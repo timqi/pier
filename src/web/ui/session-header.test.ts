@@ -31,6 +31,8 @@ const closeSession = vi.fn();
 
 /** What the orchestrator's list says about the selected session. */
 let current: SessionInfo | undefined;
+/** The continuous conversation is on screen. */
+let conversation = false;
 
 let header: typeof import("./session-header.js");
 let picker: typeof import("./model-picker.js");
@@ -58,6 +60,7 @@ beforeEach(async () => {
   vi.resetModules();
   installPage();
   current = undefined;
+  conversation = false;
   header = await import("./session-header.js");
   picker = await import("./model-picker.js");
   api = await import("./api.js");
@@ -70,6 +73,7 @@ beforeEach(async () => {
     toggleFiles: vi.fn(),
     closeSession,
     inConversation: (id) => id === "head",
+    continuousOpen: () => conversation,
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
     Promise.resolve(url.endsWith("/models") ? [model] : { level: "high", levels }) as never
@@ -102,6 +106,22 @@ it("reads the context against where the session compacts", async () => {
   expect(await context()).toBe("50K/100K · 50% left");
   header.setHeaderState(model, { contextWindow: 1_000_000, tokens: null, compactAt: 100_000 }, "high", null);
   expect(await context()).toBe("?/100K");
+});
+
+// The conversation rotates sessions and spans topics: the header names it as
+// the rail does, whatever the head was titled; every other session keeps its own.
+it("titles the continuous conversation Conversation, other sessions by their own title", () => {
+  const title = () => fake(document.querySelector("#chat-title")).textContent;
+  current = { ...session(0), title: "Worker展示功能" };
+  header.renderHeader();
+  expect(title()).toBe("Worker展示功能");
+  conversation = true;
+  header.renderHeader();
+  expect(title()).toBe("Conversation");
+  // Before its first session exists there is no row to title it either.
+  current = undefined;
+  header.renderHeader();
+  expect(title()).toBe("Conversation");
 });
 
 // Close sits after Rename and is handed to the orchestrator, which owns the
