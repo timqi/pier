@@ -51,7 +51,7 @@ const fakeSession = (id: string): FakeSession => sharedFake(id, {
   models: [{ provider: "anthropic", id: "claude-opus-4-5" }, { provider: "openai", id: "gpt-5.2" }],
   thinkingLevel: "medium",
   levels: ["off", "low", "medium", "high"],
-  contextUsage: { tokens: 1200, contextWindow: 200_000 },
+  contextUsage: { tokens: 1200, contextWindow: 200_000, compactAt: 183_616 },
   history: [{ role: "user", text: "hi" }, { role: "assistant", text: "hello" }],
   queue: { steering: ["s-msg"], followUp: ["f-msg"] },
 });
@@ -806,7 +806,7 @@ describe("workbench server", () => {
       epoch: expect.any(String),
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       state: "streaming",
-      context: { tokens: 1200, contextWindow: 200_000 },
+      context: { tokens: 1200, contextWindow: 200_000, compactAt: 183_616 },
       thinkingLevel: "medium",
       queue: { steering: ["s-msg"], followUp: ["f-msg"] },
       queueRecovery: [],

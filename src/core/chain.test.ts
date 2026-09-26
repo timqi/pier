@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { MainChain, type LedgerRun } from "./chain.js";
-import { CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
+import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
 import { fakeSession, type FakeSession, type FakeSessionOptions } from "./session.testkit.js";
@@ -106,7 +106,10 @@ describe("the continuous conversation's chain", () => {
   });
 
   it("carries the head's model, effort and last three exchanges into the next session, with the ledger since its start", async () => {
-    const runs: LedgerRun[] = [{ runId: "r1", name: "fix", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: 1, finishedAt: null }];
+    const runs: LedgerRun[] = [
+      { runId: "r1", name: "fix", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: 1, finishedAt: null },
+      { runId: "r2", name: "look", state: "queued", targetSessionId: null, cwd: null, queuedAt: 2, finishedAt: null },
+    ];
     const r = rig({ runs });
     const turns = [1, 2, 3, 4].flatMap((i) => [
       { role: "user" as const, text: `question ${String(i)}`, at: r.clock.now - 2 * IDLE_MS },
@@ -121,7 +124,7 @@ describe("the continuous conversation's chain", () => {
     expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
-    expect(seed.text).toContain(JSON.stringify(runs[0]));
+    expect(seed.text).toContain("started\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\n\n");
     expect(seed.text).toContain("user: question 2\n\nassistant: answer 2");
     expect(seed.text).toContain("assistant: answer 4");
     expect(seed.text).not.toContain("question 1");
@@ -148,6 +151,37 @@ describe("the continuous conversation's chain", () => {
     await Promise.resolve();
     expect(await r.say("and another thing")).toEqual({ sessionId: "h1" });
     expect(r.created).toEqual([]);
+    await head.abort();
+  });
+
+  it("rotates a head past the size ceiling, named full, carrying its last exchanges", async () => {
+    const r = rig();
+    const history = [{ role: "user" as const, text: "the plan", at: r.clock.now - 60_000 }, { role: "assistant" as const, text: "agreed" }];
+    r.existing("h1", r.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL, contextWindow: 400_000, compactAt: 100_000 } });
+    expect(await r.say("at the ceiling")).toEqual({ sessionId: "h1" });
+
+    const r2 = rig();
+    r2.existing("h1", r2.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL + 1, contextWindow: 400_000, compactAt: 100_000 } });
+    expect(await r2.say("past it")).toEqual({ sessionId: "m1", rotated: "full" });
+    const seed = r2.sessions.get("m1")!.systemInputs[0]!;
+    expect(seed.origin).toEqual({ kind: "session-seed", reason: "full", previousSessionId: "h1" });
+    expect(seed.text).toContain("the previous one reached 60K tokens");
+    expect(seed.text).toContain("## The previous session's last exchanges\n\nuser: the plan\n\nassistant: agreed");
+    expect(r2.sessions.get("m1")!.prompts[0]).toContain("past it");
+  });
+
+  it("never rotates on size when the size is unknown after a compaction, or mid-turn", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now, { contextUsage: { tokens: null, contextWindow: 400_000, compactAt: 100_000 } });
+    expect(await r.say("hi")).toEqual({ sessionId: "h1" });
+
+    const r2 = rig();
+    const head = r2.existing("h1", r2.clock.now, { hold: true, contextUsage: { tokens: 2 * FULL, contextWindow: 400_000, compactAt: 100_000 } });
+    await r2.router.ensure({ channelId: "web", conversationId: "h1" });
+    void head.prompt("long job");
+    await Promise.resolve();
+    expect(await r2.say("and another thing")).toEqual({ sessionId: "h1" });
+    expect(r2.created).toEqual([]);
     await head.abort();
   });
 

@@ -78,11 +78,25 @@ afterEach(() => vi.unstubAllGlobals());
 // Below md the chips cost the bar a line, so only the row that has to be seen
 // without opening anything keeps it (style.css reads the mark).
 it("marks the meta row urgent only once the context is near full", () => {
-  const usage = { contextWindow: 100_000, tokens: 20_000 };
+  const usage = { contextWindow: 100_000, tokens: 20_000, compactAt: 83_616 };
   header.setHeaderState(model, usage, "high", null);
   expect(meta().hasAttribute("data-urgent")).toBe(false);
   header.setHeaderState(model, { ...usage, tokens: 75_000 }, "high", null);
   expect(meta().hasAttribute("data-urgent")).toBe(true);
+});
+
+// The distance that matters is to compaction, not to a window it never reaches.
+it("reads the context against where the session compacts", async () => {
+  const context = async (): Promise<string> => {
+    header.sessionInfo(document.createElement("button"), { id: "s1", cwd: "/tmp", createdAt: 0 });
+    const panel = fake(vi.mocked((await import("./menu.js")).openPanel).mock.lastCall?.[1]);
+    const row = panel.querySelectorAll("div").find((d) => d.firstElementChild?.textContent === "Context");
+    return fake(row?.querySelector("dd")).textContent;
+  };
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 50_000, compactAt: 100_000 }, "high", null);
+  expect(await context()).toBe("50K/100K · 95% left");
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: null, compactAt: 100_000 }, "high", null);
+  expect(await context()).toBe("?/100K");
 });
 
 // A background run is the other kind of "nothing happening": the card sits far
