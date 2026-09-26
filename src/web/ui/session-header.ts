@@ -446,28 +446,30 @@ async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void>
   list.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
 }
 
-/** Same menu from the chat header and from a rail row's ⋯ button. */
+/** Same menu from the chat header and from a rail row's ⋯ button. The
+ *  conversation's sessions are not ones the user manages: no Rename, Close or
+ *  Continue in… on them. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
   const current = s.id === deps.currentId();
+  const managed = !deps.inConversation(s.id);
   openMenu(anchor, [
-    {
-      label: "Rename…",
-      onSelect: () => {
-        closeMenu();
-        void renameSession(s);
+    ...(managed ? [
+      {
+        label: "Rename…",
+        onSelect: () => {
+          closeMenu();
+          void renameSession(s);
+        },
       },
-    },
-    {
-      label: "Close",
-      // The conversation's row is drawn from its sessions; closing one would blank it.
-      ...(deps.inConversation(s.id)
-        ? { hint: "the conversation stays in the rail", disabled: true }
-        : { hint: "leaves the rail; a message reopens it" }),
-      onSelect: () => {
-        closeMenu();
-        deps.closeSession(s);
+      {
+        label: "Close",
+        hint: "leaves the rail; a message reopens it",
+        onSelect: () => {
+          closeMenu();
+          deps.closeSession(s);
+        },
       },
-    },
+    ] : []),
     {
       label: "Session info",
       onSelect: () => sessionInfo(anchor, s, () => sessionMenu(anchor, s)),
@@ -489,11 +491,11 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         deps.openFiles(current ? undefined : s.cwd);
       },
     },
-    {
+    ...(managed ? [{
       label: "Continue in Lark/Slack…",
       ...(s.channel && s.channel !== "web" ? { hint: `answers in ${s.channel}`, disabled: true } : {}),
       onSelect: () => void handoffPicker(anchor, s),
-    },
+    }] : []),
     {
       label: "Model & reasoning…",
       separatorBefore: true,

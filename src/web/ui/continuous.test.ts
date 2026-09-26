@@ -97,16 +97,18 @@ it("leaves the conversation's own sessions out of In progress", () => {
     .toEqual(["c"]);
 });
 
-// A lead is in progress while something of it runs, or while its design waits on
-// the user to finalize; after that, seen or not, it is `/status`'s and search's.
-it("keeps a lead in progress while a run, a subagent or a turn of it is live, or its design awaits you", () => {
+// Needs you = unread: a finished lead stays while unread and leaves once viewed;
+// In progress is the palette's Running set, less the chain, and nothing else.
+it("keeps a finished lead in progress while unread and drops it once viewed", () => {
   const lead = (id: string, over: Partial<Row> = {}) => row(id, { phase: "design", ...over });
   const rows = [
-    lead("done"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
+    lead("viewed"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
     lead("workers", { activeRuns: 1 }), lead("talking", { state: "streaming", unread: true }),
-    lead("awaiting", { designOpen: true }), row("built", { phase: "build" }),
+    lead("awaiting", { designOpen: true }), row("built", { phase: "build" }), row("built-unread", { phase: "build", unread: true }),
   ];
-  expect(sidebar.inProgress(rows, []).map((s) => s.id).sort()).toEqual(["awaiting", "queued", "talking", "workers"]);
+  const ids = sidebar.inProgress(rows, []).map((s) => s.id);
+  expect(ids.sort()).toEqual(["awaiting", "built-unread", "queued", "talking", "unread", "workers"]);
+  expect(ids).toEqual(rows.filter(sidebar.isLive).map((s) => s.id).sort());
 });
 
 const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>

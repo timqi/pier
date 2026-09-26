@@ -204,8 +204,8 @@ browser keeps no second session order.
   palette. All stand down under a modal.
 - **Continuous session on** (Settings → Instance): the list is the
   **Conversation** row (the head's dot), then **In progress** — the palette's
-  Running set in rail order, less the conversation's own sessions and
-  finished leads (a design waiting on the user is not finished), then the open items'
+  Running set in rail order, less the conversation's own sessions — one set,
+  so the rail and ⌘K never disagree — then the open items'
   ([10 §Open items](10-continuous-session.md#open-items)) live (running,
   queued) runs no session row stands for, as rows of the same shape:
   `<name>` + `run` tag + the run state's dot, opening the run's session (the
@@ -226,11 +226,10 @@ browser keeps no second session order.
 - A lead's session (it carries a `phase`) is live while `runLive` (a run targeting
   it queued or running; grey dot "lead — run queued" when nothing else marks
   it) or `designOpen` (a design lead no run of which has reported
-  `Design final:`; grey dot "design — waiting for you to finalize"). It is in
-  In progress only while `runLive`, `designOpen`, its subagents or a streaming
-  turn hold it — unread alone does not; a design lead leaves once final or
-  closed, a build lead once finished, then it is the palette's and `/status`'s.
-  Its `phase` (`design` | `build`) is a trailing tag before the dot, in the
+  `Design final:`; grey dot "design — waiting for you to finalize").
+  Needs you = unread: a finished lead stays in In progress while its last turn
+  is unread (amber dot) and leaves once viewed, then it is the palette's Recent
+  and `/status`'s. Its `phase` (`design` | `build`) is a trailing tag before the dot, in the
   rail and the palette.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
@@ -271,9 +270,10 @@ browser keeps no second session order.
   its text field. An open menu owns those keys: ⌘K/⌃K stands down. ⌘N/⌘P are
   never bound.
 - Session menu: Rename / Close / Session info, New session here / Browse files /
-  Continue in Lark/Slack…, Model & reasoning. Close takes the row off the rail
-  at once (back if the write fails), leaves an open pane open, and is disabled
-  on the continuous conversation's sessions; a message to the session reopens it. Model loading is immediate; a
+  Continue in Lark/Slack…, Model & reasoning. On the continuous conversation's
+  sessions Rename, Close and Continue in… are absent — not a session the user
+  manages. Close takes the row off the rail at once (back if the write fails),
+  leaves an open pane open; a message to the session reopens it. Model loading is immediate; a
   cancelled load cannot reopen the panel. A disabled row stays visible with
   its hint and is skipped by the arrow keys. Manual compaction is API-only.
 - Session info: directory/ID (copy buttons), model/context, time groups; a

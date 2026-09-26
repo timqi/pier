@@ -224,17 +224,12 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 const renderKey = (): string =>
   `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
-/** No run of its queued or running, no subagent, no turn streaming, no design
- *  left for the user to finalize: `/status` and search reach it. */
-const leadFinished = (s: SessionInfo): boolean =>
-  s.phase !== undefined && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0 && s.designOpen !== true;
-
 /** Switch on, the rail below the conversation: the palette's Running set in
- *  rail order, less the conversation's own sessions, which its row stands for,
- *  and finished leads; a design waiting on the user stays until it is final or closed. */
+ *  rail order, less the conversation's own sessions, which its row stands for;
+ *  a finished lead stays while unread and leaves once viewed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
-  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id) && !leadFinished(s)));
+  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id)));
   return [...top, ...rest];
 }
 

@@ -430,7 +430,7 @@ describe("workbench server", () => {
     expect((await app.request("/api/sessions/gone")).status).toBe(404);
   });
 
-  // The rail keeps a lead in progress while a run of its is live (ui/sidebar.ts);
+  // A lead's live run keeps it in the rail's In progress (ui/sidebar.ts `isLive`);
   // the role is the task store's, only a lead's row carries a phase.
   it("marks a lead's session with its phase and live run", async () => {
     const { app, db, factory, tasks } = setup();

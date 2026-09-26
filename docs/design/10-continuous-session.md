@@ -179,6 +179,11 @@ The tables are `main_chain` and `open_items` in `db.ts`.
 The routes (`/api/continuous*`), the rail, the pane and its composer are
 [03](03-web-workbench.md)'s. An earlier member is read off disk, never opened.
 
+- In progress is the palette's Running set less the conversation's sessions;
+  needs you = unread: a finished lead stays while unread and leaves once viewed.
+- The conversation's ⋯ menu is Session info, New session here, Browse files,
+  Model & reasoning; no Rename, Close or Continue in….
+
 ## Not built
 
 - Phase 3, the IM DM: a platform-level switch, effective only while the

@@ -125,8 +125,9 @@ it("titles the continuous conversation Conversation, other sessions by their own
 });
 
 // Close sits after Rename and is handed to the orchestrator, which owns the
-// list it optimistically edits — except on the conversation's own sessions.
-it("offers Close after Rename, disabled on the continuous conversation", async () => {
+// list it optimistically edits. The conversation's sessions are not managed:
+// no Rename, Close or Continue in… on them.
+it("offers Close after Rename, and neither nor Continue in… on the continuous conversation", async () => {
   const { openMenu } = await import("./menu.js");
   const items = (s: SessionInfo) => {
     header.sessionMenu(document.createElement("button"), s);
@@ -138,7 +139,9 @@ it("offers Close after Rename, disabled on the continuous conversation", async (
   expect(own[1]!.disabled).toBeUndefined();
   own[1]!.onSelect();
   expect(closeSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
-  expect(items({ ...session(0), id: "head" })[1]).toMatchObject({ disabled: true });
+  expect(own.map((i) => i.label)).toContain("Continue in Lark/Slack…");
+  expect(items({ ...session(0), id: "head" }).map((i) => i.label))
+    .toEqual(["Session info", "New session here", "Browse files", "Model & reasoning…"]);
 });
 
 // A background run is the other kind of "nothing happening": the card sits far
