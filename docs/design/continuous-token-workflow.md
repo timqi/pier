@@ -1,6 +1,6 @@
 # Continuous conversation — token cost and workflow
 
-Design for one build: what changes in the continuous conversation
+Final, 2026-09-26. Design for one build: what changes in the continuous conversation
 ([10](10-continuous-session.md)) so a day of use costs fewer tokens and fewer
 round trips. The build folds every rule below into 10, `roles.ts` and the
 `pier-tasks` skill, then deletes this file.
@@ -81,8 +81,10 @@ thinking follows the pin:
 - The lead line becomes `--model hardest --thinking high`.
 - Never `--model ?` per message: a word that matches no pin, or two, is a
   refusal that prints the menu — the dispatcher picks from that.
-- One pin per tier word: `resolveModel` keeps refusing on several hits, so a
-  second balanced pin needs a note of its own (`gpt reviewer`).
+- One pin per tier word: `resolveModel` keeps refusing on several hits.
+  Decided: `hardest` = fable, `balanced` = opus-5-5, `cheap` = gpt-6-luna;
+  gpt-6-astra keeps a note of its own (`gpt reviewer`), the operator writes
+  the notes in Settings → Models.
 - Main runs on the instance default model; 10 §Roles says to pin it balanced.
 - `pier-tasks` §Model choice names the three words.
 
