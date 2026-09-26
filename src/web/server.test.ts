@@ -96,7 +96,7 @@ const SETTINGS_JSON = {
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
-  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], roleOf: () => undefined, designs: () => [], hub });
+  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub });
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
@@ -2596,7 +2596,7 @@ describe("the continuous conversation's routes", () => {
   it("answers the open items, runs joined through the ledger", async () => {
     const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
     const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "queued", targetSessionId: null };
-    const { app, db, restarted } = chainRig(true, () => [live, stray]);
+    const { app, db, restarted } = chainRig(() => [live, stray]);
     restarted();
     db.prepare("INSERT INTO open_items VALUES ('open items', 'worker running', '[\"r1\"]', 1)").run();
     const res = await app.request("/api/continuous/open");
