@@ -285,8 +285,15 @@ describe("session loads", () => {
 
     // Inside a turn the error is part of it; the turn's own state events settle it.
     h.composer.setState("streaming");
-    event(2, { type: "turn-start" });
-    event(3, { type: "error", message: "tool failed" });
+    event(2, { type: "state", state: "streaming" });
+    event(3, { type: "turn-start" });
+    event(4, { type: "error", message: "tool failed" });
+    expect(h.composer.sessionState()).toBe("streaming");
+
+    // Between two turns of one run (a drained follow-up) no turn is open, but
+    // the server said streaming: an error there takes nothing back.
+    event(5, { type: "turn-end", text: "done" });
+    event(6, { type: "error", message: "session title: no auth" });
     expect(h.composer.sessionState()).toBe("streaming");
   });
 });

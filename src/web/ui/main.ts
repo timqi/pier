@@ -116,6 +116,9 @@ let currentState: SessionState = "idle";
 let source: EventSource | null = null;
 let lastSeq = 0;
 let turnOpen = false;
+/** Streaming set by this tab's own send, no state event since: the one guess
+ *  an error may take back — after a server state event, only another one can. */
+let optimistic = false;
 
 // --- the continuous conversation (docs/design/10-continuous-session.md) -------------
 
@@ -328,6 +331,7 @@ function handleEvent(e: SessionEvent): void {
   switch (e.type) {
     case "turn-start":
       turnOpen = true;
+      optimistic = false;
       break;
     case "system-input":
       finalizeStreaming();
@@ -391,9 +395,13 @@ function handleEvent(e: SessionEvent): void {
       appendTurn("error", e.message);
       // A prompt Pi refused before its turn began (no model, no auth) has no
       // state event to follow: the optimistic streaming would never clear.
-      if (!turnOpen && currentState === "streaming") setState("idle");
+      if (optimistic) {
+        optimistic = false;
+        setState("idle");
+      }
       break;
     case "state":
+      optimistic = false;
       if (e.state === "idle" && turnOpen) {
         // idle without a turn-end: the run was aborted
         turnOpen = false;
@@ -490,6 +498,7 @@ function resetPane(): void {
   setSkills([]);
   resetHeaderState();
   turnOpen = false;
+  optimistic = false;
   clearOptimistic();
   lastSeq = 0;
 }
@@ -545,6 +554,12 @@ initIcons();
 guardFetch();
 initTheme();
 
+/** This tab's guess at the state its own send caused: the buttons say so before the server does. */
+const ownState = (state: SessionState): void => {
+  optimistic = state === "streaming";
+  setState(state);
+};
+
 /** Shared by chat + composer deps: reload only if `id` is still selected. */
 const reloadIfCurrent = async (id: string): Promise<void> => {
   if (currentId === id) await loadSession(id);
@@ -559,7 +574,7 @@ initChat({
   send: (mode, label) => void send(mode, label),
   ownTurn: (text) => {
     markOptimisticUser(text);
-    setState("streaming"); // an edit resend starts a turn; the buttons say so now
+    ownState("streaming"); // an edit resend starts a turn
   },
   reload: reloadIfCurrent,
 });
@@ -567,7 +582,7 @@ initComposer({
   sessionId: () => currentId,
   sessionState: () => currentState,
   chatVisible: isChatVisible,
-  setState,
+  setState: ownState,
   reload: reloadIfCurrent,
   continuous: continuousOpen,
   // The re-list sees the rotation and moves the pane to the new head.
