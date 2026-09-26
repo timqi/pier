@@ -114,7 +114,7 @@ export class TaskService {
 
   /** A design lead finalized in its own session, a turn outside any run (the
    *  user confirmed there): recorded as a finished run of the lead whose result
-   *  is that reply, so it reports to the lead's supervisor, and the rail and
+   *  is that reply, so it reports to the lead's supervisor, and the session list and
    *  `/status` see it, exactly as a run's `Design final:` does. */
   private designFinal(sessionId: string, text: string): void {
     // A run's own turn reports through the run.

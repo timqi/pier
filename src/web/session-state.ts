@@ -1,6 +1,6 @@
 // What the workbench decided about a session, and nothing a transcript already
-// knows: a finished turn nobody looked at (`unread`), the rail's working set
-// (`sort`), and a session the operator closed out of the rail (`closed`), which
+// knows: a finished turn nobody looked at (`unread`), the session list's working set
+// (`sort`), and a session the operator closed out of the session list (`closed`), which
 // the next human message reopens. A session enters the set at the front when a
 // human speaks to it and it is not already in; members never move relative to
 // each other until one is pushed out. Remembered, not derived: any order
@@ -15,9 +15,9 @@ export const WORKING_SET = 5;
 
 export interface SessionFlags {
   unread: boolean;
-  /** Place in the working set on top of the rail; unset = not in it. */
+  /** Place in the working set on top of the session list; unset = not in it. */
   rank?: number;
-  /** Left out of the rail's listing until a human speaks to it. */
+  /** Left out of the session list's listing until a human speaks to it. */
   closed: boolean;
 }
 
@@ -53,7 +53,7 @@ export class SessionStateStore {
   }
 
   /** Already in the working set: nothing moves. Reopens a closed session — a
-   *  message to it must not happen out of sight. Answers whether the rail
+   *  message to it must not happen out of sight. Answers whether the session list
    *  changed, so the caller re-lists only when there is something to see. */
   promote(sessionId: string): boolean {
     const reopened = this.#db.prepare(

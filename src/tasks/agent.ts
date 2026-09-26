@@ -159,7 +159,7 @@ export class AgentTaskRunner {
     if (!cwd) throw new Error("could not resolve child working directory");
     const opts = {
       cwd,
-      // The rail's title: the caller's `--name`, else the prompt's first line.
+      // The session list's title: the caller's `--name`, else the prompt's first line.
       name: run.context.definition.name,
       // Unspecified model inherits the caller's live model, not the global
       // default; falls back to the default when the caller isn't attached.

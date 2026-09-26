@@ -598,7 +598,7 @@ describe("a directory reached through a symlink", () => {
     expect((await listing(link).list())[0]?.cwd).toBe(real);
   });
 
-  // A worktree that was merged and removed: the rail must still read it as a
+  // A worktree that was merged and removed: the session list must still read it as a
   // branch of the repository beside it, which only holds if the part of the
   // path that does exist is spelled the way that repository's own session is.
   it("resolves as much of a deleted directory's path as still exists", async () => {

@@ -149,7 +149,7 @@ export interface WebDeps {
   parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** `TaskStore.leads`: every lead session, tagged by its phase in the rail and
+  /** `TaskStore.leads`: every lead session, tagged by its phase in the session list and
    *  the palette, `runLive` while a run targeting it is queued or running,
    *  `designOpen` while a design of it waits on the user to finalize. */
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean; designOpen: boolean }>;
@@ -265,7 +265,7 @@ export function createServer(
   };
 
   // Pi persists a session only once the first assistant message lands; until
-  // then the rail lists it from here.
+  // then the session list lists it from here.
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
   /** A session created and never messaged does not survive an eviction (Pi
@@ -279,7 +279,7 @@ export function createServer(
         nascent.delete(id);
         state.forget(id);
         hub.emitWorkspace({ type: "sessions-changed" });
-        throw new Error(`session ${id} no longer exists — it never got a first reply, so nothing was persisted; its rail entry was removed`);
+        throw new Error(`session ${id} no longer exists — it never got a first reply, so nothing was persisted; its session list entry was removed`);
       }
       throw err;
     }
@@ -310,7 +310,7 @@ export function createServer(
     ];
   };
 
-  // `rank` is the place in the rail's working set; `modified` is for the
+  // `rank` is the place in the session list's working set; `modified` is for the
   // row's tooltip and orders nothing.
   const leadOf = (lead: { phase: LeadPhase; runLive: boolean; designOpen: boolean } | undefined) =>
     (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}), ...(lead.designOpen ? { designOpen: true } : {}) } : {});
@@ -324,7 +324,7 @@ export function createServer(
     ...leadOf(lead.get(s.id)),
   });
 
-  // The rail's top rows are maintained here and nowhere else: a session a
+  // The session list's top rows are maintained here and nowhere else: a session a
   // human speaks to — or creates, below — and that is not in the working set
   // already takes the front slot (web/session-state.ts). No route — there is no
   // gesture to make, and an IM message has no browser to make it from.

@@ -172,7 +172,7 @@ export class TaskStore {
   }
 
   /** `fresh` is the one mode that makes a session rather than borrowing one;
-   *  these are the agent's conversations with itself, which the rail does not
+   *  these are the agent's conversations with itself, which the session list does not
    *  list. A feature lead's is the user's too, so it is not one of them. */
   taskOwnedSessionIds(): Set<string> {
     const rows = this.sql(`
@@ -208,7 +208,7 @@ export class TaskStore {
   /** Every lead session with its phase (as `leadPhaseOf`), its creating run,
    *  whether a run targeting it is queued or running, and — a design lead's —
    *  whether no run of it has reported `Design final:` yet, which leaves the
-   *  design on the user; in one statement for the rail's listing. */
+   *  design on the user; in one statement for the session list's listing. */
   leads(): Map<string, { phase: LeadPhase; runId: string; runLive: boolean; designOpen: boolean }> {
     const rows = this.sql(`
       SELECT c.id, c.run_id, c.design, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (

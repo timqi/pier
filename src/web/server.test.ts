@@ -350,9 +350,9 @@ function setup(
   };
 }
 
-/** The rail, as a surface reads it: the listing joined with what the store
+/** The session list, as a surface reads it: the listing joined with what the store
  *  owns, and the route is where that happens. */
-const rail = async (app: Hono): Promise<{ id: string; title?: string; rank?: number; modified?: number }[]> =>
+const sessionList = async (app: Hono): Promise<{ id: string; title?: string; rank?: number; modified?: number }[]> =>
   (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; rank?: number; modified?: number }[];
 
 describe("workbench server", () => {
@@ -480,7 +480,7 @@ describe("workbench server", () => {
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6 },
     ]);
     state.promote("s1");
-    expect(await rail(app)).toEqual([
+    expect(await sessionList(app)).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5, rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
@@ -643,7 +643,7 @@ describe("workbench server", () => {
     expect(factory.create).toHaveBeenCalledWith({ cwd: real });
   });
 
-  // The name goes into the transcript and nowhere else; the rail re-reads it
+  // The name goes into the transcript and nowhere else; the session list re-reads it
   // like every other title, so there is no second copy to keep in step.
   it("names a session in its transcript, and tells the surfaces to re-read", async () => {
     const { app, session, router, hub } = setup();
@@ -664,7 +664,7 @@ describe("workbench server", () => {
       .toBe(400);
   });
 
-  // Closed is out of the rail and nothing else: the by-id read still answers,
+  // Closed is out of the session list and nothing else: the by-id read still answers,
   // and the next human message brings the row back.
   it("closes a session out of the listing until it is spoken to", async () => {
     const { app, factory, state, hub } = setup();
@@ -683,15 +683,15 @@ describe("workbench server", () => {
     const res = await close(JSON.stringify({ closed: true }));
     expect(await res.json()).toEqual({ ok: true });
     expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
-    expect((await rail(app)).map((s) => s.id)).toEqual(["s2"]);
+    expect((await sessionList(app)).map((s) => s.id)).toEqual(["s2"]);
     expect((await app.request("/api/sessions/s1")).status).toBe(200);
 
     state.promote("s1");
-    expect((await rail(app)).map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect((await sessionList(app)).map((s) => s.id)).toEqual(["s1", "s2"]);
   });
 
   // A row that predates all of this holds a rank and a directory and nothing
-  // else. Everything the rail draws comes off the listing, so there is no
+  // else. Everything the session list draws comes off the listing, so there is no
   // backfill to run and no stale summary to repair. Nothing dates a rank
   // either: a month-old session holds its slot until eight newer ones push it
   // out.
@@ -708,12 +708,12 @@ describe("workbench server", () => {
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: month, title: "from the transcript", modified: Date.now() },
     ]);
-    expect(await rail(app)).toEqual([
+    expect(await sessionList(app)).toEqual([
       expect.objectContaining({ id: "s1", title: "from the transcript", rank: 0 }),
     ]);
   });
 
-  // The rail's order is maintained by one rule and no gesture: whoever is
+  // The session list's order is maintained by one rule and no gesture: whoever is
   // spoken to and is not up there already takes the front slot. A member is
   // left exactly where it is — that is the whole point, so switching between
   // two sessions cannot make the list dance.
@@ -731,15 +731,15 @@ describe("workbench server", () => {
       app.request(`/api/sessions/${id}/messages`, { method: "POST", body: JSON.stringify({ text: "hi" }) });
 
     expect((await speak("a")).status).toBe(202);
-    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 0], ["b", undefined]]);
+    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 0], ["b", undefined]]);
     expect((await speak("b")).status).toBe(202);
-    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
+    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
 
     // Back to the one already in the set: nothing moves, and no re-list is
     // broadcast for an order that did not change.
     changed.mockClear();
     expect((await speak("a")).status).toBe(202);
-    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
+    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
     expect(changed).not.toHaveBeenCalledWith({ type: "sessions-changed" });
   });
 
@@ -1416,7 +1416,7 @@ describe("workbench server", () => {
     expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
   });
 
-  it("drops a ghost session's rail entry when loading it proves Pi never persisted it", async () => {
+  it("drops a ghost session's session list entry when loading it proves Pi never persisted it", async () => {
     const { factory } = setup();
     const hub = new EventHub();
     const router = new Router(hub, async () => {
@@ -1445,7 +1445,7 @@ describe("workbench server", () => {
     expect(res.status).toBe(404);
     const { error } = (await res.json()) as { error: string };
     expect(error).toContain("never got a first reply");
-    // The row is gone and every rail was told, so the Desk row (or a project
+    // The row is gone and every session list was told, so the Desk row (or a project
     // group) stops pointing at a session nothing can resume.
     expect(state.flags().get("ghost")).toBeUndefined();
     expect(events).toContain("sessions-changed");

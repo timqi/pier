@@ -377,7 +377,7 @@ describe("a feature lead", () => {
     service.stop();
   });
 
-  it("is a session of the user's, not one of the runs' own the rail hides", async () => {
+  it("is a session of the user's, not one of the runs' own the session list hides", async () => {
     const { service, store, leadRan } = rig();
     await leadRan();
     store.saveRun({ ...store.getRun("lead-run")!, id: "worker-run", targetSessionId: "worker", context: { definition: (await service.create({

@@ -46,7 +46,7 @@ desktop / phone                         viewing a child session
 | `⋯` | Search ⌘K · Session info · Browse files · Model & reasoning · Settings | Session info · Browse files · Model & reasoning · Settings |
 
 - `N running` counts the drawer's green and grey rows; `M needs you` its
-  amber ones plus design leads waiting on Finalize. The chip is the rail's
+  amber ones plus design leads waiting on Finalize. The chip is the drawer's
   attention badge and the tab-title count, one number source
   (`setAttention`).
 - The bar is the only chrome. The transcript runs the full pane under it and
@@ -54,7 +54,7 @@ desktop / phone                         viewing a child session
 
 ## In progress drawer
 
-The rail's In progress list ([03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts))
+The In progress list ([03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts))
 as an overlay: a panel anchored under the chip at the right ≥ md (the
 sidebar's material, 20rem, over the transcript, not beside it), a bottom
 sheet below 640px (the menu primitive's sheet, `menu.ts`). Right because the
@@ -73,7 +73,7 @@ chip is right and the reading column keeps its left edge.
   returns focus to the chip. ⌘⇧[ / ⌘⇧] go: the drawer and ⌘K are the two
   walks.
 - Focus, inertness and the phone sheet's backdrop follow the menu primitive;
-  nothing of `shell.ts`'s drawer/rail code survives (§Deletions).
+  the drawer uses `menu.ts` (§Deletions).
 
 ## Child session
 
@@ -129,7 +129,7 @@ menu's first item; there is no other way in and there need not be.
 A full-column view, as the Console is today, opened from `⋯` or ⌘K; its own
 head (title, topics, close) is the bar's strip. ✕ or Esc returns to where it
 was opened from. Files stays the overlay it is (`#/files/<dir>`). The
-Console's rail section, "Console › Settings", has nowhere to live and is the
+Console's section, "Console › Settings", has nowhere to live and is the
 `⋯` item.
 
 ## Phone
@@ -155,7 +155,7 @@ sources.
 | the permanent rail, its toggle, the phone drawer, the scrim, `data-rail`, `pier.railClosed` | `sidebar.ts` (391), `shell.ts` (240), `index.html`, `style.css` | §Frame; the rows move to the drawer module, the rest goes |
 | ⌘⇧[ / ⌘⇧] row chords, ⌘⇧O | `sidebar.ts`, `shortcut.ts` | the drawer and ⌘K are the two walks |
 | the desktop chat heading and the phone bar as two elements, `hostMeta` moving chips between them | `shell.ts`, `session-header.ts`, `index.html` | one bar at every width |
-| the Console rail section | `sidebar.ts`, `views.ts` | `⋯` → Settings |
+| the Console section | `sidebar.ts`, `views.ts` | `⋯` → Settings |
 | four-line preview on system cards | `chat.ts` | §Transcript density; the card is the expanded state |
 
 Renamed, not new: `sidebar.ts` becomes the drawer module (rows, order, dots,
@@ -166,7 +166,7 @@ one with the container swapped.
 
 - Requires Phase A of [11](11-product-shape.md) (this branch's base).
 - **This design is [11 §Phase B](11-product-shape.md#phases).** One shell:
-  the `continuous` switch and every non-continuous branch of the rail and
+  the `continuous` switch and every non-continuous branch of the sidebar and
   pane rules, the New session menu, Browse… and the directory picker, the
   working-set rank and Load more, and the UI's calls to `POST /api/sessions`,
   `/close`, `/rename` go in the same change (the routes stay while

@@ -148,7 +148,7 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
   `,
-  // 6 — manual order in the rail.
+  // 6 — manual order in the session list.
   `
   -- NULL sorts on top, so a fresh database needs no backfill.
   ALTER TABLE session_state ADD COLUMN sort INTEGER;
@@ -251,7 +251,7 @@ const MIGRATIONS: readonly string[] = [
   `
   UPDATE session_state SET pinned = 0;
   `,
-  // 20 — sort becomes the rank in the working set the rail keeps on top; pinned goes.
+  // 20 — sort becomes the rank in the working set the session list keeps on top; pinned goes.
   `
   -- Pinned rows seed the set at rank -1, capped at the set's size (8).
   UPDATE session_state SET sort = -1 WHERE pinned = 1 AND sort IS NULL;
@@ -337,7 +337,7 @@ const MIGRATIONS: readonly string[] = [
   `
   CREATE INDEX task_runs_target ON task_runs(json_extract(json, '$.targetSessionId'), queued_at);
   `,
-  // 30 — a session the operator closed leaves the rail until a human speaks to it (web/session-state.ts).
+  // 30 — a session the operator closed leaves the session list until a human speaks to it (web/session-state.ts).
   `ALTER TABLE session_state ADD COLUMN closed INTEGER NOT NULL DEFAULT 0;`,
   // 31 — the continuous conversation's open items, written from the head's
   // `<open>`/`<done>` markers (core/chain.ts); run_ids a JSON array.

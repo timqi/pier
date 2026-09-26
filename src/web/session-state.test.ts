@@ -1,4 +1,4 @@
-// The one rule the rail's order has: a session a human speaks to joins the
+// The one rule the session list's order has: a session a human speaks to joins the
 // working set at the front, and a session already in it does not move.
 import { expect, it } from "vitest";
 import { openDb } from "../db.js";
@@ -16,7 +16,7 @@ it("puts a session nobody had spoken to at the front, and answers that the order
   expect(order(state)).toEqual(["b", "a"]);
 });
 
-// Switching between two open sessions is the case that made the old rail
+// Switching between two open sessions is the case that made the old session list
 // dance: neither of them may move, and nothing may be written either.
 it("leaves a member where it is, and says nothing changed", () => {
   const state = store();

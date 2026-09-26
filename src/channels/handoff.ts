@@ -28,7 +28,7 @@ export interface HandoffDeps {
   publicUrl: () => string;
   /** Sessions a task run created for itself; a picker offers only the operator's. */
   taskSessions: () => Set<string>;
-  /** The web rail's working set (`rank`): the picker lists what the rail lists, in its order. */
+  /** The web session list's working set (`rank`): the picker lists what the session list lists, in its order. */
   workingSet: () => Map<string, { rank?: number }>;
   log(message: string): void;
 }

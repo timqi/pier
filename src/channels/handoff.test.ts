@@ -230,7 +230,7 @@ describe("continueHere (pull from the panel)", () => {
 });
 
 describe("unbound", () => {
-  it("lists what the web rail lists: working set first, then newest, minus bound and task-owned, capped", async () => {
+  it("lists what the web session list lists: working set first, then newest, minus bound and task-owned, capped", async () => {
     onDisk.set("s2", { id: "s2", cwd: "/srv/b", createdAt: 2 });
     onDisk.set("s3", { id: "s3", cwd: "/srv/c", createdAt: 3 });
     onDisk.set("s4", { id: "s4", cwd: "/srv/d", createdAt: 4 });

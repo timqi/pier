@@ -343,7 +343,7 @@ describe("openDb", () => {
     db.close();
   });
 
-  // Every session open: nothing leaves the rail by upgrading.
+  // Every session open: nothing leaves the session list by upgrading.
   it("adds the closed flag, open, to a database that predates it", () => {
     const path = dbPath();
     const before = openDb(path);
@@ -492,7 +492,7 @@ describe("openDb", () => {
   });
 
   // The pinned rows are what somebody was working on, so they seed the set the
-  // rail now maintains itself: their arranged order, never-dragged first, and
+  // session list now maintains itself: their arranged order, never-dragged first, and
   // no more of them than the set holds.
   it("seeds the working set from the pinned rows, and drops the rest of the pins", () => {
     const path = dbPath();
