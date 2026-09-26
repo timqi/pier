@@ -2486,7 +2486,7 @@ describe("the app shell", () => {
 
 describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
-  function chainRig(on = true) {
+  function chainRig(on = true, ledger: () => [] = () => []) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
     settings.setContinuous(on);
@@ -2515,7 +2515,7 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      enabled: () => settings.get().continuous, ledger: () => [], now: () => clock.now,
+      enabled: () => settings.get().continuous, ledger, now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2562,6 +2562,16 @@ describe("the continuous conversation's routes", () => {
     expect(workspace).toContain("sessions-changed");
     const { chain } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[] };
     expect(chain.map((m) => [m.sessionId, m.reason])).toEqual([["m2", "idle"], ["m1", "first"]]);
+  });
+
+  it("answers a send whose new session cannot be seeded with the reason, and creates none", async () => {
+    const { factory, post } = chainRig(true, () => {
+      throw new Error("database is locked");
+    });
+    const sent = await post("/api/continuous/messages", { text: "hi" });
+    expect(sent.status).toBe(400);
+    expect(await sent.json()).toEqual({ error: "Error: a new session could not start — its seed failed: Error: database is locked" });
+    expect(factory.create).not.toHaveBeenCalled();
   });
 
   it("resolves the head ahead of a send, so the send that follows lands there without rotating", async () => {

@@ -16,7 +16,7 @@ import type { AgentFactory, AgentLaunchOptions } from "./types.js";
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function rig({ runs = [] as LedgerRun[], on = true } = {}) {
+function rig({ runs = [] as LedgerRun[] | (() => LedgerRun[]), on = true } = {}) {
   const home = join(mkdtempSync(join(tmpdir(), "pier-chain-")), "home");
   const db = openDb(":memory:");
   const clock = { now: Date.now() };
@@ -50,7 +50,7 @@ function rig({ runs = [] as LedgerRun[], on = true } = {}) {
     enabled: () => on,
     ledger: (ids, since) => {
       ledger.push({ ids, since });
-      return runs;
+      return typeof runs === "function" ? runs() : runs;
     },
     now: () => clock.now,
   });
@@ -172,6 +172,20 @@ describe("the continuous conversation's chain", () => {
     r.existing("h1", r.clock.now);
     expect(r.chain.chainOf("h0")).toEqual(["h1", "h0"]);
     expect(r.chain.chainOf("child")).toBeUndefined();
+  });
+
+  it("creates nothing when the seed cannot be built, says why, and starts cleanly on the next message", async () => {
+    let broken = true;
+    const r = rig({ runs: () => {
+      if (broken) throw new Error("database is locked");
+      return [];
+    } });
+    await expect(r.say("hello")).rejects.toThrow("a new session could not start — its seed failed: Error: database is locked");
+    expect(r.created).toEqual([]);
+    expect(r.chain.members()).toEqual([]);
+    broken = false;
+    expect(await r.say("again")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(r.created).toHaveLength(1);
   });
 
   it("says in the seed when a memory file cannot be read", async () => {

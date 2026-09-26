@@ -123,13 +123,17 @@ export class MainChain {
   }
 
   private async rotate(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<AgentSession> {
+    // Built before anything is created: a seed that fails leaves no orphan session.
+    const seed = await this.seed(reason, previous, open).catch((err: unknown) => {
+      log.warn("the continuous conversation's next session could not be seeded", err);
+      throw new Error(`a new session could not start — its seed failed: ${String(err)}`);
+    });
     mkdirSync(this.deps.home, { recursive: true });
     const session = await this.deps.factory.create({
       cwd: this.deps.home,
       ...(open?.model ? { model: open.model } : {}),
       thinking: open?.thinkingLevel ?? "low",
     });
-    const seed = await this.seed(reason, previous, open);
     this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);
     this.deps.router.attach(webKey(session.id), session);
     await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
