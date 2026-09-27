@@ -308,6 +308,19 @@ describe("open-item markers", () => {
     expect(openItemMarkers(holding).markers).toEqual([{ op: "open", problem: "run `x`", stage: "stage", runIds: [] }]);
     expect(streamBody(holding)).toBe("Hi.");
   });
+
+  it("a lone tag in a code span does not pair with the real marker after it", () => {
+    // The live reply: a quoted `<done>` early, the real marker on the last line.
+    const done = "改好了，片段里已经没有 `<done>` 和按钮行了。\n\n<done>pier search 输出精简</done>";
+    expect(openItemMarkers(done).markers).toEqual([{ op: "done", problem: "pier search 输出精简" }]);
+    expect(streamBody(done)).toBe("改好了，片段里已经没有 `<done>` 和按钮行了。");
+    expect(saidText(done)).toBe("改好了，片段里已经没有 `<done>` 和按钮行了。");
+    const open = "用 `<open>` 记一项。\n<open>搜索精简 — worker running (run r1)</open>";
+    expect(openItemMarkers(open).markers).toEqual([
+      { op: "open", problem: "搜索精简", stage: "worker running", runIds: ["r1"] },
+    ]);
+    expect(streamBody(open)).toBe("用 `<open>` 记一项。");
+  });
 });
 
 describe("originLabel", () => {

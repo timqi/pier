@@ -81,13 +81,19 @@ export function replaceOutsideCode(
   const skip = codeRanges(text);
   let out = "";
   let last = 0;
-  for (const match of text.matchAll(pattern)) {
+  const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  for (let match = re.exec(text); match; match = re.exec(text)) {
     const start = match.index;
     // A match is code when it begins in code; one that merely holds a span
-    // (`<open>run \`x\`</open>`) is prose around it.
-    if (skip.some(([from, to]) => start >= from && start < to)) continue;
+    // (`<open>run \`x\`</open>`) is prose around it. A skipped match resumes the
+    // scan one char on, so a quoted `<done>` cannot swallow the real marker after it.
+    if (skip.some(([from, to]) => start >= from && start < to)) {
+      re.lastIndex = start + 1;
+      continue;
+    }
     out += text.slice(last, start) + replace(match);
     last = start + match[0].length;
+    if (!match[0]) re.lastIndex++;
   }
   return out + text.slice(last);
 }
