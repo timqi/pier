@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, stableBlockEnd, streamBody } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -316,5 +316,13 @@ describe("originLabel", () => {
     expect(originLabel({ kind: "session-seed", reason: "first", previousSessionId: null })).toBe("↺ new session · first");
     expect(originLabel({ kind: "chat-command", command: "status" })).toBe("/status");
     expect(originLabel({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe("↩ task callback");
+  });
+});
+
+describe("saidText", () => {
+  it("takes off silent, open-item markers and the next-step block, and nothing else", () => {
+    const reply = "<open>parser — worker running (run r1)</open>\nThe **“parser”** is fixed.<silent>noted</silent>\n<done>old thing</done>\n\n---\n[Run it] | [Show the diff]";
+    expect(saidText(reply)).toBe("The **“parser”** is fixed.");
+    expect(saidText("see `<done>x</done>`\n\n---\nnot [a] block here")).toBe("see `<done>x</done>`\n\n---\nnot [a] block here");
   });
 });

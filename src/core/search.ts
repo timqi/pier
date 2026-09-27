@@ -20,6 +20,12 @@ export interface SearchCliIo {
 const USAGE = "usage: pier search <q...> [--limit N] [--json]";
 // The match marks are the palette's to paint; a line is one line.
 const flat = (text: string): string => text.replaceAll("\u0001", "").replaceAll("\u0002", "").replace(/\s+/g, " ").trim();
+// A title may be a whole first message; the snippet is what the line is for.
+const TITLE_CHARS = 30;
+const clip = (text: string): string => {
+  const chars = [...text];
+  return chars.length > TITLE_CHARS ? `${chars.slice(0, TITLE_CHARS - 1).join("").trimEnd()}…` : text;
+};
 // sv-SE spells local time as YYYY-MM-DD HH:MM.
 const when = (at: number): string => new Date(at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
 
@@ -64,6 +70,6 @@ export async function runSearchCli(argv: string[], post: SearchPost, io: SearchC
   const { hits } = body.result;
   if (v.json) io.stdout(JSON.stringify(body.result));
   else if (!hits.length) io.stdout("no hits");
-  else for (const hit of hits) io.stdout(`${hit.sessionId} · ${flat(hit.title)} · ${hit.role} · ${when(hit.at)}: ${flat(hit.snippet)}`);
+  else for (const hit of hits) io.stdout(`${hit.sessionId} · ${clip(flat(hit.title))} · ${hit.role} · ${when(hit.at)}: ${flat(hit.snippet)}`);
   return 0;
 }

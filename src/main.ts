@@ -21,6 +21,7 @@ import { ChannelRuntime } from "./channels/runtime.js";
 import { MainChain } from "./core/chain.js";
 import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
+import { saidText } from "./core/reply.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
 import { surfacePrompt } from "./agent/roles.js";
@@ -118,8 +119,9 @@ const factory = new PiAgentFactory(
   () => settings.get().modelMenu,
   () => settings.get(),
   () => settings.get().titleModel,
-  // Transcripts carry the speaker header core wrote for the model.
-  new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
+  // Transcripts carry the speaker header core wrote for the model, and replies
+  // the chat markup core strips before anyone sees them.
+  new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text, saidText),
   (id) => taskStore.roleOf(id),
 );
 const hub = new EventHub();

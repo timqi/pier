@@ -315,12 +315,12 @@ describe("pier vault run", () => {
     const at = Date.UTC(2025, 0, 2, 3, 4);
     const hits = [
       { sessionId: "s1", title: "Fix the\nparser", role: "user", at, snippet: "the \u0001parser\u0002 broke" },
-      { sessionId: "s2", title: "s2", role: "assistant", at, snippet: "fixed" },
+      { sessionId: "s2", title: "Please look at why the build fails on CI since Monday", role: "assistant", at, snippet: "fixed" },
     ];
     const { home, asked } = await fakePier(200, { result: { hits } });
     const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: home, TZ: "UTC" };
     const lines = await run(["search", "the", "parser", "--limit", "5"], { env });
-    expect(lines.stdout).toBe("s1 \u00b7 Fix the parser \u00b7 user \u00b7 2025-01-02 03:04: the parser broke\ns2 \u00b7 s2 \u00b7 assistant \u00b7 2025-01-02 03:04: fixed\n");
+    expect(lines.stdout).toBe("s1 \u00b7 Fix the parser \u00b7 user \u00b7 2025-01-02 03:04: the parser broke\ns2 \u00b7 Please look at why the build\u2026 \u00b7 assistant \u00b7 2025-01-02 03:04: fixed\n");
     expect(lines.code).toBe(0);
     expect(asked).toEqual([{ method: "POST", url: "/search", body: { params: { q: "the parser", limit: 5 }, sessionId: "sess-1" } }]);
     const json = await run(["search", "parser", "--json"], { env });

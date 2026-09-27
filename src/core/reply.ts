@@ -208,8 +208,19 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
 
 /** For rendering mid-turn: everything `splitReply` repairs, minus the
  *  next-step block, which is only one at the very end of a turn. */
-export const streamBody = (markdown: string): string =>
-  cjkFriendly(replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim());
+export const streamBody = (markdown: string): string => cjkFriendly(unmarked(markdown));
+
+const unmarked = (markdown: string): string =>
+  replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim();
+
+/** What a message says with Pier's markup off — `<silent>`, the open-item
+ *  markers, the next-step block — and otherwise untouched: search cuts its
+ *  snippets from this. */
+export function saidText(markdown: string): string {
+  const body = unmarked(markdown);
+  const m = BLOCK.exec(body);
+  return m?.[1] ? body.slice(0, m.index).trimEnd() : body;
+}
 
 /** Lines a blank line does not necessarily separate (a loose list is still one
  *  list). Over-matching is fine: one boundary too few costs only a repaint. */

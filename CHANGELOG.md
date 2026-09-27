@@ -13,6 +13,7 @@
 
 ### Changed
 
+- `pier search` cuts each hit's title to 30 characters, and its snippets (the palette's too) from the message with `<open>`, `<done>`, `<silent>` and the next-step buttons taken off, centered on the match.
 - The head's seed cuts each part to its budget: `MEMORY.md` 12K chars, each day's notes 6K, the ledger 4K, the last exchanges 4K; notes and exchanges keep their end, headed by how many lines went and where they still are.
 - Web status panel: one row per session, Waiting on you over In progress, each with a server-derived status tag (`waiting on you`, `pending release`, `running`, `queued`); `/status` groups its lines the same way. `GET /api/continuous/open` answers `{items: [{problem, stage, runs, status}], unlisted}`; design leads awaiting Finalize are items, not a `designs` list.
 

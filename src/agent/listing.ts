@@ -157,18 +157,17 @@ function fold(
 /** A picker, not a results page. */
 const SEARCH_LIMIT = 8;
 
-/** A trigram token is one character, so `snippet()` is asked for its ceiling
- *  of 64 tokens; the default 12 fits one word. */
+/** Characters of context a snippet keeps around its first match. */
 const SNIPPET_CHARS = 64;
 
 /** Whitespace splits a query: a space is "and this too", not a character to
  *  find. A term is quoted where it has to be, so a phrase is still findable. */
 const termsOf = (query: string): string[] => query.split(/\s+/).filter(Boolean);
 
-/** Delimited like `snippet()` (\u0001 … \u0002, `…` for a cut), so a surface
- *  draws one shape for both paths. Every term is marked where it first
- *  appears inside the window, as `snippet()` marks every phrase it kept.
- *  ASCII case folding: LIKE found the row by the same rule. */
+/** Cut here rather than by FTS `snippet()`, which can only cut the indexed
+ *  text, markup and all. Each match delimited \u0001 … \u0002, `…` for a cut;
+ *  every term is marked where it first appears inside the window. A match only
+ *  inside stripped markup leaves the message's opening. */
 function around(text: string, terms: string[]): string {
   const lower = text.toLowerCase();
   const found = terms
@@ -176,7 +175,7 @@ function around(text: string, terms: string[]): string {
     .filter((mark) => mark.at >= 0)
     .sort((a, b) => a.at - b.at);
   const first = found[0];
-  if (!first) return text.slice(0, SNIPPET_CHARS);
+  if (!first) return text.length > SNIPPET_CHARS ? `${text.slice(0, SNIPPET_CHARS)}…` : text;
   const start = Math.max(0, first.at - SNIPPET_CHARS / 2);
   const end = Math.min(text.length, first.at + first.length + SNIPPET_CHARS / 2);
   let out = start ? "…" : "";
@@ -194,9 +193,7 @@ interface FtsRow {
   session_id: string;
   role: "user" | "assistant";
   at: number;
-  /** From `snippet()` on the MATCH path; the LIKE path carries `text` instead. */
-  snippet?: string;
-  text?: string;
+  text: string;
 }
 
 export class IndexedListing implements SessionListing {
@@ -209,6 +206,9 @@ export class IndexedListing implements SessionListing {
     /** Handed in rather than imported: the header rule is core's, and agent/
      *  does not import core at runtime. */
     private readonly clean: (text: string) => string = (text) => text,
+    /** Chat markup off what was said, before a snippet is cut (core/reply.ts):
+     *  applied at search time, so rows indexed before it are covered too. */
+    private readonly plain: (text: string) => string = (text) => text,
   ) {
     this.#db = db;
   }
@@ -329,7 +329,7 @@ export class IndexedListing implements SessionListing {
     const rows = terms.every((term) => [...term].length >= 3)
       // Quoted: a term is a string to find, never FTS syntax.
       ? sql(
-        `SELECT session_id, role, at, snippet(session_fts, 0, char(1), char(2), '…', ${SNIPPET_CHARS}) AS snippet
+        `SELECT session_id, role, at, text
          FROM session_fts WHERE text MATCH ? ORDER BY bm25(session_fts), at DESC`,
       ).iterate(terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND "))
       : sql(
@@ -347,7 +347,7 @@ export class IndexedListing implements SessionListing {
         sessionId: row.session_id,
         role: row.role,
         at: row.at,
-        snippet: row.snippet ?? around(row.text ?? "", terms),
+        snippet: around(this.plain(row.text), terms),
       });
       if (hits.length >= limit) break;
     }

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitSpeaker } from "../core/identity.js";
+import { saidText } from "../core/reply.js";
 import { openDb } from "../db.js";
 import { IndexedListing, type SessionRecord } from "./listing.js";
 
@@ -376,6 +377,23 @@ describe("the on-disk index", () => {
     );
     expect(listing.search('fix "OR" nothing')).toEqual([]);
     expect(listing.search("parser", 1)).toHaveLength(1);
+  });
+
+  it("cuts the snippet from what was said with chat markup off, centered on the match", async () => {
+    const said = new IndexedListing(dir, db, (text) => splitSpeaker(text).text, saidText);
+    const filler = "x".repeat(200);
+    await write("--p--", "s1", [
+      header("s1", "/p"),
+      assistant(`<open>${filler} — stage</open>\nthe parser is fixed now\n\n---\n[Run it] | [Show the diff]`, 61_000),
+    ]);
+    await write("--q--", "s2", [header("s2", "/q"), assistant(`<silent>${filler}</silent>${"y".repeat(100)} 解析 done`, 62_000)]);
+    await said.scan();
+    expect(said.search("parser")).toEqual([
+      { sessionId: "s1", role: "assistant", at: 61_000, snippet: "the \u0001parser\u0002 is fixed now" },
+    ]);
+    expect(said.search("解析")[0]?.snippet).toBe(`…${"y".repeat(31)} \u0001解析\u0002 done`);
+    // A match only inside the markup still names its session, by the message's opening.
+    expect(said.search("stage")[0]?.snippet).toBe("the parser is fixed now");
   });
 
   it("finds a two-character CJK query by substring, newest first, marked the same way", async () => {

@@ -18,8 +18,10 @@ pier search 部署 --json
   any order. `--limit` 1–50, default 20; at most one hit per session, best
   first.
 - One line per hit:
-  `<sessionId> · <title> · <role> · <YYYY-MM-DD HH:MM>: <snippet>`;
-  `--json` prints `{hits}` instead. Nothing found is `no hits`, exit 0; a
+  `<sessionId> · <title> · <role> · <YYYY-MM-DD HH:MM>: <snippet>`; the
+  title is cut to 30 characters with `…`, the snippet is the message around
+  the match with Pier's chat markup off (`<open>`, `<done>`, `<silent>`, the
+  next-step buttons); `--json` prints `{hits}` instead, the title whole. Nothing found is `no hits`, exit 0; a
   refusal is one `search:` line, exit 1.
 - A hit names a session: the web opens it at `/app/#/session/<id>`; link
   that for the user rather than pasting the transcript.
