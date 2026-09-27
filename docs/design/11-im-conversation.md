@@ -13,10 +13,10 @@ stops doing meanwhile. Everything not named here is [04](04-im-channels.md)'s.
   on both platforms (`ChannelStore.setHome`, `ChannelStore.home()`).
 - A group is never the home: its main flow belongs to the people in it; groups
   stay thread-per-session. Any other DM stays thread-per-session too.
-- `ChannelControl.isHome(key)`: the key is the home chat's main flow —
-  `<platform>` + `<chatId>` with no thread half, the one shape
-  [04 §Conversation identity](04-im-channels.md#conversation-identity)
-  refuses today.
+- `ChannelControl.isHome(key)`: the key's platform is the home's and its
+  chat half (`chatOf`) is the home chat — top-level or in a thread; the home
+  key itself is `<chatId>` with no thread half
+  ([04 §Conversation identity](04-im-channels.md#conversation-identity)).
 
 ## Routing
 
@@ -47,8 +47,7 @@ top-level or in any thread, goes to the head (`MainChain.send`) under the key
 
 - The home key is the head's delivery key: `Router`'s `chatKeyOf(sessionId)`
   (wired in `main.ts`) answers the home key for the head while the home
-  chat's adapter is live (`ChannelRuntime.live`), else the `conversations` row
-  as today; an older member gets no home key, so an adapter's start cannot
+  chat's adapter is live (`ChannelRuntime.live`), else the `conversations` row; an older member gets no home key, so an adapter's start cannot
   re-key it over the head. Attaching the head under `web:` or `task:`
   takes the chat key by the existing rule (an alias never outranks a chat), so
   every turn-end and every system input of the head reaches the home chat
@@ -71,16 +70,16 @@ top-level or in any thread, goes to the head (`MainChain.send`) under the key
 Main flow, no thread: Slack posts with `thread_ts` omitted; Lark posts a card
 by `message.create` to the chat (`LarkApi.sendCard(chatId, card)`) and
 uploads files the same way. `send`/`notify` accept a conversation id with no
-thread half only for the home chat; any other is refused as today.
+thread half only for the home chat; any other is refused.
 
 | What | Renders as |
 | --- | --- |
-| the head's reply | the turn as today: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` |
+| the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, 👀 on the echo, the row retired (Lark: button value `root: ""` names the home) |
-| a task callback / delegation | the system note as today (`noteBody` digest, `↩ task callback` · `▶ delegated task`), before the turn it triggers |
-| the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel` gains `session-seed`) |
-| a chat command's answer | `/status` · `/new` · `/stop` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`); `originLabel` gains `chat-command` |
-| a failure | `⚠ failed` note, as today |
+| a task callback / delegation | the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`), before the turn it triggers |
+| the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
+| a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
+| a failure | `⚠ failed` note |
 | a restart note (`drain.ts`) | the same `notify`, main flow |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
@@ -88,8 +87,6 @@ thread half only for the home chat; any other is refused as today.
   wears none — its answer is a note, and no turn would take it off — and
   neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
   message that caused a seed already wears its own.
-- `originLabel` today labels every non-task origin `↩ task callback`; the two
-  new kinds are the first non-task origins to reach an adapter.
 
 ## Chat commands
 
@@ -117,7 +114,7 @@ empty) is dropped with a log line, never a command.
   records it as a web-sent command does.
 - An unknown `/word` or `%word` is a message, never an error, on every
   surface ([10](10-continuous-session.md#chat-commands)).
-- `skills/pier-help/SKILL.md` §In-chat commands carries a one-line copy of
+- `skills/pier-help/SKILL.md` (§In-chat commands and the settings panel) carries a one-line copy of
   each row: the npm package ships skills without `docs/design`. Changing a row
   changes both.
 
@@ -129,22 +126,17 @@ router resolves a short spelling before Pi sees it (`Router.dispatch`,
 against `session.skills()` of the session the message reaches — the head or a
 thread's):
 
-- `/<word> <text>` or `%<word> <text>`, `word` no chat command and no
-  `skill:` — `word` names a skill when it is a prefix of the skill's name or
-  of the name after any `-` (`/pier-t`, `/tasks`, `/ta` → `pier-tasks`;
+- `/<word> <text>` or `%<word> <text>`, `word` two characters or more and no
+  chat command — `word` names a skill when it is a prefix of the skill's name
+  or of the name after any `-` (`/pier-t`, `/tasks`, `/ta` → `pier-tasks`;
   `/skill:pier-t` the same with the `skill:` kept). Exactly one match:
   rewritten to `/skill:<name> <text>` and dispatched; the transcript shows
   the rewritten line, so the web's bubble reads what Pi ran.
 - More than one: not sent; the chat is told `/pier- matches pier-tasks,
   pier-web, pier-slack — say more` (the `{kind: "error"}` note; on the web the
-  send's 4xx says it). None: a message, as today.
-- `/skills` (`%skills`) is a chat command on every surface (`CHAT_COMMANDS`
-  gains `skills: "the skills this session can run, by name"`): the answer is
-  one line per skill, `<name> — <description>`, the `chat-command` note, so
-  the names are on screen where they are typed. It answers for any session,
-  not only the head: `MainChain.send` takes it for the head, and a thread's
-  adapter routes it through the same `chatCommand` seam with the thread's
-  session (`ChannelControl.skills(key)`).
+  send's 4xx says it). None: a message.
+- `/skills` answers for any session: `MainChain.send` takes it for the head,
+  and a thread's adapter asks `ChannelControl.skills(key)`.
 - Tests: `core/router.test.ts` (unique, ambiguous, none, `skill:` kept);
   `core/chain.test.ts` (`/skills`).
 
@@ -169,7 +161,7 @@ through what the head launches (`pier task`), never by a group's message.
   timeline shows every turn regardless.
 - A message typed on the web is not mirrored into the DM; the head's answer
   is, whichever surface asked. The web is the record, the DM the phone.
-- No home chat, or its adapter down: Web Push as today.
+- No home chat, or its adapter down: Web Push.
 
 ## Storage
 
@@ -177,13 +169,6 @@ through what the head launches (`pier task`), never by a group's message.
   platforms; no new table. `PUT /api/channels/:platform` with a `home` row
   clears the other platform's.
 - No `conversations` row, no `main_chain` change.
-
-## Build order
-
-1. Lark: the home flag and Console switch, the dispatch split, `chatKeyOf`,
-   `sendCard`/upload to chat, main-flow buttons, the `%` prefix, `originLabel`
-   and the whole `chat-command` note — the operator's first look.
-2. Slack: the same on `postMessage` without `thread_ts`.
 
 ## Not built
 
