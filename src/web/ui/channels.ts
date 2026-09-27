@@ -277,7 +277,15 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (chat.kind === "dm") {
       // A DM has two parties: mention is meaningless and bind is not optional.
       // Two switches that cannot move are worse than a sentence saying so.
-      switches.append(h("span", "text-[13px] text-neutral-400", "Direct message · bound users only, mention not applicable"));
+      switches.append(
+        h("span", "text-[13px] text-neutral-400", "Direct message · bound users only, mention not applicable"),
+        // One home instance-wide: the server clears the other platform's row.
+        toggle("This DM is the conversation", "", chat.home === true, set((v) => {
+          for (const c of cfg.chats) delete c.home;
+          if (v) chat.home = true;
+          render();
+        })),
+      );
     } else {
       switches.append(
         toggle("Require mention", "", chat.requireMention, set((v) => (chat.requireMention = v))),
@@ -294,6 +302,10 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       ));
     }
 
+    if (chat.home) {
+      box.append(head, switches, h("p", "mt-3 text-[13px] text-neutral-400", "The conversation's model and reasoning are set from its ⋯ menu."));
+      return box;
+    }
     const cwd = dirInput(chat.cwd, "", set((v) => (chat.cwd = v)));
     const grid = h(
       "div",

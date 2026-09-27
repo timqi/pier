@@ -63,6 +63,10 @@ export interface ChannelControl {
   /** Distinct cwds of the backend's session listing, newest first; the chat's
    *  own default first when set. */
   recentDirs(key: ConversationKey, limit?: number): Promise<string[]>;
+  /** Any key in the home chat, top-level or in a thread: all of it is the head's. */
+  isHome(key: ConversationKey): boolean;
+  /** The thread's session's skills, `[]` when it has none: `/skills` in a thread. */
+  skills(key: ConversationKey): Promise<{ name: string; description: string }[]>;
 }
 
 export interface ControlDeps {
@@ -162,5 +166,12 @@ export function createControl({ router, factory, conversations, store, modelMenu
       const seen = new Set<string>([...(own ? [own] : []), ...projectCwds(await factory.list())]);
       return [...seen].slice(0, limit);
     },
+
+    isHome(key) {
+      const home = store.home();
+      return home?.platform === key.channelId && home.chatId === chatOf(key.conversationId);
+    },
+
+    skills: async (key) => (await live(key))?.skills() ?? [],
   };
 }

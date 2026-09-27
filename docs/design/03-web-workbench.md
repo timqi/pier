@@ -301,7 +301,9 @@ The Console views are overlays: Settings and Files open over their origin, and �
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
   switch, sticky in the topic's scroller; the chats card names the current bot,
   and a row whose owner differs wears an amber badge, a one-line reason and
-  Remove (confirms). Vault (`#/settings/vault`): the
+  Remove (confirms). A DM row carries "This DM is the conversation"
+  ([11](11-im-conversation.md)); on, the row's directory and model give way to
+  one line pointing at the conversation's ⋯ menu. Vault (`#/settings/vault`): the
   rows `name · level · updated` with Remove (confirms), and the add row —
   name, `auto|approve` segmented with its one-line note, a password field;
   no reveal, filing an existing name replaces it. `?name=X` opens with the
