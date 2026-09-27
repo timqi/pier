@@ -141,7 +141,7 @@ const hashOf = (r: Route): string =>
     ? "#/conversation"
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}${r.query ? `?${r.query}` : ""}`;
 
-/** Pre-fold bookmarks still land: the old top-level views are Settings tabs now. */
+/** Bookmarks to `#/config`, `#/channels`, `#/providers` land on the Settings tab that holds them. */
 const FOLDED: Record<string, string> = { config: "files", channels: "channels", providers: "models" };
 
 function parseHash(): Route | null {
