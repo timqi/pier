@@ -94,7 +94,7 @@ export type TaskResult =
   | { type: "task"; runId: string; result: TaskResult | null }
   | { type: "watch"; matched: false };
 
-export interface TaskRunContext {
+interface TaskRunContext {
   definition: TaskDefinition;
   cwd?: string;
   sessionId?: string;

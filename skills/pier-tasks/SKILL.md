@@ -96,6 +96,16 @@ every flag. Results reach Pier;
 `--callback-session <id>` pins a session, `--callback-session none` silences.
 `pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
 
+```sh
+pier task save --name deploy-done --watch "test -f /repo/DONE" --every 60 --prompt "Summarize /repo/DONE."
+```
+
+`--watch <script> --every <s>` (≥ 5, in `--cwd`) runs the script each interval:
+exit 0 matched → the action runs; exit 1 → nothing, no callback; any other exit
+fails the run. The action does not see the script's output. Without
+`--repeat` the first match pauses the definition; with it, every match runs.
+`--watch` and `--cron` are exclusive.
+
 | Command | Does |
 | --- | --- |
 | `pier task pause --task-id <id>` | schedule off; still runs on demand |

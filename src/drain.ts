@@ -26,8 +26,8 @@ export class RestartLedger {
 
   record(entry: LedgerEntry): void {
     this.db.prepare(
-      "INSERT INTO restart_ledger (channel_id, conversation_id, note, created_at) VALUES (?, ?, ?, ?)",
-    ).run(entry.channelId, entry.conversationId, entry.note, Date.now());
+      "INSERT INTO restart_ledger (channel_id, conversation_id, note) VALUES (?, ?, ?)",
+    ).run(entry.channelId, entry.conversationId, entry.note);
   }
 
   list(): (LedgerEntry & { id: number })[] {

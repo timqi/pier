@@ -8,7 +8,7 @@ import { agoLabel } from "../core/reply.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
 import type { AgentFactory, AgentRole, LedgerRun } from "../core/types.js";
-import { openItems, openItemsStatus, renderOpenItems, type OpenItemReads } from "./open-items.js";
+import { openItems, openItemsStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { NOT_IN_LEDGER, type TaskRun } from "./types.js";
@@ -62,7 +62,7 @@ describe("the open items", () => {
     expect(open.items[1]!.runs[0]!.workers).toEqual({ queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 });
     expect(open.unlisted).toEqual([]);
     expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }, { ids: ["lead1"], since: now - 86_400_000 }]);
-    expect(renderOpenItems(open, now)).toBe([
+    expect(openItemsStatus(open, now).text).toBe([
       "Open",
       "- model menu 重选 — merged, restart pending (idle) · run gone1 — not in the ledger",
       "- open items 视图 — lead designing (running) · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
@@ -85,7 +85,7 @@ describe("the open items", () => {
     expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-queued"]);
     // The window is the ledger's: `pier task runs`' last 24h.
     expect(r.ledger[0]!.since).toBe(now - 86_400_000);
-    expect(renderOpenItems(open, now)).toBe([
+    expect(openItemsStatus(open, now).text).toBe([
       "Open",
       "- the problem (idle) · run r-named failed just now",
       "Not on the list",
@@ -106,7 +106,7 @@ describe("the open items", () => {
     const open = r.list();
     expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
     expect(open.unlisted).toEqual([]);
-    expect(renderOpenItems(open, now)).toBe("Open\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
+    expect(openItemsStatus(open, now).text).toBe("Open\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
   });
 
   it("reads an item running while its session streams, though its run has finished", () => {
@@ -138,7 +138,7 @@ describe("the open items", () => {
 
   it("says nothing is open when nothing is, and asks no ledger before the first head", () => {
     const r = rig();
-    expect(renderOpenItems(r.list([]), r.now)).toBe("Nothing open.");
+    expect(openItemsStatus(r.list([]), r.now).text).toBe("Nothing open.");
     expect(r.ledger).toEqual([]);
   });
 

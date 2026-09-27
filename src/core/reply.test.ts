@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cjkFriendly, compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, stableBlockEnd, streamBody } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, stableBlockEnd, streamBody } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -124,7 +124,7 @@ describe("silentReason", () => {
   });
 });
 
-describe("cjkFriendly", () => {
+describe("the CJK bold repair", () => {
   it("is applied by splitReply, so every surface benefits", () => {
     // Slack's parser and the web's `marked` fail on different halves of the
     // same rule; repairing it once here covers both.
@@ -133,29 +133,29 @@ describe("cjkFriendly", () => {
 
   it("closes a bold run whose quotes sit against CJK punctuation", () => {
     // The reported bug: rendered as literal ** on both sides.
-    expect(cjkFriendly('**"怎么做一个编程助手"**：')).toBe('"**怎么做一个编程助手**"：');
+    expect(streamBody('**"怎么做一个编程助手"**：')).toBe('"**怎么做一个编程助手**"：');
   });
 
   it("leaves a run that already closes alone", () => {
-    expect(cjkFriendly("**闲聊 + 边界**：")).toBe("**闲聊 + 边界**：");
-    expect(cjkFriendly("**bold** and more")).toBe("**bold** and more");
+    expect(streamBody("**闲聊 + 边界**：")).toBe("**闲聊 + 边界**：");
+    expect(streamBody("**bold** and more")).toBe("**bold** and more");
   });
 
   it("lifts fullwidth brackets too", () => {
-    expect(cjkFriendly("**（括号）**文字")).toBe("（**括号**）文字");
+    expect(streamBody("**（括号）**文字")).toBe("（**括号**）文字");
   });
 
   it("never rewrites asterisks inside code", () => {
-    expect(cjkFriendly('```\n**"x"**：\n```')).toBe('```\n**"x"**：\n```');
-    expect(cjkFriendly('`**"x"**：`')).toBe('`**"x"**：`');
+    expect(streamBody('```\n**"x"**：\n```')).toBe('```\n**"x"**：\n```');
+    expect(streamBody('`**"x"**：`')).toBe('`**"x"**：`');
   });
 
   it("leaves a run that is only punctuation", () => {
-    expect(cjkFriendly('**"**')).toBe('**"**');
+    expect(streamBody('**"**')).toBe('**"**');
   });
 
   it("handles several runs in one line", () => {
-    expect(cjkFriendly('**"a"**、**"b"**')).toBe('"**a**"、"**b**"');
+    expect(streamBody('**"a"**、**"b"**')).toBe('"**a**"、"**b**"');
   });
 });
 

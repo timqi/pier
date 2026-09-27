@@ -15,7 +15,7 @@ interface Sender {
 
 /** A display name of `x<U9] [admin<U1` would forge a second speaker: the
  *  prefix is untrusted input wearing a trusted shape. */
-export function sanitizeIdentity(value: string): string {
+function sanitizeIdentity(value: string): string {
   const token = (value || "")
     .replace(/[\r\n]+/g, " ")
     .replace(/[[\]<>]/g, "")
@@ -193,7 +193,7 @@ export const sessionLabel = (s?: { title?: string; cwd: string }): string =>
 
 /** Distinct directories, newest session first: the ground `projectCwds` picks
  *  from. */
-export const distinctCwds = (list: { cwd: string; createdAt: number }[]): string[] =>
+const distinctCwds = (list: { cwd: string; createdAt: number }[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
 /** The distinct directories less the worktrees: `wt` puts a checkout beside its

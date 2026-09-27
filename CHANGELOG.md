@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Upgrade notes
+
+- The database migrates to schema 33, one-way: it drops five columns nothing read (`session_state.cwd`, `session_state.project_sort`, `conversations.updated_at`, `restart_ledger.created_at`, `push_identity.created_at`); 0.2.0 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
+
 ## 0.2.0 — 2026-09-27
 
 ### Highlights

@@ -121,7 +121,7 @@ export function normalizeModelRef(raw: unknown): ModelRef | null {
 
 /** Shape only: tools.ts owns the catalog, and an unknown name is ignored
  *  there, so a downgrade cannot lose a setting it cannot explain. */
-export function normalizeTools(raw: unknown): string[] | null {
+function normalizeTools(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
 

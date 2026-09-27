@@ -8,7 +8,6 @@ import {
   normalizeAccent,
   parseModelMenu,
   normalizePublicUrl,
-  normalizeTools,
   SettingsStore,
 } from "./settings.js";
 
@@ -156,10 +155,17 @@ describe("managed tools", () => {
   });
 
   it("takes a name it does not know, and refuses anything that is not one", () => {
-    expect(normalizeTools([" rtk ", "rtk", "future-tool"])).toEqual(["rtk", "future-tool"]);
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    const stored = (raw: unknown): string[] => {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('tools', ?)").run(JSON.stringify(raw));
+      return store.get().tools;
+    };
+    expect(stored([" rtk ", "rtk", "future-tool"])).toEqual(["rtk", "future-tool"]);
     for (const bad of ["rtk", [42], [""], ["x".repeat(65)], Array(33).fill("a")]) {
-      expect(normalizeTools(bad)).toBeNull();
+      expect(stored(bad)).toEqual([]);
     }
+    db.close();
   });
 });
 

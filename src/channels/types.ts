@@ -45,7 +45,7 @@ export interface ChatConfig {
   home?: true;
 }
 
-export interface BoundUser {
+interface BoundUser {
   id: string;
   name: string;
   boundAt: number;

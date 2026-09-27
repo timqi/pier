@@ -38,7 +38,7 @@ const LIFTABLE = /[\u201c\u201d"\u2018\u2019'()\uff08\uff09\u300c\u300d\u300e\u3
  *  `**“怎么做”**：` never closes (a spec hole, not a platform bug, and constant
  *  in model output). Moving the punctuation outside — `“**怎么做**”：` — lands
  *  the `**` against a letter. Fences and code spans are content, never touched. */
-export function cjkFriendly(markdown: string): string {
+function cjkFriendly(markdown: string): string {
   return replaceOutsideCode(markdown, /\*\*(\S|\S[\s\S]*?\S)\*\*/g, ([whole, inner = ""]) => {
     let lead = "";
     let trail = "";

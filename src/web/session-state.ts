@@ -1,6 +1,5 @@
 // What the workbench decided about a session, and nothing a transcript already
-// knows: a finished turn nobody looked at (`unread`). `cwd` and `project_sort`
-// are columns nothing reads.
+// knows: a finished turn nobody looked at (`unread`).
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";

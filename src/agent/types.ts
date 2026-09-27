@@ -310,7 +310,7 @@ export interface RegistryModel {
   maxTokens?: number;
 }
 
-export type RequestAuth =
+type RequestAuth =
   | { ok: true; apiKey?: string; headers?: unknown; baseUrl?: string }
   | { ok: false; error: string };
 

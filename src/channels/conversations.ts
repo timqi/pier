@@ -25,11 +25,11 @@ export class ConversationStore {
    *  one launched from the chat defaults, which a re-create reads again. */
   set(key: ConversationKey, sessionId: string, launch?: AgentLaunchOptions): void {
     this.db.prepare(`
-      INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at, launch)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO conversations(channel_id, conversation_id, session_id, launch)
+      VALUES (?, ?, ?, ?)
       ON CONFLICT(channel_id, conversation_id) DO UPDATE SET
-        session_id = excluded.session_id, updated_at = excluded.updated_at, launch = excluded.launch
-    `).run(key.channelId, key.conversationId, sessionId, Date.now(), launch ? JSON.stringify(launch) : null);
+        session_id = excluded.session_id, launch = excluded.launch
+    `).run(key.channelId, key.conversationId, sessionId, launch ? JSON.stringify(launch) : null);
   }
 
   launchOf(key: ConversationKey): AgentLaunchOptions | undefined {

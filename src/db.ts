@@ -354,6 +354,14 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state DROP COLUMN sort;
   ALTER TABLE session_state DROP COLUMN closed;
   `,
+  // 33 — columns written and never read.
+  `
+  ALTER TABLE session_state DROP COLUMN cwd;
+  ALTER TABLE session_state DROP COLUMN project_sort;
+  ALTER TABLE conversations DROP COLUMN updated_at;
+  ALTER TABLE restart_ledger DROP COLUMN created_at;
+  ALTER TABLE push_identity DROP COLUMN created_at;
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

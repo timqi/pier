@@ -58,8 +58,8 @@ export class PushStore {
     if (row) return { ...row, privateKey: this.#unsealed(row.privateKey) };
     const keys = generateVapidKeys();
     this.#db
-      .prepare("INSERT INTO push_identity(id, public_key, private_key, created_at) VALUES (1, ?, ?, ?)")
-      .run(keys.publicKey, this.#sealed(keys.privateKey), Date.now());
+      .prepare("INSERT INTO push_identity(id, public_key, private_key) VALUES (1, ?, ?)")
+      .run(keys.publicKey, this.#sealed(keys.privateKey));
     log.info("minted this instance's VAPID key pair");
     return keys;
   }
