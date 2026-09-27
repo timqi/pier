@@ -4,7 +4,7 @@
 
 import type { ModelRef } from "../core/types.js";
 
-export interface CatalogModel extends ModelRef {
+interface CatalogModel extends ModelRef {
   reasoning: boolean;
 }
 

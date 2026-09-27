@@ -5,7 +5,7 @@ import type { RequestTarget } from "./provider.js";
 
 /** Anthropic Messages wire format for the hosted web_search / web_fetch server tools. */
 
-export type NativeToolName = "web_search" | "web_fetch";
+type NativeToolName = "web_search" | "web_fetch";
 
 interface NativeToolOptions {
   maxUses: number;

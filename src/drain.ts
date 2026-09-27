@@ -14,7 +14,7 @@ const POLL_MS = 1_000;
 /** Shared across sessions, so N hung seams cost this long, not N times it. */
 const CLEANUP_BOUND_MS = 10_000;
 
-export interface LedgerEntry {
+interface LedgerEntry {
   channelId: string;
   conversationId: string;
   note: string;

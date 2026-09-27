@@ -24,7 +24,7 @@ const recordIds = (origin: SystemInputOrigin | undefined): string[] => {
 };
 
 /** What a kind of delivery has to say about itself; the engine owns the rest. */
-export interface Deliverable<T extends CallbackFields> {
+interface Deliverable<T extends CallbackFields> {
   /** Its id, which is also how the recipient's transcript names it. */
   id(record: T): string;
   reload(id: string): T | undefined;

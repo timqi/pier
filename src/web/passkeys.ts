@@ -39,7 +39,7 @@ const FLAG_UP = 0x01;
 const FLAG_AT = 0x40;
 
 /** What the browser may see: never the public key. */
-export interface Passkey {
+interface Passkey {
   id: string;
   label: string;
   createdAt: number;
@@ -116,7 +116,7 @@ class Refusal extends Error {
 /** The browser binds a credential to the RP ID and refuses any other host, so
  *  only an https public URL can name one; a passkey on a tunnel would be a
  *  lockout the moment the address changed. */
-export function relyingParty(publicUrl: string): { rpId: string; origin: string } | { reason: string } {
+function relyingParty(publicUrl: string): { rpId: string; origin: string } | { reason: string } {
   if (!publicUrl.startsWith("https://")) {
     return { reason: "passkeys need an https public URL (Settings → Instance)" };
   }
@@ -230,7 +230,7 @@ const asBytes = (value: Cbor | undefined, what: string): Uint8Array => {
 
 /** COSE_Key → JWK, EC2 P-256 (ES256) or RSA (RS256). `createPublicKey`
  *  validates the point / modulus; the JWK is what the store keeps. */
-export function coseToJwk(key: Map<number | string, Cbor>): JsonWebKey {
+function coseToJwk(key: Map<number | string, Cbor>): JsonWebKey {
   const kty = key.get(1);
   const alg = key.get(3);
   const b64 = (label: number, what: string): string => Buffer.from(asBytes(key.get(label), what)).toString("base64url");
@@ -260,7 +260,7 @@ interface AuthData {
 }
 
 /** rpIdHash(32) flags(1) signCount(4) [aaguid(16) idLen(2) id COSE_Key] [extensions]. */
-export function parseAuthData(data: Uint8Array): AuthData {
+function parseAuthData(data: Uint8Array): AuthData {
   if (data.length < 37) throw new Refusal("authenticator data too short", 400);
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const parsed: AuthData = { rpIdHash: data.subarray(0, 32), flags: data[32]!, signCount: view.getUint32(33) };

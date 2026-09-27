@@ -24,7 +24,7 @@ interface PendingFile {
 }
 
 /** Everything the composer needs from the orchestrator (main.ts). */
-export interface ComposerDeps {
+interface ComposerDeps {
   sessionId: () => string | null;
   sessionState: () => SessionState;
   chatVisible: () => boolean;

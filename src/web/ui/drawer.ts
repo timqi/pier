@@ -37,7 +37,7 @@ export interface SessionInfo {
 }
 
 /** Everything the drawer needs from the orchestrator (main.ts). */
-export interface DrawerDeps {
+interface DrawerDeps {
   /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   currentId: () => string | null;

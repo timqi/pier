@@ -10,7 +10,7 @@ import { isSealed, vtCli, type Secrets, type VtClient } from "./secrets.js";
 
 const log = logger("vault");
 
-export type VaultLevel = "auto" | "approve";
+type VaultLevel = "auto" | "approve";
 
 export interface VaultEntry {
   name: string;

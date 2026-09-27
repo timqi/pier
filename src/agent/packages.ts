@@ -37,7 +37,7 @@ type ArrayKey = keyof typeof KINDS;
 const RTK_FILE = join("extensions", "rtk.ts");
 
 /** The built-in `pier` package: its switches are pier.db lists, none of it settings.json. */
-export interface PierPackage {
+interface PierPackage {
   version: string;
   settings: Pick<SettingsStore, "get" | "setSkillsOff">;
 }

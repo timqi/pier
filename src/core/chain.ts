@@ -20,7 +20,7 @@ const log = logger("core");
 
 const EXCHANGES = 3;
 
-export interface ChainDeps {
+interface ChainDeps {
   factory: AgentFactory;
   router: Router;
   home: string;

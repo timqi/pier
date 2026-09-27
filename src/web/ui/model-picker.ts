@@ -12,7 +12,7 @@ import { btn, CONTROL_TRIGGER, field } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { report } from "./report.js";
 
-export interface ModelPickerProps {
+interface ModelPickerProps {
   models: ModelRef[];
   current?: ModelRef | null;
   thinkingLevel: ThinkingLevel;

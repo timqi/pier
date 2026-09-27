@@ -14,7 +14,7 @@ export type RegistrySelection =
   | { type: "resource"; source: string; kind: PackageResourceKind; path: string }
   | { type: "add" };
 
-export interface RegistryDeps {
+interface RegistryDeps {
   pane: HTMLElement;
   paneBar: (name: string, ...rest: HTMLElement[]) => HTMLElement;
   /** A pane's ticket: `claim()` when it opens, `live(t)` before every later redraw. */

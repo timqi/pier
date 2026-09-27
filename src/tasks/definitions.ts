@@ -89,7 +89,7 @@ function parseTrigger(raw: unknown): TaskTrigger {
 
 /** Always computed from `from` (boot recomputes from *now*): cron runs missed
  *  while Pier was down are skipped, never caught up — no double fire. */
-export function nextRunAt(trigger: TaskTrigger, from: number): number | null {
+function nextRunAt(trigger: TaskTrigger, from: number): number | null {
   if (trigger.type === "manual") return null;
   if (trigger.type === "watch") return from + trigger.intervalSeconds * 1000;
   return new Cron(trigger.expression, { timezone: trigger.timezone }).nextRun(new Date(from))?.getTime() ?? null;

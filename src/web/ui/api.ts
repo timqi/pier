@@ -47,7 +47,7 @@ export async function failure(res: Response, fallback: string): Promise<string> 
 }
 
 /** What a read got: the value, or the sentence to show for not having it. */
-export type Fetched<T> = { ok: true; value: T } | { ok: false; error: string };
+type Fetched<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /** A refusal keeps the server's own sentence, and a request that never
  *  answered is a result, not a rejection into a `void` call (§5). */

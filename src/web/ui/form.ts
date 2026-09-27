@@ -138,7 +138,7 @@ export function card(title: string, subtitle: string, ...body: HTMLElement[]): H
   return el;
 }
 
-export interface FieldOptions {
+interface FieldOptions {
   /** One line under the control, for the thing the label cannot say. */
   hint?: string;
   /** A `helpBadge()`, shown beside the label. */

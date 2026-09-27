@@ -44,7 +44,7 @@ export type LarkElement =
   | { tag: "form"; name: string; elements: (LarkFormInput | LarkElement | LarkButton)[] }
   | LarkButton;
 
-export interface LarkColumn {
+interface LarkColumn {
   tag: "column";
   width: "auto";
   elements: LarkButton[];
@@ -66,7 +66,7 @@ export interface LarkCard {
 
 // --- event shapes ---------------------------------------------------------------
 
-export interface LarkMention {
+interface LarkMention {
   key: string;
   id?: { open_id?: string };
   name?: string;

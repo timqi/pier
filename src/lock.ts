@@ -9,7 +9,7 @@ import { PIER_LOCK } from "./paths.js";
 /** `heldBy` is a pid that answered signal 0 — the caller owns nothing in the
  *  directory, the database included. `null` only where the file named no pid a
  *  losing racer could still read. */
-export type InstanceLock = { release: () => void } | { heldBy: number | null };
+type InstanceLock = { release: () => void } | { heldBy: number | null };
 
 /** Unreadable, gone, or not a pid: no holder anyone can name, so the file is
  *  not evidence of one. */

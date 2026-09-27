@@ -94,7 +94,7 @@ export function markdownBox(markdown: string): HTMLElement {
 
 /** An in-tab navigation drops the composer draft and the event stream, so a
  *  link the agent wrote never takes the tab. Hash routes *are* this page. */
-export function externalLinks(root: HTMLElement): void {
+function externalLinks(root: HTMLElement): void {
   for (const a of root.querySelectorAll("a")) {
     if ((a.getAttribute("href") ?? "").startsWith("#")) continue;
     a.target = "_blank";

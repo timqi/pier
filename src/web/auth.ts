@@ -31,7 +31,7 @@ const LINK_TTL_MS = 2 * 60_000;
 const MAX_LINKS = 10;
 
 /** The token is never in here. */
-export interface Device {
+interface Device {
   id: string;
   createdAt: number;
   seenAt: number;
@@ -298,7 +298,7 @@ export function noteFailure(client: string): void {
   else failures.set(client, { count: 1, resetAt: Date.now() + WINDOW_MS });
 }
 
-export const forgetFailures = (client: string): void => void failures.delete(client);
+const forgetFailures = (client: string): void => void failures.delete(client);
 
 /** Hosts, not schemes: TLS commonly terminates at the reverse proxy. */
 function originMatches(origin: string | undefined, host: string | undefined): boolean {
@@ -379,7 +379,7 @@ export function openSession(c: Context, store: AuthStore, client: string): void 
   setSessionCookie(c, store.open(client, c.req.header("user-agent") ?? ""));
 }
 
-export const PASSWORD_OFF = "Password sign-in is off while a passkey is registered.";
+const PASSWORD_OFF = "Password sign-in is off while a passkey is registered.";
 
 export function registerAuthRoutes(
   app: Hono,

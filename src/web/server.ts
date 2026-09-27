@@ -119,7 +119,7 @@ export const instanceManifest = (
 export const withAccentIcon = (svg: string, accent: string): string =>
   svg.replace(`fill="${ICON_PLATE}"`, `fill="${ACCENTS[accent || DEFAULT_ACCENT]}"`);
 
-export interface WebDeps {
+interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;

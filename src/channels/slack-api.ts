@@ -19,7 +19,7 @@ export interface SlackFile {
 
 /** Slack flattens these onto the attachment, and some shares nest the original
  *  under `original_message` instead; both are read. */
-export interface SharedMessage {
+interface SharedMessage {
   text?: string;
   ts?: string;
   thread_ts?: string;
@@ -104,7 +104,7 @@ export interface SlackInteraction {
   view?: SlackView;
 }
 
-export interface SlackView {
+interface SlackView {
   callback_id?: string;
   private_metadata?: string;
   state?: { values: Record<string, Record<string, { value?: string | null }>> };
@@ -136,7 +136,7 @@ export interface SlackHistoryPage {
   nextCursor?: string;
 }
 
-export interface SlackHistoryQuery {
+interface SlackHistoryQuery {
   /** Slack `ts` bounds, inclusive-ish; Slack treats them as exclusive. */
   oldest?: string;
   latest?: string;
@@ -158,7 +158,7 @@ export interface SocketLike {
   close(): void;
 }
 
-export type SocketFactory = (url: string) => SocketLike;
+type SocketFactory = (url: string) => SocketLike;
 
 /** Every call the adapter makes — the seam a test double implements. */
 export interface SlackClient {

@@ -121,7 +121,7 @@ const snapshot = ({
   expires: _expires,
   ...flow
 }: Flow) => flow;
-export type ProviderFlow = ReturnType<typeof snapshot>;
+type ProviderFlow = ReturnType<typeof snapshot>;
 
 export class ProviderFlows {
   readonly #flows = new Map<string, Flow>();

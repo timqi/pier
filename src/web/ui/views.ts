@@ -8,7 +8,7 @@ import { projectCwds } from "../../core/identity.js";
 import type { SessionInfo } from "./drawer.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
-export interface ViewsDeps {
+interface ViewsDeps {
   sessions: () => SessionInfo[];
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;

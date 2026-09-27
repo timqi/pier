@@ -7,7 +7,7 @@
 /** A gap this long makes the timestamp worth its tokens. */
 const GAP_MS = 10 * 60_000;
 
-export interface Sender {
+interface Sender {
   id: string;
   /** Display name; falls back to the id when the platform cannot resolve one. */
   name: string;

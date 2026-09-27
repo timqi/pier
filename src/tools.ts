@@ -19,7 +19,7 @@ const log = logger("tools");
 const UBIX_LATEST = "https://api.github.com/repos/timqi/ubix/releases/latest";
 
 /** One binary Pier will install and keep current on request. */
-export interface ManagedTool {
+interface ManagedTool {
   name: string;
   /** One line, shown beside the switch that turns it on. */
   summary: string;
@@ -182,7 +182,7 @@ export function writePierShim(
 }
 
 /** Structural rather than the settings type: settings.ts imports this file. */
-export interface EnabledTools {
+interface EnabledTools {
   tools: readonly string[];
   customTools: readonly CustomTool[];
 }
@@ -264,7 +264,7 @@ export class SyncLock {
 }
 
 /** `waiting`: a sync was already running and this request rides the run that follows. */
-export type SyncRequest = "started" | "waiting";
+type SyncRequest = "started" | "waiting";
 
 /** Always something to wait for: "refused, nothing in flight" would loop with
  *  nothing to loop on, so the type cannot spell it. */
@@ -335,7 +335,7 @@ const spawnExec: Exec = (file, args, env) =>
 
 /** The union of what `list` and `upgrade` say; fields the other command does
  *  not have are null. */
-export interface UbixToolState {
+interface UbixToolState {
   name: string;
   /** `list`: the recorded installed version. `upgrade`: what it moved to. */
   version: string | null;
@@ -426,7 +426,7 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
 }
 
 /** What one tool did in one sync, and what it is now. */
-export interface ToolSyncEntry {
+interface ToolSyncEntry {
   name: string;
   /** ubix's own word for what happened, or Pier's for what it did around it. */
   action: string;
@@ -434,7 +434,7 @@ export interface ToolSyncEntry {
   error: string | null;
 }
 
-export interface ToolSyncReport {
+interface ToolSyncReport {
   entries: ToolSyncEntry[];
   /** True when anything at all went wrong — the CLI's exit code. */
   failed: boolean;
