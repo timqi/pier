@@ -208,8 +208,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   rows tail-capped text; expanded logs scroll independently; simple replies
   leave no empty log; interrupted work stays visible. System inputs
   (seed, callback, delegation) are one line, opening to the card:
-  `↺ session seed · <reason> · <previous id8>`, `⟵ callback · <state> · <run
-  name> · <model> · <id8>`, `⟶ delegation · <run name> · <id8>`, where `<id8>`
+  `↺ session seed · <reason> · <previous id8>`, `↩ callback · <state> · <run
+  name> · <model> · <id8>`, `↗ delegation · <run name> · <id8>` (the glyphs
+  are `ui/icons.ts` icons), where `<id8>`
   is the other session's id, a link to it, else the run id as text. A
   click or ↵ expands in place; expansion is per row, in memory. A
   `/status` answer, `Stayed silent — <reason>` and chat command answers stay
