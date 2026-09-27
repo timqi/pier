@@ -1,8 +1,9 @@
-// What counts as a file reference in a reply. The rest of the plumbing needs a
-// browser; this rule decides whether prose turns into a wrong link, so it is
-// the part worth pinning.
+// What counts as a file reference in a reply, and how the existence check is
+// batched. The rest of the plumbing needs a browser; these decide whether prose
+// turns into a wrong link or every link goes plain, so they are worth pinning.
 
 import { describe, expect, it, vi } from "vitest";
+import { installDom, type FakeElement } from "./dom.testkit.js";
 
 // The module wires the lightbox at import; a stub element
 // takes those assignments so the rule can be imported without a DOM.
@@ -11,7 +12,10 @@ vi.mock("./dom.js", async (orig) => ({
   $: () => ({}) as HTMLElement,
 }));
 
-const { parseFileRef } = await import("./attachments.js");
+const report = vi.fn();
+vi.mock("./report.js", () => ({ report }));
+
+const { parseFileRef, renderFileRefs } = await import("./attachments.js");
 
 describe("parseFileRef", () => {
   it("reads the path and the line it names", () => {
@@ -37,5 +41,31 @@ describe("parseFileRef", () => {
     expect(parseFileRef("src/web/ui")).toBeNull(); // no extension: as likely a directory
     expect(parseFileRef("https://example.com/a.ts")).toBeNull();
     expect(parseFileRef("")).toBeNull();
+  });
+});
+
+describe("the existence check", () => {
+  it("asks in slices the route accepts, and a failed slice plains only its own paths", async () => {
+    const doc = installDom();
+    const asked: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const { paths } = JSON.parse(String(init?.body)) as { paths: string[] };
+      asked.push(paths.length);
+      if (asked.length === 2) return Response.json({ error: "paths required" }, { status: 400 });
+      return Response.json({ exists: paths.map(() => true) });
+    }));
+    const codes = Array.from({ length: 1500 }, (_, i) => {
+      const code = doc.createElement("code");
+      code.textContent = `/w/f${String(i)}.ts`;
+      return code;
+    });
+    renderFileRefs(codes as unknown as HTMLElement[], "h1", ["/w"]);
+    const linked = () => codes.filter((c: FakeElement) => c.classList.contains("fileref")).length;
+    await vi.waitFor(() => expect(linked()).toBe(1000));
+    expect(asked).toEqual([1000, 500]);
+    expect(codes.slice(1000).some((c) => c.classList.contains("fileref"))).toBe(false);
+    await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(1));
+    expect(report).toHaveBeenCalledWith("paths required");
+    vi.unstubAllGlobals();
   });
 });

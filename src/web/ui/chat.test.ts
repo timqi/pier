@@ -170,6 +170,16 @@ it("replays a refused prompt as the user's row and the reason", () => {
   ]);
 });
 
+it("keeps the prior answer's buttons when the turn after it failed", () => {
+  chat.renderSnapshot([
+    { role: "assistant", text: "Done.\n\n---\n[Ship it] | [Wait]" },
+    { role: "user", text: "Ship it" },
+    { role: "assistant", text: "", error: "overloaded" },
+  ], "idle", []);
+  const buttons = doc.querySelector("#turns")!.querySelectorAll("button").map((b) => b.textContent).filter(Boolean);
+  expect(buttons).toEqual(["Ship it", "Wait"]);
+});
+
 describe("file references", () => {
   /** Answers the existence check from `onDisk`, recording every path asked. */
   const disk = (onDisk: string[]): string[][] => {

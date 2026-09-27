@@ -249,16 +249,25 @@ function exists(path: string): Promise<boolean> {
   });
 }
 
-/** A failed check leaves every reference in it plain code, and says so (§5). */
+/** The most paths `/api/fs/exists` takes in one request (web/fs.ts). */
+const EXISTS_MAX = 1000;
+
+/** A failed slice leaves the references in it plain code, and says so once (§5). */
 async function checkAsked(): Promise<void> {
   const batch = asked!;
   asked = null;
   const paths = [...batch.keys()];
-  const got = await postJson<{ exists: boolean[] }>("/api/fs/exists", { paths }, "Could not check file references");
+  const slices = Array.from({ length: Math.ceil(paths.length / EXISTS_MAX) }, (_, i) => paths.slice(i * EXISTS_MAX, (i + 1) * EXISTS_MAX));
+  const answers = await Promise.all(slices.map((slice) =>
+    postJson<{ exists: boolean[] }>("/api/fs/exists", { paths: slice }, "Could not check file references")));
+  const failed = answers.find((got) => !got.ok);
   // Dynamic: report.ts draws into the chat, which imports this module.
-  if (!got.ok) void import("./report.js").then((m) => m.report(got.error));
-  paths.forEach((path, i) => {
-    for (const done of batch.get(path) ?? []) done(got.ok && got.value.exists[i] === true);
+  if (failed && !failed.ok) void import("./report.js").then((m) => m.report(failed.error));
+  slices.forEach((slice, s) => {
+    const got = answers[s]!;
+    slice.forEach((path, i) => {
+      for (const done of batch.get(path) ?? []) done(got.ok && got.value.exists[i] === true);
+    });
   });
 }
 
