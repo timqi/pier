@@ -117,6 +117,9 @@ empty) is dropped with a log line, never a command.
   records it as a web-sent command does.
 - An unknown `/word` or `%word` is a message, never an error, on every
   surface ([10](10-continuous-session.md#chat-commands)).
+- `skills/pier-help/SKILL.md` §In-chat commands carries a one-line copy of
+  each row: the npm package ships skills without `docs/design`. Changing a row
+  changes both.
 
 ### Skill commands by prefix
 

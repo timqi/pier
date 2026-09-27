@@ -67,11 +67,20 @@ truth.
 
 - A chat command is the whole message `/<word>` or `%<word>` on every surface
   (`%` because Slack's client eats an unregistered `/`); there are no bare
-  command words, and a message that is only a mention is dropped. The table
-  — `/status`, `/new`, `/stop`, `/skills`, `/settings`, `/s <text>`,
-  `/bind <code>`, and what each does in the home chat and in a thread — is
-  §Chat commands of `../../docs/design/11-im-conversation.md` (Pier's source
-  checkout). An unknown `/word` is a message.
+  command words, and a message that is only a mention is dropped. An unknown
+  `/word` is a message. The commands (this list mirrors
+  `docs/design/11-im-conversation.md` §Chat commands):
+  - `/status` — the head's open items; prose in a thread.
+  - `/new` — the next head now; refused while the head is replying; prose in
+    a thread.
+  - `/stop` — aborts the head's turn (children untouched), or the thread's
+    session.
+  - `/skills` — one `<name> — <description>` line per skill of the session
+    asked, head or thread.
+  - `/settings` — the panel on a thread; prose in the home chat.
+  - `/s <text>` — on a thread root, the draft with `<text>` as its question;
+    prose inside a thread and in the home chat.
+  - `/bind <code>` — in a DM, binds the sender.
 - `/<word> <text>` (or `%`) runs a skill when `word` is a prefix of its name or
   of the part after any `-` (`/tasks`, `/ta` → `pier-tasks`); several matches
   are refused with their names, nothing sent; a one-letter word never matches.
@@ -122,7 +131,7 @@ truth.
   mention, require the sender to be bound, or both. Dropped messages are
   logged, never answered.
 - Binding: the operator issues a code in the Console; the user DMs the bot
-  `/bind <code>` (Slack: `bind <code>`). Codes expire after ~10 minutes.
+  `/bind <code>` (or `%bind <code>`). Codes expire after ~10 minutes.
 - An unbound DM sender is told how to bind at most once per 10 minutes;
   their other messages are dropped. "The bot ignores my DMs" usually means
   not bound.
