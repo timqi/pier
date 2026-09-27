@@ -39,6 +39,10 @@ export interface ChatConfig {
    *  the owner and show which rows no longer have one. "" until traffic or a
    *  start records it. */
   botId: string;
+  /** This DM is the continuous conversation's chat: every message in it goes
+   *  to the head, and the head's turns render in its main flow. At most one
+   *  across both platforms (docs/design/11-im-conversation.md); a group never. */
+  home?: true;
 }
 
 export interface BoundUser {
