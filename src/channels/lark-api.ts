@@ -124,12 +124,18 @@ export interface LarkSocket {
   close(): Promise<void>;
 }
 
+/** Where a post goes: into the topic under `root`, or the main flow of `chatId`
+ *  — the home chat's only (docs/design/11-im-conversation.md). */
+export type LarkTarget = { root: string } | { chatId: string };
+
 /** Every call the adapter makes — the seam a test double implements. */
 export interface LarkClient {
   botOpenId(): Promise<string>;
   connect(handlers: LarkHandlers): Promise<LarkSocket>;
-  /** The only way to post: Pier never roots a topic of its own. */
+  /** Into a topic: Pier never roots a topic of its own. */
   replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }>;
+  /** Into the home chat's main flow. */
+  sendCard(chatId: string, card: LarkCard): Promise<{ messageId: string }>;
   patchCard(messageId: string, card: LarkCard): Promise<void>;
   deleteMessage(messageId: string): Promise<void>;
   /** `emojiType` is a Lark key (`OnIt`), never a codepoint. */
@@ -139,7 +145,7 @@ export interface LarkClient {
   chatName(chatId: string): Promise<string | undefined>;
   userName(openId: string): Promise<string>;
   uploadFile(
-    rootId: string,
+    to: LarkTarget,
     file: { name: string; bytes: Uint8Array; image: boolean },
   ): Promise<void>;
   /** Refuses past `maxBytes` mid-stream. */
@@ -258,24 +264,34 @@ export class LarkApi implements LarkClient {
 
   // --- messages ------------------------------------------------------------------
 
-  async replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }> {
-    const res = await this.client.im.v1.message.reply({
-      path: { message_id: messageId },
-      data: {
-        msg_type: "interactive",
-        content: JSON.stringify(card),
-        // Lark's equivalent of posting to a thread_ts.
-        reply_in_thread: true,
-      },
-    });
-    return { messageId: ok("message.reply", res).data?.message_id ?? "" };
+  replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }> {
+    return this.post({ root: messageId }, "interactive", card);
+  }
+
+  sendCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
+    return this.post({ chatId }, "interactive", card);
+  }
+
+  private async post(to: LarkTarget, type: string, content: object): Promise<{ messageId: string }> {
+    const data = { msg_type: type, content: JSON.stringify(content) };
+    const res = "root" in to
+      // `reply_in_thread` is Lark's equivalent of posting to a thread_ts.
+      ? ok("message.reply", await this.client.im.v1.message.reply({
+        path: { message_id: to.root },
+        data: { ...data, reply_in_thread: true },
+      }))
+      : ok("message.create", await this.client.im.v1.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: { ...data, receive_id: to.chatId },
+      }));
+    return { messageId: res.data?.message_id ?? "" };
   }
 
   /** Images take the image endpoint so they render inline; `stream` is Lark's
    *  "type unknown". The SDK unwraps an upload response to its `data`, so a
    *  failure arrives as a missing key, not a code. */
   async uploadFile(
-    rootId: string,
+    to: LarkTarget,
     file: { name: string; bytes: Uint8Array; image: boolean },
   ): Promise<void> {
     const bytes = Buffer.from(file.bytes);
@@ -293,17 +309,7 @@ export class LarkApi implements LarkClient {
       if (!res?.file_key) throw new Error(`lark file.create: no file_key for ${file.name}`);
       content = { file_key: res.file_key };
     }
-    ok(
-      "message.reply",
-      await this.client.im.v1.message.reply({
-        path: { message_id: rootId },
-        data: {
-          msg_type: file.image ? "image" : "file",
-          content: JSON.stringify(content),
-          reply_in_thread: true,
-        },
-      }),
-    );
+    await this.post(to, file.image ? "image" : "file", content);
   }
 
   async patchCard(messageId: string, card: LarkCard): Promise<void> {

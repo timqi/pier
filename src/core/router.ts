@@ -50,8 +50,12 @@ export class QueueOperationError extends Error {
   }
 }
 
+/** A message the router did not take and has already told the chat about
+ *  (`refuse`): a caller that reports its own failures skips these. */
+export class Refused extends Error {}
+
 /** A short skill spelling that names more than one skill: not sent, the chat told. */
-export class SkillAmbiguous extends Error {}
+export class SkillAmbiguous extends Refused {}
 
 /** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`) resolved to the
  *  one skill `word` is a prefix of — of the name, or of the name after any `-`;
@@ -95,8 +99,29 @@ export class Router {
     private readonly chatKeyOf: (sessionId: string) => ConversationKey | undefined = () => undefined,
   ) {}
 
+  /** A session its adapter's stop sent back to its own stream takes its chat again. */
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
+    for (const attached of this.bySession.values()) this.toChat(attached, channel.id);
+  }
+
+  /** A stopped adapter's sessions answer on their own stream until it is back:
+   *  a key on a dead channel delivers nowhere, and Web Push reads it as a chat's. */
+  unregisterChannel(channelId: string): void {
+    this.channels.delete(channelId);
+    for (const key of this.byKey.keys()) if (key.startsWith(`${channelId}:`)) this.byKey.delete(key);
+    for (const attached of this.bySession.values()) {
+      if (attached.key.channelId === channelId) attached.key = { channelId: "web", conversationId: attached.session.id };
+    }
+  }
+
+  /** The durable chat outranks the alias that happened to open the session
+   *  first (a restart, the web speaking first), same rule as `reached`. */
+  private toChat(attached: Attached, channelId?: string): void {
+    const chat = isAlias(attached.key) ? this.chatKeyOf(attached.session.id) : undefined;
+    if (!chat || (channelId && chat.channelId !== channelId)) return;
+    this.byKey.set(keyOf(chat), attached.session);
+    attached.key = chat;
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
@@ -293,13 +318,7 @@ export class Router {
       }),
     };
     this.bySession.set(session.id, attached);
-    // The durable chat outranks the alias that happened to open the session
-    // first (a restart, the web speaking first), same rule as `reached`.
-    const chat = isAlias(key) ? this.chatKeyOf(session.id) : undefined;
-    if (chat) {
-      this.byKey.set(keyOf(chat), session);
-      attached.key = chat;
-    }
+    this.toChat(attached);
   }
 
   /** An adapter's send is several platform calls (chunks, then attachments),
@@ -473,7 +492,7 @@ export class Router {
   }
 
   private refuseDraining(key: ConversationKey): never {
-    this.refuse(key, new Error("Pier is restarting — this message was not taken; send it again in a moment."));
+    this.refuse(key, new Refused("Pier is restarting — this message was not taken; send it again in a moment."));
   }
 
   /** Attached sessions still mid-turn, and conversations whose answer is still

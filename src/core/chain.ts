@@ -58,6 +58,10 @@ function lastExchanges(turns: ChatTurn[], n: number): string {
 const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
 
+/** `/skills`' answer on every surface, the head's and a thread's (channels/). */
+export const skillsText = (skills: { name: string; description: string }[]): string =>
+  skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
+
 /** Only the exact word is a command: the composer is not a shell. */
 function chatCommand(text: string): ChatCommand | undefined {
   const draft = text.trim().toLowerCase();
@@ -106,7 +110,7 @@ export class MainChain {
       return { session: await this.rotate("new", this.members()[0], session, key), rotated: "new" };
     }
     if (command === "skills") {
-      const text = session.skills().map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
+      const text = skillsText(session.skills());
       await session.systemInput(text, origin, "append");
       return undefined;
     }

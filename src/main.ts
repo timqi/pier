@@ -128,7 +128,7 @@ const router = new Router(hub, (key) => {
     return factory.resume(key.conversationId);
   }
   return resolveIm(key);
-}, (key) => conversations.get(key), (id) => conversations.keyOf(id));
+}, (key) => conversations.get(key), (id) => chatKeyOf(id));
 const chain = new MainChain(db, {
   factory, router, home: pierPath("home"),
   ledger: (ids, since) => tasks.ledger(ids, since),
@@ -159,7 +159,18 @@ const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
 });
-const channels = new ChannelRuntime(channelStore, router, control);
+const channels = new ChannelRuntime(channelStore, router, chain, control);
+/** The head answers in the home chat while its adapter runs (docs/design/11); down,
+ *  it is web-only and Web Push resumes. An older member keeps no delivery: re-keyed
+ *  on an adapter's start it would take the home key from the head. Any other
+ *  session: its conversations row. */
+function chatKeyOf(sessionId: string): ConversationKey | undefined {
+  const home = channelStore.home();
+  if (home && channels.live(home.platform) && chain.chainOf(sessionId)?.[0] === sessionId) {
+    return { channelId: home.platform, conversationId: home.chatId };
+  }
+  return conversations.keyOf(sessionId);
+}
 resolveIm = resolveConversation(
   conversations,
   factory,
@@ -345,7 +356,7 @@ app.route("/", createServer({
   taskSessions: () => tasks.taskSessions(),
   leads: () => taskStore.leads(),
   openItems: () => tasks.openItems(),
-  channelOf: (id) => conversations.keyOf(id)?.channelId,
+  channelOf: (id) => chatKeyOf(id)?.channelId,
   continuous: chain,
 }));
 

@@ -1,10 +1,10 @@
-// How a turn becomes cards in a Lark thread: one card per chunk, footer and
+// How a turn becomes cards in a Lark thread (or the home chat's main flow): one card per chunk, footer and
 // buttons on the last, and what an empty turn still has to say.
 
 import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
-import type { LarkCard, LarkClient, LarkElement } from "./lark-api.js";
+import type { LarkCard, LarkClient, LarkElement, LarkTarget } from "./lark-api.js";
 import { noteBody } from "./lines.js";
 import {
   button,
@@ -28,14 +28,14 @@ export class LarkOutbound {
   private readonly sent = new Map<string, LarkCard>();
 
   constructor(
-    private readonly api: Pick<LarkClient, "replyCard" | "patchCard" | "uploadFile">,
+    private readonly api: Pick<LarkClient, "replyCard" | "sendCard" | "patchCard" | "uploadFile">,
     private readonly log: (message: string) => void,
   ) {}
 
   /** An empty turn still posts its footer and says which kind of nothing (§5).
    *  The footer folds into the last chunk's element (a second element renders
    *  a blank gap); only a bodiless turn gets the standalone one. */
-  async reply(root: string, reply: AgentReply): Promise<void> {
+  async reply(to: LarkTarget, reply: AgentReply): Promise<void> {
     // A local file link is dead in Lark: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
@@ -43,6 +43,8 @@ export class LarkOutbound {
     const quiet = isSilentReply(reply) ? quietLabel(reply.silence) : "";
     const note = [quiet, meta].filter(Boolean).join(" · ");
     if (!(text || reply.suggestions.length || note || paths.length)) return;
+    // An empty root is a main-flow button, which only the home chat has (lark.ts onAction).
+    const root = "root" in to ? to.root : "";
     const row = reply.suggestions.length
       ? buttonRow(reply.suggestions.map((label, index) =>
         button(label, { key: `${OFFER_PREFIX}${index}`, root, label })))
@@ -55,11 +57,15 @@ export class LarkOutbound {
       else if (last && note) elements.push(footer(note));
       if (last && row) elements.push(row);
       if (!elements.length) continue;
-      const { messageId } = await this.api.replyCard(root, card(elements));
+      const { messageId } = await this.post(to, card(elements));
       if (last && row && messageId) this.remember(messageId, card(elements));
     }
-    const lost = await sendAttachments(paths, (file) => this.api.uploadFile(root, file), this.log);
-    if (lost) await this.api.replyCard(root, card([markdown(lost)]));
+    const lost = await sendAttachments(paths, (file) => this.api.uploadFile(to, file), this.log);
+    if (lost) await this.post(to, card([markdown(lost)]));
+  }
+
+  post(to: LarkTarget, sent: LarkCard): Promise<{ messageId: string }> {
+    return "root" in to ? this.api.replyCard(to.root, sent) : this.api.sendCard(to.chatId, sent);
   }
 
   /** Best-effort: a card sent before a restart keeps its row, logged. */
@@ -88,10 +94,10 @@ export class LarkOutbound {
 
   /** No footer: the turn this input triggers has not ended. Answers with the
    *  id of the last card posted, where the caller puts the 👀. */
-  async note(root: string, note: { text: string; origin: NoteOrigin }): Promise<string | undefined> {
+  async note(to: LarkTarget, note: { text: string; origin: NoteOrigin }): Promise<string | undefined> {
     let messageId: string | undefined;
     for (const part of chunk(noteBody(note, "*"), LARK_MAX)) {
-      messageId = (await this.api.replyCard(root, card([markdown(part)]))).messageId;
+      messageId = (await this.post(to, card([markdown(part)]))).messageId;
     }
     return messageId;
   }
