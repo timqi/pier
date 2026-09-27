@@ -140,13 +140,14 @@ export type SystemInputOrigin = {
 };
 
 /** The chat commands, each with the one line the composer's completion shows:
- *  a message to the continuous conversation that is exactly `/<word>` is a
+ *  a message to the continuous conversation that is exactly `/<word>` or `%<word>` is a
  *  command, never a message (core/chain.ts). Browser-safe: the composer
  *  lists this table. */
 export const CHAT_COMMANDS = {
   status: "what is open — in flight, or waiting on you",
   new: "start a new session now",
   stop: "stop the reply in progress",
+  skills: "the skills this session can run, by name",
 } as const;
 
 export type ChatCommand = keyof typeof CHAT_COMMANDS;

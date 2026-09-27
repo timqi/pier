@@ -8,6 +8,13 @@ describe("IM command parsing", () => {
     expect(parseCommand("")).toBeNull();
     expect(parseCommand("   ")).toBeNull();
     expect(parseCommand("/")).toBeNull();
+    expect(parseCommand("%")).toBeNull();
+    expect(parseCommand("100% sure")).toBeNull();
+  });
+
+  it("takes `%` as it takes `/`", () => {
+    expect(parseCommand(" %STOP ")).toEqual({ name: "stop", args: "" });
+    expect(parseCommand("%bind ab-CD")).toEqual({ name: "bind", args: "ab-CD" });
   });
 
   it("trims both ends before deciding", () => {
@@ -33,11 +40,13 @@ describe("the configure-first trigger", () => {
     expect(settingsDraft("s what is  new?")).toBe("what is  new?");
     expect(settingsDraft("  /s  review the parser ")).toBe("review the parser");
     expect(settingsDraft("S ship it")).toBe("ship it");
+    expect(settingsDraft("%s ship it")).toBe("ship it");
   });
 
   it("is not a bare `s`, nor the other settings words", () => {
     expect(settingsDraft("s")).toBeUndefined();
     expect(settingsDraft("/s")).toBeUndefined();
+    expect(settingsDraft("%s")).toBeUndefined();
     expect(settingsDraft("set the timer")).toBeUndefined();
     expect(settingsDraft("setting up")).toBeUndefined();
     expect(settingsDraft("settings are broken")).toBeUndefined();

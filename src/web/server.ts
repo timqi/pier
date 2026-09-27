@@ -13,7 +13,7 @@ import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { ChatCommandRefused, type MainChain } from "../core/chain.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
-import { QueueOperationError, Router } from "../core/router.js";
+import { QueueOperationError, Router, SkillAmbiguous } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { registerPackageRoutes } from "./packages.js";
@@ -463,16 +463,21 @@ export function createServer(
     const mode: InboundMessage["mode"] =
       body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
     sentByOperator(id);
-    const { sessionId } = await router.dispatch({
-      key: { channelId: "web", conversationId: id },
-      senderId: "web",
-      // Named: in a session also reached from a group chat, an unheaded message
-      // is attributed to whoever spoke last (core/identity.ts).
-      sender: { id: "web", name: "operator" },
-      text: body.text,
-      mode,
-    });
-    return c.json({ sessionId }, 202);
+    try {
+      const { sessionId } = await router.dispatch({
+        key: { channelId: "web", conversationId: id },
+        senderId: "web",
+        // Named: in a session also reached from a group chat, an unheaded message
+        // is attributed to whoever spoke last (core/identity.ts).
+        sender: { id: "web", name: "operator" },
+        text: body.text,
+        mode,
+      });
+      return c.json({ sessionId }, 202);
+    } catch (err) {
+      if (err instanceof SkillAmbiguous) return c.json({ error: err.message }, 409);
+      throw err;
+    }
   });
 
   /** A rotation re-lists every surface. */
@@ -496,7 +501,7 @@ export function createServer(
     try {
       return c.json(reached(await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode })), 202);
     } catch (err) {
-      if (err instanceof ChatCommandRefused) return c.json({ error: err.message }, 409);
+      if (err instanceof ChatCommandRefused || err instanceof SkillAmbiguous) return c.json({ error: err.message }, 409);
       throw err;
     }
   });

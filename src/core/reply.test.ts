@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cjkFriendly, compact, formatTurnMeta, openItemMarkers, silentReason, splitReply, stableBlockEnd, streamBody } from "./reply.js";
+import { cjkFriendly, compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, stableBlockEnd, streamBody } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -307,5 +307,14 @@ describe("open-item markers", () => {
     const holding = "<open>run `x` — stage</open>\nHi.";
     expect(openItemMarkers(holding).markers).toEqual([{ op: "open", problem: "run `x`", stage: "stage", runIds: [] }]);
     expect(streamBody(holding)).toBe("Hi.");
+  });
+});
+
+describe("originLabel", () => {
+  it("names a seed by its reason and a chat command by its word, not as a task callback", () => {
+    expect(originLabel({ kind: "session-seed", reason: "idle", previousSessionId: "h1" })).toBe("↺ new session · idle");
+    expect(originLabel({ kind: "session-seed", reason: "first", previousSessionId: null })).toBe("↺ new session · first");
+    expect(originLabel({ kind: "chat-command", command: "status" })).toBe("/status");
+    expect(originLabel({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe("↩ task callback");
   });
 });

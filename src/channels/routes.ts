@@ -44,6 +44,7 @@ function parseChats(raw: unknown, known: ChatConfig[]): ChatConfig[] {
     if (!edit) return base;
     return {
       ...base,
+      home: edit.home === true && base.kind === "dm" ? true : undefined,
       enabled: asBool(edit.enabled),
       requireMention: asBool(edit.requireMention),
       requireBind: asBool(edit.requireBind),
@@ -98,7 +99,14 @@ export function registerChannelRoutes(
       // next start read as the first one and skip the swapped bot's cleanup.
       botId: current.botId,
     };
+    const before = store.home();
     store.save(platform, next);
+    const home = next.chats.find((chat) => chat.home);
+    if (home) {
+      store.setHome(platform, home.id);
+      // A thread session opened here before is unreachable once the chat is the head's.
+      if (before?.platform !== platform || before.chatId !== home.id) conversations.forgetChat(platform, home.id);
+    }
     await runtime.reload();
     return c.json({ ok: true });
   });

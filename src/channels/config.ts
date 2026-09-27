@@ -13,6 +13,7 @@ import {
   type ChatKind,
   type ChatPolicy,
   defaultChannelConfig,
+  PLATFORMS,
 } from "./types.js";
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
@@ -86,6 +87,31 @@ export class ChannelStore {
 
   chat(platform: ChannelPlatform, chatId: string): ChatConfig | undefined {
     return this.get(platform).chats.find((c) => c.id === chatId);
+  }
+
+  /** One home instance-wide: setting it clears every other row on both
+   *  platforms. Refuses a chat that is unknown or not a DM; `null` leaves no home anywhere. */
+  setHome(platform: ChannelPlatform, chatId: string | null): void {
+    if (chatId !== null && this.cached(platform).chats.find((c) => c.id === chatId)?.kind !== "dm") {
+      throw new Error(`${platform}:${chatId} is not a known DM`);
+    }
+    for (const p of PLATFORMS) {
+      const config = this.get(p);
+      for (const chat of config.chats) {
+        if (p === platform && chat.id === chatId) chat.home = true;
+        else delete chat.home;
+      }
+      this.save(p, config);
+    }
+  }
+
+  // On the per-message path: no clone.
+  home(): { platform: ChannelPlatform; chatId: string } | undefined {
+    for (const platform of PLATFORMS) {
+      const chat = this.cached(platform).chats.find((c) => c.home);
+      if (chat) return { platform, chatId: chat.id };
+    }
+    return undefined;
   }
 
   /** No platform reliably lists every chat a bot is in, so discovery is passive

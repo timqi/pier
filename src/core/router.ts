@@ -6,6 +6,7 @@ import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
 import { cut, splitReply } from "./reply.js";
+import { isChatCommand } from "./types.js";
 import type {
   AgentSession,
   Channel,
@@ -30,6 +31,7 @@ function keyOf(key: ConversationKey): string {
  *  Channel is registered under them — so they share a lock in `ensure`. */
 const isAlias = (key: ConversationKey): boolean =>
   key.channelId === "web" || key.channelId === "task";
+const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
 
 interface Attached {
   session: AgentSession;
@@ -47,6 +49,28 @@ export class QueueOperationError extends Error {
   constructor(readonly reason: "busy" | "empty" | "draining", message: string) {
     super(message);
   }
+}
+
+/** A message the router did not take and has already told the chat about
+ *  (`refuse`): a caller that reports its own failures skips these. */
+export class Refused extends Error {}
+
+/** A short skill spelling that names more than one skill: not sent, the chat told. */
+export class SkillAmbiguous extends Refused {}
+
+/** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`) resolved to the
+ *  one skill `word` is a prefix of — of the name, or of the name after any `-`;
+ *  the text unchanged when it names none (docs/design/11-im-conversation.md). */
+function skillText(text: string, skills: { name: string }[]): string | SkillAmbiguous {
+  // Two characters at least: `/s <text>` is the settings draft's spelling (channels/commands.ts).
+  const [, kept, spelled, rest] = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i.exec(text.trim()) ?? [];
+  const word = spelled?.toLowerCase();
+  if (!word || (!kept && isChatCommand(word))) return text;
+  const names = skills.map((s) => s.name);
+  const found = names.includes(word) ? [word] : names.filter((name) =>
+    name.split("-").some((_, i, parts) => parts.slice(i).join("-").startsWith(word)));
+  if (found.length > 1) return new SkillAmbiguous(`/${word} matches ${found.join(", ")} — say more`);
+  return found[0] ? `/skill:${found[0]}${rest ? ` ${rest}` : ""}` : text;
 }
 
 export class Router {
@@ -76,8 +100,38 @@ export class Router {
     private readonly chatKeyOf: (sessionId: string) => ConversationKey | undefined = () => undefined,
   ) {}
 
+  /** A session its adapter's stop sent back to its own stream takes its chat again. */
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
+    for (const attached of this.bySession.values()) this.toChat(attached);
+  }
+
+  /** A stopped adapter's sessions answer on their own stream until it is back:
+   *  a key on a dead channel delivers nowhere, and Web Push reads it as a chat's. */
+  unregisterChannel(channelId: string): void {
+    this.channels.delete(channelId);
+    for (const key of this.byKey.keys()) if (key.startsWith(`${channelId}:`)) this.byKey.delete(key);
+    for (const attached of this.bySession.values()) {
+      if (attached.key.channelId === channelId) attached.key = webKey(attached.session.id);
+    }
+  }
+
+  /** The durable chat outranks the alias that happened to open the session
+   *  first (a restart, the web speaking first), same rule as `reached`. */
+  private toChat(attached: Attached): void {
+    const chat = isAlias(attached.key) ? this.chatKeyOf(attached.session.id) : undefined;
+    if (!chat || !this.channels.has(chat.channelId)) return;
+    this.hold(chat, attached.session);
+    attached.key = chat;
+  }
+
+  /** A chat key taken from another session (the chain's rotation) leaves it,
+   *  or two sessions would answer one chat. */
+  private hold(key: ConversationKey, session: AgentSession): void {
+    const previous = this.byKey.get(keyOf(key));
+    const left = previous && previous !== session ? this.bySession.get(previous.id) : undefined;
+    if (left && keyOf(left.key) === keyOf(key)) left.key = webKey(left.session.id);
+    this.byKey.set(keyOf(key), session);
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
@@ -186,7 +240,7 @@ export class Router {
   attach(key: ConversationKey, session: AgentSession): void {
     const existing = this.bySession.get(session.id);
     if (existing?.session === session) {
-      this.byKey.set(keyOf(key), session);
+      this.hold(key, session);
       this.reached(session, key);
       return;
     }
@@ -200,7 +254,7 @@ export class Router {
         log.error(`disposing replaced session ${session.id} failed`, err)
       );
     }
-    this.byKey.set(keyOf(key), session);
+    this.hold(key, session);
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
     // Delivery reads `attached.key` live: a chat attaching after the workbench
     // opened the session takes over (`reached`), and the closure must follow.
@@ -274,13 +328,7 @@ export class Router {
       }),
     };
     this.bySession.set(session.id, attached);
-    // The durable chat outranks the alias that happened to open the session
-    // first (a restart, the web speaking first), same rule as `reached`.
-    const chat = isAlias(key) ? this.chatKeyOf(session.id) : undefined;
-    if (chat) {
-      this.byKey.set(keyOf(chat), session);
-      attached.key = chat;
-    }
+    this.toChat(attached);
   }
 
   /** An adapter's send is several platform calls (chunks, then attachments),
@@ -318,7 +366,7 @@ export class Router {
   private async useQueue<T>(
     sessionId: string,
     action: (session: AgentSession) => Promise<T>,
-    key: ConversationKey = { channelId: "web", conversationId: sessionId },
+    key: ConversationKey = webKey(sessionId),
   ): Promise<T> {
     if (this.queueOperations.has(sessionId)) throw new QueueOperationError("busy", "Queue operation in progress");
     this.queueOperations.add(sessionId);
@@ -446,12 +494,15 @@ export class Router {
   }
 
   /** Told to the chat directly (§5): an adapter's dispatch catch only logs. */
-  private refuseDraining(key: ConversationKey): void {
-    const message = "Pier is restarting — this message was not taken; send it again in a moment.";
+  private refuse(key: ConversationKey, err: Error): never {
     this.channels.get(key.channelId)
-      ?.notify(key.conversationId, { text: message, origin: { kind: "error" } })
-      .catch((err) => log.error(`could not report the drain to ${key.channelId}`, err));
-    throw new Error(message);
+      ?.notify(key.conversationId, { text: err.message, origin: { kind: "error" } })
+      .catch((e: unknown) => log.error(`could not report the refusal to ${key.channelId}`, e));
+    throw err;
+  }
+
+  private refuseDraining(key: ConversationKey): never {
+    this.refuse(key, new Refused("Pier is restarting — this message was not taken; send it again in a moment."));
   }
 
   /** Attached sessions still mid-turn, and conversations whose answer is still
@@ -550,15 +601,17 @@ export class Router {
     if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
     if (this.draining) this.refuseDraining(msg.key);
-    const { action, text } = decide(msg, session.state);
+    const skilled = skillText(msg.text, session.skills());
+    if (skilled instanceof SkillAmbiguous) this.refuse(msg.key, skilled);
+    const { action, text } = decide({ ...msg, text: skilled }, session.state);
     // A chat is named so the agent can hand it to a script (skills/pier-slack);
     // an alias names nothing a shell could reach.
     const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
     const opaque = this.channels.get(msg.key.channelId)?.opaqueIds;
-    const prompt = withPrefix(
-      this.senders.next(session.id, msg.sender, Date.now(), where, opaque, text),
-      text,
-    );
+    const header = this.senders.next(session.id, msg.sender, Date.now(), where, opaque, text);
+    // Pi expands `/skill:<name>` only at the very start, so a header rides in its args.
+    const skill = header ? /^\/skill:\S+/.exec(text)?.[0] : undefined;
+    const prompt = skill ? `${skill} ${withPrefix(header, text.slice(skill.length).trimStart())}` : withPrefix(header, text);
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );

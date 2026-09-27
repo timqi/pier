@@ -24,8 +24,10 @@ import type {
   LarkClient,
   LarkHandlers,
   LarkMessageEvent,
+  LarkTarget,
 } from "./lark-api.js";
 import { ReceiptLedger } from "./receipts.js";
+import { chatOf } from "./types.js";
 
 const ME = "ou_bot";
 const CHAT = "oc_100";
@@ -61,6 +63,16 @@ class FakeClient implements LarkClient {
 
   replyCard(to: string, card: LarkCard): Promise<{ messageId: string }> {
     this.replied.push({ to, card });
+    const messageId = `om_${this.nextId++}`;
+    this.cards.set(messageId, card);
+    return Promise.resolve({ messageId });
+  }
+
+  /** sendCard calls: the home chat's main flow. */
+  readonly sent: { chatId: string; card: LarkCard }[] = [];
+
+  sendCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
+    this.sent.push({ chatId, card });
     const messageId = `om_${this.nextId++}`;
     this.cards.set(messageId, card);
     return Promise.resolve({ messageId });
@@ -108,13 +120,13 @@ class FakeClient implements LarkClient {
     return Promise.resolve({ bytes: new TextEncoder().encode("fo") });
   }
 
-  readonly uploads: { root: string; name: string; image: boolean; size: number }[] = [];
+  readonly uploads: (LarkTarget & { name: string; image: boolean; size: number })[] = [];
 
   uploadFile(
-    rootId: string,
+    to: LarkTarget,
     file: { name: string; bytes: Uint8Array; image: boolean },
   ): Promise<void> {
-    this.uploads.push({ root: rootId, name: file.name, image: file.image, size: file.bytes.length });
+    this.uploads.push({ ...to, name: file.name, image: file.image, size: file.bytes.length });
     return Promise.resolve();
   }
 }
@@ -127,6 +139,8 @@ let dropped: string[];
 let receipts: ReceiptLedger;
 let aborted: string[];
 let known: Set<string>;
+/** The home chat's id, when the test made one. */
+let homeChat: string | undefined;
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   sessionState: SessionState;
@@ -216,6 +230,8 @@ function fakeControl() {
     launchFor: () => ({}),
     claimBot: () => [] as string[],
     knows: (key: ConversationKey) => known.has(key.conversationId),
+    isHome: (key: ConversationKey) => chatOf(key.conversationId) === homeChat,
+    skills: () => Promise.resolve([{ name: "pier-tasks", description: "delegate work" }]),
     abort: (key: ConversationKey) => {
       aborted.push(key.conversationId);
       return Promise.resolve();
@@ -258,6 +274,7 @@ beforeEach(async () => {
   receipts = new ReceiptLedger("lark", openDb(":memory:"));
   aborted = [];
   known = new Set();
+  homeChat = undefined;
   control = fakeControl();
   channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
   await channel.start((msg) => inbound.push(msg));
@@ -853,6 +870,89 @@ describe("the panel of a thread with a session", () => {
   it("offers Stop only while the session streams", async () => {
     control.sessionState = "streaming";
     expect(buttonLabels(await openPanel())).toEqual(["Model & reasoning", "⏹ Stop"]);
+  });
+});
+
+describe("the home chat", () => {
+  const HOME = "oc_home";
+  const dm = (over: Parameters<typeof message>[0]) => message({ chatId: HOME, chatType: "p2p", ...over });
+  const homeKey = { channelId: "lark", conversationId: HOME };
+
+  beforeEach(() => {
+    bind();
+    homeChat = HOME;
+  });
+
+  it("keys every message by the chat, top-level or in a topic, and 👀 under that key", async () => {
+    await feed(dm({ text: "morning", messageId: "om_h1" }), dm({ text: "and this", messageId: "om_h2", rootId: "om_h1" }));
+    expect(inbound.map((m) => [m.key, m.text])).toEqual([[homeKey, "morning"], [homeKey, "and this"]]);
+    expect(client.reactions.map((r) => r.messageId)).toEqual(["om_h1", "om_h2"]);
+    // The head's turn-end, delivered under the chat's id, settles both.
+    await channel.send(HOME, { text: "hi", suggestions: [] });
+    expect(client.reactions.filter((r) => !r.add).map((r) => r.messageId).sort()).toEqual(["om_h1", "om_h2"]);
+  });
+
+  it("settings, s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
+    await feed(dm({ text: "settings", messageId: "om_s1" }), dm({ text: "/settings", messageId: "om_s2" }), dm({ text: "s fix it", messageId: "om_s3" }), dm({ text: "/stop" }), dm({ text: "%stop" }), dm({ text: "%Status " }));
+    expect(inbound.map((m) => m.text)).toEqual(["settings", "/settings", "s fix it", "/stop", "%stop", "%Status"]);
+    expect(aborted).toEqual([]);
+    expect(client.replied).toEqual([]);
+    // Answered by a note, not a turn: nothing would take the 👀 off a command, or off its answer.
+    expect(client.reactions.map((r) => r.messageId)).toEqual(["om_s1", "om_s2", "om_s3"]);
+    await channel.notify(HOME, { text: "nothing running", origin: { kind: "chat-command", command: "stop" } });
+    await channel.notify(HOME, { text: "seed", origin: { kind: "session-seed", reason: "new", previousSessionId: null } });
+    expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*/stop*\n> nothing running", "*↺ new session · new*\n> seed"]);
+    expect(client.reactions).toHaveLength(3);
+  });
+
+  it("drops a message that is only a mention, loudly", async () => {
+    await feed(dm({ text: "@_user_1", mentions: [{ key: "@_user_1", id: { open_id: ME }, name: "Pier" }] }));
+    expect(inbound).toEqual([]);
+    expect(dropped.some((m) => m.includes("bare mention in the home chat"))).toBe(true);
+  });
+
+  it("%stop in another chat's topic aborts that thread", async () => {
+    openGates();
+    await feed(message({ text: "%stop", rootId: "om_1" }));
+    expect(aborted).toEqual([`${CHAT}/om_1`]);
+    expect(inbound).toEqual([]);
+  });
+
+  it("posts turns, notes and files to the main flow; any other chat without a root is still refused", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pier-lark-home-")), "a.txt");
+    writeFileSync(path, "x");
+    await channel.send(HOME, { text: `done [a.txt](file://${path})`, suggestions: ["More"] });
+    await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
+    expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([
+      [HOME, "done a.txt"],
+      [HOME, "*⚠ failed*\n> Pier restarted"],
+    ]);
+    expect(client.uploads).toEqual([{ chatId: HOME, name: "a.txt", image: false, size: 1 }]);
+    await channel.notify(CHAT, { text: "lost", origin: { kind: "error" } });
+    expect(client.sent).toHaveLength(2);
+    expect(client.replied).toEqual([]);
+    expect(dropped.some((m) => m.includes(`refusing to post a system note to ${CHAT}`))).toBe(true);
+  });
+
+  it("a main-flow button echoes top-level and steers the label in under the chat's key", async () => {
+    await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+    const offerId = [...client.cards.keys()].at(-1)!;
+    // An empty root names the main flow: the callback does not say where the card is.
+    expect(JSON.stringify(client.sent.at(-1)!.card)).toContain('"root":""');
+    await act({ messageId: offerId, chatId: HOME, operatorId: USER, value: { key: "sg:0", root: "", label: "Deploy" } });
+    expect(client.patched.at(-1)!.messageId).toBe(offerId);
+    expect(bodyText(client.sent.at(-1)!.card)).toBe("▸ Deploy");
+    const echoId = [...client.cards.keys()].at(-1)!;
+    expect(client.reactions.at(-1)).toEqual({ messageId: echoId, emoji: "OnIt", add: true });
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  it("/skills in another chat's topic lists the thread session's skills as a note", async () => {
+    openGates();
+    await feed(message({ text: "/skills", rootId: "om_1" }));
+    expect(inbound).toEqual([]);
+    expect(client.replied.at(-1)!.to).toBe("om_1");
+    expect(bodyText(client.replied.at(-1)!.card)).toContain("> pier-tasks — delegate work");
   });
 });
 

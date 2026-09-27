@@ -65,13 +65,27 @@ truth.
 
 ## In-chat commands and the settings panel
 
-- `/settings` — or an addressed message with no text at all (a bare mention,
-  an empty DM) — opens a panel; Slack takes the same words bare (`stop`,
-  `settings`, `bind <code>`).
+- A chat command is `/<word>` or `%<word>` on every surface (`%` because
+  Slack's client eats an unregistered `/`): `/status` the conversation's open
+  items, `/new` the next session now, `/stop` abort the running turn,
+  `/skills` one `<name> — <description>` line per skill of the session asked,
+  home or thread. An unknown `/word` is a message.
+- `/<word> <text>` (or `%`) runs a skill when `word` is a prefix of its name or
+  of the part after any `-` (`/tasks`, `/ta` → `pier-tasks`); several matches
+  are refused with their names, nothing sent; a one-letter word never matches.
+- The home chat: at most one DM per instance, set in the Console's chat row.
+  Every message there, top-level or in a thread, reaches the continuous
+  conversation, whose replies, callbacks, seeds and command answers render in
+  the DM's main flow; `/settings` and `s <text>` are prose there and a bare
+  mention is dropped; while that adapter is live the head sends no Web Push.
+  Groups stay thread-per-session.
+- Elsewhere `/settings` — or an addressed message with no text at all (a bare
+  mention, an empty DM) — opens a panel; Slack takes the same words bare
+  (`stop`, `settings`, `bind <code>`).
 - In a thread with no session yet the panel is a draft: directory, model &
   reasoning (the operator's pinned models, one pick sets both), and Start
-  creates the session. `s <text>` as a thread's first message (Lark also
-  `/s <text>`) opens that draft with the text as a pending question, which
+  creates the session. `s <text>` as a thread's first message (also `/s`,
+  `%s <text>`) opens that draft with the text as a pending question, which
   Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
   is an ordinary message.
 - In a thread with a session the panel reads it out (resuming an idle one) and

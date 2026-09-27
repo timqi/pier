@@ -58,16 +58,23 @@ function lastExchanges(turns: ChatTurn[], n: number): string {
 const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
 
+/** `/skills`' answer on every surface, the head's and a thread's (channels/). */
+export const skillsText = (skills: { name: string; description: string }[]): string =>
+  skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
+
 /** Only the exact word is a command: the composer is not a shell. */
 function chatCommand(text: string): ChatCommand | undefined {
   const draft = text.trim().toLowerCase();
   const word = draft.slice(1);
-  return draft.startsWith("/") && isChatCommand(word) ? word : undefined;
+  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
 }
 
 export class MainChain {
   /** Sends pass one at a time, so two cannot both find the head idle and rotate twice. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** The chat the send in flight came from, if any: the head is attached under
+   *  it before anything is appended, so the seed reaches the chat too. */
+  private chat?: ConversationKey;
 
   constructor(private readonly db: DatabaseSync, private readonly deps: ChainDeps) {}
 
@@ -85,17 +92,18 @@ export class MainChain {
     return ids.includes(sessionId) ? ids : undefined;
   }
 
-  /** The alias send: resolve the head, rotating it first when due, then dispatch
-   *  to its own key; `command` names a chat command, answered without a turn. */
-  send(message: Omit<InboundMessage, "key">): Promise<{ sessionId: string; rotated?: ChainReason; command?: ChatCommand }> {
+  /** Resolve the head, rotating it first when due, then dispatch to `key` (a
+   *  chat's) or else the head's own; `command` names a chat command, answered
+   *  without a turn. */
+  send(message: Omit<InboundMessage, "key">, key?: ConversationKey): Promise<{ sessionId: string; rotated?: ChainReason; command?: ChatCommand }> {
     const command = chatCommand(message.text);
-    if (command) return this.serial((session, rotated) => this.command(command, session, rotated)).then((head) => ({ ...head, command }));
-    return this.serial(async (session) => {
-      await this.deps.router.dispatch({ ...message, key: webKey(session.id) });
+    if (command) return this.serial(key, (session, rotated) => this.command(command, session, rotated)).then((head) => ({ ...head, command }));
+    return this.serial(key, async (session) => {
+      await this.deps.router.dispatch({ ...message, key: key ?? webKey(session.id) });
     });
   }
 
-  /** `status` and `stop` answer with a card on the head; `new` answers with the
+  /** `status`, `stop` and `skills` answer with a card on the head; `new` answers with the
    *  next head's seed card — a head just rotated for its own reason is that answer. */
   private async command(command: ChatCommand, session: AgentSession, rotated?: ChainReason): Promise<Head | undefined> {
     const origin = { kind: "chat-command" as const, command };
@@ -103,6 +111,10 @@ export class MainChain {
       if (session.state === "streaming") throw new ChatCommandRefused("the conversation is replying — /stop first");
       if (rotated) return undefined;
       return { session: await this.rotate("new", this.members()[0], session), rotated: "new" };
+    }
+    if (command === "skills") {
+      await session.systemInput(skillsText(session.skills()), origin, "append");
+      return undefined;
     }
     if (command === "stop") {
       const running = session.state === "streaming";
@@ -116,9 +128,11 @@ export class MainChain {
   }
 
   /** `then` may rotate again and return the head it made; the caller's answer is that one. */
-  private serial(then: (head: AgentSession, rotated?: ChainReason) => Promise<Head | undefined | void>): Promise<{ sessionId: string; rotated?: ChainReason }> {
+  private serial(key: ConversationKey | undefined, then: (head: AgentSession, rotated?: ChainReason) => Promise<Head | undefined | void>): Promise<{ sessionId: string; rotated?: ChainReason }> {
     const done = this.queue.then(async () => {
+      this.chat = key;
       const found = await this.current();
+      if (key) this.deps.router.attach(key, found.session);
       const { session, rotated } = (await then(found.session, found.rotated)) ?? found;
       return { sessionId: session.id, ...(rotated ? { rotated } : {}) };
     });
@@ -166,6 +180,7 @@ export class MainChain {
       if (reason === "lost" && previous) this.db.prepare("DELETE FROM main_chain WHERE session_id = ?").run(previous.sessionId);
     });
     this.deps.router.attach(webKey(session.id), session);
+    if (this.chat) this.deps.router.attach(this.chat, session);
     await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
     log.info(`main session ${session.id} started (${reason})`);
     return session;

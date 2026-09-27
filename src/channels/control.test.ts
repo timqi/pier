@@ -279,3 +279,25 @@ describe("claimBot", () => {
     expect(store.get("slack").botId).toBe("U1");
   });
 });
+
+describe("isHome / skills", () => {
+  it("is every key in the home chat on its platform, and nothing else", () => {
+    store.discoverChat("slack", { id: "D1", name: "qiqi", kind: "dm" });
+    expect(control.isHome({ channelId: "slack", conversationId: "D1" })).toBe(false);
+    store.setHome("slack", "D1");
+    expect(control.isHome({ channelId: "slack", conversationId: "D1" })).toBe(true);
+    expect(control.isHome({ channelId: "slack", conversationId: "D1/1717.7" })).toBe(true);
+    expect(control.isHome({ channelId: "lark", conversationId: "D1" })).toBe(false);
+    expect(control.isHome(KEY)).toBe(false);
+  });
+
+  it("answers the thread's session's skills, [] without one and opens nothing", async () => {
+    expect(await control.skills(KEY)).toEqual([]);
+    expect(factory.resumed).toEqual([]);
+    const s = fake("s1");
+    s.skills = () => [{ name: "pier-tasks", description: "run tasks" }];
+    wire(fakeFactory([s]));
+    conversations.set(KEY, "s1");
+    expect(await control.skills(KEY)).toEqual([{ name: "pier-tasks", description: "run tasks" }]);
+  });
+});

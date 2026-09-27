@@ -4,7 +4,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { EventHub } from "./hub.js";
-import { Router } from "./router.js";
+import { Router, SkillAmbiguous } from "./router.js";
 import { fakeSession as sharedFake } from "./session.testkit.js";
 import type {
   AgentReply,
@@ -460,6 +460,21 @@ describe("opening a session", () => {
     expect(router.conversationOf("s1")).toEqual(KEY);
   });
 
+  it("a stopped adapter's sessions go back to their own stream, and take the chat again when it is back", async () => {
+    router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => KEY);
+    router.registerChannel(im.channel);
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    router.unregisterChannel("slack");
+    expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
+    expect(router.sessionOf(KEY)).toBeUndefined();
+    fake.emit({ type: "turn-end", text: "web only" });
+    expect(im.sent).toEqual([]);
+    router.registerChannel(im.channel);
+    expect(router.conversationOf("s1")).toEqual(KEY);
+    fake.emit({ type: "turn-end", text: "back" });
+    expect(im.sent.map(([, r]) => r.text)).toEqual(["back"]);
+  });
+
   it("no chat key → alias behaviour unchanged", async () => {
     router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => undefined);
     await router.ensure({ channelId: "web", conversationId: "s1" });
@@ -889,5 +904,45 @@ describe("conversation abort", () => {
   it("is a no-op for a conversation nobody opened — never a lazy create", async () => {
     await router.abortConversation({ channelId: "slack", conversationId: "C999" });
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe("skill commands by prefix", () => {
+  const SKILLS = ["pier-tasks", "pier-web", "pier-slack", "review"].map((name) => ({ name, description: name }));
+  const WEB = { channelId: "web", conversationId: "s1" };
+  let session: ReturnType<typeof sharedFake>;
+  const send = (text: string, key = WEB) => router.dispatch({ key, senderId: "web", text, mode: "auto" });
+
+  beforeEach(() => {
+    session = sharedFake("s1", { scripted: true, skills: SKILLS });
+    router = new Router(hub, () => Promise.resolve(session));
+    router.registerChannel(im.channel);
+  });
+
+  it("rewrites a word naming one skill, by its name or a part after a dash, `%` or `/`, `skill:` kept", async () => {
+    await send("/ta ship the parser");
+    await send("%Pier-W  what is new?");
+    await send("/skill:pier-s");
+    await send("/rev");
+    expect(session.prompts).toEqual([
+      "/skill:pier-tasks ship the parser", "/skill:pier-web what is new?", "/skill:pier-slack", "/skill:review",
+    ]);
+  });
+
+  it("leaves a word naming no skill, a chat command and plain text as they were", async () => {
+    for (const text of ["/tmp is full", "%status", "/stop", "100% done", "/s one letter"]) await send(text);
+    expect(session.prompts).toEqual(["/tmp is full", "%status", "/stop", "100% done", "/s one letter"]);
+  });
+
+  it("sends nothing for a word naming several, and tells the chat which", async () => {
+    await expect(send("/pier- go")).rejects.toThrow("/pier- matches pier-tasks, pier-web, pier-slack — say more");
+    await expect(send("%pier go", KEY)).rejects.toThrow(SkillAmbiguous);
+    expect(session.prompts).toEqual([]);
+    expect(im.notes).toEqual([["C100/1717.7", { text: "/pier matches pier-tasks, pier-web, pier-slack — say more", origin: { kind: "error" } }]]);
+  });
+
+  it("puts a speaker header after the skill, where Pi still expands it", async () => {
+    await router.dispatch({ key: KEY, senderId: "u1", sender: { id: "u1", name: "qiqi" }, text: "/web search this", mode: "auto" });
+    expect(session.prompts[0]).toMatch(/^\/skill:pier-web \[qiqi<u1> .*slack:C100\/1717\.7\]\nsearch this$/);
   });
 });

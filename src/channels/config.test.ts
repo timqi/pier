@@ -229,6 +229,41 @@ describe("channel config store", () => {
   });
 });
 
+describe("the home chat", () => {
+  beforeEach(() => {
+    store.discoverChat("slack", { id: "D1", name: "qiqi", kind: "dm" });
+    store.discoverChat("slack", { id: "D2", name: "ann", kind: "dm" });
+    store.discoverChat("slack", { id: "C1", name: "ops", kind: "group" });
+    store.discoverChat("lark", { id: "oc_1", name: "qiqi", kind: "dm" });
+  });
+  const homes = (): string[] =>
+    (["slack", "lark"] as const).flatMap((p) => store.get(p).chats.filter((c) => c.home).map((c) => `${p}:${c.id}`));
+
+  it("is one row across both platforms", () => {
+    expect(store.home()).toBeUndefined();
+    store.setHome("slack", "D1");
+    store.setHome("slack", "D2");
+    expect(homes()).toEqual(["slack:D2"]);
+    expect(store.home()).toEqual({ platform: "slack", chatId: "D2" });
+    store.setHome("slack", null);
+    expect(homes()).toEqual([]);
+  });
+
+  it("set on lark clears slack's", () => {
+    store.setHome("slack", "D1");
+    store.setHome("lark", "oc_1");
+    expect(homes()).toEqual(["lark:oc_1"]);
+    expect(store.home()).toEqual({ platform: "lark", chatId: "oc_1" });
+  });
+
+  it("refuses a group or an unknown chat, changing nothing", () => {
+    store.setHome("slack", "D1");
+    expect(() => store.setHome("slack", "C1")).toThrow(/not a known DM/);
+    expect(() => store.setHome("lark", "D1")).toThrow(/not a known DM/);
+    expect(homes()).toEqual(["slack:D1"]);
+  });
+});
+
 const policy = (over: Partial<ChatPolicy> = {}): ChatPolicy => ({
   enabled: true,
   requireMention: true,

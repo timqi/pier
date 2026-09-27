@@ -1,14 +1,15 @@
 // Channel lifecycle: which adapters are running; one call for the Console to
 // apply a config change.
 
-import type { Router } from "../core/router.js";
-import type { Channel } from "../core/types.js";
+import type { MainChain } from "../core/chain.js";
+import { Refused, type Router } from "../core/router.js";
+import type { Channel, InboundMessage } from "../core/types.js";
 import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
-import type { ChannelPlatform } from "./types.js";
+import { type ChannelPlatform, chatOf } from "./types.js";
 
 const ADAPTERS: {
   platform: ChannelPlatform;
@@ -29,13 +30,14 @@ const log = logger("channels");
 const warn = (m: string): void => log.warn(m);
 
 export class ChannelRuntime {
-  private readonly live = new Map<ChannelPlatform, Channel>();
+  private readonly running = new Map<ChannelPlatform, Channel>();
   private reloading: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(
     private readonly store: ChannelStore,
     private readonly router: Router,
+    private readonly chain: MainChain,
     private readonly control: ChannelControl,
     private readonly log: (message: string) => void = warn,
   ) {}
@@ -58,9 +60,10 @@ export class ChannelRuntime {
 
   private async restart(adapter: (typeof ADAPTERS)[number]): Promise<void> {
     const { platform, build } = adapter;
-    const existing = this.live.get(platform);
+    const existing = this.running.get(platform);
     if (existing) {
-      this.live.delete(platform);
+      this.running.delete(platform);
+      this.router.unregisterChannel(platform);
       // Never fatal: the config still has to be applied.
       await existing.stop().catch((err: unknown) =>
         this.log(`${platform} did not stop cleanly: ${String(err)}`));
@@ -79,35 +82,55 @@ export class ChannelRuntime {
     });
     try {
       await channel.start((msg) => {
+        if (this.control.isHome(msg.key)) return this.toHead(channel, msg);
         void this.router.dispatch(msg).catch((err) => this.log(`dispatch failed: ${String(err)}`));
       });
     } catch (err) {
       this.log(`${platform} failed to start: ${String(err)}`);
       return;
     }
+    // Running before registered: the router asks main.ts's chatKeyOf, which asks `live`.
+    this.running.set(platform, channel);
     this.router.registerChannel(channel);
-    this.live.set(platform, channel);
     log.info(`${platform} started`);
+  }
+
+  /** The home chat's every message, threaded or not, is the head's under the
+   *  chat's key. A refusal is the chat's to see (§5): the adapter only logs. */
+  private toHead(channel: Channel, msg: InboundMessage): void {
+    const conversationId = chatOf(msg.key.conversationId);
+    this.chain.send(msg, { channelId: msg.key.channelId, conversationId }).catch((err: unknown) => {
+      this.log(`the conversation did not take a message: ${String(err)}`);
+      if (err instanceof Refused) return;
+      const text = err instanceof Error ? err.message : String(err);
+      void channel.notify(conversationId, { text, origin: { kind: "error" } })
+        .catch((e: unknown) => this.log(`could not report it to ${channel.id}: ${String(e)}`));
+    });
+  }
+
+  live(platform: ChannelPlatform): boolean {
+    return this.running.has(platform);
   }
 
   /** For restart-note delivery (src/drain.ts), which has no session to report
    *  through; false means the platform is not running. */
   async notify(platform: string, conversationId: string, text: string): Promise<boolean> {
-    const channel = this.live.get(platform as ChannelPlatform);
+    const channel = this.running.get(platform as ChannelPlatform);
     if (!channel) return false;
     await channel.notify(conversationId, { text, origin: { kind: "error" } });
     return true;
   }
 
   async stop(): Promise<void> {
-    // An in-flight restart could otherwise register an adapter after `live`
+    // An in-flight restart could otherwise register an adapter after `running`
     // was cleared — running, unstoppable.
     this.stopped = true;
     await this.reloading.catch(() => {});
-    for (const channel of this.live.values()) {
+    for (const channel of this.running.values()) {
+      this.router.unregisterChannel(channel.id);
       await channel.stop().catch((err: unknown) =>
         this.log(`${channel.id} did not stop cleanly: ${String(err)}`));
     }
-    this.live.clear();
+    this.running.clear();
   }
 }

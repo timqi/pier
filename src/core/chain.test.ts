@@ -11,7 +11,7 @@ import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js"
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
 import { fakeSession, type FakeSession, type FakeSessionOptions } from "./session.testkit.js";
-import type { AgentFactory, AgentLaunchOptions, LedgerRun } from "./types.js";
+import type { AgentFactory, AgentLaunchOptions, Channel, LedgerRun, NoteOrigin } from "./types.js";
 
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -255,9 +255,11 @@ describe("the chat commands", () => {
     const m1 = r.sessions.get("m1")!;
     expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Open\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
     expect(m1.prompts).toEqual([]);
-    for (const text of ["/tmp is full", "/status please", "status", "/stat"]) await r.say(text);
-    expect(m1.prompts).toHaveLength(4);
+    for (const text of ["/tmp is full", "/status please", "status", "/stat", "%", "%unknown"]) await r.say(text);
+    expect(m1.prompts).toHaveLength(6);
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
+    expect(await r.say(" %Status ")).toEqual({ sessionId: "m1", command: "status" });
+    expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(2);
   });
 
   it("carries each named run's session with `/status`, for the card to link", async () => {
@@ -301,5 +303,59 @@ describe("the chat commands", () => {
     await r.say("/stop");
     expect(h1.calls.at(-1)).toBe("systemInput:chat-command:append:nothing running");
     expect(h1.calls.filter((c) => c === "abort")).toHaveLength(1);
+  });
+
+  it("lists the head's skills on `/skills`, one line each, or says there are none", async () => {
+    const r = rig({ head: "h1" });
+    const h1 = r.existing("h1", r.clock.now, {
+      skills: [{ name: "pier-tasks", description: "run a task" }, { name: "pier-web", description: "search the web" }],
+    });
+    expect(await r.say("%skills")).toEqual({ sessionId: "h1", command: "skills" });
+    expect(h1.systemInputs.at(-1)).toEqual({
+      text: "pier-tasks — run a task\npier-web — search the web", origin: { kind: "chat-command", command: "skills" }, mode: "append",
+    });
+    expect(h1.prompts).toEqual([]);
+
+    const r2 = rig();
+    await r2.say("/skills");
+    expect(r2.sessions.get("m1")!.systemInputs.at(-1)!.text).toBe("no skills");
+  });
+});
+
+describe("a send under a chat's key", () => {
+  const KEY = { channelId: "lark", conversationId: "oc_home" };
+  const lark = () => {
+    const notes: [string, NoteOrigin][] = [];
+    const channel: Channel = {
+      id: "lark",
+      start: async () => {},
+      send: async () => {},
+      notify: async (id, note) => void notes.push([id, note.origin]),
+      stop: async () => {},
+    };
+    return { channel, notes };
+  };
+  const send = (r: ReturnType<typeof rig>, text: string) =>
+    r.chain.send({ senderId: "u1", sender: { id: "u1", name: "qiqi" }, text, mode: "steer" }, KEY);
+
+  it("dispatches under that key, the head attached under it, and so is a rotation's next head", async () => {
+    const r = rig();
+    const im = lark();
+    r.router.registerChannel(im.channel);
+    expect(await send(r, "hello")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(r.router.conversationOf("m1")).toEqual(KEY);
+    expect(r.router.sessionOf(KEY)?.id).toBe("m1");
+    expect(r.sessions.get("m1")!.prompts[0]).toContain("lark:oc_home");
+    // The seed reached the chat: attached before it was appended.
+    expect(im.notes.map(([id, o]) => [id, o.kind])).toEqual([["oc_home", "session-seed"]]);
+
+    r.clock.now += 2 * IDLE_MS;
+    expect(await send(r, "back")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(r.router.sessionOf(KEY)?.id).toBe("m2");
+    expect(r.router.conversationOf("m2")).toEqual(KEY);
+    // The previous head keeps no delivery: its next turn would otherwise answer in the chat too.
+    expect(r.router.conversationOf("m1")).toEqual({ channelId: "web", conversationId: "m1" });
+    expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "session-seed", reason: "idle" })]);
+    expect(r.sessions.get("m2")!.prompts[0]).toContain("back");
   });
 });

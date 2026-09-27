@@ -121,6 +121,29 @@ describe("channel config routes", () => {
     expect(forgotten).toEqual(["slack:D1"]);
   });
 
+  it("a home DM clears the other platform's and drops its threads only when it changed", async () => {
+    store.discoverChat("slack", { id: "D1", name: "qiqi", kind: "dm" });
+    store.discoverChat("slack", { id: "C1", name: "ops", kind: "group" });
+    store.discoverChat("lark", { id: "oc_1", name: "qiqi", kind: "dm" });
+    store.setHome("lark", "oc_1");
+    const cfg = await get();
+    cfg.chats[0]!.home = true;
+    cfg.chats[1]!.home = true; // a group never is
+    await put(cfg);
+    expect(store.home()).toEqual({ platform: "slack", chatId: "D1" });
+    expect(store.get("slack").chats.map((c) => c.home)).toEqual([true, undefined]);
+    expect(store.get("lark").chats[0]!.home).toBeUndefined();
+    expect(forgotten).toEqual(["slack:D1"]);
+    // Saved again unchanged: still the home, nothing forgotten twice.
+    await put(await get());
+    expect(forgotten).toEqual(["slack:D1"]);
+    // Switched off: no home anywhere.
+    const off = await get();
+    delete off.chats[0]!.home;
+    await put(off);
+    expect(store.home()).toBeUndefined();
+  });
+
   it("rejects a body that is not an object", async () => {
     expect((await put("nope")).status).toBe(400);
     expect(reloads).toBe(0);

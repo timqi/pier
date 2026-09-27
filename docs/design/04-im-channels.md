@@ -222,7 +222,8 @@ Identity is **per-turn, never baked into a session**: a thread is shared.
 ## Conversation identity
 
 A `conversationId` is opaque to core. Slack and Lark spell it
-`<channelId>/<threadTs>`; the chat half has one decoder (`chatOf`).
+`<channelId>/<threadTs>` (Lark's home chat: `<chatId>`, [11](11-im-conversation.md));
+the chat half has one decoder (`chatOf`).
 
 `ConversationStore` (`conversations.ts`) makes routing survive a restart. A
 row made by `newSession` carries the launch it was created with, amended by
@@ -320,7 +321,7 @@ channel row holds no credential.
 | Route | Behavior |
 | ----- | -------- |
 | `GET /api/channels/:platform` | config with the token **masked** |
-| `PUT /api/channels/:platform` | full document; masked token = unchanged token |
+| `PUT /api/channels/:platform` | full document; masked token = unchanged token; a `home` DM row clears every other ([11](11-im-conversation.md)) |
 | `POST /api/channels/:platform/bind-code` | issue a single-use code |
 | `DELETE /api/channels/:platform/users/:id` | unbind |
 | `GET /api/models` | backend model catalog, no session needed |
@@ -358,7 +359,7 @@ Answer these first.
   flow: a conversation is `<channel>/<threadTs>` and a thread *is* a session.
   DMs too (`threadOf` = `thread_ts ?? ts`): every top-level DM opens its own
   session. The Console's Connection card states it beside a help badge. Lark
-  follows this rule too.
+  follows this rule too, but in the home chat ([11](11-im-conversation.md)).
 - **Two credentials.** `xapp-` (`connections:write`) opens Socket Mode;
   `xoxb-` signs Web API calls. `ChannelConfig.appToken` under the same
   "masked means unchanged" rule as `token`.
@@ -439,7 +440,7 @@ Answer these first.
   the submission arrives as `action.form_value`.
 - **Threads follow Slack's rule**, DMs included: `reply_in_thread` roots a
   topic per top-level message; `root_id` continues it. Pier posts no root of
-  its own.
+  its own outside the home chat's main flow ([11](11-im-conversation.md)).
 - **Permissions and the `im.message.receive_v1` subscription take effect only
   after a version is published and approved** — the usual reason a configured
   bot stays silent.

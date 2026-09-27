@@ -50,9 +50,11 @@ function digest(text: string): string {
 /** The origin label in the platform's `emphasis` over the quoted body. A system
  *  input is context for the turn it precedes: pasted whole, a run result buries
  *  a chat that cannot collapse it, so it is digested (the hub keeps it all). An
- *  error is quoted whole; core already capped it. */
+ *  error is quoted whole, core already capped it; so is a chat command's
+ *  answer, bounded and the reason it was asked. */
 export function noteBody(note: { text: string; origin: NoteOrigin }, emphasis: string): string {
-  const text = note.origin.kind === "error" ? note.text : digest(note.text);
+  const whole = note.origin.kind === "error" || note.origin.kind === "chat-command";
+  const text = whole ? note.text : digest(note.text);
   const body = text.split("\n").map((line) => `> ${line}`).join("\n");
   return `${emphasis}${originLabel(note.origin)}${emphasis}\n${body}`;
 }
