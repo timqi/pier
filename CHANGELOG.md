@@ -1,24 +1,24 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-09-27
 
 ### Highlights
 
-- Pier is one continuous conversation, labelled "Pier": you talk to one head session in `$PIER_HOME/home` that answers, remembers and delegates real work to task runs.
-- The head rotates by itself: after an idle hour or past 60K tokens the next message starts a fresh session, seeded with `MEMORY.md`, the open items, recent runs and the last exchanges.
-- Open items: the head keeps a list of what is in flight or waiting on you; `/status` shows it with no model call, on the web and in IM.
+- Pier is one conversation: its current session, in `$PIER_HOME/home`, answers, remembers and delegates real work to task runs.
+- Pier rotates its session by itself: after an idle hour or past 60K tokens the next message starts a fresh session, seeded with `MEMORY.md`, the open items, recent runs and the last exchanges.
+- Open items: Pier keeps a list of what is in flight or waiting on you; `/status` shows it with no model call, on the web and in IM.
 - Feature leads: `pier task run --role lead` runs a long-lived lead that delegates to workers and reports milestones only; `--design` makes it a design lead the user finalizes.
 - One IM DM (Slack or Lark) can be the home chat: the conversation lives in the DM's main flow, with Web Push quiet while it does.
 - The web is one bar and an In progress drawer in place of the rail.
 
 ### Added
 
-- `$PIER_HOME/home` holds the head's memory: `MEMORY.md` (one-line facts), `memory/YYYY-MM-DD.md` daily notes, and an optional `AGENTS.md`.
+- `$PIER_HOME/home` holds Pier's memory: `MEMORY.md` (one-line facts), `memory/YYYY-MM-DD.md` daily notes, and an optional `AGENTS.md`.
 - Chat commands on every surface, typed `/word` or `%word` (Slack eats an unregistered `/`): `/status`, `/new`, `/stop`, `/skills`.
 - `/skills` lists the session's skills; `/<prefix> <text>` runs the one skill whose name starts with the prefix, and an ambiguous prefix is refused with the candidates.
 - `pier task runs`: the runs you launched (across the conversation's sessions), in flight or finished in the last 24h, as JSON.
 - `pier task pause|resume|archive --task-id <id>` for saved definitions; `pier task list` now returns `nextRun` and `lastRun` per definition.
-- `pier task run --role lead [--design]`: a lead may delegate to workers but never to another lead; a lead's result with a `Design final: <path>` line is reported to the head.
+- `pier task run --role lead [--design]`: a lead may delegate to workers but never to another lead; a lead's result with a `Design final: <path>` line is reported to Pier.
 - `pier task run --model <tier>` resolves `hardest`, `balanced` or `cheap` to the first pin with that tier; `--model ?` shows each pin's tier.
 - `pier task save --callback-session none` files a definition whose results go nowhere.
 - A `--run <id> --after` follow-up is visible while it waits: in the target's queue panel under the run's name, and as `N queued` on the sender's run card.
@@ -27,22 +27,22 @@
 - Settings → Tasks: every scheduled task with trigger, last and next run, a pause/resume switch, and its newest 20 runs with their logs.
 - Settings → Boards: every board with its Public switch, Copy link and Delete.
 - Web status panel, opened from the bar's status chip: what is running or queued, over the same open-items text `/status` gives.
-- Web In progress drawer (⌘⇧P): the live sessions other than the head; a finished lead stays until viewed, and a design lead waiting on you keeps its row.
+- Web In progress drawer (⌘⇧P): the live sessions other than Pier's; a finished lead stays until viewed, and a design lead waiting on you keeps its row.
 - Web Files dialog: one modal for Browse files, Settings → Agent's files and file references in chat; Markdown renders by default with a Rendered/Source switch, PDFs show inline.
 - Web composer completes `/skill:<name>` from the session's own skills beside the chat commands.
-- Earlier sessions of the conversation page in above the head, read-only, with a divider naming why each rotation happened.
+- Earlier sessions of the conversation page in above the current one, read-only, with a divider naming why each rotation happened.
 - Routes: `GET /api/continuous`, `GET /api/continuous/open`, `GET /api/continuous/status`, `POST /api/continuous/messages`, `POST /api/fs/exists`.
 - The speaker header carries `lang=<code>` when the sender switches language, so the model replies in it.
 
 ### Changed
 
 - The web opens on `#/conversation`; every other session is reached from the In progress drawer or ⌘K, and Settings is an overlay like Files.
-- Each new head starts on Settings' default model and reasoning; set the default to your `balanced` pin.
-- Compaction is decided per session: the head at 100K tokens, a lead's or worker's at 150K, any other at the instance setting.
+- Each new session of Pier starts on Settings' default model and reasoning; set the default to your `balanced` pin.
+- Compaction is decided per session: Pier's at 100K tokens, a lead's or worker's at 150K, any other at the instance setting.
 - A session created by a delegated run is a worker for its whole life: it opens without the `pier-tasks` skill and `pier task` refuses it, even after its run ends.
-- Callbacks and ownership follow the conversation: a result owed to any of its sessions reaches the current head.
+- Callbacks and ownership follow the conversation: a result owed to any of its sessions reaches Pier's current session.
 - `pier task save` without `--callback-session` now delivers results to the conversation (was: nowhere); a watch probe that did not match still posts nothing.
-- A lead's turn no longer marks its session unread or sends Web Push; the head reports it through its callback instead.
+- A lead's turn no longer marks its session unread or sends Web Push; Pier reports it through its callback instead.
 - Seeds, callbacks, delegations and run cards in the transcript fold to one line that opens to the card and names the other session; a failed run keeps its reason on the line.
 - File references in a reply resolve against the writing session's cwd (then its callbacks' cwds), and only files that exist become links.
 - Settings → Packages shows Tools as one source in the tree.
@@ -53,7 +53,7 @@
 
 ### Removed
 
-- The rail: its create, rename and reorder of sessions, the working-set ordering, and ⌘⇧[ / ⌘⇧] / ⌘⇧O; new work in a directory is something you ask the head to delegate.
+- The rail: its create, rename and reorder of sessions, the working-set ordering, and ⌘⇧[ / ⌘⇧] / ⌘⇧O; new work in a directory is something you ask Pier to delegate.
 - The web ↔ IM handoff: the web's "Continue in…" and the IM panel's "Continue web session…" picker.
 - The Automation and Boards Console views (task editor, global Runs, Activity), replaced by the lean Settings → Tasks and Settings → Boards tabs.
 - Model pin notes; the tier field replaces them.
@@ -75,8 +75,8 @@
 ### Upgrade notes
 
 - The database migrates to schema 32, one-way: it adds the `main_chain` and `open_items` tables and drops `session_state.sort`; 0.1.x refuses the upgraded database, so keep the backup Pier takes if you may roll back.
-- The first message after the upgrade creates the head in `$PIER_HOME/home`; existing sessions stay readable and reachable from ⌘K.
-- Set Settings' default model (the head's) and assign the `hardest`, `balanced` and `cheap` tiers in Settings → Models; `--model <tier>` refuses an unassigned tier.
+- The first message after the upgrade creates Pier's session in `$PIER_HOME/home`; existing sessions stay readable and reachable from ⌘K.
+- Set Settings' default model (Pier's) and assign the `hardest`, `balanced` and `cheap` tiers in Settings → Models; `--model <tier>` refuses an unassigned tier.
 - Config sync: upgrade the source and every subscriber together; a version mismatch pauses the subscription until the older side upgrades.
 - Definitions saved before 0.2.0 keep their stored silent callback; `pier task save --task-id <id>` moves one to the conversation default.
 - Slack and Lark users who typed `s <text>` now type `/s <text>` or `%s <text>`.

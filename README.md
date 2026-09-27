@@ -42,22 +42,22 @@ reload) and Security (master key, password, passkeys, signed-in devices).
 
 ## How the conversation works
 
-The web chat is one conversation, named Pier. Its current session — the head —
-answers, remembers and dispatches; it runs in `~/.pier/home`, which holds
+The web chat is one conversation, Pier. Its current session answers,
+remembers and dispatches; it runs in `~/.pier/home`, which holds
 memory only: `MEMORY.md` (one-line facts) and daily notes in
 `memory/YYYY-MM-DD.md`.
 
 - Real work is delegated with `pier task run`: a worker for a small task, a
   lead for a feature, which designs with you or builds with its own workers.
-  Each is its own session; its result comes back to the head as a callback.
+  Each is its own session; its result comes back to Pier as a callback.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
-  head, seeded with the memory, the open items, recent runs and the last
+  session, seeded with the memory, the open items, recent runs and the last
   exchanges. The old transcripts stay readable.
-- `/status` lists what is open, `/new` starts a fresh head now, `/stop` stops
+- `/status` lists what is open, `/new` starts a fresh session now, `/stop` stops
   the reply in progress, `/skills` lists the skills. `%` works in place of
   `/` (`%status`), because Slack's client eats an unregistered `/`.
 - One IM DM, on Lark or Slack, can be the conversation: Console → Settings →
-  Channels, the DM's row, "This DM is the conversation". The head then
+  Channels, the DM's row, "This DM is the conversation". Pier then
   answers there, from the phone; other chats keep one session per thread.
 
 ## Configure Pi
