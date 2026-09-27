@@ -83,8 +83,8 @@ restates the whole definition, callback included:
 
 - no `--callback-session` → `{type: "conversation"}`, also `definitions.create`'s
   default: each run's callback is the head when the
-  run is prepared (`callbacks.target`), so a rotated head gets it; switch off →
-  no callback;
+  run is prepared (`callbacks.target`), so a rotated head gets it; before the
+  conversation's first message there is no head and no callback;
 - `--callback-session none` → `{type: "none"}`, the one silent definition;
 - `--callback-session <id>` → that session.
 
@@ -184,7 +184,7 @@ in one sentence that `pier task` is refused, and a lead that it may delegate.
 turn after launching; callbacks are the only delivery; ownership; the
 instance limit; workers do not delegate, a lead delegates to workers only;
 `recover` only for lost text; models by name. Its size is measured in the
-commit that changes it. When asked what is scheduled, main uses `list` and
+commit that changes it. When asked what is scheduled, the head uses `list` and
 answers one line per cron/watch with name, trigger, next run and last-run
 state/age; one-shots and manual definitions are runs, not schedules.
 
@@ -197,6 +197,6 @@ socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
 many, full id, `?`), the schedule verbs, `list`'s two fields.
 `tasks/continuous.test.ts`: the chain's callbacks, a saved definition's
-default reaching the current head, `none` and switch off silent, ownership,
+default reaching the current head, `none` and a head-less conversation silent, ownership,
 `runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,
 the milestone flow.

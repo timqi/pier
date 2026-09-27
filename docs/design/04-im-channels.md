@@ -20,7 +20,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ |
 | Speaker identity | `[name<id> time place]` above a message (`[name time platform]` where ids are opaque), only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ |
 | Deliberate silence | `<silent>` sends no reply, so a group thread is bearable | shared (`splitReply`) | ✅ | ✅ |
-| Stop | Abort the conversation's running turn | shared (`runtime` → `abortConversation`) | ✅ | ✅ |
+| Stop | Abort the conversation's running turn | shared (`ChannelControl.abort` → `abortConversation`) | ✅ | ✅ |
 | Bind | Redeem a Console-issued single-use code in a DM | shared | ✅ | ✅ |
 | Permissions | Chat enable · require mention (groups) · bind (always in DMs) | shared (`gate()`) | ✅ | ✅ |
 | Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ |
@@ -38,7 +38,8 @@ Commands and their spelling: [11 §Chat commands](11-im-conversation.md#chat-com
 Re-adding any of these is a design decision, not a gap: backend / agent
 selection in chat; message-visibility toggles; per-thread setting overrides;
 admin / bind management from chat; webhook inbound; registered Slack slash
-commands; posting in a Slack channel's main flow;
+commands; posting in a channel's main flow, the home DM's aside
+([11](11-im-conversation.md));
 editing a live session's cwd (Pi fixes cwd at creation — a new directory is a
 new thread); moving a session between threads.
 
@@ -47,7 +48,7 @@ new thread); moving a session between threads.
 File list: `docs/architecture.md`; each file's header comment names its one
 reason. Everything but the per-platform files (`<platform>.ts`, `-api`,
 `-render`, `-panel`, and `-outbound` / `-directory` / `-thread` / `-cli` /
-`-transcript` where present) is shared. A fourth adapter adds four or five files and touches only `runtime.ts`
+`-transcript` where present) is shared. A third adapter adds four or five files and touches only `runtime.ts`
 (one entry in `ADAPTERS`) and the Console copy in `web/ui/channel-help.ts`.
 
 Shared: `Gatekeeper`, `Chains` (a `catch` on every link, bounded drain),
@@ -78,9 +79,10 @@ adapter must not reimplement it. Notes are trimmed to 600 characters; a notify
 that itself fails is reported to the hub once, never retried.
 
 **Control that is not a prompt does not go through the seam.** `ChannelControl`
-(`control.ts`): abort, read status, pins, set model / reasoning, start a new
-session, recent directories, `knows()` — injected by `runtime.ts`, which owns
-router and factory. The seam keeps one inbound path (`onMessage`); add the
+(`control.ts`): the chat's launch config, the bot-identity claim, `knows()`,
+abort, `working()`, status, pins, set model / reasoning, start a new session,
+recent directories, `isHome()`, a thread's skills — built in `main.ts`
+(`createControl`) and handed to each adapter by `runtime.ts`. The seam keeps one inbound path (`onMessage`); add the
 next control here.
 
 ## The in-chat panel
@@ -304,7 +306,8 @@ and `sweep`:
 - Clear only what the ending turn was working on: pass `reply.meta` to
   `settle`/`settleAfter` (one Pi run can end several turns).
 - Await the in-flight "add" before issuing the "clear".
-- On `start()`, clear every receipt on the books; sweep stragglers every 30 min.
+- On `start()`, clear every receipt on the books; an inbound event sweeps, at
+  most once a minute, receipts past 10 minutes whose conversation is not working.
 
 ## Console surface
 
@@ -351,10 +354,11 @@ Answer these first.
 ## Slack facts
 
 - **Threads are the whole design.** Pier never posts into a channel's main
-  flow: a conversation is `<channel>/<threadTs>` and a thread *is* a session.
-  DMs too (`threadOf` = `thread_ts ?? ts`): every top-level DM opens its own
+  flow but the home DM's ([11](11-im-conversation.md)): a conversation is
+  `<channel>/<threadTs>` and a thread *is* a session. DMs too (`threadOf` =
+  `thread_ts ?? ts`): every top-level message in any other DM opens its own
   session. The Console's Connection card states it beside a help badge. Lark
-  follows this rule too, but in the home chat ([11](11-im-conversation.md)).
+  follows the same rule.
 - **Two credentials.** `xapp-` (`connections:write`) opens Socket Mode;
   `xoxb-` signs Web API calls. `ChannelConfig.appToken` under the same
   "masked means unchanged" rule as `token`.

@@ -208,8 +208,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   rows tail-capped text; expanded logs scroll independently; simple replies
   leave no empty log; interrupted work stays visible. System inputs
   (seed, callback, delegation) are one line, opening to the card:
-  `↺ session seed · <reason> · <previous id8>`, `⟵ callback · <state> · <run
-  name> · <model> · <id8>`, `⟶ delegation · <run name> · <id8>`, where `<id8>`
+  `↺ session seed · <reason> · <previous id8>`, `↩ callback · <state> · <run
+  name> · <model> · <id8>`, `↗ delegation · <run name> · <id8>` (the glyphs
+  are `ui/icons.ts` icons), where `<id8>`
   is the other session's id, a link to it, else the run id as text. A
   click or ↵ expands in place; expansion is per row, in memory. A
   `/status` answer, `Stayed silent — <reason>` and chat command answers stay
@@ -445,9 +446,6 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
     name another skill already took — reads `not loaded — <Pi's diagnostic>`
     beside a switch that stays on. The verdict is Pi's own `loadSkills` in
     Pi's order, where a package's skill shadows Pier's own of that name.
-  - Shadowing is known at session open, not at list time: `standDownShadowed`
-    records what it stood down, `GET` reports the last open's finding, and a
-    built-in no session has opened since reads no state.
   - After any package or switch write, idle sessions are recycled as for an
     agent-file save; sessions mid-turn keep what they opened with.
   - One switch, one write: the `pier` package's skills flip through

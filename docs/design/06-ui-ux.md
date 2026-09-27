@@ -23,7 +23,7 @@ updates this document.
   token set — canvas one step darker than the panel, neutral translucent
   hairline (light in dark mode), top-edge highlight, two-part shadow (wide
   ambient + tight contact) — shared by the bar, floating controls and menus; the
-  composer and the open drawer take it one step raised.
+  composer and the search palette take it one step raised.
 - Corner radii coordinate with nesting. Reuse the shared palette, controls,
   menus and time labels; no page-specific styles.
 - Canvas: pale neutral page edge, matched by installed-window theme metadata in
@@ -103,7 +103,7 @@ updates this document.
 
 ## Editing and forms
 
-- Only the latest user message is editable, even after a reply; its control
+- Any user message is editable, even after a reply; its control
   sits beside the bubble with touch and keyboard access. Say that an edit
   resends the question and replaces subsequent replies. Reject stale or
   busy-session edits; allow cancel; on failure restore the server's history
