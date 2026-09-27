@@ -10,6 +10,7 @@ import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import { day } from "./identity.js";
+import { cut } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
 import type {
@@ -19,6 +20,11 @@ import type {
 const log = logger("core");
 
 const EXCHANGES = 3;
+// Seed budgets in chars (10 §Head lifecycle); the ledger is newest first, so its oldest lines go.
+const MEMORY_CHARS = 12_000;
+const NOTES_CHARS = 6_000;
+const EXCHANGES_CHARS = 4_000;
+const LEDGER_CHARS = 4_000;
 
 interface ChainDeps {
   factory: AgentFactory;
@@ -208,11 +214,11 @@ export class MainChain {
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
     return [
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
-      section("MEMORY.md", await this.read("MEMORY.md")),
+      section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).text),
-      section("Runs — in flight, and finished since the previous session started", runs.map(ledgerLine).join("\n") || "none"),
-      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, await this.read(join("memory", `${date}.md`)))))),
-      section("The previous session's last exchanges", open ? lastExchanges(await open.history(), EXCHANGES) : ""),
+      section("Runs — in flight, and finished since the previous session started", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
+      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, cut(await this.read(join("memory", `${date}.md`)), NOTES_CHARS))))),
+      section("The previous session's last exchanges", open ? cut(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS) : ""),
     ].filter(Boolean).join("\n\n");
   }
 

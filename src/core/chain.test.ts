@@ -267,6 +267,22 @@ describe("the continuous conversation's chain", () => {
     await r.say("hi");
     expect(r.sessions.get("m1")!.systemInputs[0]!.text).toMatch(/## MEMORY\.md\n\n\(could not be read: .*EISDIR/);
   });
+
+  it("cuts each seed part to its budget, the ledger's oldest lines first", async () => {
+    const runs: LedgerRun[] = Array.from({ length: 300 }, (_, i) => (
+      { runId: `r${String(300 - i)}`, name: "n", state: "succeeded", targetSessionId: null, cwd: null, queuedAt: 300 - i, finishedAt: 1 }
+    ));
+    const r = rig({ runs });
+    mkdirSync(r.home, { recursive: true });
+    writeFileSync(join(r.home, "MEMORY.md"), "m".repeat(100_000));
+    await r.say("hi");
+    const text = r.sessions.get("m1")!.systemInputs[0]!.text;
+    const memory = text.slice(0, text.indexOf("\n\n## Open"));
+    expect(memory.length).toBeLessThan(13_000);
+    expect(memory.endsWith("…")).toBe(true);
+    expect(text).toContain("started\n\nr300 · n · succeeded");
+    expect(text).not.toContain("r1 · n");
+  });
 });
 
 describe("the chat commands", () => {
