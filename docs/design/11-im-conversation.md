@@ -1,6 +1,6 @@
 # IM home chat
 
-The contract for one IM DM joining the continuous conversation
+The contract for one IM DM joining the Pier head
 ([10](10-continuous-session.md)): which chat, how its messages reach the head,
 how the head's replies, notes and buttons render there, and what the web
 stops doing meanwhile. Everything not named here is [04](04-im-channels.md)'s.
@@ -158,11 +158,11 @@ the DM's main flow, an `[attachment lost: …]` line on failure.
 
 Unchanged: thread-per-session, mention and bind gates, the speaker header per
 turn. A group cannot be the home; the head is reached from a group only
-through what main launches (`pier task`), never by a group's message.
+through what the head launches (`pier task`), never by a group's message.
 
 ## Notifications
 
-- The home chat is the conversation's notification. While the head is
+- The home chat is the head's notification. While the head is
   attached under the home key, `channelOf(head)` is the platform, so Web Push
   sends nothing for it and the web sets no unread mark on it (the existing
   rule: a turn delivered to a chat is not notified about again). The web

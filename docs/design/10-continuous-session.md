@@ -1,21 +1,21 @@
 # Continuous session
 
-The contract for one continuous conversation per instance, in front of a
-dispatcher session that routes work to task-run children; every instance has it.
-Behaviour not named here is [03](03-web-workbench.md)'s,
-[04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s; what is not built is
-§Not built.
+The contract for the instance's Pier head, which routes work to task-run
+children; every instance has one. Behaviour not named here is
+[03](03-web-workbench.md)'s, [04](04-im-channels.md)'s and
+[09](09-tasks-cli.md)'s; what is not built is §Not built.
 
 ## Roles
 
 The behavioural contract of each role is `agent/roles.ts` (`DISPATCHER`,
-`LEAD`); this section holds what code enforces. The **main session**
-(dispatcher) answers, remembers and launches work; real work is a task-run
-child, and callbacks are the only delivery.
+`LEAD`); this section holds what code enforces. The **head** answers, remembers
+and launches work; real work is a task-run child, and callbacks are the only
+delivery.
 
 | Role | Session | Delegates |
 | --- | --- | --- |
-| main | the chain head, the instance default model (the operator sets it to the `balanced` pin) at `low` | leads and workers |
+| head | the newest session, the instance default model (the operator sets it to the
+  `balanced` pin) at `low` | leads and workers |
 | lead | a `--role lead` run's, cwd the feature's worktree, long-lived | workers only |
 | worker | any other run's launched from a session | never |
 
@@ -26,7 +26,7 @@ child, and callbacks are the only delivery.
   (`LEAD`), never on disk; its session appears in In progress as described in
   [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
 - A lead's run whose result carries a `Design final: <absolute path>` line
-  owes main a callback (§Milestones); main launches a new build lead on that
+  owes the head a callback (§Milestones); the head launches a new build lead on
   doc, its prompt opening `Build per `.
 - A design lead's turn outside any run (the user confirmed in its session)
   that carries the line is recorded as a finished run of the lead — reuse,
@@ -36,7 +36,7 @@ child, and callbacks are the only delivery.
   record nothing.
 - A run's `--name` is its session's title; a lead's session carries its
   phase (`TaskStore.leads`): `design` when its creating run carries
-  `launch.design` (`--design`, set by main only for a product or architecture
+  `launch.design` (`--design`, set by the head only for a product or architecture
   design the user finalizes), `build` for any other lead.
 - Models are the tiers of [pier-tasks §Model
   choice](../../skills/pier-tasks/SKILL.md#model-choice); a lead is `hardest`,
@@ -51,12 +51,12 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
   unfinished group's, names it): a plain callback, a lead turn outside any run;
 - the result that leaves nothing owed: resumes the lead's last run, prompted
   `[Pier: the last result you were waiting on follows; …]`, and that run's
-  callback reaches main once; the resume and the `delivered` marks commit in
+  callback reaches the head once; the resume and the `delivered` marks commit in
   one transaction;
 - the lead's last run still running, or a drain: pending, asked again in 10 s;
 - nobody waiting on that run, or a resume that cannot be filed (logged): plain.
 
-A lead's own run owes main a callback only when it was a milestone resume,
+A lead's own run owes the head a callback only when it was a milestone resume,
 its result carries a `Design final:` line, it is a build lead's and leaves no
 result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwise it settles as
 `--callback none` does, `LEAD_TURN` (`tasks/callbacks.ts`) the reason on its record.
@@ -72,7 +72,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
   is `rg` over `memory/` and the Pi session directory; no vector store.
 
-## Main session lifecycle
+## Head lifecycle
 
 | Event | Rule |
 | --- | --- |
@@ -91,7 +91,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   setting; `reserveTokens = window − cap`, never later than the instance's
   reserve, recomputed on `setModel`. Children never rotate.
 - `ContextUsage.compactAt` is that point, and a child's header reads against
-  it; the conversation's bar shows the used tokens, Session info `used/rotateAt` (`CHAIN_FULL_TOKENS`).
+  it; the head's bar shows the used tokens, Session info `used/rotateAt` (`CHAIN_FULL_TOKENS`).
 
 ### Cache
 
@@ -105,7 +105,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
 ## Open items
 
-- Main keeps the list inside its replies: `<open>problem — stage (run <id>)</open>`
+- The head keeps the list inside its replies: `<open>problem — stage (run <id>)</open>`
   adds or replaces the item keyed by `problem`, `<done>problem</done>` removes it;
   both are stripped beside `<silent>` and never read inside a fence
   (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
@@ -185,26 +185,17 @@ The routes (`/api/continuous*`), the In progress drawer, the pane and its
 composer are [03](03-web-workbench.md)'s. An earlier member is read off disk,
 never opened.
 
-- In progress is the palette's Running set less the conversation's sessions;
+- In progress is the palette's Running set less the sessions making up the head;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
-- The conversation's ⋯ menu is Session info, Browse files,
+- The head's ⋯ menu is Session info, Browse files,
   Model & reasoning; no Rename or New session here.
 
 ## Not built
 
-- Phase 3, the IM DM: a platform-level switch sends a DM's top-level
-  messages and unbound-thread replies to the main session (answers in the
-  DM's main flow), a bound
-  thread's replies to its session, and the chat commands to one message in
-  the main flow;
-  group chats never change.
-- With it, a run reporting its session posts a card (`<task name> · <state>`,
-  cwd, web link) as a thread root bound to the child, edited in place; it
-  needs a chat-level DM id in both adapters, replies to more than one attached
-  chat, and a way to post a card root and edit it.
-- A callback to a cold head (>1h) deferred to the next seed; a rotation on a
-  callback to a full head.
-- A lead keeping the 1h cache TTL while its workers run.
+- A run reporting its session posts a card (`<task name> · <state>`, cwd,
+  web link) as a thread root bound to the child, edited in place; it needs a
+  chat-level DM id in both adapters, replies to more than one attached chat,
+  and a way to post a card root and edit it.
 - The seed capped near 8K.
 - `pier search <q>` over the CLI socket (the index is `GET /api/search` only).
 - Out of this design: workers nested under their lead in In progress (the
@@ -214,11 +205,11 @@ never opened.
 
 - A week of daily use, web and one IM DM, with no manually opened session and
   every rotation, dispatch, callback and failure visible where it came from.
-- A follow-up reaches the same child verbatim; main edits nothing outside the
-  home; one feature runs through a lead with main seeing milestones only.
+- A follow-up reaches the same child verbatim; the head edits nothing outside
+  the home; one feature runs through a lead with the head seeing milestones only.
 - The week's largest head is recorded; above ~300K tokens, intra-session
   paging is next.
-- From the heads' transcript usage: main averages ≤ 2 model calls per user
+- From the head's transcript usage: it averages ≤ 2 model calls per user
   message; uncached input stays under 2% of input; no head compacts; `full`
   rotations lose nothing the user has to repeat.
 - After a day of use, `/status` names every problem in flight or waiting on

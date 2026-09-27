@@ -46,9 +46,8 @@ members by hand.
 ## Model choice
 
 Default: your model. `--model hardest | balanced | cheap` are tiers the
-operator pinned on the menu — the first pin on the tier, the next one when it is
-not available; thinking follows the pin, `--thinking` overrides
-(`off/minimal/low/medium/high/xhigh/max`).
+operator pinned on the menu; thinking follows the pin, `--thinking`
+overrides (`off/minimal/low/medium/high/xhigh/max`).
 
 | Work | `--model` |
 | --- | --- |
@@ -93,7 +92,7 @@ pier task save --name nightly --bash "make check" --cwd /repo --cron "0 3 * * *"
 ```
 
 Only for schedules or roles run more than once; `--task-id` updates, restating
-every flag. Results reach the continuous conversation;
+every flag. Results reach Pier;
 `--callback-session <id>` pins a session, `--callback-session none` silences.
 `pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
 

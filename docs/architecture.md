@@ -28,7 +28,7 @@ Slack / Lark                     Web workbench (browser)       Tasks
 src/
   core/        types.ts (the conversation seams), router.ts, hub.ts, queue.ts,
                reply.ts, identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
-               continuous conversation: the main_chain table, rotation, seed)
+               Pier head: the `main_chain` table, rotation, seed)
   agent/       types.ts (the Pi-config seams the Console asks for: config
                files, packages, providers, config sync, `pier web`'s auth),
                pi.ts (sessions) and packages.ts (the package registry: Pi's

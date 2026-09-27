@@ -161,8 +161,8 @@ with the buttons.
   note reads `Model set to <id> · <level>.` Nothing pinned: `No pinned models
   — Settings → Models → Model menu.`; the catalog is the Console's, not a
   chat's.
-- "Directory…" (`cfg:cwd`) lists up to six recent directories — the web
-  New-session menu's list (`core/identity.ts` `projectCwds`: distinct cwds
+- "Directory…" (`cfg:cwd`) lists up to six recent directories — the directory
+  picker (`core/identity.ts` `projectCwds`: distinct cwds
   newest first, worktrees folded into their project), the chat's own default
   first (`ChannelControl.recentDirs`) — as numbered full paths with one button each (`cfg:cwd:<i>`, label the last two segments),
   then "Type a path…" (`cfg:cwdtype`) and Back. A tap sets the draft's

@@ -37,8 +37,7 @@ otherwise).
 **The first start generates a password and prints it once.** Lost it?
 `sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart. Open
 `http://localhost:3141`, sign in; **Console → Settings** configures Models,
-Agent, Channels, Vault, the public URL, password and master key. The web is one
-continuous conversation; `/new` starts a fresh session.
+Agent, Channels, Vault, the public URL, password and master key. The web chat is Pier; `/new` starts a fresh session.
 
 ## Configure Pi
 

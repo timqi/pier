@@ -29,9 +29,9 @@ truth.
   everything, but detail can leave *your* context, so a very old turn is worth
   re-reading rather than recalling. The web session header shows context used.
 
-## The continuous conversation
+## Pier
 
-- The web is one conversation: the status chip opens **In progress**; the rest is in ⌘K. IM is unchanged.
+- Pier is one conversation: the status chip opens **In progress**; the rest is in ⌘K. IM is unchanged.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
   session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
   and the last exchanges.
@@ -85,10 +85,10 @@ truth.
   of the part after any `-` (`/tasks`, `/ta` → `pier-tasks`); several matches
   are refused with their names, nothing sent; a one-letter word never matches.
 - The home chat: at most one DM per instance, set in the Console's chat row.
-  Every message there, top-level or in a thread, reaches the continuous
-  conversation, whose replies, callbacks, seeds and command answers render in
-  the DM's main flow; `/settings` and `/s <text>` are prose there; while that
-  adapter is live the head sends no Web Push. Groups stay thread-per-session.
+  Every message there, top-level or in a thread, reaches Pier; its replies,
+  callbacks, seeds and command answers render in the DM's main flow.
+  `/settings` and `/s <text>` are prose there; while that adapter is live the
+  head sends no Web Push. Groups stay thread-per-session.
 - Elsewhere `/settings` opens a panel. In a thread with no session yet it is a
   draft: directory, model & reasoning (the operator's pinned models, one pick
   sets both), and Start creates the session. `/s <text>` as a thread's first

@@ -82,7 +82,7 @@ hidden definition (`kind: subagent`) is refused. No trigger means `manual`.
 restates the whole definition, callback included:
 
 - no `--callback-session` → `{type: "conversation"}`, also `definitions.create`'s
-  default: each run's callback is the continuous conversation's head when the
+  default: each run's callback is the head when the
   run is prepared (`callbacks.target`), so a rotated head gets it; switch off →
   no callback;
 - `--callback-session none` → `{type: "none"}`, the one silent definition;
@@ -121,7 +121,7 @@ pier task runs
 
 No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`),
 the runs the caller launched — every chain member's, for a member of the
-continuous conversation — in flight plus finished in the last 24h, at most 200.
+head — in flight plus finished in the last 24h, at most 200.
 
 ## Models
 
@@ -173,7 +173,7 @@ A session's role is fixed by the run that made it, for the session's life
 ([10 §Roles](10-continuous-session.md#roles)).
 
 Ownership: the session that launched a run controls it, and so does the run's
-own session; every session of the continuous conversation counts as the one
+own session; every session represented in the head's history counts as the one
 that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
 `parentRunId` links only a `task` action's child, which a cancel walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
 in one sentence that `pier task` is refused, and a lead that it may delegate.

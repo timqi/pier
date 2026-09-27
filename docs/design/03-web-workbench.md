@@ -13,9 +13,9 @@ surface owns its routes and is mounted beside it.
 | `GET /api/sessions` | `AgentFactory.list()` joined with live router state and unread flags; `modified` is metadata, not the drawer's ordering key |
 | `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from its run card names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
-| `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
-| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
-| `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}], rotateAt}`, newest first; `rotateAt` is `CHAIN_FULL_TOKENS` |
+| `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier head session |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier head member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
+| `GET /api/continuous` | *(the head, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}], rotateAt}`, newest first; `rotateAt` is `CHAIN_FULL_TOKENS` |
 | `GET /api/continuous/open` | `TaskService.openItems()` (`WebDeps.openItems`): `{items: [{problem, stage, runs, live}], unlisted, designs}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
 | `GET /api/continuous/status` | `MainChain.status()`: `{text, sessions}`, exactly what `/status` posts, without posting it |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text, 409 with the refusal when `/new` meets a replying head. A rotation re-lists every surface (`sessions-changed`) |
@@ -57,9 +57,9 @@ surface owns its routes and is mounted beside it.
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
-  session for itself, and only for a turn of the continuous conversation or
+  session for itself, and only for a turn of the head or
   one the operator sent into (a message, an edit, a queue delivery); a lead's
-  dispatch or callback turn finishing reports through main and marks nothing.
+  dispatch or callback turn finishing reports through the head and marks nothing.
   One flag, read by the dot, the badges and Web Push.
 
 Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
@@ -169,12 +169,12 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier (the continuous conversation) shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
+- The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
 - The status chip reads `N running · M needs you` and opens In progress; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; running counts the drawer's other rows. Absent at zero, and the drawer cannot open. The app icon badge counts the needs-you rows plus the conversation's own unread reply.
 - Context chip: Pier shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
 - The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings; Search is shown on Pier only. Session info and model actions are disabled before the first reply.
 - **Status** opens `/status`'s answer (`GET /api/continuous/status`) as one `system-card` in the drawer's placement, headed ← back to ⋯, Status, ✕: the same text and body as the transcript's `/status` card, each `run <id8>…` with a session opening it and closing the panel; a failed read is said in the card. Refetched in place while open on `sessions-changed`, `task-run-changed` and `open-items-changed`; it posts nothing to the transcript, typing `/status` does.
-- **In progress** lists sessions outside the continuous conversation and runs not represented by a session row. A session is in it while streaming, while a run targets it or while runs it launched are in flight (green; sky when only subagents are), or while its last turn is unread (amber); a lead whose run is queued or whose design waits on Finalize is grey, as is a run with no session yet. A failed run's callback reaches main, so a failure is the conversation's unread, never a row. Rows: name · `phase` tag · dot, newest first by birth, from `GET /api/sessions` and `GET /api/continuous/open`'s live runs, re-read on `sessions-changed` and `open-items-changed`.
+- **In progress** lists sessions outside Pier and runs not represented by a session row. A session is in it while streaming, while a run targets it or while runs it launched are in flight (green; sky when only subagents are), or while its last turn is unread (amber); a lead whose run is queued or whose design waits on Finalize is grey, as is a run with no session yet. A failed run's callback reaches the head, so a failure is the head's unread, never a row. Rows: name · `phase` tag · dot, newest first by birth, from `GET /api/sessions` and `GET /api/continuous/open`'s live runs, re-read on `sessions-changed` and `open-items-changed`.
 - A row opens the session in the column (`#/session/<id>`) and closes the drawer; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
 - The drawer is a 20rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
 - Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
@@ -227,7 +227,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
   session and an index the transcript no longer holds.
-- **Continuous conversation**: the head's snapshot under earlier sessions
+- **Pier**: the head's snapshot under earlier sessions
   paged in read-only (no pencil, no next-step buttons), each closed by a
   divider naming the rotation. **Earlier session**, or scrolling to the top,
   pages one more in whole, keeping the reader's position, the pane as it is until
@@ -246,7 +246,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (each line from `CHAT_COMMANDS`; the
   table is [11 §Chat commands](11-im-conversation.md#chat-commands)) only in
-  the continuous conversation, then
+  the head, then
   `/skill:<name>` for every skill on the snapshot's `skills`, its
   `description` as the line. A row matches on a prefix of its word or of the
   skill name alone (`/pier-t` → `/skill:pier-tasks`). The exact word of a chain
