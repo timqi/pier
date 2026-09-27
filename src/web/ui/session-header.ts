@@ -20,11 +20,11 @@ export interface HeaderDeps {
   /** The selected session's listed summary; undefined before the
    *  conversation's first session exists, or while a detached one loads. */
   currentSession: () => SessionInfo | undefined;
-  /** Open the Files view on a cwd, or on nothing — which reopens the folder
-   *  and diff the current session last browsed (views.ts, wired through main). */
-  openFiles: (cwd?: string) => void;
-  /** Same view, but a second press closes it — what the chord binds to. */
-  toggleFiles: (cwd?: string) => void;
+  /** Open the Files dialog on the folder and diff the current session last
+   *  browsed (views.ts, wired through main). */
+  openFiles: () => void;
+  /** Same dialog, but a second press closes it — what the chord binds to. */
+  toggleFiles: () => void;
   openSettings: () => void;
   /** The continuous conversation is what the pane shows. */
   continuousOpen: () => boolean;
@@ -46,8 +46,8 @@ export function initHeader(d: HeaderDeps): void {
     const s = deps.currentSession();
     if (!s) return;
     closeMenu();
-    deps.toggleFiles(); // no cwd: the current session's own last folder + diff
-  }, modalOpen);
+    deps.toggleFiles();
+  }, () => modalOpen($("#files-dialog")));
 }
 
 const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken

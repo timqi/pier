@@ -23,8 +23,9 @@ export function chordLabel(spec: string): string {
 }
 
 /** A chord acting under a modal would leave it floating over a view it was
- *  never opened from. */
-export const modalOpen = (): boolean => document.querySelector("dialog[open]") !== null;
+ *  never opened from. `own`: a control inside the dialog, whose keys it keeps. */
+export const modalOpen = (own?: Element): boolean =>
+  [...document.querySelectorAll("dialog[open]")].some((d) => !d.contains(own ?? null));
 
 const CARD =
   "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
@@ -45,7 +46,8 @@ function hint(el: HTMLElement, label: string, chord: string): void {
     if (ev.pointerType !== "mouse") return;
     hide();
     card = h("div", CARD, label, h("kbd", "rounded bg-white/15 px-1 py-px font-sans text-[10.5px]", chord));
-    document.body.append(card);
+    // Inside a modal dialog's top layer, or no z-index shows it.
+    (el.closest("dialog[open]") ?? document.body).append(card);
     const r = el.getBoundingClientRect();
     // Above when there is no room below: clamping would drop the card onto the
     // control it names.
@@ -100,7 +102,7 @@ export function letterKey(
     // a global listener that dereferences it crashes on every such event.
     if (!ev.key || !keys.includes(ev.key.toLowerCase())) return;
     if ((ev.target as Element | null)?.closest?.(TYPING)) return;
-    if (modalOpen() || !when()) return;
+    if (modalOpen(el) || !when()) return;
     ev.preventDefault();
     run();
   });

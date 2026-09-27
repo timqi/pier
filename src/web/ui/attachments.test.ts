@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-// The module wires the lightbox and preview dialog at import; a stub element
+// The module wires the lightbox at import; a stub element
 // takes those assignments so the rule can be imported without a DOM.
 vi.mock("./dom.js", async (orig) => ({
   ...(await orig<typeof import("./dom.js")>()),

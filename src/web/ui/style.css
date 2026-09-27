@@ -421,8 +421,8 @@ main {
   .config-row, .session-open { min-height: 44px; }
   /* Files' tree rows and controls are on the same thumb. The
      heat-map marks are sized from the diff, so the floor may not reach them. */
-  #files-view :is(summary, button:not(.map-mark), a.btn) { min-height: 44px; }
-  #files-view .icon-btn { min-width: 44px; }
+  #files-dialog :is(summary, button:not(.map-mark), a.btn) { min-height: 44px; }
+  #files-dialog .icon-btn { min-width: 44px; }
   /* The dock's card is on the same thumb: the queue's whole-queue actions. Its
      header row is a fixed cursor height, so it gives that up rather than
      clipping what now stands in it. */
@@ -436,8 +436,8 @@ main {
   #turns [data-kind="activity"] details > summary { min-height: 28px; }
   #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
-/* One selection vocabulary: the palette's rows and the Files view's. */
-.palette-row.bg-indigo-50, #files-view button.bg-indigo-50 {
+/* One selection vocabulary: the palette's rows and the Files dialog's. */
+.palette-row.bg-indigo-50, #files-dialog button.bg-indigo-50 {
   color: var(--color-indigo-700);
   font-weight: 500;
   background-color: var(--color-indigo-100);
@@ -693,7 +693,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 /* Native disclosure state stays authoritative, including keyboard activation.
    Engines without details-content/interpolate-size retain instant expansion. */
-:is(#turns, #files-view) details::details-content {
+:is(#turns, #files-dialog) details::details-content {
   interpolate-size: allow-keywords;
   block-size: 0;
   opacity: 0;
@@ -701,7 +701,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   transition: block-size 180ms var(--ease-surface), opacity 180ms,
     content-visibility 180ms allow-discrete;
 }
-:is(#turns, #files-view) details[open]::details-content { block-size: auto; opacity: 1; }
+:is(#turns, #files-dialog) details[open]::details-content { block-size: auto; opacity: 1; }
 :is(.btn, .icon-btn, #composer button) {
   transition: background-color 180ms, box-shadow 180ms, transform 180ms var(--ease-surface);
 }
@@ -754,7 +754,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
   #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
-  :is(#turns, #files-view) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
+  :is(#turns, #files-dialog) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }
 }
 

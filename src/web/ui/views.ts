@@ -29,7 +29,7 @@ const chatEls = [$("#bar"), turnsPane, composerForm];
 
 export const isChatVisible = (): boolean => openName === null;
 
-export type ConsoleName = "settings" | "files";
+export type ConsoleName = "settings";
 
 /** Built so far — a view arrives with its own chunk the first time it opens. */
 const views = new Map<ConsoleName, ConsoleView>();
@@ -41,24 +41,20 @@ const building = new Map<ConsoleName, Promise<ConsoleView>>();
 let openName: ConsoleName | null = null;
 let openRequest = 0;
 
-// Both drop over whatever was on screen and their ✕ returns there — each
+// Settings drops over whatever was on screen and its ✕ returns there — it
 // remembers where it was opened from.
-const OVERLAYS: ConsoleName[] = ["files", "settings"];
 const origins = new Map<ConsoleName, Route>();
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
   settings: "Settings",
-  files: "Files",
 };
 
 /** Open a Console view by name — the ⋯ menu and the search palette both
  *  address them this way rather than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string, query?: string): void {
-  // Switching folders inside an overlay re-enters the same view: not a new origin.
-  if (OVERLAYS.includes(name)) {
-    const from = parseHash();
-    if (from && !(from.kind === "console" && from.name === name)) origins.set(name, from);
-  }
+  // Switching tabs re-enters the same view: not a new origin.
+  const from = parseHash();
+  if (from && !(from.kind === "console" && from.name === name)) origins.set(name, from);
   setHash({ kind: "console", name, arg, query });
   openName = name;
   for (const el of chatEls) el.classList.add("hidden");
@@ -97,24 +93,20 @@ async function openView(name: ConsoleName, arg: string | undefined, query: strin
   view.show(arg, query);
 }
 
-/** Entry for the ⋯ menus (session header, project row): browse a cwd — or
- *  none, which reopens where the current session left off. `select` names a
- *  file under it to open (Settings → Agent's Browse files). */
+/** The Files dialog (explorer.ts) on a cwd — or none, which reopens where the
+ *  current session left off. `select` names a file under it to open (Settings
+ *  → Agent's Browse files). A chunk that will not load is an unhandled
+ *  rejection, which report.ts puts in the chat (§5). */
 export const showFiles = (dir?: string, select?: string): void =>
-  showConsole("files", dir, select ? new URLSearchParams({ select }).toString() : undefined);
+  void import("./explorer.js").then((m) => m.openFiles(deps.currentSession(), dir, select));
 
-/** The chord's version: one key both opens the overlay and, pressed again, is
- *  its ✕. A menu row keeps opening — it names a directory, so it always does. */
-const toggleOverlay = (name: ConsoleName, dir?: string): void => {
-  if (openName === name) closeOverlay(name);
-  else showConsole(name, dir);
-};
+/** The chord's version: one key both opens the dialog and, pressed again, closes it. */
+export const toggleFiles = (): void =>
+  void import("./explorer.js").then((m) => m.toggleFiles(deps.currentSession()));
 
-export const toggleFiles = (dir?: string): void => toggleOverlay("files", dir);
-
-/** An overlay's ✕ and Esc. Back to the route it was opened from — a chat, or
- *  the other overlay — and the current chat when that is unknown (a bookmarked
- *  or reloaded #/files, where there is no "from"). */
+/** An overlay's ✕ and Esc. Back to the route it was opened from, and the
+ *  current chat when that is unknown (a bookmarked or reloaded #/settings,
+ *  where there is no "from"). */
 function closeOverlay(name: ConsoleName): void {
   const id = deps.currentId();
   const back = origins.get(name) ?? (id ? chatRoute(id) : CONVERSATION);
@@ -212,15 +204,6 @@ export function applyRoute(): void {
 /** One dynamic import per view, with the deps it is built from. `deps` is read
  *  when a view opens, not when this table is written, so it is already set. */
 const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = {
-  files: async (root) =>
-    (await import("./explorer.js")).createExplorerView(
-      root,
-      // Whose folder+diff to restore: a bare open is "the files of this chat".
-      () => deps.currentSession(),
-      // Through the router, so Back walks directory switches too.
-      (dir) => showConsole("files", dir),
-      () => closeOverlay("files"),
-    ),
   settings: async (root) =>
     (await import("./settings.js")).createSettingsView(
       root,

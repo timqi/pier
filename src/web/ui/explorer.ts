@@ -1,12 +1,14 @@
-// Console → Files view: read-only browsing of a project directory, with a
-// changed file shown whole and its changes toned inline, never a bare patch.
+// The Files dialog: every way the workbench browses a directory or opens a
+// file — the ⋯ menu, Agent → Browse files, a reference or attachment in chat.
+// Read-only; in a git checkout a changed file is shown whole with its changes
+// toned inline, never a bare patch.
 
 import { ArrowDown, ArrowUp, FoldVertical, Funnel, GitBranch, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
-import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
+import { $, basename, detailsRow, h } from "./dom.js";
 import { BAND, btn, CONTROL_TRIGGER, empty, PANE, pageTitle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
@@ -20,6 +22,9 @@ interface GitInfo {
   /** Every checkout of this repository, this one included — the folder menu. */
   worktrees: { path: string; branch?: string }[];
 }
+
+/** A relative path's folder, "" at the root. */
+const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
 const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
 
@@ -81,16 +86,43 @@ const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonE
     }`,
   );
 
-export function createExplorerView(
-  root: HTMLElement,
-  /** The chat this was opened from: its id keys the remembered folder+diff,
-   *  its cwd is where a bare open lands the first time. */
-  session: () => { id: string; cwd: string } | undefined,
-  /** Through the router (hash), so Back walks directories too. */
-  openDir: (dir: string) => void,
-  /** The ✕: leave the view, back to wherever it was opened from. */
-  close: () => void,
-): ConsoleView {
+/** The chat a dialog is opened from: its id keys the remembered folder+diff,
+ *  its cwd is where a bare open lands the first time. */
+export type FilesSession = { id: string; cwd: string } | undefined;
+
+type Show = (session: FilesSession, dir?: string, select?: string, line?: number) => void;
+
+/** Built on first open; a dialog, so it stacks over the chat or Settings and
+ *  closing it leaves them as they were. */
+let show: Show | undefined;
+const dialog = (): Show => (show ??= createFilesDialog($<HTMLDialogElement>("#files-dialog")));
+
+/** `dir` absolute, `select` relative to it (a file opened, or a folder
+ *  unfolded), `line` revealed in the file. No `dir`: the session's last folder. */
+export const openFiles: Show = (session, dir, select, line) => dialog()(session, dir, select, line);
+
+/** The chord: one key opens the dialog and, pressed again, closes it. */
+export function toggleFiles(session: FilesSession): void {
+  const el = $<HTMLDialogElement>("#files-dialog");
+  if (el.open) el.close();
+  else openFiles(session);
+}
+
+/** Where an absolute path opens: under the session's cwd there, so the tree
+ *  around it is the project's; anywhere else in its own folder. */
+export function pathTarget(cwd: string, path: string): { root: string; select?: string } {
+  if (cwd && path === cwd) return { root: cwd };
+  const root = cwd && path.startsWith(`${cwd}/`) ? cwd : path.slice(0, path.lastIndexOf("/")) || "/";
+  const select = path.slice(root === "/" ? 1 : root.length + 1);
+  return select ? { root, select } : { root };
+}
+
+export function openPath(session: FilesSession, path: string, line?: number): void {
+  const { root, select } = pathTarget(session?.cwd ?? "", path);
+  openFiles(session, root, select, line);
+}
+
+function createFilesDialog(root: HTMLDialogElement): Show {
   let cwd = "";
   let sessionKey = ""; // whose folder+diff is on screen, and where it is saved
   let git: GitInfo = { branch: null, refs: [], commits: [], worktrees: [] };
@@ -103,9 +135,11 @@ export function createExplorerView(
   const expanded = new Set<string>();
   let selectedPath: string | null = null;
   let selectedRow: HTMLElement | null = null;
-  /** `?select=`: opened by the row that renders it, so a path that is not
-   *  there leaves the viewer on "Select a file." */
+  /** `select`: opened by the row that renders it; its folder's listing says
+   *  when there is no such row. */
   let pendingSelect: string | null = null;
+  /** The line a reference named, revealed once the selected file renders. */
+  let pendingLine: number | undefined;
 
   // flex-nowrap: two chips and a ✕ is one line at every width, and the head's
   // wrap exists for a tab row this view does not have.
@@ -174,6 +208,10 @@ export function createExplorerView(
       );
     }
     list.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+    if (pendingSelect && parentOf(pendingSelect) === path && !names.has(basename(pendingSelect))) {
+      viewer.replaceChildren(placeholder(`No such file: ${pendingSelect}`));
+      pendingSelect = null;
+    }
     return list.map((e) => (e.dir ? dirNode(`${prefix}${e.name}`, e.name) : fileRow(`${prefix}${e.name}`, e.name)));
   }
 
@@ -215,6 +253,7 @@ export function createExplorerView(
     // The changed-only filter is a flat list of changes — everything unfolds.
     // A plain directory opens its first level only: one below may be node_modules.
     const autoOpen = git.branch ? onlyChanged : !path.includes("/");
+    if (path === pendingSelect) pendingSelect = null; // a folder was named: unfolded, nothing to view
     if ((autoOpen && !collapsedAll) || expanded.has(path)) {
       el.open = true;
       load();
@@ -324,6 +363,17 @@ export function createExplorerView(
     diffNav.set([], []);
   }
 
+  /** The named line, tinted and scrolled to the middle once the pane is in. */
+  function reveal(path: string, pane: HTMLElement): HTMLElement {
+    const line = path === selectedPath ? pendingLine : undefined;
+    if (line === undefined) return pane;
+    pendingLine = undefined;
+    const row = pane.querySelector<HTMLElement>(`[data-line="${String(line)}"]`);
+    row?.classList.add("bg-indigo-100");
+    requestAnimationFrame(() => row?.scrollIntoView({ block: "center" }));
+    return pane;
+  }
+
   /** Stale-response guard: only the newest view() may touch the viewer — a
    *  slow fetch for the last file must not overwrite the one now selected. */
   let viewSeq = 0;
@@ -370,7 +420,7 @@ export function createExplorerView(
     if (!current(seq)) return;
     const lang = await langFor(path); // first file of the session waits for hljs
     if (!current(seq)) return;
-    body.replaceChildren(codePane(rows, lang));
+    body.replaceChildren(reveal(path, codePane(rows, lang)));
   }
 
   /** `+`/`-`/context off the wire, two number columns on screen. The request
@@ -451,7 +501,7 @@ export function createExplorerView(
       counter.textContent = `${idx + 1}/${segs.length}`;
     };
     // The keys are this view's only while it is on screen with a diff in it.
-    const live = (): boolean => segs.length > 0 && !root.classList.contains("hidden");
+    const live = (): boolean => segs.length > 0 && root.open;
     const arrow = (glyph: IconNode, d: number, label: string, keys: [string, string]): HTMLElement => {
       const el = h("button", "icon-btn flex-none", icon(glyph));
       el.onclick = () => go(d);
@@ -492,7 +542,7 @@ export function createExplorerView(
       markIntraline(rows);
       const lang = await langFor(path); // first file of the session waits for hljs
       if (!current(seq)) return;
-      const pane = codePane(rows, lang);
+      const pane = reveal(path, codePane(rows, lang));
       const rowEls = [...pane.children] as HTMLElement[];
       const segs = segmentsOf(rows);
       diffNav.set(segs, rowEls);
@@ -547,14 +597,10 @@ export function createExplorerView(
       renderCompare();
       renderTree();
     });
-    // No repo → no diff to pick, but folding the tree still applies. The
-    // absence is named here rather than left as an empty strip (§5).
-    if (!git.branch) {
-      compare.replaceChildren(h("div", "flex items-center gap-1.5",
-        h("span", "min-w-0 flex-1 text-[11px] leading-snug text-neutral-400", "Not a git repository — nothing to compare."),
-        fold));
-      return;
-    }
+    // No repo → nothing git-shaped is drawn: the tree is the whole answer.
+    compare.classList.toggle("hidden", !git.branch);
+    compare.classList.toggle("flex", !!git.branch);
+    if (!git.branch) return void compare.replaceChildren();
     const picker = btn(diffLabel(), `${CONTROL_TRIGGER} font-mono`);
     if (pickedCommit()) {
       const c = git.commits.find((x) => x.hash === pickedCommit());
@@ -655,13 +701,13 @@ export function createExplorerView(
         cwdChip,
         git.worktrees.map((w) => ({ path: w.path, ...(w.branch ? { hint: w.branch } : {}) })),
         cwd || undefined,
-        openDir, // hash first; show() reloads
+        (dir) => showIn(sessionNow, dir),
       );
     const closeBtn = h("button", "icon-btn ml-auto", icon(X)) as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";
     closeBtn.setAttribute("aria-label", "Close Files");
-    closeBtn.onclick = close;
+    closeBtn.onclick = () => root.close();
     // No branch chip without a repo: the compare block names that absence, and
     // a head saying it too is one level of hierarchy saying it twice.
     const branch = git.branch
@@ -692,18 +738,19 @@ export function createExplorerView(
     expanded.clear();
     pendingSelect = select || null;
     if (select) {
-      // The named file must have a row: its folders open, and the diff filter
-      // (a git: package is a checkout) would hide an unchanged file.
+      // The named path must have a row: its folders open (it too, when it is
+      // one), and the diff filter would hide an unchanged file.
       onlyChanged = false;
       const parts = select.split("/");
-      for (let i = 1; i < parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
+      for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
     }
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     setTitle();
     viewer.replaceChildren(placeholder("Select a file."));
     if (!cwd) {
-      compare.replaceChildren();
+      git = { branch: null, refs: [], commits: [], worktrees: [] };
+      renderCompare();
       tree.replaceChildren();
       viewer.replaceChildren(placeholder("No folder yet — pick one from the chip above."));
       return;
@@ -723,31 +770,41 @@ export function createExplorerView(
     await applyRefs();
   }
 
-  return consoleView(root, (arg, query) => {
-    const s = session();
+  // The largest DOM in the workbench; closed, it keeps only the tree, which
+  // a reopen on the same folder reuses.
+  root.addEventListener("close", () => {
+    clearDiffChrome();
+    viewer.classList.remove("flex", "flex-col");
+    setTitle();
+    viewer.replaceChildren(placeholder("Select a file."));
+    selectedRow?.classList.remove("bg-indigo-50", "font-medium", "text-indigo-700");
+    selectedPath = null;
+    selectedRow = null;
+  });
+
+  let sessionNow: FilesSession;
+  function showIn(s: FilesSession, dir?: string, select?: string, line?: number): void {
+    sessionNow = s;
     const id = s?.id ?? "";
-    const select = new URLSearchParams(query).get("select") ?? undefined;
+    // Already open when a chat reference or the folder chip asked again:
+    // showModal() on an open dialog throws.
+    if (!root.open) root.showModal();
     // No first-project fallback: landing in somebody else's repository is
     // worse than the empty chip that asks which folder you meant.
-    const next = arg?.startsWith("/")
-      ? arg
+    const next = dir?.startsWith("/")
+      ? dir
       : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || "";
-    if (next === cwd && id === sessionKey && tree.childElementCount && (!select || select === selectedPath)) {
-      // Back to the view: keep tree + selection, but re-read git and the diff —
-      // both moved while it was away.
+    if (next === cwd && id === sessionKey && tree.childElementCount && !select) {
+      // Back to the dialog: keep the tree, but re-read git and the diff — both
+      // moved while it was away.
       renderHeader();
       void refreshGit().then(applyRefs);
       return;
     }
     sessionKey = id;
     cwd = next;
+    pendingLine = line;
     void load(select);
-  }, () => {
-    // The largest DOM in the workbench; hiding the view only flips a class.
-    // Re-entering re-renders anyway.
-    clearDiffChrome();
-    viewer.classList.remove("flex", "flex-col");
-    setTitle();
-    viewer.replaceChildren(placeholder("Select a file."));
-  });
+  }
+  return showIn;
 }

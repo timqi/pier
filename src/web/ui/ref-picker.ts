@@ -75,7 +75,7 @@ export function hoverHint(el: HTMLElement, text: () => string): void {
     if (!t) return;
     tip = h("div", "pointer-events-none fixed z-50 max-w-96 whitespace-pre-wrap rounded-lg bg-neutral-800/95 px-3 py-2 font-sans text-[11.5px] leading-snug text-neutral-100 shadow-lg");
     tip.textContent = t;
-    document.body.append(tip);
+    (el.closest("dialog[open]") ?? document.body).append(tip);
     // mouseleave never fires if the hovered row is removed or its panel closes
     // under the cursor — any press or scroll retires the card instead.
     document.addEventListener("pointerdown", hideHint, true);

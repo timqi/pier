@@ -24,7 +24,7 @@ export interface RegistryDeps {
   cwd(): string | undefined;
   /** The nav redraws itself from `registry` after every write. */
   changed(): void;
-  /** Browse files: the Files overlay on `dir`, with `select` (relative) opened. */
+  /** Browse files: the Files dialog on `dir`, with `select` (relative) opened. */
   browse(dir: string, select?: string): void;
   /** Highlights a row; null clears. Never opens a pane — the caller does. */
   select(sel: RegistrySelection | null): void;

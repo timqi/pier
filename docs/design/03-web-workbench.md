@@ -29,7 +29,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's previews and attachment cards; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
+| `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
 | `GET /api/search?q=` | content hits for the palette (below): `{hits}`, empty for an empty query |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
@@ -282,17 +282,15 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   carry no caption.
 - **File references**: an inline code span that is a path with an extension —
   `src/web/ui/chat.ts:481`, and a bare name only when the extension is a
-  file-ish one — opens the preview dialog, at the named line when it names one.
+  file-ish one — opens the Files dialog on it, at the named line when it names
+  one (the line tinted and centred; in a diff, the new side's number).
   Under a filesystem root (`~`, `/home`, `/tmp`, `/etc`, …) the extension is not
   required, so `~/.pier/boards` is a reference too; `~` expands to the home the
-  listing route reports. Relative paths resolve against the session's cwd; the
-  files route takes absolute paths only. A pointer press leaves no focus ring on
-  one; a keyboard focus does.
-- **Folder tree**: the same dialog lists a directory (`GET /api/fs/ls`) — `../`
-  walks up, a folder row walks in, a file row previews it, Download hidden. A
-  file's header names its whole path and its folder is the click that opens the
-  tree, so a reference that landed on the wrong file is one step from the right
-  one; a reference naming a folder lands there directly.
+  listing route reports. Relative paths resolve against the session's cwd. A
+  path under the cwd opens with the cwd as the tree's root, anything else with
+  its own folder as the root; a folder lands there, a path with no row reads
+  "No such file: <name>". An attachment card's eye opens its file the same way.
+  A pointer press leaves no focus ring on one; a keyboard focus does.
 - **Copy**: a fenced block has a Copy button in its corner; any inline code
   span — a file reference included — copies on a 450 ms press-and-hold that
   stays put, flashing green or red in place and swallowing the click it would
@@ -306,7 +304,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Console views
 
-The Console views are overlays: Settings and Files open over their origin, and ✕ or Esc returns to it. Settings is a full-column view whose header carries `#version` and `#theme-toggle`; Files remains a directory tree and viewer. `views.ts` owns the overlay routes.
+Settings is an overlay route: it opens over its origin, and ✕ or Esc returns to it. It is a full-column view whose header carries `#version` and `#theme-toggle`; `views.ts` owns the route. Files is a modal `<dialog>`, not a route: it stacks over the chat or Settings, and ✕ or Esc leaves what is under it as it was.
 
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
   switch, sticky in the topic's scroller; the chats card names the current bot,
@@ -343,17 +341,18 @@ The Console views are overlays: Settings and Files open over their origin, and �
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
   refusal), the browser's notification switch, Reload.
-- **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
-  was opened from): a directory tree beside a viewer; in a git checkout the
+- **Files** (`explorer.ts`, `#files-dialog`; ⋯ Browse files and its chord,
+  Agent → Browse files, and a chat file reference all open it, on the current
+  session): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to
   `MAX_AUTO_EXPAND` folders); elsewhere only the root's own folders unfold —
-  one level down may be `node_modules`. `?select=<relative path>` opens that
-  file with its ancestors unfolded, its row marked and the diff filter off; a
-  path with no row leaves the viewer on "Select a file."
-  Without a repository (`GET /api/explorer/git` answers `branch: null`) the
-  branch chip, the compare picker, the changed-only funnel and the diff
-  stepper are all absent, the compare block says so, and an empty folder reads
-  "Empty." rather than "No changes." — the filter is not in force.
+  one level down may be `node_modules`. A selected path opens with its
+  ancestors unfolded, its row marked and the diff filter off. Without a
+  repository (`GET /api/explorer/git` answers `branch: null`) the branch chip,
+  the whole compare band, the changed-only funnel and the diff stepper are
+  absent, and an empty folder reads "Empty." rather than "No changes." — the
+  filter is not in force. On a phone the dialog is full-screen, inside the
+  safe-area insets, tree above viewer.
 
   The Agent nav, drawn from one `GET /api/packages` answer. The management
   unit is the **package** (a source); its resources are the extensions and

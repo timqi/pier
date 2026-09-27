@@ -58,7 +58,6 @@
       <button type="button" id="theme-toggle" aria-label="Theme"
         class="icon-btn text-[13px]"></button>
     </section>
-    <section id="files-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <!-- The one bar, at every width: the way back, the title (Session info),
          the phase tag, then the status chip (the status panel, drawer.ts),
          the meta chips and ⋯ (session-header.ts). Flat children, so below md the
@@ -193,16 +192,11 @@
     <button type="button" id="image-close" aria-label="Close" class="lightbox-btn right-2 top-[calc(0.5rem+env(safe-area-inset-top))]"><span data-icon="X" class="h-6 w-6"></span></button>
   </dialog>
 
-  <!-- Text preview of an agent attachment — the Files view's code pane fills
-       #file-text; download stays one click away. -->
-  <dialog id="file-dialog" class="m-auto w-[45rem] max-w-[92vw] rounded-3xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
-    <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
-      <span id="file-name" class="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap font-mono text-[12.5px] text-neutral-700"></span>
-      <a id="file-download" download class="btn flex-none text-[12px] no-underline">Download</a>
-      <button type="button" id="file-close" class="btn flex-none text-[12px]">Close</button>
-    </div>
-    <div id="file-text" class="max-h-[70vh] overflow-auto"></div>
-  </dialog>
+  <!-- The Files dialog (ui/explorer.ts fills it): a tree beside a viewer, over
+       the chat or Settings. Nearly the viewport at every width, and the whole
+       screen below md, where it pays the safe-area insets `main` pays. -->
+  <dialog id="files-dialog" aria-label="Files"
+    class="m-auto h-[calc(100dvh-2rem)] max-h-none w-[90rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-(--workbench-canvas) p-0 shadow-xl backdrop:bg-black/40 open:flex max-md:m-0 max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]"></dialog>
 
   <!-- Before the bundle, and only until it loads: a module that throws while
        evaluating leaves a blank page, no handler installed and nothing in the

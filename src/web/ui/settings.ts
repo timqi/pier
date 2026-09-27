@@ -70,7 +70,7 @@ export function createSettingsView(
   getCwds: () => string[],
   /** Tab clicks route (#/settings/<topic>) so refresh and Back keep the tab. */
   onTopic: (topic: string) => void,
-  /** Agent → Packages' Browse files: the Files overlay on a package directory. */
+  /** Agent → Packages' Browse files: the Files dialog on a package directory. */
   openFiles: (dir: string, select?: string) => void,
   /** ✕ and Esc: back to where Settings was opened from (views.ts). */
   close: () => void,

@@ -53,7 +53,7 @@ const catalog: CatalogEntry[] = [
 let registry: PackageRegistry;
 let root: FakeElement;
 let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
-/** What Browse files handed the router: `#/files/<dir>?select=<file>` in parts. */
+/** What Browse files handed the Files dialog: the directory and the file to select. */
 let browsed: [string, string | undefined][];
 /** The next POST /api/packages answers this; a promise parks it. */
 let install: () => Promise<Response>;
@@ -178,7 +178,7 @@ describe("Settings → Agent", () => {
     expect(walk(root).find((el) => el.localName === "pre")?.textContent).toBe("# help");
   });
 
-  it("Browse files opens the Files view on a skill's directory, an extension's, or the package's install path", async () => {
+  it("Browse files opens the Files dialog on a skill's directory, an extension's, or the package's install path", async () => {
     row("pier-help")!.onclick!();
     await settled();
     button("Browse files")!.onclick!();

@@ -50,9 +50,10 @@ export function codePane(rows: CodeRow[], lang: string | null): HTMLElement {
       gutter.style.width = `calc(${digits}ch + 0.375rem)`; // content + its own pr
       row.append(gutter);
     }
-    // How a caller reveals a line it was pointed at (a `file:line` in chat).
-    // Single-gutter rows only: in a diff, "line 12" names two different lines.
-    if (r.nums.length === 1 && typeof r.nums[0] === "number") row.dataset.line = String(r.nums[0]);
+    // How a caller reveals a line it was pointed at (a `file:line` in chat):
+    // the last gutter, which in a diff is the file as it stands now.
+    const line = r.nums.at(-1);
+    if (typeof line === "number") row.dataset.line = String(line);
     row.append(codeSpan(r, hl));
     box.append(row);
   }

@@ -56,7 +56,7 @@ export function fileHeaders(file: string, bytes: Buffer, download = false): Reco
 }
 
 export function registerFsRoutes(app: Hono): void {
-  // The Files view walks a project (`root` confines it); the cwd pickers walk
+  // The Files dialog walks a project (`root` confines it); the cwd pickers walk
   // from anywhere. Never contents, and never `.git`.
   guarded(app, "GET", "/api/fs/ls", 404, async (c) => {
     c.header("cache-control", "no-store");
