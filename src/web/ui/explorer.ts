@@ -8,9 +8,9 @@ import { icon } from "./icons.js";
 import { mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
-import { $, basename, detailsRow, h } from "./dom.js";
-import { BAND, btn, CONTROL_TRIGGER, empty, PANE, pageTitle } from "./form.js";
-import { langFor } from "./highlight.js";
+import { $, addCodeCopy, basename, detailsRow, h, markdownBox } from "./dom.js";
+import { BAND, btn, CONTROL_TRIGGER, empty, PANE, pageTitle, segmented } from "./form.js";
+import { highlightCode, langFor } from "./highlight.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
 import { letterKey } from "./shortcut.js";
 
@@ -27,6 +27,7 @@ interface GitInfo {
 const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
 const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+const MD_EXT = /\.(md|markdown)$/i;
 
 /** name-status letters, toned like every diff tool tones them. */
 const STATUS_TONE: Record<string, string> = {
@@ -117,6 +118,31 @@ export function pathTarget(cwd: string, path: string): { root: string; select?: 
   return select ? { root, select } : { root };
 }
 
+/** The absolute path a rendered document's `src`/`href` names, from the
+ *  document's folder `dir`; null for a URL, an anchor or nothing. A leading
+ *  `/` is the project root, as a repository host reads it, unless it is
+ *  already a path under `root`. */
+export function resolveRef(root: string, dir: string, ref: string): string | null {
+  if (!ref || ref.startsWith("#") || ref.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(ref)) return null;
+  let rel = ref.replace(/[?#].*$/s, "");
+  try {
+    rel = decodeURIComponent(rel);
+  } catch {
+    /* not percent-encoded — take the path as written */
+  }
+  const from = !rel.startsWith("/") ? dir : rel === root || rel.startsWith(`${root}/`) ? "" : root;
+  const parts = from.split("/").filter(Boolean); // a root of "/" doubles no slash
+  for (const seg of rel.split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg && seg !== ".") parts.push(seg);
+  }
+  return `/${parts.join("/")}`;
+}
+
+/** GitHub's heading anchors, so a README's table of contents scrolls. */
+const slug = (text: string): string =>
+  text.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s/g, "-");
+
 export function openPath(session: FilesSession, path: string, line?: number): void {
   const { root, select } = pathTarget(session?.cwd ?? "", path);
   openFiles(session, root, select, line);
@@ -130,6 +156,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   let head = ""; // "" = working tree
   let changes = new Map<string, { status: string; add: number; del: number }>();
   let onlyChanged = true; // the diff is why you came; the full tree is one toggle away
+  let mdSource = false; // for the dialog's life: a reviewer who asked for source keeps it
   let collapsedAll = false;
   let savedExpanded: string[] = []; // what "collapse all" will restore
   const expanded = new Set<string>();
@@ -300,7 +327,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
 
   /** The band over the viewer: which file, what changed in it, what may be
    *  done with it. Empty when nothing is open. */
-  function setTitle(path?: string, download = false, extra?: HTMLElement): void {
+  function setTitle(path?: string, download = false, ...extra: HTMLElement[]): void {
     // An empty band is a rule drawn for nothing; both classes, because `hidden`
     // and `flex` are one property and neither reliably outranks the other.
     bar.classList.toggle("hidden", !path);
@@ -313,7 +340,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
       parts.push(...countChips(change.add, change.del));
     }
     const tail = h("div", "ml-auto flex flex-none items-center gap-2");
-    if (extra) tail.append(extra);
+    tail.append(...extra);
     if (download) {
       const dl = document.createElement("a");
       dl.className = "btn flex-none text-[12px]";
@@ -379,6 +406,71 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   let viewSeq = 0;
   const current = (seq: number): boolean => seq === viewSeq;
 
+  /** Rendered unless Source was picked, or a reference named a line — only
+   *  the source has lines to reveal. */
+  const rendersMd = (path: string): boolean =>
+    MD_EXT.test(path) && !mdSource && !(path === selectedPath && pendingLine !== undefined);
+
+  /** Re-views on a pick, so the choice reads the same for a diff and a file. */
+  function mdToggle(path: string, rendered: boolean): HTMLElement[] {
+    if (!MD_EXT.test(path)) return [];
+    const el = segmented([["Rendered", "rendered"], ["Source", "source"]], rendered ? "rendered" : "source", (key) => {
+      if ((key === "rendered") === rendered) return;
+      mdSource = key === "source";
+      void view(path);
+    });
+    el.classList.add("font-sans");
+    return [el];
+  }
+
+  /** A document as the reader sees it. Its own links stay in Files, an image
+   *  loads from disk beside it; a URL opens in a new tab (markdownBox). */
+  function mdPane(text: string, path: string): HTMLElement {
+    const box = markdownBox(text);
+    box.className = "md mx-auto max-w-3xl px-6 py-5 text-[14px] leading-relaxed";
+    void highlightCode(box);
+    addCodeCopy(box);
+    const dir = `${cwd}/${parentOf(path)}`; // resolveRef drops the empty segments
+    const fileOf = (abs: string): string => {
+      const t = pathTarget(cwd, abs);
+      return `/api/fs/file?${new URLSearchParams({ root: t.root, path: t.select ?? "" })}`;
+    };
+    for (const img of box.querySelectorAll("img")) {
+      const abs = resolveRef(cwd, dir, img.getAttribute("src") ?? "");
+      if (abs) img.setAttribute("src", fileOf(abs));
+    }
+    for (const a of box.querySelectorAll("a")) {
+      const href = a.getAttribute("href") ?? "";
+      if (href.startsWith("#")) {
+        // The page's hash is the workbench's router; an anchor must not reach it.
+        a.onclick = (e) => {
+          e.preventDefault();
+          let id = href.slice(1);
+          try {
+            id = decodeURIComponent(id);
+          } catch {
+            /* not percent-encoded — match the anchor as written */
+          }
+          id = id.toLowerCase();
+          const heading = [...box.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")]
+            .find((el) => slug(el.textContent ?? "") === id);
+          heading?.scrollIntoView({ block: "start" });
+        };
+        continue;
+      }
+      const abs = resolveRef(cwd, dir, href);
+      if (!abs) continue;
+      a.setAttribute("href", fileOf(abs)); // what a middle-click opens: the file itself
+      a.onclick = (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        const t = pathTarget(cwd, abs);
+        showIn(sessionNow, t.root, t.select);
+      };
+    }
+    return box;
+  }
+
   function view(path: string): Promise<void> {
     const seq = ++viewSeq;
     return changes.has(path) ? viewDiff(path, seq) : viewPlain(path, seq);
@@ -390,7 +482,8 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     const url = fsApi("file", { path });
     const body = h("div", "min-w-0");
     viewer.classList.remove("flex", "flex-col");
-    setTitle(path, true);
+    const rendered = rendersMd(path);
+    setTitle(path, true, ...mdToggle(path, rendered));
     viewer.replaceChildren(body);
     if (IMG_EXT.test(path)) {
       const img = h("img", "max-w-full p-4") as HTMLImageElement;
@@ -416,8 +509,10 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     if (!(res.headers.get("content-type") ?? "").startsWith("text/plain")) {
       return void body.replaceChildren(note("Binary file — use Download."));
     }
-    const rows = fileRows(await res.text());
+    const text = await res.text();
     if (!current(seq)) return;
+    if (rendered) return void body.replaceChildren(mdPane(text, path));
+    const rows = fileRows(text);
     const lang = await langFor(path); // first file of the session waits for hljs
     if (!current(seq)) return;
     body.replaceChildren(reveal(path, codePane(rows, lang)));
@@ -528,8 +623,11 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   async function viewDiff(path: string, seq: number): Promise<void> {
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
-    const canDownload = changes.get(path)?.status !== "D";
-    setTitle(path, canDownload);
+    const deleted = changes.get(path)?.status === "D";
+    const canDownload = !deleted;
+    const rendered = rendersMd(path);
+    const toggle = mdToggle(path, rendered);
+    setTitle(path, canDownload, ...toggle);
     viewer.replaceChildren(note("…"));
     try {
       const { diff } = await mustGetJson<{ diff: string }>(
@@ -539,6 +637,13 @@ function createFilesDialog(root: HTMLDialogElement): Show {
       if (!current(seq)) return;
       if (!diff || /^Binary files /m.test(diff)) return viewPlain(path, seq); // mode-only change, or an image
       const rows = parseDiff(diff);
+      if (rendered) {
+        // The diff's context covers the whole file, so its side of the picked
+        // head is the document at that head — the old side when it is gone.
+        const drop = deleted ? "add" : "del";
+        const text = rows.filter((r) => r.tone !== drop && r.nums.some((n) => n !== "")).map((r) => r.text).join("\n");
+        return void viewer.replaceChildren(mdPane(text, path));
+      }
       markIntraline(rows);
       const lang = await langFor(path); // first file of the session waits for hljs
       if (!current(seq)) return;
@@ -546,7 +651,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
       const rowEls = [...pane.children] as HTMLElement[];
       const segs = segmentsOf(rows);
       diffNav.set(segs, rowEls);
-      setTitle(path, canDownload, diffNav.el);
+      setTitle(path, canDownload, ...toggle, diffNav.el);
       viewer.replaceChildren(pane);
       renderMinimap(segs, rows.length, rowEls);
     } catch (err) {

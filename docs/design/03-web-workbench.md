@@ -362,7 +362,14 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   repository (`GET /api/explorer/git` answers `branch: null`) the branch chip,
   the whole compare band, the changed-only funnel and the diff stepper are
   absent, and an empty folder reads "Empty." rather than "No changes." — the
-  filter is not in force. A PDF shows inline in the viewer's frame:
+  filter is not in force. A `.md`/`.markdown` file shows rendered through the
+  chat's markdown (sanitized, highlighted, code copy) with a Rendered/Source
+  switch in the viewer band; Source — the numbered lines, or the toned diff for
+  a changed file — holds for the dialog's life, and a reference naming a line
+  opens on it. A changed file renders the diff's head side (the old side when
+  deleted); relative images load through `GET /api/fs/file` from the file's
+  folder (a leading `/` is the project root), relative links open in Files,
+  `#anchors` scroll to the heading, URLs open a new tab. A PDF shows inline in the viewer's frame:
   `GET /api/fs/file` answers `X-Frame-Options: SAMEORIGIN`, every other
   response `DENY`. On a phone the dialog is full-screen, inside the
   safe-area insets, tree above viewer.

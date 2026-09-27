@@ -3,15 +3,13 @@
 
 import { ArrowUpRight, CornerDownLeft, History, Pencil, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, agoLabel, copyBtn, externalLinks, h, holdToCopy, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
@@ -516,32 +514,11 @@ function setRowTime(row: HTMLElement, at: number): void {
   row.dataset.time = stampTime(at).slice(11);
 }
 
-/** Wrap each fenced block so a copy button can sit in its corner without
- *  scrolling away with the code, and copy the source text, not the tokens. */
-function addCodeCopy(root: HTMLElement): void {
-  for (const pre of root.querySelectorAll("pre")) {
-    const code = pre.querySelector("code");
-    if (!code) continue;
-    const wrap = h("div", "group/code relative");
-    pre.replaceWith(wrap);
-    wrap.append(
-      pre,
-      copyBtn(
-        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100 pointer-coarse:opacity-100 dark:border-neutral-200",
-        () => code.textContent ?? "",
-      ),
-    );
-  }
-}
-
 /** Attachment links are rewritten to the files route first: the sanitizer
  *  drops `file:` URLs. */
 function mdBox(raw: string): HTMLElement {
   const id = deps.sessionId();
-  const box = h("div", "");
-  box.innerHTML = DOMPurify.sanitize(marked.parse(id ? rewriteFileLinks(raw, id) : raw, { async: false }));
-  externalLinks(box);
-  return box;
+  return markdownBox(id ? rewriteFileLinks(raw, id) : raw);
 }
 
 /** Swap a plain-text bubble to sanitized rendered markdown. */

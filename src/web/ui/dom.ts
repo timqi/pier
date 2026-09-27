@@ -84,6 +84,14 @@ export function prose(markdown: string): HTMLElement {
   return el;
 }
 
+/** A block of sanitized rendered markdown — a chat reply, a file in Files. */
+export function markdownBox(markdown: string): HTMLElement {
+  const box = h("div", "");
+  box.innerHTML = DOMPurify.sanitize(marked.parse(markdown, { async: false }));
+  externalLinks(box);
+  return box;
+}
+
 /** An in-tab navigation drops the composer draft and the event stream, so a
  *  link the agent wrote never takes the tab. Hash routes *are* this page. */
 export function externalLinks(root: HTMLElement): void {
@@ -120,6 +128,24 @@ export function copyBtn(cls: string, text: () => string): HTMLElement {
     timer = setTimeout(() => (btn.textContent = "Copy"), 1200);
   };
   return btn;
+}
+
+/** Wrap each fenced block so a copy button can sit in its corner without
+ *  scrolling away with the code, and copy the source text, not the tokens. */
+export function addCodeCopy(root: HTMLElement): void {
+  for (const pre of root.querySelectorAll("pre")) {
+    const code = pre.querySelector("code");
+    if (!code) continue;
+    const wrap = h("div", "group/code relative");
+    pre.replaceWith(wrap);
+    wrap.append(
+      pre,
+      copyBtn(
+        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100 pointer-coarse:opacity-100 dark:border-neutral-200",
+        () => code.textContent ?? "",
+      ),
+    );
+  }
 }
 
 /** Long enough that a press meant as the start of a drag or a selection is
