@@ -2374,6 +2374,14 @@ describe("the continuous conversation's routes", () => {
     expect(await res.json()).toEqual(open);
   });
 
+  it("answers `/status`'s text for the Status panel without posting it or opening a head", async () => {
+    const { app, factory } = chainRig();
+    const res = await app.request("/api/continuous/status");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ text: "Nothing open.", sessions: {} });
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
   it("sends to the head through the alias, and to the next head across a rotation", async () => {
     const { app, sessions, clock, workspace, post } = chainRig();
     const first = await post("/api/continuous/messages", { text: "one" });

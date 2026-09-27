@@ -20,6 +20,7 @@ import {
   finishActivity,
   FOLD_ROW,
   initTurnActivity,
+  linkRuns,
   renderBackgroundRun,
   replayActivity,
   resetActivity,
@@ -294,26 +295,6 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   "chat-command": [SquareSlash, "command", "text-cyan-700"],
 };
 
-/** `/status`'s text names a run as `run <id8>…` (tasks/open-items.ts renderOpenItems);
- *  each one whose session the origin carries opens it. */
-function linkRuns(content: HTMLElement, sessions: Record<string, string>): void {
-  const text = content.textContent ?? "";
-  const parts: (Node | string)[] = [];
-  let at = 0;
-  for (const m of text.matchAll(/\brun ([\w-]+)(…?)/g)) {
-    const [token, id = "", cut] = m;
-    const runId = Object.keys(sessions).find((r) => (cut ? r.startsWith(id) : r === id));
-    if (!runId) continue;
-    const link = h("button", "text-indigo-600 hover:underline", token);
-    link.setAttribute("type", "button");
-    link.title = `Open run ${runId}'s session`;
-    link.onclick = () => deps.select(sessions[runId]!);
-    parts.push(text.slice(at, m.index), link);
-    at = m.index + token.length;
-  }
-  if (parts.length) content.replaceChildren(...parts, text.slice(at));
-}
-
 /** Every task text opens with `Key: value` lines naming the run, which the
  *  head row already says; only a card with no source of its own borrows the
  *  first line as a caption. */
@@ -357,7 +338,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       sessionId: origin.sourceSessionId,
       expands: content,
     });
-  if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions);
+  if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions, deps.select);
   row.append(head, content);
   turnsPane.append(row);
   trimRows();

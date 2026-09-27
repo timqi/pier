@@ -95,6 +95,11 @@ export class MainChain {
     return ids.includes(sessionId) ? ids : undefined;
   }
 
+  /** What `/status` answers, now: the Status panel shows this same text. */
+  status(): { text: string; sessions: Record<string, string> } {
+    return this.deps.status(this.now());
+  }
+
   /** Resolve the head, rotating it first when due, then dispatch to `key` (a
    *  chat's) or else the head's own; `command` names a chat command, answered
    *  without a turn. */
@@ -125,7 +130,7 @@ export class MainChain {
       await session.systemInput(running ? "stopped" : "nothing running", origin, "append");
       return undefined;
     }
-    const { text, sessions } = this.deps.status(this.now());
+    const { text, sessions } = this.status();
     await session.systemInput(text, { ...origin, sessions }, "append");
     return undefined;
   }

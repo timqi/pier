@@ -136,7 +136,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run and listed design that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the `/status` card and the In progress drawer
+- Surfaces: the `/status` card, the ⋯ Status panel (the same text,
+  `GET /api/continuous/status`) and the In progress drawer
   (`GET /api/continuous/open`), [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
 
 ## Chat commands

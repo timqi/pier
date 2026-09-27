@@ -140,36 +140,33 @@ it("does not open with nothing to list, and closes when its rows run out", () =>
   expect(menu.closeMenu).toHaveBeenCalledOnce();
 });
 
-// ⋯ → Status: the whole of `/status` in one card, its sections in `/status`'s
-// order, a run's name opening its session, refilled as the open items change.
-it("draws /status as one card and refills it while open", () => {
-  const run = (runId: string, over: Partial<import("../../tasks/types.js").OpenRun> = {}) =>
-    ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: Date.now(), finishedAt: null, ...over });
-  const anchor = document.createElement("button");
-  drawer.openStatus(anchor, document.createElement("header"));
+// ⋯ → Status: `/status`'s own text in the chat's card, a named run opening its
+// session, refetched while open, a failed read said in the card.
+it("draws /status's text as its card and refetches it while open", async () => {
+  const answers: Response[] = [];
+  const fetch = vi.fn(async () => answers.shift()!);
+  vi.stubGlobal("fetch", fetch);
+  const text = "Open\n- Bar — building (running) · run r1abcdef… running 1m";
+  answers.push(Response.json({ text, sessions: { r1abcdefgh: "s-r1" } }));
+  drawer.openStatus(document.createElement("button"), document.createElement("header"));
   const card = () => fake(menu.openPanel.mock.lastCall![1]).querySelectorAll(".system-card");
   expect(card()).toHaveLength(1);
   expect(card()[0]!.textContent).toBe("Loading…");
-
-  open = {
-    items: [{ problem: "Bar", stage: "building", live: "running", runs: [run("r1", { workers: { queued: 0, running: 2, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } })] }],
-    unlisted: [run("r2", { state: "succeeded", finishedAt: Date.now() })],
-    designs: [],
-  };
-  drawer.renderDrawer();
-  const text = card()[0]!.textContent;
-  expect(text).toContain("Open");
-  expect(text).toContain("Bar");
-  expect(text).toContain("building");
-  expect(text).toContain("running now · workers: 2 running, 1 succeeded");
-  expect(text).toContain("Not on the list");
-  expect(text).not.toContain("Designs for you to finalize");
-  const name = card()[0]!.querySelectorAll("button").find((b) => b.textContent === "r1")!;
-  name.onclick?.();
+  await vi.waitFor(() => expect(card()[0]!.textContent).toBe(text));
+  expect(fetch).toHaveBeenLastCalledWith("/api/continuous/status", undefined);
+  const link = card()[0]!.querySelectorAll("button").find((b) => b.textContent === "run r1abcdef…")!;
+  link.onclick?.();
   expect(menu.closeMenu).toHaveBeenCalled();
   expect(select).toHaveBeenCalledWith("s-r1");
 
+  answers.push(Response.json({ text: "Nothing open.", sessions: {} }));
   open = { items: [], unlisted: [], designs: [] };
   drawer.renderDrawer();
-  expect(card()[0]!.textContent).toBe("Nothing open.");
+  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("Nothing open."));
+
+  answers.push(Response.json({ error: "database is locked" }, { status: 500 }));
+  sessions = [row("a", { state: "streaming" })];
+  drawer.renderDrawer();
+  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("database is locked"));
+  vi.unstubAllGlobals();
 });

@@ -66,6 +66,26 @@ export const FOLD_ROW = "fold-row";
 export const runBody = (text: string): HTMLElement =>
   h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
+/** `/status`'s text names a run as `run <id8>…` (tasks/open-items.ts renderOpenItems);
+ *  each one whose session `sessions` carries opens it — in the chat card and the Status panel. */
+export function linkRuns(content: HTMLElement, sessions: Record<string, string>, open: (sessionId: string) => void): void {
+  const text = content.textContent ?? "";
+  const parts: (Node | string)[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/\brun ([\w-]+)(…?)/g)) {
+    const [token, id = "", cut] = m;
+    const runId = Object.keys(sessions).find((r) => (cut ? r.startsWith(id) : r === id));
+    if (!runId) continue;
+    const link = h("button", "text-indigo-600 hover:underline", token);
+    link.setAttribute("type", "button");
+    link.title = `Open run ${runId}'s session`;
+    link.onclick = () => open(sessions[runId]!);
+    parts.push(text.slice(at, m.index), link);
+    at = m.index + token.length;
+  }
+  if (parts.length) content.replaceChildren(...parts, text.slice(at));
+}
+
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", `flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);

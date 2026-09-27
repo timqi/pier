@@ -492,6 +492,9 @@ export function createServer(
   // The drawer's run rows.
   app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [], designs: [] }));
 
+  // ⋯ → Status: `/status`'s answer, without posting it.
+  app.get("/api/continuous/status", (c) => c.json(continuous.status()));
+
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.
   guarded(app, "POST", "/api/continuous/messages", 400, async (c) => {
