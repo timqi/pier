@@ -1,8 +1,8 @@
 # CLI socket (design)
 
 `$PIER_HOME/pier.sock` is how the `pier` CLI reaches the running instance:
-`pier vault run`, `pier slack` (a vault resolve), `pier task`, `pier web` and
-`pier login`. `node:http`
+`pier vault run`, `pier slack` (a vault resolve), `pier task`, `pier web`,
+`pier search` and `pier login`. `node:http`
 on a Unix socket, mode `0600`, unlinked on start and on exit; the permission
 bits are the whole auth (`src/socket.ts`). Not a workbench route: plaintext
 crosses this socket into a local process of Pier's user and nowhere else.
@@ -36,6 +36,7 @@ for an answer — 120 s on `/web`, the one route that waits on a provider.
 | --- | --- | --- |
 | `/resolve` | `{sessionId, names: string[]}` | `200 {values}` — `{NAME: {kind: "plain" \| "record", value}}`; `404 {error: "no secret named X", file}` where `file` is `<publicUrl>/app/#/settings/vault?name=X` (loopback when no public URL is set); `423 {error: "locked — <reason>"}`; `400` for names that are not a non-empty list of vault names; `500 {error}` for anything else ([07-vault.md](07-vault.md)) |
 | `/task` | `{sessionId, params}` — `params.operation` is `run`, `message`, `save`, `list`, `pause`, `resume`, `archive`, `runs`, `cancel` or `recover` ([09-tasks-cli.md](09-tasks-cli.md)) | `200 {result}`; `422 {error}` with the operation's own message for anything it refused — `handleTask` (`tasks/operations.ts`) is the one validator, and the CLI does none |
+| `/search` | `{sessionId, params: {q, limit?}}` — `q` the words the palette takes ([03](03-web-workbench.md)), `limit` 1–50, default 20 | `200 {result: {hits}}`, each hit `{sessionId, title, role, at, snippet}` (`AgentFactory.search`, the session index; `title` the session's name at answer time); `422 {error}` for an empty `q`. The CLI prints one line per hit — `<sessionId> · <title> · <role> · <YYYY-MM-DD HH:MM>: <snippet>` — or the object with `--json`; no hits prints `no hits` and exits 0 |
 | `/login` | `{}` | `200 {url}` — `<publicUrl>/login/<token>` (loopback when no public URL is set); the token is 32 random bytes, single use, dead after two minutes, at most 10 outstanding (oldest evicted); every unspent link dies with a password change or a sign-everyone-out, and the URL is a credential — redact `/login/*` in proxy logs. `GET /login/:token` opens a browser session on the login throttle and redirects to `/app/`; a stale or unknown token is the form with "That sign-in link has expired." (401) and counts as a failed guess; `HEAD` is 405 so a link checker cannot spend it; answers are `no-store`, `no-referrer`. Passkeys do not gate it: the socket's `0600` bits are the door — any process of Pier's user, an agent's shell included, may mint one |
 | `/web` | `{sessionId, params}` — `params.op` is `search` (`query`, `language_mode?`, `allowed_domains?`, `blocked_domains?`, `backend?`) or `fetch` (`url`, `prompt?`, `mode?`) | `200 {result: {text, details}}`; `422 {error}` for a refused field, no backend with auth, a URL that is not public HTTP(S), or a provider failure — `parseWebParams`/`runWeb` (`websearch/run.ts`) validate, the CLI checks argv shape only; the model auth is the instance's (`WebContext`), the caller's active model a candidate |
 
@@ -52,3 +53,4 @@ for an answer — 120 s on `/web`, the one route that waits on a provider.
 | `vault: …` | 2 | a `/resolve` route answer ([07-vault.md](07-vault.md)) |
 | `task: …` | 1 | a `/task` route answer (`skills/pier-tasks/SKILL.md`) |
 | `web: …` | 1 | a `/web` route answer (`skills/pier-web/SKILL.md`) |
+| `search: …` | 1 | a `/search` route answer |

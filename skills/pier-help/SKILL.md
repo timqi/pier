@@ -94,7 +94,10 @@ truth.
   Every message there, top-level or in a thread, reaches Pier; its replies,
   callbacks, seeds and command answers render in the DM's main flow.
   `/settings` and `/s <text>` are prose there; while that adapter is live the
-  head sends no Web Push. Groups stay thread-per-session.
+  head sends no Web Push. Groups stay thread-per-session. A design lead that
+  waits for the user gets a thread of the home DM bound to its session, under
+  a `▷ <name> · design — waiting for you` root that the head edits to `✓ … design
+  final` or `⚠ … <error>`; that thread is the lead's, not Pier's conversation.
 - Elsewhere `/settings` opens a panel. In a thread with no session yet it is a
   draft: directory, model & reasoning (the operator's pinned models, one pick
   sets both), and Start creates the session. `/s <text>` as a thread's first

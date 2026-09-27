@@ -362,6 +362,8 @@ describe("a send under a chat's key", () => {
       start: async () => {},
       send: async () => {},
       notify: async (id, note) => void notes.push([id, note.origin]),
+      openThread: async () => "",
+      editRoot: async () => {},
       stop: async () => {},
     };
     return { channel, notes };

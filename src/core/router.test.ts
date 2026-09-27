@@ -41,6 +41,8 @@ function fakeChannel(id: string) {
       notes.push([conversationId, note]);
       return Promise.resolve();
     },
+    openThread: () => Promise.resolve(""),
+    editRoot: () => Promise.resolve(),
     stop: () => Promise.resolve(),
   };
   return { channel, sent, notes };
@@ -115,6 +117,8 @@ describe("channel fan-out", () => {
         finished.push(reply.text);
       },
       notify: () => Promise.resolve(),
+      openThread: () => Promise.resolve(""),
+      editRoot: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);
@@ -142,6 +146,8 @@ describe("channel fan-out", () => {
         return reply.text === "first" ? Promise.reject(new Error("429")) : Promise.resolve();
       },
       notify: () => Promise.resolve(),
+      openThread: () => Promise.resolve(""),
+      editRoot: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);

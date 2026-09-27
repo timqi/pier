@@ -211,8 +211,9 @@ export class LarkChannel implements Channel {
     const text = raw.trim();
     const command = parseCommand(text);
     const root = threadOf(msg);
-    // Every message in the home chat, in a topic or not, is the head's, under one key.
-    const home = this.isHome(msg.chatId);
+    // The home chat is the head's, in a topic or not, under one key — except a
+    // child's topic (docs/design/11 §Child threads), which is that session's.
+    const home = this.isHead(msg.chatId, msg.rootId);
     const here: ConversationKey = { channelId: this.id, conversationId: home ? msg.chatId : conversationId(msg.chatId, root) };
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", msg.chatId, {
@@ -356,9 +357,9 @@ export class LarkChannel implements Channel {
       ? action.name.slice(CWD_SUBMIT_PREFIX.length)
       : "";
     const root = action.value?.root ?? formRoot;
-    // Any tap in the home chat is the head's, echoed where the card was;
-    // anywhere else only a topic's card is Pier's.
-    const home = this.isHome(action.chatId);
+    // Any tap in the home chat is the head's, echoed where the card was,
+    // unless a child's topic; anywhere else only a topic's card is Pier's.
+    const home = this.isHead(action.chatId, root);
     if (!root && !(home && payload.startsWith(OFFER_PREFIX))) {
       this.log(`card action without a thread root in ${action.chatId}, dropped`);
       return;
@@ -459,6 +460,12 @@ export class LarkChannel implements Channel {
     return this.deps.control?.isHome({ channelId: this.id, conversationId: chatId }) ?? false;
   }
 
+  /** The head's: the home chat, outside any topic a session of its own is bound to. */
+  private isHead(chatId: string, root: string | undefined): boolean {
+    return this.isHome(chatId) &&
+      !(root && this.deps.control?.knows({ channelId: this.id, conversationId: conversationId(chatId, root) }));
+  }
+
   /** A topic, or the home chat's main flow; undefined for any other chat's. */
   private target(conversation: string): LarkTarget | undefined {
     const { chatId, root } = parseConversation(conversation);
@@ -517,5 +524,18 @@ export class LarkChannel implements Channel {
     if (messageId && awaitsTurn(note.origin)) {
       this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);
     }
+  }
+
+  async openThread(chatId: string, note: { text: string; origin: NoteOrigin }): Promise<string> {
+    if (!this.isHome(chatId)) throw new Error(`refusing to open a topic in ${chatId}: not the home chat`);
+    const messageId = await this.out.note({ chatId }, note);
+    if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
+    return conversationId(chatId, messageId);
+  }
+
+  async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+    const { root } = parseConversation(conversation);
+    if (!root) throw new Error(`refusing to edit ${conversation}: no thread root in the conversation id`);
+    await this.out.edit(root, note);
   }
 }

@@ -43,7 +43,13 @@ function rig() {
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
-  const service = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } });
+  /** What a design lead's settled runs told the home chat (docs/design/11 §Child threads). */
+  const leadStates: [string, string][] = [];
+  const service = new TaskService(store, factory, router, hub, {
+    modelMenu: () => [],
+    continuous: { chainOf: () => undefined, members: () => [] },
+    designLead: (run, state) => { leadStates.push([run.id, state]); },
+  });
   const agent = (name: string, role?: "lead", design?: true) => service.create({
     name, trigger: { type: "manual" },
     action: { type: "agent", session: { mode: "fresh", cwd }, prompt: `be ${name}`, ...(role ? { launch: { role, ...(design ? { design } : {}) } } : {}) },
@@ -62,7 +68,7 @@ function rig() {
     return task;
   };
   const bash = (script: string) => service.create({ name: script, trigger: { type: "manual" }, action: { type: "bash", cwd, script }, timeoutSeconds: 5 });
-  return { cwd, sessions, created, service, store, leadRan, bash, agent, router };
+  return { cwd, sessions, created, service, store, leadRan, bash, agent, router, leadStates };
 }
 
 /** The wall clock `ms` ahead, past a waiting result's backoff; timers stay real. */
@@ -360,6 +366,38 @@ describe("a feature lead", () => {
         service.stop();
       }
     }
+  });
+
+  // docs/design/11-im-conversation.md §Child threads: what the home chat is told about a design lead.
+  it("reports a design lead's turn as waiting, its Design final: as final, a failure as failed; a build lead never", async () => {
+    const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };
+    const states = async (reply: { reply: string } | { error: string }, phase: "design" | "build" = "design") => {
+      const { service, sessions, store, leadRan, leadStates, router } = rig();
+      await leadRan("succeeded", phase);
+      sessions.set("lead", fakeSession("lead", reply));
+      const run = await service.waitForRun(service.resume("lead-run", "what do you propose?", owed).id);
+      return { run, leadStates, store, router, sessions, service };
+    };
+    const waiting = await states({ reply: "Two options." });
+    expect(waiting.leadStates).toEqual([[waiting.run.id, "waiting"]]);
+    // A Design final: outside any run (the user confirmed in the lead's session) is final too.
+    const lead = waiting.sessions.get("lead")!;
+    waiting.router.attach({ channelId: "web", conversationId: "lead" }, lead);
+    lead.emit({ type: "turn-end", text: "Design final: /repo/design.md" });
+    const recorded = waiting.store.latestRunForTarget("lead")!;
+    expect(recorded.id).not.toBe(waiting.run.id);
+    expect(waiting.leadStates.at(-1)).toEqual([recorded.id, "final"]);
+    waiting.service.stop();
+
+    const final = await states({ reply: "Agreed.\nDesign final: /repo/design.md" });
+    expect(final.leadStates).toEqual([[final.run.id, "final"]]);
+    final.service.stop();
+    const failed = await states({ error: "provider down" });
+    expect(failed.leadStates).toEqual([[failed.run.id, "failed"]]);
+    failed.service.stop();
+    const build = await states({ reply: "built" }, "build");
+    expect(build.leadStates).toEqual([]);
+    build.service.stop();
   });
 
   it("holds a build lead's turn back while a worker's result is still coming, and reports the wave once", async () => {

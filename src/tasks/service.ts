@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
-import { DESIGN_FINAL, MILESTONE, runCwd, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, LEAD_TURN, MILESTONE, runCwd, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -59,6 +59,9 @@ export class TaskService {
       modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous: TaskChain;
+      /** A design lead's run settled: the user's turn (`waiting`), its `Design
+       *  final:` (`final`), or a run of it that did not succeed (`failed`). */
+      designLead?: (run: TaskRun, state: "waiting" | "final" | "failed") => void;
     },
   ) {
     const headOf = (id: string): string => instance.continuous.chainOf(id)?.[0] ?? id;
@@ -153,6 +156,24 @@ export class TaskService {
     if (run.callbackSessionId === null) log.warn(`lead ${sessionId}: Design final: recorded as run ${run.id}; the lead reports to no one`);
     else log.info(`lead ${sessionId}: Design final: outside any run, recorded as run ${run.id} for ${run.callbackSessionId}`);
     this.runs.start(run);
+    this.designLead(run);
+  }
+
+  /** What a settled run of a design lead means to whoever shows the lead to
+   *  the user (channels/runtime.ts); a reporter that throws must not unwind the settle. */
+  private designLead(run: TaskRun): void {
+    const lead = run.targetSessionId;
+    if (!this.instance.designLead || lead === null || this.store.leadPhaseOf(lead) !== "design") return;
+    const state = run.callbackError === LEAD_TURN ? "waiting"
+      : run.state !== "succeeded" ? "failed"
+      : run.result?.type === "agent" && DESIGN_FINAL.test(run.result.text) ? "final"
+      : undefined;
+    if (!state) return;
+    try {
+      this.instance.designLead(run, state);
+    } catch (err) {
+      log.error(`lead ${lead}: its ${state} state could not be reported`, err);
+    }
   }
 
   start(tickMs = 1000): void {
@@ -510,6 +531,7 @@ export class TaskService {
     if (waiters) for (const resolve of waiters) resolve(run);
     this.waiters.delete(run.id);
     this.groups.onSettled(run);
+    this.designLead(run);
   }
 
   private backgroundRun(run: TaskRun): BackgroundRun {

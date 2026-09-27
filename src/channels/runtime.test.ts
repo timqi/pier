@@ -25,9 +25,21 @@ vi.mock("./slack.js", () => ({
     async stop(): Promise<void> {
       events.push(`stop ${this.n}`);
     }
-    async send(): Promise<void> {}
+    async send(conversationId: string, reply: { text: string; suggestions: string[] }): Promise<void> {
+      if (sendFails) throw sendFails;
+      events.push(`send ${conversationId}: ${reply.text}${reply.suggestions.length ? ` [${reply.suggestions.join("|")}]` : ""}`);
+    }
     async notify(conversationId: string, note: { text: string }): Promise<void> {
       events.push(`notify ${conversationId}: ${note.text}`);
+    }
+    async openThread(chatId: string, note: { text: string }): Promise<string> {
+      if (openFails) throw openFails;
+      events.push(`root ${chatId}: ${note.text}`);
+      return `${chatId}/1900.1`;
+    }
+    async editRoot(conversationId: string, note: { text: string }): Promise<void> {
+      if (openFails) throw openFails;
+      events.push(`edit ${conversationId}: ${note.text}`);
     }
   },
 }));
@@ -43,6 +55,13 @@ vi.mock("./lark.js", () => ({
 const dispatched: InboundMessage[] = [];
 const headSent: [string, ConversationKey | undefined][] = [];
 let headFails: Error | undefined;
+let openFails: Error | undefined;
+let sendFails: Error | undefined;
+/** The child threads the fake store knows, thread id → session. */
+const bound = new Map<string, string>();
+/** The keys the fake router was asked to resolve, with the session the store bound them to. */
+const attached: [ConversationKey, string | undefined][] = [];
+let home: { platform: "slack"; chatId: string } | undefined;
 
 function runtime(config: Record<string, unknown>, log: (m: string) => void = () => {}): ChannelRuntime {
   const store = {
@@ -51,6 +70,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       if (c instanceof Error) throw c;
       return c ?? { enabled: false, token: "" };
     },
+    home: () => home,
   } as unknown as ChannelStore;
   const router = {
     registerChannel: vi.fn(),
@@ -59,6 +79,10 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       dispatched.push(msg);
       return Promise.resolve({ sessionId: "s" });
     },
+    ensure: (key: ConversationKey) => {
+      attached.push([key, bound.get(key.conversationId)]);
+      return Promise.resolve({ id: bound.get(key.conversationId) ?? key.conversationId });
+    },
   } as unknown as Router;
   const chain = {
     send: (msg: InboundMessage, key?: ConversationKey) => {
@@ -66,8 +90,18 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       return headFails ? Promise.reject(headFails) : Promise.resolve({ sessionId: "head" });
     },
   } as unknown as MainChain;
-  const control = { isHome: (key: ConversationKey) => key.conversationId.startsWith("D1") } as unknown as ChannelControl;
-  return new ChannelRuntime(store, router, chain, control, log);
+  const control = {
+    isHome: (key: ConversationKey) => key.conversationId.startsWith("D1"),
+    knows: (key: ConversationKey) => bound.has(key.conversationId),
+  } as unknown as ChannelControl;
+  const conversations = {
+    keyOf: (sessionId: string) => {
+      const thread = [...bound].find(([, s]) => s === sessionId)?.[0];
+      return thread === undefined ? undefined : { channelId: "slack", conversationId: thread };
+    },
+    set: (key: ConversationKey, sessionId: string) => { bound.set(key.conversationId, sessionId); },
+  };
+  return new ChannelRuntime(store, router, chain, control, conversations, log);
 }
 
 describe("ChannelRuntime", () => {
@@ -134,7 +168,11 @@ describe("ChannelRuntime", () => {
       events.length = 0;
       dispatched.length = 0;
       headSent.length = 0;
+      attached.length = 0;
+      bound.clear();
       headFails = undefined;
+      openFails = sendFails = undefined;
+      home = { platform: "slack", chatId: "D1" };
       startGate = Promise.resolve();
       const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
       await rt.reload();
@@ -144,12 +182,14 @@ describe("ChannelRuntime", () => {
     it("goes to the head under the chat's key, threaded or not; any other chat to the router", async () => {
       const rt = await live();
       expect(rt.live("slack")).toBe(true);
+      bound.set("D1/1717.3", "lead");
       deliver(say("D1", "hi"));
       deliver(say("D1/1717.1", "in a thread"));
       deliver(say("C9/1717.2", "elsewhere"));
+      deliver(say("D1/1717.3", "to the child"));
       const home = { channelId: "slack", conversationId: "D1" };
       expect(headSent).toEqual([["hi", home], ["in a thread", home]]);
-      expect(dispatched.map((m) => m.text)).toEqual(["elsewhere"]);
+      expect(dispatched.map((m) => m.text)).toEqual(["elsewhere", "to the child"]);
       await rt.stop();
       expect(rt.live("slack")).toBe(false);
     });
@@ -164,6 +204,68 @@ describe("ChannelRuntime", () => {
       await new Promise((r) => setTimeout(r, 5));
       expect(events.filter((e) => e.startsWith("notify"))).toHaveLength(1);
       await rt.stop();
+    });
+  });
+
+  // docs/design/11-im-conversation.md §Child threads
+  describe("a design lead's thread", () => {
+    const origin = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+    const lead = (text = "Which storage?\n\n---\n[Finalize design]") => ({ sessionId: "lead", name: "storage", origin, text });
+
+    async function live(): Promise<ChannelRuntime> {
+      events.length = 0; attached.length = 0; bound.clear();
+      openFails = sendFails = undefined; home = { platform: "slack", chatId: "D1" }; startGate = Promise.resolve();
+      const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
+      await rt.reload();
+      return rt;
+    }
+    const posted = (): string[] => events.filter((e) => !e.startsWith("start") && !e.startsWith("stop"));
+
+    it("opens under a root in the main flow, binds and attaches the session, and posts the turn that ended nowhere", async () => {
+      const rt = await live();
+      await rt.designLead(lead(), "waiting");
+      expect(posted()).toEqual([
+        "root D1: ▷ storage · design — waiting for you",
+        "send D1/1900.1: Which storage? [Finalize design]",
+      ]);
+      expect(bound.get("D1/1900.1")).toBe("lead");
+      expect(attached).toEqual([[{ channelId: "slack", conversationId: "D1/1900.1" }, "lead"]]);
+      // Bound: a later turn of the user's is the thread's; the root follows the design.
+      await rt.designLead(lead("more"), "waiting");
+      await rt.designLead(lead("Design final: /d.md"), "final");
+      await rt.designLead(lead("provider down"), "failed");
+      expect(posted().slice(2)).toEqual([
+        "edit D1/1900.1: ✓ storage · design final",
+        "edit D1/1900.1: ⚠ storage · design — provider down",
+      ]);
+      await rt.stop();
+    });
+
+    it("does nothing without a live home or when the session already has a chat; a failure is a note", async () => {
+      const rt = await live();
+      home = undefined;
+      await rt.designLead(lead(), "waiting");
+      home = { platform: "slack", chatId: "D1" };
+      bound.set("C9/1.1", "lead");
+      await rt.designLead(lead(), "waiting");
+      await rt.designLead(lead(), "final");
+      expect(posted()).toEqual([]);
+      bound.clear();
+      openFails = new Error("ratelimited");
+      await rt.designLead(lead(), "waiting");
+      expect(events.at(-1)).toBe(`notify D1: "storage" waits for you on the web; its thread could not be opened: Error: ratelimited`);
+      expect(attached).toEqual([]);
+      // The root posted and bound, the turn lost: the thread says so, and stays the lead's.
+      openFails = undefined;
+      sendFails = new Error("ratelimited");
+      await rt.designLead(lead(), "waiting");
+      expect(events.at(-1)).toBe(`notify D1/1900.1: "storage" waits for you on the web; its turn did not reach this thread: Error: ratelimited`);
+      expect(bound.get("D1/1900.1")).toBe("lead");
+      await rt.stop();
+      // Adapter down: nothing, and never later.
+      bound.clear(); events.length = 0;
+      await rt.designLead(lead(), "waiting");
+      expect(events).toEqual([]);
     });
   });
 });

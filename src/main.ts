@@ -29,6 +29,7 @@ import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
+import { runResultText, runSource } from "./tasks/callbacks.js";
 import { openItemsStatus } from "./tasks/open-items.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -146,6 +147,16 @@ tasks = new TaskService(taskStore, factory, router, hub, {
     },
   },
   continuous: chain,
+  // `channels` is assigned below, before any run can settle.
+  designLead: (run, state) => {
+    if (!run.targetSessionId) return;
+    void channels.designLead({
+      sessionId: run.targetSessionId,
+      name: run.context.definition.name,
+      origin: { kind: "task-callback", taskId: run.taskId, runId: run.id, sourceSessionId: run.targetSessionId, source: runSource(run), state: run.state },
+      text: state === "failed" ? run.error ?? run.state : runResultText(run),
+    }, state).catch((err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
+  },
 });
 const configurationSync = configSyncTask(tasks, configSync);
 
@@ -166,7 +177,7 @@ const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
 });
-const channels = new ChannelRuntime(channelStore, router, chain, control);
+const channels = new ChannelRuntime(channelStore, router, chain, control, conversations);
 /** The head answers in the home chat while its adapter runs (docs/design/11), else on
  *  the web with Web Push; an older member gets no home key, or an adapter's start
  *  would re-key it over the head. Any other session: its conversations row. */

@@ -1243,6 +1243,42 @@ describe("the home chat", () => {
     expect(client.sent.at(-1)).toMatchObject({ channel: CHANNEL, thread_ts: "1700.000100" });
     expect(client.sent.at(-1)!.text).toContain("> pier-tasks — delegate work");
   });
+
+  // docs/design/11-im-conversation.md §Child threads
+  it("opens a child's thread under a root in the main flow, and edits that root in place", async () => {
+    const origin = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+    const thread = await channel.openThread(HOME, { text: "▷ storage · design — waiting for you", origin });
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: undefined, text: "_↩ task callback_\n> ▷ storage · design — waiting for you" });
+    expect(thread).toMatch(new RegExp(`^${HOME}/\\d+\\.\\d+$`));
+    await channel.editRoot(thread, { text: "✓ storage · design final", origin });
+    expect(client.updated.at(-1)).toMatchObject({ channel: HOME, ts: thread.slice(HOME.length + 1), text: "_↩ task callback_\n> ✓ storage · design final" });
+    await expect(channel.openThread(CHANNEL, { text: "x", origin })).rejects.toThrow(/not the home DM/);
+    await expect(channel.editRoot(HOME, { text: "x", origin })).rejects.toThrow(/no thread/);
+  });
+
+  it("a threaded message in a child's thread is that session's, not the head's; its buttons too", async () => {
+    known.add(`${HOME}/1900.000100`);
+    const child = { channelId: "slack", conversationId: `${HOME}/1900.000100` };
+    await feed(
+      dm({ text: "use sqlite", ts: "1900.000200", thread_ts: "1900.000100" }),
+      dm({ text: "and the head", ts: "1900.000300", thread_ts: "1800.000100" }),
+      dm({ text: "%stop", ts: "1900.000400", thread_ts: "1900.000100" }),
+    );
+    expect(inbound.map((m) => [m.key, m.text])).toEqual([[child, "use sqlite"], [homeKey, "and the head"]]);
+    expect(aborted).toEqual([child.conversationId]);
+    expect(client.reactions.map((r) => r.ts)).toEqual(["1900.000200", "1900.000300"]);
+    await channel.send(child.conversationId, { text: "Which storage?", suggestions: ["Finalize design"] });
+    expect(client.reactions.filter((r) => !r.add).map((r) => r.ts)).toEqual(["1900.000200"]);
+    const offer = client.sent.at(-1)!;
+    expect(offer.thread_ts).toBe("1900.000100");
+    await feed(interaction({
+      channel: { id: HOME },
+      message: { ts: "1900.000500", thread_ts: "1900.000100", blocks: offer.blocks },
+      actions: [{ action_id: "sg:0" }],
+    }));
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "1900.000100", text: "▸ Finalize design" });
+    expect(inbound.at(-1)).toMatchObject({ key: child, text: "Finalize design" });
+  });
 });
 
 describe("settings panel", () => {

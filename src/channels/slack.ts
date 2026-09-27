@@ -240,8 +240,9 @@ export class SlackChannel implements Channel {
     const text = this.stripMention(raw);
     const command = parseCommand(text);
     const threadTs = threadOf(event);
-    // Every message in the home DM, in a thread or not, is the head's, under one key.
-    const home = this.isHome(channel);
+    // The home DM is the head's, in a thread or not, under one key — except a
+    // child's thread (docs/design/11 §Child threads), which is that session's.
+    const home = this.isHead(channel, event.thread_ts);
     const here: ConversationKey = { channelId: this.id, conversationId: home ? channel : conversationId(channel, threadTs) };
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", channel, {
@@ -311,9 +312,9 @@ export class SlackChannel implements Channel {
       this.log("incomplete block_actions payload, dropped");
       return;
     }
-    // Any click in the home DM is the head's, echoed where the button was;
-    // anywhere else a top-level message roots a thread.
-    const home = this.isHome(channel);
+    // Any click in the home DM is the head's, echoed where the button was,
+    // unless a child's thread; anywhere else a top-level message roots a thread.
+    const home = this.isHead(channel, message.thread_ts);
     const threadTs = home ? message.thread_ts : message.thread_ts ?? message.ts;
     const key: ConversationKey = {
       channelId: this.id,
@@ -435,6 +436,12 @@ export class SlackChannel implements Channel {
 
   private isHome(channel: string): boolean {
     return this.deps.control?.isHome({ channelId: this.id, conversationId: channel }) ?? false;
+  }
+
+  /** The head's: the home DM, outside any thread a session of its own is bound to. */
+  private isHead(channel: string, threadTs: string | undefined): boolean {
+    return this.isHome(channel) &&
+      !(threadTs && this.deps.control?.knows({ channelId: this.id, conversationId: conversationId(channel, threadTs) }));
   }
 
   /** A thread, or the home DM's main flow (no `threadTs`); undefined for any other channel's. */
@@ -569,6 +576,19 @@ export class SlackChannel implements Channel {
     }
     const ts = await this.out.note(to.channel, to.threadTs, note);
     if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
+  }
+
+  async openThread(channel: string, note: { text: string; origin: NoteOrigin }): Promise<string> {
+    if (!this.isHome(channel)) throw new Error(`refusing to open a thread in ${channel}: not the home DM`);
+    const ts = await this.out.note(channel, undefined, note);
+    if (!ts) throw new Error(`Slack returned no ts for the root in ${channel}`);
+    return conversationId(channel, ts);
+  }
+
+  async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+    const { channel, threadTs } = parseConversation(conversation);
+    if (!threadTs) throw new Error(`refusing to edit ${conversation}: no thread in the conversation id`);
+    await this.out.edit(channel, threadTs, note);
   }
 }
 

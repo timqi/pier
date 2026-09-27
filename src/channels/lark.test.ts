@@ -973,6 +973,42 @@ describe("the home chat", () => {
     expect(client.replied.at(-1)!.to).toBe("om_1");
     expect(bodyText(client.replied.at(-1)!.card)).toContain("> pier-tasks — delegate work");
   });
+
+  // docs/design/11-im-conversation.md §Child threads
+  it("opens a child's topic under a root in the main flow, and edits that root in place", async () => {
+    const origin = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+    const thread = await channel.openThread(HOME, { text: "▷ storage · design — waiting for you", origin });
+    expect(client.sent.at(-1)!.chatId).toBe(HOME);
+    expect(bodyText(client.sent.at(-1)!.card)).toBe("*↩ task callback*\n> ▷ storage · design — waiting for you");
+    const rootId = [...client.cards.keys()].at(-1)!;
+    expect(thread).toBe(`${HOME}/${rootId}`);
+    await channel.editRoot(thread, { text: "✓ storage · design final", origin });
+    expect(client.patched.at(-1)!.messageId).toBe(rootId);
+    expect(bodyText(client.patched.at(-1)!.card)).toBe("*↩ task callback*\n> ✓ storage · design final");
+    await expect(channel.openThread(CHAT, { text: "x", origin })).rejects.toThrow(/not the home chat/);
+    await expect(channel.editRoot(HOME, { text: "x", origin })).rejects.toThrow(/no thread root/);
+  });
+
+  it("a message in a child's topic is that session's, not the head's; its buttons too", async () => {
+    known.add(`${HOME}/om_root`);
+    const child = { channelId: "lark", conversationId: `${HOME}/om_root` };
+    await feed(
+      dm({ text: "use sqlite", messageId: "om_c1", rootId: "om_root" }),
+      dm({ text: "and the head", messageId: "om_c2", rootId: "om_h1" }),
+      dm({ text: "%stop", messageId: "om_c3", rootId: "om_root" }),
+    );
+    expect(inbound.map((m) => [m.key, m.text])).toEqual([[child, "use sqlite"], [homeKey, "and the head"]]);
+    expect(aborted).toEqual([child.conversationId]);
+    expect(client.reactions.map((r) => r.messageId)).toEqual(["om_c1", "om_c2"]);
+    await channel.send(child.conversationId, { text: "Which storage?", suggestions: ["Finalize design"] });
+    expect(client.reactions.filter((r) => !r.add).map((r) => r.messageId)).toEqual(["om_c1"]);
+    expect(client.replied.at(-1)!.to).toBe("om_root");
+    const offerId = [...client.cards.keys()].at(-1)!;
+    await act({ messageId: offerId, chatId: HOME, operatorId: USER, value: { key: "sg:0", root: "om_root", label: "Finalize design" } });
+    expect(client.replied.at(-1)!.to).toBe("om_root");
+    expect(bodyText(client.replied.at(-1)!.card)).toBe("▸ Finalize design");
+    expect(inbound.at(-1)).toMatchObject({ key: child, text: "Finalize design" });
+  });
 });
 
 describe("discovery", () => {

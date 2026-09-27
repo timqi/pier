@@ -77,6 +77,15 @@ export interface Channel {
     conversationId: string,
     note: { text: string; origin: NoteOrigin; at?: number },
   ): Promise<void>;
+  /**
+   * Post the note as a root in the chat's main flow and answer the conversation
+   * id of the thread under it, for a child session that waits on the user
+   * (docs/design/11 §Child threads). Only the home chat has a main flow; any
+   * other chat rejects.
+   */
+  openThread(chatId: string, note: { text: string; origin: NoteOrigin }): Promise<string>;
+  /** Replace the text of the root `openThread` posted: the thread's state, shown where it was opened. */
+  editRoot(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
   stop(): Promise<void>;
 }
 

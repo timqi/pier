@@ -2,8 +2,9 @@
 
 The contract for one IM DM joining the Pier head
 ([10](10-continuous-session.md)): which chat, how its messages reach the head,
-how the head's replies, notes and buttons render there, and what the web
-stops doing meanwhile. Everything not named here is [04](04-im-channels.md)'s.
+how the head's replies, notes and buttons render there, what the web stops
+doing meanwhile, and the one kind of thread the chat has (§Child threads).
+Everything not named here is [04](04-im-channels.md)'s.
 
 ## The home chat
 
@@ -20,14 +21,18 @@ stops doing meanwhile. Everything not named here is [04](04-im-channels.md)'s.
 
 ## Routing
 
-The home chat is the head's and nothing else's: every message in it,
-top-level or in any thread, goes to the head (`MainChain.send`) under the key
-`<chatId>`. No thread session, no panel, no `knows()` per message.
+The home chat is the head's: every message in it goes to the head
+(`MainChain.send`) under the key `<chatId>` — top-level, or in any thread
+that is not a child's. A thread with a `conversations` row (§Child threads)
+is that session's, routed as any thread of any chat (`Router.dispatch`, the
+panel, `/stop`, `/skills`): the adapter asks `control.knows(<chatId>/<thread>)`
+for a threaded message in the home chat, and nothing else per message.
 
 - Setting the home drops that chat's `conversations` rows
   (`ConversationStore.forgetChat`): a thread session opened there before is
   unreachable from the chat and reads the same as a live one; its transcript
-  stays on the web.
+  stays on the web. Child threads are the only rows the home chat has after
+  that.
 - `/settings` and `/s <text>` are prose here (§Chat commands): the head
   has no cwd to pick (the home) and its model & reasoning are the web's ⋯
   menu ([10 §Web](10-continuous-session.md#web)).
@@ -64,6 +69,54 @@ top-level or in any thread, goes to the head (`MainChain.send`) under the key
 - The adapter is down (token broken, disabled): `chatKeyOf` answers nothing,
   the head is web-only, Web Push resumes. Silence is never the outcome of a
   dead adapter.
+
+## Child threads
+
+A child that waits on the user — a design lead, today the only one
+([09 §Decisions](09-tasks-cli.md#decisions)) — gets a thread in the home DM
+bound to its session, so the design is discussed and finalized from the phone.
+Both platforms, the same rule.
+
+- **When**: a run on a design lead's session settles as `LEAD_TURN` (a turn
+  that is the user's, not the head's — `settleCallback`,
+  `tasks/callbacks.ts`) and the session has no chat yet (`conversations.keyOf`
+  is empty). `TaskService` reports it (`designLead(run, "waiting")`, wired in
+  `main.ts`) to `ChannelRuntime.designLead`.
+- **Where**: the home chat, while its adapter is live. No home, or its adapter
+  down: nothing — the web's needs-you already carries it, and the thread is
+  never opened later.
+- **How**: `Channel.openThread(chatId, note)` posts the note as a main-flow
+  root and returns the thread's conversation id (Slack: `<chat>/<ts>` of the
+  post; Lark: `<chat>/<messageId>`, which a reply in the topic carries as
+  `root_id`). The note is `▷ <run name> · design — waiting for you` (origin
+  `task-callback`, the run's `source`/`state`). The runtime then
+  `conversations.set(thread, session)`, `Router.ensure(thread)` (resolved
+  through the row like any thread's message; the chat outranks the `task:`
+  alias, so every later turn of the lead lands in the thread), and
+  `Channel.send(thread, splitReply(result))` — the result that already ended,
+  buttons included (`[Finalize design]`), which the turn-end delivered
+  nowhere. A failure after the root is posted is an error note in the thread;
+  before, in the main flow.
+- **Then**: the user's replies in the thread are the lead's messages; a button
+  tap echoes into the thread; a reply carrying `Design final:` is recorded as
+  today (`designFinal`, `router.onTurnEnd`) and the head's callback note
+  appears in the main flow. The thread stays bound after the design closes;
+  it reaches the same session.
+- **The root is edited in place** (`Channel.editRoot(thread, note)`: Slack
+  `chat.update`, Lark `message.patch`) on two transitions only: `Design
+  final:` recorded → `✓ <run name> · design final`; a run of the lead that did
+  not succeed → `⚠ <run name> · design — <error>`. Any other state the
+  thread itself shows. One `designLead(run, state)` hook carries all three
+  (`waiting`, `final`, `failed`); a failed edit is an error note in the
+  thread, never silent.
+- The web: the lead's session lists `channel: <platform>` and takes no unread
+  mark or push while bound (a turn delivered to a chat), as any thread session
+  opened on the web; the design's needs-you row is the store's and
+  unaffected. Talking to the lead from the web mirrors its answer into the
+  thread (an alias never outranks a chat).
+- A lost session (Pi has no transcript) re-creates from the chat defaults like
+  any thread's, without the lead's role; the home changing forgets the thread
+  with the rest.
 
 ## Rendering in the DM
 
@@ -172,9 +225,10 @@ through what the head launches (`pier task`), never by a group's message.
 
 ## Not built
 
-- A run card per child as a thread root in the home DM, bound to the child's
-  session (talk to a lead or worker from the phone): the callback note names
-  the run; the web and `pier task` reach the child.
+- A thread for any other child (a build lead, a worker): the callback note
+  names the run; the head and `pier task` reach it. A thread opened on demand
+  for a session that has none, or for a design that waited while there was
+  no home.
 - More than one home chat; a group as the home; a web message mirrored into
   the DM.
 - The Lark `pier lark` CLI (operator's decision, [04](04-im-channels.md)).
@@ -196,6 +250,14 @@ through what the head launches (`pier task`), never by a group's message.
   `channels/lines.test.ts`: a `chat-command` note is quoted whole.
 - `channels/config.test.ts`: one home across platforms.
 - `web/push.test.ts`: no push while the head answers a chat.
+- `channels/runtime.test.ts`: `designLead` binds the thread, attaches the
+  session and posts the result there, then edits the root on `final` and
+  `failed`; nothing without a live home or when the session already has a
+  chat; a failed open is an error note in the main flow. `channels/lark.test.ts` and `slack.test.ts`,
+  each: a threaded home message with a row goes to `Router.dispatch` under
+  `<chat>/<thread>`, without one to the head; `openThread` returns the thread
+  id and posts the root in the main flow. `tasks/lead.test.ts`: `designLead`
+  fires `waiting` on `LEAD_TURN`, `final`, `failed`, for a design lead only.
 
 ## Acceptance
 
@@ -205,3 +267,31 @@ through what the head launches (`pier task`), never by a group's message.
   the DM); the web timeline matches.
 - Disabling the platform in the Console returns the head to the web with
   Web Push, with no restart.
+- A design lead launched from the phone asks its first question in a thread
+  of the home DM, on Lark and on Slack alike; the discussion and
+  `[Finalize design]` happen there; the head reports the final design in the
+  main flow and the build starts.
+
+## Build plan (this change only; delete this section when merged)
+
+Child threads (§Child threads, items 1–5 of the original plan) are built in
+this worktree. Left:
+
+1. `core/chain.ts` `seed`: each part through `cut` at the budgets in
+   [10 §Head lifecycle](10-continuous-session.md#head-lifecycle); the ledger
+   cut after joining newest-first. Test: a 100K memory file seeds under 32K
+   chars with the ellipsis.
+2. `pier search`: `src/socket.ts` route `/search` over
+   `AgentFactory.search` plus `find` for the title; `src/cli.ts` verb
+   (`search <q…> [--limit N] [--json]`), `search:` failure prefix per
+   [08](08-cli-socket.md). Tests: `socket.test.ts` (empty `q` is 422, limit
+   clamped), `cli.test.ts` (one line per hit, `no hits`). Skill
+   `skills/pier-search/SKILL.md`, in `pier-web`'s shape and under 30 lines:
+   when (something said in an earlier session, not in memory), the argv, the
+   line format, that a hit names a session the web opens
+   (`/app/#/session/<id>`), and that `memory/` is `rg`'s, not this.
+3. Docs: [10 Not built](10-continuous-session.md#not-built) (the three items
+   go — done in this worktree); `skills/pier-help/SKILL.md` `pier search`
+   beside `rg` under recall.
+
+Budgets: `core/` +~10 (the seed cuts), root `src/*.ts` +~40 (the route, the verb).

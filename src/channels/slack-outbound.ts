@@ -25,7 +25,7 @@ export class SlackOutbound {
   private markdownBlocks = true;
 
   constructor(
-    private readonly api: Pick<SlackClient, "postMessage" | "uploadFile">,
+    private readonly api: Pick<SlackClient, "postMessage" | "updateMessage" | "uploadFile">,
     private readonly log: (message: string) => void,
   ) {}
 
@@ -71,6 +71,14 @@ export class SlackOutbound {
       ts = await this.post(channel, threadTs, part, []);
     }
     return ts;
+  }
+
+  /** A note's root rewritten in place (a child thread's state); one message,
+   *  so the body is cut to the smaller budget rather than split. */
+  async edit(channel: string, ts: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+    const body = chunk(noteBody(note, "_"), MRKDWN_MAX)[0] ?? "";
+    const blocks = this.markdownBlocks ? [markdown(body)] : sections(toMrkdwn(body));
+    await this.api.updateMessage({ channel, ts, text: body, blocks });
   }
 
   private budget(): number {

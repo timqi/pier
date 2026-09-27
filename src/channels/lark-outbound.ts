@@ -84,6 +84,12 @@ export class LarkOutbound {
     ).catch((err) => this.log(`retiring options failed: ${String(err)}`));
   }
 
+  /** A note's root rewritten in place (a child thread's state); one card, so
+   *  the body is cut to the budget rather than split. */
+  async edit(messageId: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+    await this.api.patchCard(messageId, card([markdown(chunk(noteBody(note, "*"), LARK_MAX)[0] ?? "")]));
+  }
+
   private remember(messageId: string, sent: LarkCard): void {
     this.sent.set(messageId, sent);
     while (this.sent.size > SENT_CACHE) {
