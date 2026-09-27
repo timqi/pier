@@ -6,6 +6,7 @@ import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
 import { cut, splitReply } from "./reply.js";
+import { isChatCommand } from "./types.js";
 import type {
   AgentSession,
   Channel,
@@ -47,6 +48,23 @@ export class QueueOperationError extends Error {
   constructor(readonly reason: "busy" | "empty" | "draining", message: string) {
     super(message);
   }
+}
+
+/** A short skill spelling that names more than one skill: not sent, the chat told. */
+export class SkillAmbiguous extends Error {}
+
+/** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`) resolved to the
+ *  one skill `word` is a prefix of — of the name, or of the name after any `-`;
+ *  the text unchanged when it names none (docs/design/11-im-conversation.md). */
+function skillText(text: string, skills: { name: string }[]): string | SkillAmbiguous {
+  const match = /^[/%](skill:)?([^\s/%]+)(?:[ \t]+([\s\S]*))?$/i.exec(text.trim());
+  const word = match?.[2]?.toLowerCase();
+  if (!match || !word || (!match[1] && isChatCommand(word))) return text;
+  const names = skills.map((s) => s.name);
+  const found = names.includes(word) ? [word] : names.filter((name) =>
+    name.split("-").some((_, i, parts) => parts.slice(i).join("-").startsWith(word)));
+  if (found.length > 1) return new SkillAmbiguous(`/${word} matches ${found.join(", ")} — say more`);
+  return found[0] ? `/skill:${found[0]}${match[3] ? ` ${match[3]}` : ""}` : text;
 }
 
 export class Router {
@@ -446,12 +464,15 @@ export class Router {
   }
 
   /** Told to the chat directly (§5): an adapter's dispatch catch only logs. */
-  private refuseDraining(key: ConversationKey): void {
-    const message = "Pier is restarting — this message was not taken; send it again in a moment.";
+  private refuse(key: ConversationKey, err: Error): never {
     this.channels.get(key.channelId)
-      ?.notify(key.conversationId, { text: message, origin: { kind: "error" } })
-      .catch((err) => log.error(`could not report the drain to ${key.channelId}`, err));
-    throw new Error(message);
+      ?.notify(key.conversationId, { text: err.message, origin: { kind: "error" } })
+      .catch((e: unknown) => log.error(`could not report the refusal to ${key.channelId}`, e));
+    throw err;
+  }
+
+  private refuseDraining(key: ConversationKey): never {
+    this.refuse(key, new Error("Pier is restarting — this message was not taken; send it again in a moment."));
   }
 
   /** Attached sessions still mid-turn, and conversations whose answer is still
@@ -550,15 +571,17 @@ export class Router {
     if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
     if (this.draining) this.refuseDraining(msg.key);
-    const { action, text } = decide(msg, session.state);
+    const skilled = skillText(msg.text, session.skills());
+    if (skilled instanceof SkillAmbiguous) this.refuse(msg.key, skilled);
+    const { action, text } = decide({ ...msg, text: skilled }, session.state);
     // A chat is named so the agent can hand it to a script (skills/pier-slack);
     // an alias names nothing a shell could reach.
     const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
     const opaque = this.channels.get(msg.key.channelId)?.opaqueIds;
-    const prompt = withPrefix(
-      this.senders.next(session.id, msg.sender, Date.now(), where, opaque, text),
-      text,
-    );
+    const header = this.senders.next(session.id, msg.sender, Date.now(), where, opaque, text);
+    // Pi expands `/skill:<name>` only at the very start, so a header rides in its args.
+    const skill = header ? /^\/skill:\S+/.exec(text)?.[0] : undefined;
+    const prompt = skill ? `${skill} ${withPrefix(header, text.slice(skill.length).trimStart())}` : withPrefix(header, text);
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );

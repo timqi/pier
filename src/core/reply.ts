@@ -11,11 +11,15 @@ import type { AgentReply, LedgerRun, NoteOrigin, TaskRunState, ThinkingLevel, Tu
 
 /** Where a system input came from; wording every surface must spell the same. */
 export function originLabel(origin: NoteOrigin): string {
-  if (origin.kind === "error") return "\u26a0 failed";
-  if (origin.kind !== "task-message") {
-    return origin.kind === "task-delegation" ? "\u25b6 delegated task" : "\u21a9 task callback";
+  switch (origin.kind) {
+    case "error": return "\u26a0 failed";
+    case "task-delegation": return "\u25b6 delegated task";
+    case "task-callback": return "\u21a9 task callback";
+    case "session-seed": return `\u21ba new session \u00b7 ${origin.reason}`;
+    case "chat-command": return `/${origin.command}`;
+    case "task-message":
+      return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
   }
-  return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
 }
 
 /** Is a turn coming once this note is posted? On IM the note is the only

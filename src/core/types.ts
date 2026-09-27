@@ -140,7 +140,7 @@ export type SystemInputOrigin = {
 };
 
 /** The chat commands, each with the one line the composer's completion shows:
- *  a message to the continuous conversation that is exactly `/<word>` is a
+ *  a message to the continuous conversation that is exactly `/<word>` or `%<word>` is a
  *  command, never a message (core/chain.ts). Browser-safe: the composer
  *  lists this table. */
 export const CHAT_COMMANDS = {
