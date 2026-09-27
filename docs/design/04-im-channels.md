@@ -81,8 +81,8 @@ that itself fails is reported to the hub once, never retried.
 **Control that is not a prompt does not go through the seam.** `ChannelControl`
 (`control.ts`): the chat's launch config, the bot-identity claim, `knows()`,
 abort, `working()`, status, pins, set model / reasoning, start a new session,
-recent directories, `isHome()`, a thread's skills — injected by `runtime.ts`, which owns
-router and factory. The seam keeps one inbound path (`onMessage`); add the
+recent directories, `isHome()`, a thread's skills — built in `main.ts`
+(`createControl`) and handed to each adapter by `runtime.ts`. The seam keeps one inbound path (`onMessage`); add the
 next control here.
 
 ## The in-chat panel
