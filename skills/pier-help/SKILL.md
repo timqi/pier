@@ -14,14 +14,16 @@ truth.
 
 ## Sessions and persistence
 
-- One durable session per conversation: a web chat, a Slack or Lark thread.
-  The mapping survives restarts — the next message
+- One durable session per conversation: a web session, a task run's, a Slack
+  or Lark thread; Pier's own conversation is a chain of them (§Pier). The
+  mapping survives restarts — the next message
   lands in the same transcript with its context intact.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
   wipes context.
 - A fresh start is explicit: a new thread (its panel drafts the session) or
-  `/new` in the web conversation. The old transcript remains readable from the web workbench.
+  `/new` in Pier's conversation (web or the home chat). The old transcript
+  remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
 - A long session does not hit a wall: when the context fills, Pi compacts it
@@ -31,13 +33,17 @@ truth.
 
 ## Pier
 
-- Pier is one conversation: the status chip opens the status panel — what is running over the open items; the rest is in ⌘K. IM is unchanged.
+- Pier is one conversation, on the web and in the home chat (below): the
+  status chip opens the status panel — what is running over the open items;
+  the rest is in ⌘K. Its current session, the head, runs in `$PIER_HOME/home`,
+  which holds memory only: `MEMORY.md` and daily notes in `memory/`.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
   session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
   and the last exchanges.
 - It dispatches: real work is a task run — a worker, or a feature lead that
   designs with the user; once the user finalizes, a new build lead builds it
-  with workers — each its own session, taking messages directly.
+  with workers — each its own session, taking messages directly. Results come
+  back to the head as callbacks.
 - `/status` alone in the composer answers with the open items — each problem,
   its stage and its runs — with no model call; the web's status panel shows
   the same list under what is running or queued. `/new` starts
@@ -60,8 +66,8 @@ truth.
   into the running turn as a steer.
 - From an IM chat, every mid-turn message steers the running turn directly —
   no `!` needed, and a leading `!` is just content.
-- `/stop` from an IM chat aborts the current turn outright; the web has a Stop
-  button.
+- `/stop` (or `%stop`) aborts the current turn outright in IM and in Pier's
+  web conversation; every web session also has a Stop button.
 
 ## In-chat commands and the settings panel
 
