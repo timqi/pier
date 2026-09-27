@@ -45,7 +45,7 @@ export interface RunSummary {
 }
 
 /** `pier task list`'s summary of a definition's most recent run. */
-export interface LastRun {
+interface LastRun {
   runId: string;
   state: TaskRun["state"];
   startedAt?: number;

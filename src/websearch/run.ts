@@ -99,7 +99,7 @@ async function runSearch(run: SearchRun): Promise<SearchOutcome> {
   return searchOutcomeFrom(result.content, result.model, target.backend, result);
 }
 
-export interface SearchParams {
+interface SearchParams {
   op: "search";
   query: string;
   language_mode?: LanguageMode;
@@ -108,18 +108,18 @@ export interface SearchParams {
   backend?: Backend;
 }
 
-export interface FetchParams {
+interface FetchParams {
   op: "fetch";
   url: string;
   prompt?: string;
   mode?: FetchMode;
 }
 
-export type FetchMode = keyof typeof FETCH_LIMITS;
-export type WebParams = SearchParams | FetchParams;
+type FetchMode = keyof typeof FETCH_LIMITS;
+type WebParams = SearchParams | FetchParams;
 
 /** What the CLI prints (`text`) and what the log keeps (`details`). */
-export interface WebResult {
+interface WebResult {
   text: string;
   details: Record<string, unknown>;
 }

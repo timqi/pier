@@ -15,7 +15,7 @@ export interface Commit {
   at?: number; // epoch ms
 }
 
-export interface GitRefs {
+interface GitRefs {
   refs: { name: string; subject: string }[];
   commits: Commit[];
 }

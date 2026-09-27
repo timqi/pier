@@ -13,7 +13,7 @@ import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
 
 /** Everything the palette needs from the orchestrator (main.ts). */
-export interface PaletteDeps {
+interface PaletteDeps {
   /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   loadSessions: () => Promise<void>;

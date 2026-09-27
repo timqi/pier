@@ -54,7 +54,7 @@ const DEDUP_MAX = 2000;
 /** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (chatId: string, root: string): string => `${chatId}/${root}`;
 
-export const parseConversation = (id: string): { chatId: string; root: string } => {
+const parseConversation = (id: string): { chatId: string; root: string } => {
   const at = id.indexOf("/");
   return at < 0
     ? { chatId: id, root: "" }
@@ -71,7 +71,7 @@ interface LarkAttachment {
   size?: number;
 }
 
-export interface LarkDeps {
+interface LarkDeps {
   store: ChannelStore;
   /** Dropped and malformed input is reported here — never a silent catch. */
   log?: (message: string) => void;

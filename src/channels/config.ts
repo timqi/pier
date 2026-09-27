@@ -233,7 +233,7 @@ export class ChannelStore {
 
 }
 
-export interface GateInput {
+interface GateInput {
   policy: ChatPolicy;
   isDm: boolean;
   /** Mentioned, replied to, or continuing a thread Pier owns. */
@@ -243,7 +243,7 @@ export interface GateInput {
   bindRequest: boolean;
 }
 
-export type GateVerdict = "allow" | "chat-disabled" | "not-addressed" | "not-bound";
+type GateVerdict = "allow" | "chat-disabled" | "not-addressed" | "not-bound";
 
 /** The whole inbound permission policy. A group denial is silent by contract;
  *  a DM is the exception, and the adapter answers `not-bound` there. */

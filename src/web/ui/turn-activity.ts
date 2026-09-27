@@ -12,7 +12,7 @@ import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js"
 
 /** Handed over at init rather than imported: chat.ts imports this module, and
  *  importing it back is a runtime cycle. */
-export interface TurnsPane {
+interface TurnsPane {
   el: HTMLElement;
   scroll: (force?: boolean) => void;
   /** A whole snapshot is being replayed: no step may measure layout. */
@@ -34,7 +34,7 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
 
 const shortId = (id: string): string => id.slice(0, 8);
 
-export interface RunHead {
+interface RunHead {
   glyph: SVGElement;
   /** The kind of card or the run's state, whichever the card is about. */
   label: string;

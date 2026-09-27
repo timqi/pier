@@ -5,7 +5,7 @@ import { isObject } from "./json.js";
 import { languageLabel } from "./language.js";
 import type { Backend } from "./provider.js";
 
-export interface Source {
+interface Source {
   title: string;
   url: string;
 }
@@ -34,7 +34,7 @@ export function putSource(into: Map<string, SearchResult>, value: unknown): void
   });
 }
 
-export interface FetchedDocument {
+interface FetchedDocument {
   url?: string;
   retrievedAt?: string;
   text?: string;

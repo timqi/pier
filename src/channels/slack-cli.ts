@@ -26,7 +26,7 @@ import {
   type TranscriptOptions,
 } from "./slack-transcript.js";
 
-export interface SlackCliIo {
+interface SlackCliIo {
   stdout(line: string): void;
   stderr(line: string): void;
   stdin(): string;

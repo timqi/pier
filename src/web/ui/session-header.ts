@@ -15,7 +15,7 @@ import { chord, chordLabel, modalOpen } from "./shortcut.js";
 import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
-export interface HeaderDeps {
+interface HeaderDeps {
   currentId: () => string | null;
   /** The selected session's listed summary; undefined before the
    *  conversation's first session exists, or while a detached one loads. */
@@ -382,7 +382,7 @@ function panelHead(anchor: HTMLElement, text: string, closeLabel: string): HTMLE
 
 /** The bar's ⋯. Session info and the model need a session, so before the
  *  conversation's first reply they are shown and say so rather than vanish. */
-export function barMenu(anchor: HTMLElement): void {
+function barMenu(anchor: HTMLElement): void {
   const s = deps.currentSession();
   const conversation = deps.continuousOpen();
   const later = s ? {} : { disabled: true, hint: "after the first reply" };

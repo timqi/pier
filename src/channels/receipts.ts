@@ -10,7 +10,7 @@ import type { ChannelPlatform } from "./types.js";
 /** Adapters ask on every inbound envelope; the books change on the scale of `staleMs`. */
 const SWEEP_EVERY_MS = 60_000;
 
-export interface Receipt {
+interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
   conversationId: string;
   chatId: string;
@@ -88,7 +88,7 @@ export class ReceiptLedger {
 }
 
 /** `null` clears the reaction. */
-export interface ReactionApi {
+interface ReactionApi {
   setReaction(chatId: string, messageId: string, emoji: string | null): Promise<void>;
 }
 

@@ -7,7 +7,7 @@ import type { ChannelPlatform } from "./types.js";
 
 const BIND_HINT_EVERY_MS = 10 * 60_000;
 
-export interface AdmitRequest {
+interface AdmitRequest {
   isDm: boolean;
   /** Mentioned, replied to, or continuing a conversation we own. */
   addressed: boolean;

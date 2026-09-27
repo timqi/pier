@@ -21,7 +21,7 @@ export interface ModelMenuEntry {
   tier?: ModelTier;
 }
 
-export interface Settings {
+interface Settings {
   /** Origin plus path prefix, no trailing slash; nothing in the process can
    *  discover it (a Host header is whatever a proxy passed on). Empty when unset. */
   publicUrl: string;

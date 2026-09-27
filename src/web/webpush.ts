@@ -118,7 +118,7 @@ export function vapidAuthorization(
 
 /** `status: 0` is "no answer", distinct from a rejection so a caller never
  *  prunes a subscription because the network was down. */
-export interface PushResult {
+interface PushResult {
   status: number;
   error?: string;
 }

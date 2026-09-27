@@ -28,7 +28,7 @@ async function bounded(put: Promise<void>, name: string): Promise<"filed" | "pen
   }
 }
 
-export interface VaultRouteDeps {
+interface VaultRouteDeps {
   vault: Pick<Vault, "list" | "put" | "remove">;
   /** vt's own read-only report: the 503 for an `approve` row vt could not create. */
   doctor: () => Promise<string>;

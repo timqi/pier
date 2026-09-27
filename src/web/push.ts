@@ -28,7 +28,7 @@ const MAX_SUBSCRIPTIONS = 20;
 const SETTLE_MS = 6_000;
 const MAX_BODY_CHARS = 160;
 
-export interface PushSubscriptionRow extends PushTarget {
+interface PushSubscriptionRow extends PushTarget {
   /** The only way to tell two rows apart in the Console. */
   label: string;
   createdAt: number;
@@ -123,7 +123,7 @@ export interface PushPayload {
   tag: string;
 }
 
-export interface PushDeps {
+interface PushDeps {
   store: PushStore;
   hub: EventHub;
   unread(sessionId: string): boolean;

@@ -1,7 +1,7 @@
 // Slash commands in IM text, parsed once for every platform: clients add
 // whitespace and capitalise. `%` is `/` too: Slack's client eats an unregistered `/`.
 
-export interface Command {
+interface Command {
   /** Lowercase, without the prefix. */
   name: string;
   /** Everything after the command word, trimmed. "" when there is none. */

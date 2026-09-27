@@ -59,7 +59,7 @@ const DEDUP_MAX = 2000;
 /** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (channel: string, threadTs: string): string => `${channel}/${threadTs}`;
 
-export const parseConversation = (id: string): { channel: string; threadTs: string } => {
+const parseConversation = (id: string): { channel: string; threadTs: string } => {
   const at = id.indexOf("/");
   return at < 0
     ? { channel: id, threadTs: "" }
@@ -87,7 +87,7 @@ const sharedFiles = (share: SlackAttachment): SlackFile[] =>
  *  coordinates and decides for itself. */
 const INLINE_REPLY_MAX = 30;
 
-export interface SlackDeps {
+interface SlackDeps {
   store: ChannelStore;
   /** Dropped and malformed input is reported here — never a silent catch. */
   log?: (message: string) => void;

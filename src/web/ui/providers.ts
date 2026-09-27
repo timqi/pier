@@ -140,8 +140,7 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       const line = h("div", "hidden flex-col gap-2 px-4 pb-3", status);
       const actions = h("div", "flex flex-wrap justify-end gap-1.5");
       // Which model to probe is the operator's call and nothing else's: an
-      // answer about a model Pier picked is an answer about a different
-      // question, and the one it picked here was an unreleased id nobody uses.
+      // answer about a model Pier picked is an answer about a different question.
       const ids = testable(provider);
       if (!ids.length) {
         // No button, and the reason — "Test is missing" is not a diagnosis.

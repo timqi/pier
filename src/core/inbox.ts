@@ -62,7 +62,7 @@ export async function readCapped(
 }
 
 /** One inbound attachment, as the adapter that received it describes it. */
-export interface InboundAttachment {
+interface InboundAttachment {
   /** What the lost-marker calls it when there are no bytes to name. */
   label: string;
   name?: string;

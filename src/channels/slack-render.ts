@@ -114,7 +114,7 @@ export const context = (text: string): SlackBlock => ({
 
 /** `action_id` carries an index: the label is read back off the message Slack
  *  echoes with the click, so a button survives a reload. */
-export const OFFER_PREFIX = "sg:";
+const OFFER_PREFIX = "sg:";
 
 /** Slack refuses a button label over BUTTON_MAX: every button, the panel's too. */
 export const truncate = (label: string): string => cut(label, BUTTON_MAX);

@@ -69,7 +69,7 @@ export interface ChannelControl {
   skills(key: ConversationKey): Promise<{ name: string; description: string }[]>;
 }
 
-export interface ControlDeps {
+interface ControlDeps {
   router: Router;
   factory: AgentFactory;
   conversations: ConversationStore;

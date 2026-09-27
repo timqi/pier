@@ -22,7 +22,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const TOKEN = /^[a-f0-9]{8}$/;
 const mintToken = (): string => randomBytes(4).toString("hex");
 
-export interface BoardManifest {
+interface BoardManifest {
   title: string;
   description: string;
   public: boolean;
@@ -30,7 +30,7 @@ export interface BoardManifest {
 }
 
 /** One row of `GET /api/boards`. */
-export interface BoardSummary extends BoardManifest {
+interface BoardSummary extends BoardManifest {
   slug: string;
   updatedAt: string;
 }

@@ -17,7 +17,7 @@ const TIMEOUT_MS = 5_000;
 export const currentVersion = (): string =>
   (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
-export interface UpdateStatus {
+interface UpdateStatus {
   current: string;
   /** `null` when the registry has not answered yet, or could not be reached. */
   latest: string | null;
@@ -92,7 +92,7 @@ export class UpdateCheck {
 export type UpdateStart = "started" | "busy" | "not-installed" | "failed";
 
 /** How this instance replaces itself, and when it is allowed to. */
-export interface AutoUpdate {
+interface AutoUpdate {
   enabled: () => boolean;
   /** The updater stops the service, so anything running when it fires is thrown away. */
   idle: () => boolean;

@@ -19,7 +19,7 @@ export type ProviderCredential =
   | { type: "api_key"; key?: string; env?: Record<string, string> }
   | ({ type: "oauth"; refresh: string; access: string; expires: number } & Record<string, unknown>);
 
-export interface ProviderCredentialInfo {
+interface ProviderCredentialInfo {
   providerId: string;
   type: ProviderCredential["type"];
 }

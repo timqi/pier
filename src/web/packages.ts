@@ -5,7 +5,7 @@ import type { Context, Hono } from "hono";
 import type { AgentFactory } from "../core/types.js";
 import { PackageError, type PackageErrorReason, type PackageStore, type PackageSwitch } from "../agent/types.js";
 
-export interface PackageRouteDeps {
+interface PackageRouteDeps {
   factory: AgentFactory;
   packages: PackageStore;
   /** Packages are read when a session opens; idle ones are recycled after a write. */

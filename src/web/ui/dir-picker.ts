@@ -9,7 +9,7 @@ import { h } from "./dom.js";
 import { btn, CONTROL } from "./form.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 
-export interface Listing {
+interface Listing {
   path: string;
   parent: string | null;
   entries: { name: string; dir: boolean }[];
@@ -70,7 +70,7 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
 }
 
 /** `start` falls back to the user's home when it is not absolute. */
-export function openBrowser(
+function openBrowser(
   anchor: HTMLElement,
   start: string | undefined,
   onPick: (path: string) => void,
@@ -137,7 +137,7 @@ export function openBrowser(
 }
 
 /** A folder this surface already knows about, offered before the full tree. */
-export interface PathOption {
+interface PathOption {
   path: string;
   hint?: string;
 }

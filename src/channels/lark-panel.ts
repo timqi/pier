@@ -31,7 +31,7 @@ import {
 export const CWD_SUBMIT_PREFIX = "cwdgo:";
 const CWD_FIELD = "cwd";
 
-export interface LarkPanelDeps extends PanelDeps {
+interface LarkPanelDeps extends PanelDeps {
   api: Pick<LarkClient, "replyCard" | "patchCard" | "deleteMessage">;
 }
 

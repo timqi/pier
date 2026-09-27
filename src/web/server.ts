@@ -119,7 +119,7 @@ export const instanceManifest = (
 export const withAccentIcon = (svg: string, accent: string): string =>
   svg.replace(`fill="${ICON_PLATE}"`, `fill="${ACCENTS[accent || DEFAULT_ACCENT]}"`);
 
-export interface WebDeps {
+interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
@@ -544,7 +544,7 @@ export function createServer(
     return c.json({ ok: true }, 202);
   });
 
-  // Core owns exclusion and reports a failed handoff with the originals.
+  // Core owns exclusion and reports a failed delivery with the originals.
   guarded(app, "POST", "/api/sessions/:id/queue/deliver", 404, async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);

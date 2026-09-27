@@ -37,7 +37,7 @@ export interface SessionInfo {
 }
 
 /** Everything the drawer needs from the orchestrator (main.ts). */
-export interface DrawerDeps {
+interface DrawerDeps {
   /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   currentId: () => string | null;
@@ -198,7 +198,7 @@ let rows: HTMLElement[] = [];
 /** Rows, or open items with nothing running: the chip is there, and opens the panel. */
 let shown = false;
 
-/** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
+/** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
   `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;

@@ -2,7 +2,7 @@
 
 import type { InboundMessage, SessionState } from "./types.js";
 
-export interface QueueDecision {
+interface QueueDecision {
   action: "prompt" | "steer" | "followUp";
   text: string;
 }

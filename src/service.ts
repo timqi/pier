@@ -26,7 +26,7 @@ export const updateUnitPath = (home = homedir()): string =>
 export const updateRuntimePath = (home = homedir()): string =>
   join(dirname(unitPath(home)), `${UPDATE_UNIT_NAME}.d`, "runtime.conf");
 
-export interface UnitOptions {
+interface UnitOptions {
   /** The node and npm that installed Pier, both absolute and kept as a pair. */
   execPath: string;
   npmPath: string;
@@ -172,7 +172,7 @@ OOMPolicy=continue
 }
 
 /** Runs a command, or in a test records that it would have. */
-export type Exec = (argv: string[]) => boolean;
+type Exec = (argv: string[]) => boolean;
 
 const runner = (say: (message: string) => void): Exec => (argv) => {
   try {
@@ -185,7 +185,7 @@ const runner = (say: (message: string) => void): Exec => (argv) => {
   }
 };
 
-export interface InstallOptions extends UnitOptions {
+interface InstallOptions extends UnitOptions {
   /** Rewrite a unit that is already there. */
   force: boolean;
   home?: string;
@@ -233,7 +233,7 @@ export function install(options: InstallOptions): boolean {
   return true;
 }
 
-export type UpdateStart = "started" | "not-installed" | "failed";
+type UpdateStart = "started" | "not-installed" | "failed";
 
 /** The absolute node and npm paths pin the unit to one version manager's
  *  directory: `fnm uninstall 24` leaves ExecStart naming a Node that is gone,

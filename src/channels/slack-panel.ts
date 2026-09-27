@@ -26,7 +26,7 @@ const CWD_VIEW = "cfg_cwd";
 const CWD_BLOCK = "cwd_block";
 const CWD_INPUT = "cwd_input";
 
-export interface SlackPanelDeps extends PanelDeps {
+interface SlackPanelDeps extends PanelDeps {
   api: Pick<SlackClient, "postMessage" | "updateMessage" | "deleteMessage" | "openView">;
 }
 

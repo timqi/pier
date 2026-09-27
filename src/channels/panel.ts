@@ -38,7 +38,7 @@ export interface PanelButton {
 }
 
 /** A titled block of lines: one Slack section, one Lark markdown element. */
-export interface PanelGroup {
+interface PanelGroup {
   title: string;
   /** Trails the title outside the emphasis, for a counter or a hint. */
   suffix?: string;

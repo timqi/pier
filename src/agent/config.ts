@@ -59,7 +59,7 @@ interface ModelsJson extends Record<string, unknown> {
   providers?: Record<string, ModelsProvider>;
 }
 
-export interface ProviderStructure {
+interface ProviderStructure {
   name?: string;
   endpoint?: string;
   api?: ProviderApi;

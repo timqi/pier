@@ -36,7 +36,7 @@ export interface SessionListing {
 }
 
 /** Declared rather than imported: this file must not see the SDK. */
-export interface NativeInfo {
+interface NativeInfo {
   id: string;
   cwd: string;
   created: Date;

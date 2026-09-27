@@ -6,7 +6,7 @@
 import type { SlackClient, SlackMessageEvent } from "./slack-api.js";
 import type { ChatKind } from "./types.js";
 
-export interface ChannelFacts {
+interface ChannelFacts {
   kind: ChatKind;
   /** Absent for a DM, whose name is its member. */
   name?: string;
