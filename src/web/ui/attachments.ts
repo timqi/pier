@@ -6,6 +6,7 @@
 import { Download, Eye } from "lucide";
 import { icon } from "./icons.js";
 import { replaceOutsideCode } from "../../core/inbound-file.js";
+import { postJson } from "./api.js";
 import { listing } from "./dir-picker.js";
 import { $, basename, h } from "./dom.js";
 
@@ -219,43 +220,100 @@ export function parseFileRef(raw: string): { path: string; line?: number } | nul
 /** The home directory is the server's, learned once from the listing route. */
 let homePath: Promise<string | null> | undefined;
 
-/** Opens what a reference named, `~` expanded first. Unresolved it is opened as
- *  written, so the dialog names the path it could not find (§5). */
-async function openRef(sessionId: string, cwd: string | null, path: string, line?: number): Promise<void> {
-  let target = path;
-  if (target.startsWith("~")) {
+/** Where a reference is, absolute (the files routes take nothing else) with
+ *  the cwd it was read under: `~` and `/` name one place, a relative path one
+ *  per cwd, the first that exists winning — all asked in the one batch. */
+async function locateRef(path: string, cwds: readonly string[]): Promise<{ path: string; cwd: string | null } | null> {
+  let candidates: { path: string; cwd: string | null }[];
+  if (path.startsWith("~")) {
     homePath ??= listing().then((l) => l?.path ?? null);
-    target = `${(await homePath) ?? "~"}${target.slice(1)}`;
-  }
-  openInFiles(sessionId, cwd, target, line);
+    const home = await homePath;
+    candidates = home === null ? [] : [{ path: `${home}${path.slice(1)}`, cwd: cwds[0] ?? null }];
+  } else if (path.startsWith("/")) candidates = [{ path, cwd: cwds[0] ?? null }];
+  else candidates = cwds.map((cwd) => ({ path: `${cwd}/${path}`, cwd }));
+  const found = await Promise.all(candidates.map((c) => exists(c.path)));
+  return candidates[found.indexOf(true)] ?? null;
+}
+
+/** Paths asked about since the last check, each with everyone waiting on it:
+ *  a replayed transcript draws hundreds of references, and they share one request. */
+let asked: Map<string, ((found: boolean) => void)[]> | null = null;
+
+function exists(path: string): Promise<boolean> {
+  return new Promise((done) => {
+    if (!asked) {
+      asked = new Map();
+      setTimeout(() => void checkAsked(), 0);
+    }
+    asked.set(path, [...(asked.get(path) ?? []), done]);
+  });
+}
+
+/** A failed check leaves every reference in it plain code, and says so (§5). */
+async function checkAsked(): Promise<void> {
+  const batch = asked!;
+  asked = null;
+  const paths = [...batch.keys()];
+  const got = await postJson<{ exists: boolean[] }>("/api/fs/exists", { paths }, "Could not check file references");
+  // Dynamic: report.ts draws into the chat, which imports this module.
+  if (!got.ok) void import("./report.js").then((m) => m.report(got.error));
+  paths.forEach((path, i) => {
+    for (const done of batch.get(path) ?? []) done(got.ok && got.value.exists[i] === true);
+  });
 }
 
 /** A code span naming a file or a folder opens the dialog, at its line when it
- *  named one. A relative path resolves against the session's cwd — the files
- *  route takes absolute paths only — so without one it stays plain code. */
-export function renderFileRefs(root: HTMLElement, sessionId: string, cwd: string | null): void {
-  for (const el of root.querySelectorAll<HTMLElement>(":not(pre) > code")) {
+ *  named one. `cwds` resolve a relative path, in order: the writer's own first
+ *  (a callback's is the child's), then — for a reply relaying what its
+ *  callbacks said — the cwds those callbacks carried; with none it stays plain
+ *  code. So does a path with nothing there: a link that opens "No such file"
+ *  is a dead link. */
+export function renderFileRefs(codes: Iterable<HTMLElement>, sessionId: string, cwds: readonly string[]): void {
+  for (const el of codes) {
     const ref = parseFileRef(el.textContent?.trim() ?? "");
     if (!ref || el.closest("a")) continue; // inside a link, the label is the link's
-    const rooted = ref.path.startsWith("/") || ref.path.startsWith("~");
-    const path = rooted ? ref.path : cwd ? `${cwd}/${ref.path}` : null;
-    if (!path) continue;
-    const open = (): void => void openRef(sessionId, cwd, path, ref.line);
-    el.classList.add("fileref");
-    el.tabIndex = 0;
-    el.setAttribute("role", "button");
-    el.title = ref.line === undefined ? path : `${path}:${String(ref.line)}`;
-    el.onclick = open;
-    // A focus ring left on a pressed span reads as a blue box drawn around the
-    // prose, and the Files dialog hands focus back when it closes. Keyboard
-    // focus keeps its ring: it never arrives with a pointerup.
-    el.addEventListener("pointerup", () => el.blur());
-    el.onkeydown = (ev) => {
-      if (ev.key !== "Enter" && ev.key !== " ") return;
-      ev.preventDefault();
-      open();
-    };
+    void locateRef(ref.path, cwds).then((found) => {
+      if (found) fileRef(el, sessionId, found.cwd, found.path, ref.line);
+    });
   }
+}
+
+/** A plain-text body (a callback card's) has no code elements, only the
+ *  backticks: each span inside them that is a reference becomes the code
+ *  element renderFileRefs takes, the backticks left as written. */
+export function markFileRefs(el: HTMLElement): HTMLElement[] {
+  const text = el.textContent ?? "";
+  const parts: (Node | string)[] = [];
+  const codes: HTMLElement[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/`([^`\n]+)`/g)) {
+    if (!parseFileRef(m[1]!.trim())) continue;
+    const start = m.index + 1;
+    const code = h("code", "", m[1]!);
+    parts.push(text.slice(at, start), code);
+    codes.push(code);
+    at = start + m[1]!.length;
+  }
+  if (parts.length) el.replaceChildren(...parts, text.slice(at));
+  return codes;
+}
+
+function fileRef(el: HTMLElement, sessionId: string, cwd: string | null, path: string, line?: number): void {
+  const open = (): void => openInFiles(sessionId, cwd, path, line);
+  el.classList.add("fileref");
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.title = line === undefined ? path : `${path}:${String(line)}`;
+  el.onclick = open;
+  // A focus ring left on a pressed span reads as a blue box drawn around the
+  // prose, and the Files dialog hands focus back when it closes. Keyboard
+  // focus keeps its ring: it never arrives with a pointerup.
+  el.addEventListener("pointerup", () => el.blur());
+  el.onkeydown = (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    open();
+  };
 }
 
 function thumb(url: string, name: string): HTMLElement {

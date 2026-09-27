@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
-import { DESIGN_FINAL, MILESTONE, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, MILESTONE, runCwd, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -542,7 +542,5 @@ export class TaskService {
 }
 
 function ledgerRun(run: TaskRun): LedgerRun {
-  const action = run.context.definition.action;
-  const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
-  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
+  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt };
 }

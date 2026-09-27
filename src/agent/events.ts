@@ -73,7 +73,7 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   if (message.role !== "custom" || message.customType !== "pier.system-input") return null;
   const value = message.details;
   if (!value || typeof value !== "object") return null;
-  const { source: raw, ...origin } = value as Record<string, unknown>;
+  const { source: raw, cwd, ...origin } = value as Record<string, unknown>;
   if (origin.kind === "session-seed") {
     const { reason, previousSessionId } = origin;
     return (reason === "first" || reason === "idle" || reason === "lost" || reason === "full" || reason === "new") &&
@@ -97,7 +97,12 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   ) return null;
   // A half-valid `source` drawn by the card is an `undefined` in a chip.
   const source = inputSource(raw);
-  const shape = { ...origin, ...(source ? { source } : {}) };
+  // A callback's, and relative paths resolve against it, so only an absolute one is kept.
+  const shape = {
+    ...origin,
+    ...(source ? { source } : {}),
+    ...(origin.kind === "task-callback" && typeof cwd === "string" && cwd.startsWith("/") ? { cwd } : {}),
+  };
   if (origin.kind === "task-delegation" || origin.kind === "task-callback") {
     return shape as SystemInputOrigin;
   }

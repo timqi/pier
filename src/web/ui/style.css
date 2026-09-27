@@ -1005,11 +1005,12 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     }
   }
   /* A code span that opens a file (ui/attachments.ts). At rest it is code like
-     any other — a paragraph of paths should still read as prose. */
-  .md code.fileref {
+     any other — a paragraph of paths should still read as prose. A callback
+     card's plain-text body carries them too. */
+  code.fileref {
     cursor: pointer;
   }
-  .md code.fileref:hover {
+  code.fileref:hover {
     background-color: var(--color-indigo-50);
     text-decoration: underline dotted;
     text-underline-offset: 0.18em;

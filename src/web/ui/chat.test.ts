@@ -1,11 +1,15 @@
 // System rows on index.html: the `/status` card opens its runs' sessions, and
 // seeds, callbacks, delegations and run cards fold to one line that opens in place.
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemInputOrigin } from "../../core/types.js";
-import { installPage, type FakeDocument } from "./dom.testkit.js";
+import { installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
 let doc: FakeDocument;
 let chat: typeof import("./chat.js");
+
+// A reply renders through marked; the sanitizer and the highlighter want a real DOM.
+vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
+vi.mock("./highlight.js", () => ({ highlightCode: async () => {} }));
 const select = vi.fn();
 
 beforeEach(async () => {
@@ -164,4 +168,85 @@ it("replays a refused prompt as the user's row and the reason", () => {
     ["user", "hello"],
     ["error", "No API key found for anthropic"],
   ]);
+});
+
+describe("file references", () => {
+  /** Answers the existence check from `onDisk`, recording every path asked. */
+  const disk = (onDisk: string[]): string[][] => {
+    const asked: string[][] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url !== "/api/fs/exists") return Response.json({ error: "unexpected" }, { status: 404 });
+      const { paths } = JSON.parse(String(init?.body)) as { paths: string[] };
+      asked.push(paths);
+      return Response.json({ exists: paths.map((p) => onDisk.includes(p)) });
+    }));
+    return asked;
+  };
+  const codes = (root: FakeElement) => root.querySelectorAll("code") as unknown as HTMLElement[];
+  const refs = (root: FakeElement | HTMLElement) => codes(root as FakeElement).filter((c) => c.classList.contains("fileref")).map((c) => c.title);
+
+  it("resolves a reply's relative paths against its session's cwd, and links only what exists", async () => {
+    const asked = disk(["/w/main/src/a.ts"]);
+    // A reply's code spans as renderMarkdown hands them over.
+    const { renderFileRefs } = await import("./attachments.js");
+    const reply = doc.createElement("div");
+    reply.innerHTML = "<p>See <code>src/a.ts:3</code> and <code>gone.ts</code> and <code>~/x.md</code>.</p>";
+    renderFileRefs(codes(reply), "h1", ["/w/main"]);
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    // One request for the whole reply; `~` with no home to expand to is never asked.
+    expect(asked[0]).toEqual(["/w/main/src/a.ts", "/w/main/gone.ts"]);
+    await vi.waitFor(() => expect(refs(reply)).toEqual(["/w/main/src/a.ts:3"]));
+  });
+
+  it("falls back to the cwds earlier callbacks carried, most recent first, when the session's own has nothing", async () => {
+    const asked = disk(["/w/main/src/a.ts", "/w/one/src/b.ts", "/w/two/src/b.ts", "/w/one/src/c.ts"]);
+    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}) };
+    chat.initChat(deps);
+    const callback = (cwd: string) => chat.appendSystemInput("Task \"t\" finished with state: succeeded\n\nok", {
+      kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s", source: { taskName: "t" }, state: "succeeded", cwd,
+    });
+    callback("/w/one");
+    callback("/w/two");
+    callback("/w/one");
+    const reply = chat.appendTurn("assistant", "See `src/a.ts`, `src/b.ts:2`, `src/c.ts` and `src/d.ts`.", true);
+    await vi.waitFor(() => expect(refs(reply)).toEqual(["/w/main/src/a.ts", "/w/one/src/b.ts:2", "/w/one/src/c.ts"]));
+    // One request for the reply: every candidate of every path, the session's own cwd first.
+    expect(asked).toEqual([[
+      "/w/main/src/a.ts", "/w/one/src/a.ts", "/w/two/src/a.ts",
+      "/w/main/src/b.ts", "/w/one/src/b.ts", "/w/two/src/b.ts",
+      "/w/main/src/c.ts", "/w/one/src/c.ts", "/w/two/src/c.ts",
+      "/w/main/src/d.ts", "/w/one/src/d.ts", "/w/two/src/d.ts",
+    ]]);
+    // Another session's transcript starts with no callbacks of its own.
+    chat.resetChat();
+    deps.sessionCwd = () => null;
+    const fresh = chat.appendTurn("assistant", "See `src/b.ts`.", true);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(refs(fresh)).toEqual([]);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("resolves a callback's paths against the child's cwd, never the recipient's", async () => {
+    const asked = disk(["/w/child/src/config-sync.ts", "/tmp/run.log"]);
+    const text = 'Task "sync" finished with state: succeeded\nRun: r1\n\nFixed `src/config-sync.ts:239`; log at `/tmp/run.log`, not `res.text`.';
+    chat.appendSystemInput(text, {
+      kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s-child",
+      source: { taskName: "sync" }, state: "succeeded", cwd: "/w/child",
+    });
+    const callback = card();
+    await vi.waitFor(() => expect(refs(callback)).toEqual(["/w/child/src/config-sync.ts:239", "/tmp/run.log"]));
+    expect(asked.flat()).toEqual(["/w/child/src/config-sync.ts", "/tmp/run.log"]);
+    // The body still reads as the child wrote it, backticks included.
+    expect(body().textContent).toBe(text.slice(text.indexOf("\n\n") + 2));
+    expect(codes(callback).map((c) => c.textContent)).toEqual(["src/config-sync.ts:239", "/tmp/run.log"]);
+  });
+
+  it("leaves a batch callback's relative paths plain: no one cwd is theirs", async () => {
+    const asked = disk(["/tmp/run.log", "/w/main/src/a.ts"]);
+    chat.appendSystemInput("2 task callbacks\n\n`src/a.ts` and `/tmp/run.log`", {
+      kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: null, runIds: ["r1", "r2"],
+    });
+    await vi.waitFor(() => expect(refs(card())).toEqual(["/tmp/run.log"]));
+    expect(asked.flat()).toEqual(["/tmp/run.log"]);
+  });
 });

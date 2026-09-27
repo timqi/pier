@@ -7,7 +7,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
-import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
+import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
@@ -163,6 +163,9 @@ const MAX_ROWS = 500;
  *  right turn of history() in submitEdit. */
 let trimmedUserTurns = 0;
 let trimmedRows = 0;
+/** The cwds this conversation's callback cards carried, most recent first: a
+ *  reply relays its children's paths as they were written, relative to those. */
+let callbackCwds: string[] = [];
 /** Says how many rows left, because a transcript that just starts in the middle
  *  is indistinguishable from a transcript that lost its beginning. */
 let trimNotice: HTMLElement | null = null;
@@ -339,6 +342,13 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       expands: content,
     });
   if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions, deps.select);
+  if (origin.kind === "task-callback") {
+    // The child wrote these paths, so they resolve against its cwd, not this session's.
+    const codes = markFileRefs(content);
+    const id = origin.sourceSessionId ?? deps.sessionId();
+    if (id) renderFileRefs(codes, id, origin.cwd ? [origin.cwd] : []);
+    if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
+  }
   row.append(head, content);
   turnsPane.append(row);
   trimRows();
@@ -545,11 +555,12 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   addCodeCopy(node);
   // Ahead of renderFileRefs: holding a path copies it instead of opening it,
   // and the hold can only swallow a click it was wired before.
-  for (const code of node.querySelectorAll<HTMLElement>(":not(pre) > code"))
-    holdToCopy(code, () => code.textContent ?? "");
+  const codes = [...node.querySelectorAll<HTMLElement>("code")].filter((code) => !code.closest("pre"));
+  for (const code of codes) holdToCopy(code, () => code.textContent ?? "");
   renderAttachments(node);
   const id = deps.sessionId();
-  if (id) renderFileRefs(node, id, deps.sessionCwd());
+  const cwd = deps.sessionCwd();
+  if (id) renderFileRefs(codes, id, [...(cwd ? [cwd] : []), ...callbackCwds.filter((c) => c !== cwd)]);
 }
 
 /** `offer`: next-step buttons only on the turn that just ended or the last
@@ -691,6 +702,7 @@ export function resetChat(): void {
   turnsPane.replaceChildren();
   trimmedUserTurns = 0;
   trimmedRows = 0;
+  callbackCwds = [];
   trimNotice = null;
   lastStampAt = null;
   streamingEl = null;

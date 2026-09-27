@@ -109,6 +109,21 @@ export function registerFsRoutes(app: Hono): void {
     }
   });
 
+  // Which of these absolute paths exist, file or folder: a reply's file
+  // reference is drawn only when it opens something. A path stat cannot reach
+  // (missing, unreadable) is the answer `false`, not a failure.
+  guarded(app, "POST", "/api/fs/exists", 400, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const paths: unknown = body?.paths;
+    if (!Array.isArray(paths) || paths.length > 1000 || !paths.every((p) => typeof p === "string")) {
+      return c.json({ error: "paths required" }, 400);
+    }
+    const exists = await Promise.all(
+      paths.map((p: string) => (isAbsolute(p) ? stat(p).then(() => true, () => false) : false)),
+    );
+    return c.json({ exists });
+  });
+
   // A name, never a path: traversal is rejected, not normalized.
   guarded(app, "POST", "/api/fs/mkdir", 400, async (c) => {
     const body = await c.req.json().catch(() => null);

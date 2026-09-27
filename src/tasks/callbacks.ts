@@ -19,6 +19,19 @@ export const runSource = (run: TaskRun): SystemInputSource => ({
   ...(run.context.thinking ? { thinking: run.context.thinking } : {}),
 });
 
+/** The directory a run worked in: the one its session opened on, else the one its action names. */
+export const runCwd = (run: TaskRun): string | null => {
+  const action = run.context.definition.action;
+  return run.context.cwd ??
+    (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
+};
+
+/** What a callback's card says about the one run it carries. */
+const oneRun = (run: TaskRun): { source: SystemInputSource; state: TaskRun["state"]; cwd?: string } => {
+  const cwd = runCwd(run);
+  return { source: runSource(run), state: run.state, ...(cwd ? { cwd } : {}) };
+};
+
 /** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
 export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
 
@@ -85,8 +98,8 @@ export class TaskCallbacks {
           sourceSessionId: runs[0]!.targetSessionId,
           runIds: runs.map((run) => run.id),
           // Only for one run: a batch's caption would attribute every result
-          // to the first run's name and model.
-          ...(runs.length === 1 ? { source: runSource(runs[0]!), state: runs[0]!.state } : {}),
+          // to the first run's name, model and directory.
+          ...(runs.length === 1 ? oneRun(runs[0]!) : {}),
         },
       }),
       abandoned: (run, sessionId, why) => unreachable(sessionId, `the result of "${run.context.definition.name}"`, why),

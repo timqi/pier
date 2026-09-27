@@ -527,6 +527,17 @@ describe("toChatTurns", () => {
     }
   });
 
+  it("keeps a callback's cwd only when it is absolute — relative paths resolve against it", () => {
+    const origin = { kind: "task-callback" as const, taskId: "t1", runId: "r1", sourceSessionId: "s2" };
+    const read = (cwd: unknown) =>
+      toChatTurns([{ role: "custom", customType: "pier.system-input", content: "done", details: { ...origin, cwd } }])[0]?.origin;
+    expect(read("/home/u/wt")).toEqual({ ...origin, cwd: "/home/u/wt" });
+    for (const bad of ["wt", 3, null]) expect(read(bad)).toEqual(origin);
+    // Only a callback's result has paths written elsewhere.
+    const delegation = { ...origin, kind: "task-delegation" as const };
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "go", details: { ...delegation, cwd: "/home/u/wt" } }])[0]?.origin).toEqual(delegation);
+  });
+
   it("keeps activity from an aborted run as a text-less turn", () => {
     const turns = toChatTurns([
       { role: "user", content: "go" },

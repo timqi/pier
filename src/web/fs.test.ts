@@ -134,4 +134,20 @@ describe("fs routes", () => {
     expect((await create({ path: root, name: "new-project" })).status).toBe(400);
     expect((await create({ path: join(root, "nope"), name: "x" })).status).toBe(400);
   });
+
+  it("answers which absolute paths exist, folders and symlinks included", async () => {
+    const exists = (body: unknown) =>
+      app.request("/api/fs/exists", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const res = await exists({
+      paths: [join(root, "a.ts"), join(root, "sub"), join(root, "escape.txt"), join(root, "gone.ts"), "a.ts"],
+    });
+    expect(res.status).toBe(200);
+    // A relative path names nothing without a cwd, so it is never there.
+    expect(await res.json()).toEqual({ exists: [true, true, true, false, false] });
+    for (const body of [{}, { paths: "a.ts" }, { paths: [1] }]) expect((await exists(body)).status).toBe(400);
+  });
 });

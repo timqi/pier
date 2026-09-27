@@ -67,7 +67,7 @@ Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` li
 `/api/devices*`), `passkeys.ts` (below), `config.ts` (`/api/config*`), `config-sync.ts`
 (`/api/config-sync`; `/config-sync/:token` is served before the password, the
 token being its guard), `packages.ts` (`/api/packages*`; a file of its
-own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,mkdir}` and the
+own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,exists,mkdir}` and the
 containment check; `/api/sessions/:id/files` shares only its size cap and
 headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
@@ -286,8 +286,19 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   one (the line tinted and centred; in a diff, the new side's number).
   Under a filesystem root (`~`, `/home`, `/tmp`, `/etc`, …) the extension is not
   required, so `~/.pier/boards` is a reference too; `~` expands to the home the
-  listing route reports. Relative paths resolve against the session's cwd. A
-  path under the cwd opens with the cwd as the tree's root, anything else with
+  listing route reports. Relative paths resolve against the cwd of the session
+  that wrote them: a reply's against its session's, a one-run callback card's
+  (whose plain-text body links its `` `path` `` spans too) against the run's,
+  carried as the origin's `cwd`; a batch callback has none, so its relative
+  paths stay plain. A reply relays its children's paths as they were written,
+  so one with nothing under the session's cwd tries the cwds the
+  conversation's earlier callback cards carried, most recent first, and the
+  first that exists wins; the chat forgets them with the transcript. A
+  reference is drawn only once `POST /api/fs/exists` (`{paths}` →
+  `{exists: boolean[]}`, one request per render batch, every candidate in
+  it) says something is there — no dead links; a failed check leaves them
+  plain and is reported in the chat. A path under the cwd it resolved from
+  opens with that cwd as the tree's root, anything else with
   its own folder as the root; a folder lands there, a path with no row reads
   "No such file: <name>". An attachment card's eye opens its file the same way.
   A pointer press leaves no focus ring on one; a keyboard focus does.

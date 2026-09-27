@@ -532,6 +532,8 @@ describe("task service", () => {
     });
     // A bash run has no model and no effort, and the card must not invent one.
     expect(session.systemInputs.at(-1)?.origin).toHaveProperty("source", { taskName: "command" });
+    // The result's relative paths are the run's, so the card carries where it ran.
+    expect(session.systemInputs.at(-1)?.origin).toHaveProperty("cwd", cwd);
 
     // Simulate a crash after Pi persisted the custom message but before Pier
     // committed delivery: startup detects runId in transcript and does not resend.
@@ -1682,6 +1684,7 @@ describe("task service", () => {
     // caption would attribute the others' results to it, so the batch carries
     // no provenance at all — the text names every run it contains.
     expect(session.systemInputs.at(-1)!.origin).not.toHaveProperty("source");
+    expect(session.systemInputs.at(-1)!.origin).not.toHaveProperty("cwd");
     service.stop();
   });
 

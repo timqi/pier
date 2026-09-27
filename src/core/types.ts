@@ -115,6 +115,9 @@ export type SystemInputOrigin = {
   /** How the run ended, on a callback about one run: the card's caption says
    *  it beside the name instead of the reader finding it in the text. */
   state?: BackgroundRun["state"];
+  /** Where the run worked, on a callback about one run: the result's relative
+   *  paths are relative to it, not to the recipient's cwd. */
+  cwd?: string;
 } | {
   kind: "task-message";
   taskId: string;
