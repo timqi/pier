@@ -63,16 +63,36 @@ truth.
 - `/stop` from an IM chat aborts the current turn outright; the web has a Stop
   button.
 
-## In-chat commands
+## In-chat commands and the settings panel
 
-- On every surface a chat command is `/<word>` or `%<word>`; Slack eats an unregistered `/`, so `%` works there too.
-- `/status` answers with the head's open items; `/new` starts a fresh session; `/stop` aborts the running turn; `/skills` lists `<name> — <description>` for the current session on any surface.
-- `/<word> <text>` (or `%<word> <text>`) runs a skill when `word` prefixes its name or the part after any `-` (`/tasks`, `/ta` run `pier-tasks`); a one-letter word is never a skill spelling.
-- If a skill spelling matches several skills, tell the chat which skills match and send nothing.
-- At most one DM per instance is the conversation, set in the Console's chat row; groups remain thread-per-session.
-- In the home DM every message, top-level or threaded, reaches the continuous conversation; its replies, callbacks, seeds and command answers render in that DM's main flow.
-- In the home DM `/settings` and `s <text>` are prose, a bare mention is dropped, and while its adapter is live the head sends no Web Push.
-
+- A chat command is `/<word>` or `%<word>` on every surface (`%` because
+  Slack's client eats an unregistered `/`): `/status` the conversation's open
+  items, `/new` the next session now, `/stop` abort the running turn,
+  `/skills` one `<name> — <description>` line per skill of the session asked,
+  home or thread. An unknown `/word` is a message.
+- `/<word> <text>` (or `%`) runs a skill when `word` is a prefix of its name or
+  of the part after any `-` (`/tasks`, `/ta` → `pier-tasks`); several matches
+  are refused with their names, nothing sent; a one-letter word never matches.
+- The home chat: at most one DM per instance, set in the Console's chat row.
+  Every message there, top-level or in a thread, reaches the continuous
+  conversation, whose replies, callbacks, seeds and command answers render in
+  the DM's main flow; `/settings` and `s <text>` are prose there and a bare
+  mention is dropped; while that adapter is live the head sends no Web Push.
+  Groups stay thread-per-session.
+- Elsewhere `/settings` — or an addressed message with no text at all (a bare
+  mention, an empty DM) — opens a panel; Slack takes the same words bare
+  (`stop`, `settings`, `bind <code>`).
+- In a thread with no session yet the panel is a draft: directory, model &
+  reasoning (the operator's pinned models, one pick sets both), and Start
+  creates the session. `s <text>` as a thread's first message (also `/s`,
+  `%s <text>`) opens that draft with the text as a pending question, which
+  Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
+  is an ordinary message.
+- In a thread with a session the panel reads it out (resuming an idle one) and
+  offers "Model & reasoning"; Stop aborts a running turn. A session's directory
+  is fixed at creation, so another directory means another thread.
+- Panel taps never reach you. The next-step buttons under your own replies
+  do — a click arrives as an ordinary user message with that label.
 
 ## What a turn looks like from outside
 
