@@ -6,10 +6,11 @@ import type { AgentTaskRunner } from "./agent.js";
 import { settleCallback, type TaskCallbacks } from "./callbacks.js";
 import { runBash } from "./command.js";
 import type { TaskDefinitions } from "./definitions.js";
-import type { TaskStore } from "./store.js";
+import { INTERRUPTED, type TaskStore } from "./store.js";
 import type { TaskResult, TaskRun } from "./types.js";
 
 const log = logger("tasks");
+const SHUTDOWN = Symbol("shutdown");
 
 interface ExecutionHost {
   runChild(taskId: string, parent: TaskRun): TaskRun;
@@ -34,8 +35,10 @@ export class TaskExecution {
     void this.execute(run);
   }
 
+  /** Shutdown: the abort still kills each detached bash group, which boot
+   *  recovery could not, but the run ends as that recovery would record it. */
   stop(): void {
-    for (const controller of this.controllers.values()) controller.abort();
+    for (const controller of this.controllers.values()) controller.abort(SHUTDOWN);
   }
 
   cancel(id: string): void {
@@ -83,9 +86,11 @@ export class TaskExecution {
       }
     } catch (error) {
       // A killed child reports `exited null`; report why we aborted instead.
+      // The first abort's reason wins: a shutdown after a user cancel stays cancelled.
       const aborted = controller.signal.aborted;
-      run.state = aborted ? (timedOut ? "failed" : "cancelled") : "failed";
-      run.error = timedOut ? "task timed out" : aborted ? "cancelled" : String(error);
+      const interrupted = aborted && !timedOut && controller.signal.reason === SHUTDOWN;
+      run.state = aborted ? (timedOut ? "failed" : interrupted ? "interrupted" : "cancelled") : "failed";
+      run.error = timedOut ? "task timed out" : interrupted ? INTERRUPTED : aborted ? "cancelled" : String(error);
       cause = timedOut ? run.error : error;
     } finally {
       clearTimeout(timeout);

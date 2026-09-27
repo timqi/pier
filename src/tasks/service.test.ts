@@ -1971,8 +1971,8 @@ describe("owned system actions", () => {
     const done = await service.waitForRun(run.id);
     expect(handler.mock.calls[0]![0].aborted).toBe(true);
     expect(done).toMatchObject({
-      state: operation === "timeout" ? "failed" : "cancelled",
-      error: operation === "timeout" ? "task timed out" : "cancelled",
+      state: { cancel: "cancelled", timeout: "failed", stop: "interrupted" }[operation],
+      error: { cancel: "cancelled", timeout: "task timed out", stop: "Pier restarted while the run was active" }[operation],
       result: null,
     });
     expect(service.activeRunCount()).toBe(0);

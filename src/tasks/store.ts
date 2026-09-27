@@ -17,6 +17,9 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
  *  surface lists of a probe that found nothing. */
 const KEPT_PROBES = 50;
 
+/** The error of a run a restart or shutdown stopped: not a result, not a cancel. */
+export const INTERRUPTED = "Pier restarted while the run was active";
+
 export class TaskStore {
   /** Every query below is a fixed string, so each is compiled once. */
   private readonly sql: (sql: string) => StatementSync;
@@ -377,7 +380,7 @@ export class TaskStore {
       "SELECT json FROM task_runs WHERE state IN ('queued', 'running')",
     ).map((run) => {
       run.state = "interrupted";
-      run.error = "Pier restarted while the run was active";
+      run.error = INTERRUPTED;
       run.finishedAt = now;
       if (run.callbackSessionId) run.callbackState = "pending";
       this.saveRun(run);

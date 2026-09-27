@@ -96,6 +96,20 @@ describe("a run that has to be killed", () => {
     });
   });
 
+  it("ends a run stopped by shutdown interrupted, and keeps a user cancel cancelled", async () => {
+    const { cwd, service } = setup();
+    onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+    const cancelled = service.run((await service.create({ ...bashDraft(cwd, "sleep 5"), name: "cancelled" })).id);
+    const stopped = service.run((await service.create({ ...bashDraft(cwd, "sleep 5"), name: "stopped" })).id);
+    service.cancel(cancelled.id);
+    // A shutdown landing during the cancel's TERM grace does not rewrite it.
+    service.stop();
+    expect(await service.waitForRun(cancelled.id)).toMatchObject({ state: "cancelled", error: "cancelled" });
+    expect(await service.waitForRun(stopped.id)).toMatchObject({
+      state: "interrupted", error: "Pier restarted while the run was active",
+    });
+  });
+
   it("keeps a requested cancellation when TERM grace crosses the task timeout", async () => {
     const { cwd, service } = setup();
     const task = await service.create({

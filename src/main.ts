@@ -430,8 +430,8 @@ const shutdown = (stopTasks = true): void => {
   // 90-second wait for SIGKILL.
   setTimeout(() => process.exit(0), 3000).unref();
   stopEviction();
-  // The drain path leaves task runs alone: aborting would record them cancelled,
-  // when the boot-time interrupted marking is the recovery that was promised.
+  // Aborted runs end interrupted, as boot recovery records them; the drain path
+  // leaves the ones it outlasted to that recovery.
   if (stopTasks) tasks.stop();
   void channels.stop().finally(() => {
     server.close(() => process.exit(0));
