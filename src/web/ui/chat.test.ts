@@ -1,5 +1,5 @@
 // System rows on index.html: the `/status` card opens its runs' sessions, and
-// seeds, callbacks and delegations fold to one line that opens in place.
+// seeds, callbacks, delegations and run cards fold to one line that opens in place.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SystemInputOrigin } from "../../core/types.js";
 import { installPage, type FakeDocument } from "./dom.testkit.js";
@@ -113,4 +113,25 @@ it("folds a delegation and a task message to name and run id; a command answer s
   expect(card().querySelector("button[aria-expanded]")).toBeNull();
   expect(body().hidden).toBe(false);
   expect(card().getAttribute("data-kind")).toBe("system");
+});
+
+it("folds a run card like a callback, and a status update keeps it open", async () => {
+  const run = {
+    runId: "qvv3qbffxyz", taskId: "t6", taskName: "IM conversation", state: "running" as const, targetSessionId: "s-run6",
+    sessionMode: "fresh" as const, prompt: "Build per the design doc.", queuedAt: 1, startedAt: 1, finishedAt: null, queuedMessages: 0,
+  };
+  const { renderBackgroundRun } = await import("./turn-activity.js");
+  renderBackgroundRun(run);
+  const runCard = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
+  const runToggle = () => runCard().querySelector("button[aria-expanded]")!;
+  expect(runCard().classList.contains("system-row")).toBe(true);
+  expect(runToggle().textContent).toBe("run · runningIM conversation");
+  expect(runCard().children.at(-1)!.hidden).toBe(true);
+  runToggle().onclick?.();
+  expect(runCard().hasAttribute("data-expanded")).toBe(true);
+  renderBackgroundRun({ ...run, state: "succeeded", finishedAt: 142_001 });
+  expect(runToggle().textContent).toBe("run · succeededIM conversation");
+  expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+  expect(runCard().children.at(-1)!.hidden).toBe(false);
+  expect(runCard().children.at(-1)!.textContent).toBe("Build per the design doc.");
 });

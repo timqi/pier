@@ -608,9 +608,9 @@ main {
 .system-row:not([data-expanded])::before { display: none; }
 .system-row:not([data-expanded]) :is(.run-thinking, .run-id ~ .run-session) { display: none; }
 /* The line stays one line: its ids never wrap under the name, and below md the
-   model gives way to them. */
+   model and a run's mode · duration give way to them. */
 .system-row:not([data-expanded]) .run-meta { flex-wrap: nowrap; }
-@media (width < 48rem) { .system-row:not([data-expanded]) .run-model { display: none; } }
+@media (width < 48rem) { .system-row:not([data-expanded]) :is(.run-model, .run-note) { display: none; } }
 /* --- end system rows --- */
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */

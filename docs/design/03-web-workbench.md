@@ -209,7 +209,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   one open line or card. A compaction (Pi's automatic one) leaves one system
   line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` create Background
-  Run rows, updated from `task-status` events; the In progress drawer lists the
+  Run rows, updated from `task-status` events and folded like a callback —
+  `✓ run · <state> · <run name> · <mode> · <duration> · <run id8>`, opening
+  to the prompt, kept open across updates; the In progress drawer lists the
   runs still in flight. A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the
   message's creation, delivery and expiry each emit `task-status`. Delegation and

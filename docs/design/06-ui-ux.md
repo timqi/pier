@@ -85,7 +85,7 @@ updates this document.
 - Aborted work keeps its unfinished text; errors and states without a reply
   stay explicit. Nothing that happened may disappear.
 - Activity history limits never displace queued or running work.
-- System inputs (seed, callback, delegation): one line at the divider's weight
+- System inputs (seed, callback, delegation) and run cards: one line at the divider's weight
   — chevron, kind chip, topic, id in mono — opening in place to a wide neutral
   card; failure text stays on the line, a failed callback red-chipped and an
   interrupted one amber, so the count of lines is the count of things that

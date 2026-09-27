@@ -53,6 +53,8 @@ export interface RunHead {
   /** A system row's body: glyph, label and name become the button that shows
    *  it, and the row wears `data-expanded` while it is shown. */
   expands?: HTMLElement;
+  /** Starts shown: a re-rendered head keeps the reader's choice. */
+  open?: boolean;
 }
 
 /** Quiet card body; the coloured edge and labelled chip carry type/status. */
@@ -61,49 +63,10 @@ export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
 export const runBody = (text: string): HTMLElement =>
   h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
-/** Four rendered lines give the topic; the full text stays one click away.
- *  Hidden panes use a conservative guess until their content can be measured. */
-function clampedBody(text: string): [content: HTMLElement, toggle: HTMLElement] {
-  const long = text.length > 240 || text.split("\n").length > 4;
-  const collapsed = ["max-h-[4lh]", "overflow-hidden"];
-  const content = runBody(text);
-  content.classList.add(...collapsed);
-  // Measured after the caller appends it: `clientHeight` is 0 until then and
-  // the guess decides.
-  const toggle = h(
-    "button",
-    "mt-1 hidden w-fit rounded-md px-1 py-1 text-[11px] pointer-coarse:min-h-11 pointer-coarse:px-2 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700",
-    "Show full message",
-  );
-  toggle.setAttribute("type", "button");
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.onclick = () => {
-    const before = content.getBoundingClientRect().height;
-    content.getAnimations().forEach((animation) => animation.cancel());
-    const clamped = content.classList.toggle(collapsed[0]!);
-    const after = content.getBoundingClientRect().height;
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    content.animate(
-      reduced ? [{ opacity: 0.8 }, { opacity: 1 }] : [{ maxHeight: `${before}px`, opacity: 0.8 }, { maxHeight: `${after}px`, opacity: 1 }],
-      { duration: reduced ? 120 : 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-    );
-    toggle.textContent = clamped ? "Show full message" : "Collapse message";
-    toggle.setAttribute("aria-expanded", String(!clamped));
-    content.tabIndex = -1;
-    content.focus({ preventScroll: true });
-  };
-  queueMicrotask(() => {
-    const clipped = content.clientHeight ? content.scrollHeight > content.clientHeight + 1 : long;
-    if (clipped) toggle.classList.remove("hidden");
-    else content.classList.remove(...collapsed);
-  });
-  return [content, toggle];
-}
-
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", `flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);
-  const lead = o.expands ? expander(head, o.expands) : head;
+  const lead = o.expands ? expander(head, o.expands, o.open ?? false) : head;
   lead.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
   // subagent's name is its whole prompt line. A collapsed line is one line.
@@ -115,7 +78,7 @@ export function runHead(o: RunHead): HTMLElement {
   }
   if (lead !== head) head.append(lead);
   const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
-  if (o.note) meta.append(h("span", "flex-none", o.note));
+  if (o.note) meta.append(h("span", "run-note flex-none", o.note));
   if (o.model) {
     const model = h("span", "run-model flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200", o.model.id);
     model.title = `${o.model.provider} / ${o.model.id}`;
@@ -146,11 +109,12 @@ export function runHead(o: RunHead): HTMLElement {
 
 /** The chevron-led button of a collapsible head. A native button: Enter and
  *  Space toggle it, and the session link beside it stays its own control. */
-function expander(head: HTMLElement, body: HTMLElement): HTMLElement {
+function expander(head: HTMLElement, body: HTMLElement, open: boolean): HTMLElement {
   const toggle = h("button", "flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left pointer-coarse:min-h-11", icon(ChevronRight, "chev h-3 w-3"));
   toggle.setAttribute("type", "button");
-  toggle.setAttribute("aria-expanded", "false");
-  body.hidden = true;
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.classList.toggle("chev-open", open);
+  body.hidden = !open;
   toggle.onclick = () => {
     const open = body.hidden === true;
     body.hidden = !open;
@@ -182,7 +146,7 @@ const backgroundRows = new Map<string, HTMLElement>();
 
 /** The prompt is drawn once per card and kept across status re-renders: a
  *  reader who expanded it must not watch it snap shut when the run moves on. */
-const promptBodies = new WeakMap<HTMLElement, HTMLElement[]>();
+const promptBodies = new WeakMap<HTMLElement, HTMLElement>();
 
 export function renderBackgroundRun(run: BackgroundRun): void {
   // Rows leave the pane without telling us (rewind, trim); a card held here
@@ -195,11 +159,20 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     turns.el.append(row);
     backgroundRows.set(run.runId, row);
   }
-  row.className = cardClass(STATE_STYLE[run.state].edge);
+  const open = row.hasAttribute("data-expanded");
+  // Folded like a callback row: the prompt is the delegating turn's own text.
+  row.className = `${cardClass(STATE_STYLE[run.state].edge)} system-row`;
   const active = run.state === "queued" || run.state === "running";
   // The header's running chip finds its card by this mark (chat.ts).
   row.toggleAttribute("data-active", active);
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
+  let body = promptBodies.get(row);
+  if (!body && run.prompt !== null) {
+    body = runBody(run.prompt);
+    promptBodies.set(row, body);
+  }
+  // No control on the card: the run's page, one click away on its id, is where
+  // a run is stopped.
   const head = runHead({
     glyph: stateGlyph(run.state),
     label: `run · ${run.state}`,
@@ -208,17 +181,9 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     note: `${run.sessionMode ?? "task"} · ${String(seconds)}s${run.queuedMessages > 0 ? ` · ${String(run.queuedMessages)} queued` : ""}`,
     runId: run.runId,
     sessionId: run.targetSessionId,
+    ...(body ? { expands: body, open } : {}),
   });
-  // No control on the card: the run's page, one click away on its id, is where
-  // a run is stopped.
-  // This card sits where the delegating turn sent the message, so it is the
-  // message: the prompt, clamped to a glance like a delegation card's is.
-  let body = promptBodies.get(row);
-  if (!body && run.prompt !== null) {
-    body = clampedBody(run.prompt);
-    promptBodies.set(row, body);
-  }
-  row.replaceChildren(head, ...(body ?? []));
+  row.replaceChildren(head, ...(body ? [body] : []));
   turns.scroll();
 }
 
