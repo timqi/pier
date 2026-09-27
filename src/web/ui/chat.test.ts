@@ -135,3 +135,15 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   expect(runCard().children.at(-1)!.hidden).toBe(false);
   expect(runCard().children.at(-1)!.textContent).toBe("Build per the design doc.");
 });
+
+it("replays a refused prompt as the user's row and the reason", () => {
+  chat.renderSnapshot([
+    { role: "user", text: "hello" },
+    { role: "assistant", text: "", error: "No API key found for anthropic" },
+  ], "idle", []);
+  const rows = doc.querySelector("#turns")!.querySelectorAll("[data-kind]");
+  expect(rows.map((r) => [r.dataset.kind, r.textContent])).toEqual([
+    ["user", "hello"],
+    ["error", "No API key found for anthropic"],
+  ]);
+});

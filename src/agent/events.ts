@@ -245,6 +245,13 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     }
 
     const text = textOf(m.content);
+    // Only the attempt that ended the turn: one Pi retried past is no failure.
+    if (m.role === "assistant" && m.stopReason === "error" && messages[i + 1]?.role !== "assistant") {
+      flush("assistant", hasTools ? "" : text, turnMetaAt(messages, i), undefined, m.timestamp);
+      turns[turns.length - 1]!.error = m.errorMessage || "unknown agent error";
+      candidate = undefined;
+      continue;
+    }
     // Tool-bearing messages are intermediate work, even when they include text.
     if (!text || hasTools) continue;
     flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined, undefined, m.timestamp);

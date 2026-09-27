@@ -308,6 +308,10 @@ export interface ChatTurn {
   origin?: SystemInputOrigin; // system inputs only
   meta?: TurnMeta; // assistant turns only
   steps?: ActivityStep[]; // assistant turns only; activity preceding the text
+  /** Assistant turns only: why the turn failed — a provider error, or a prompt
+   *  refused before it began (no model, no key). The live `error` event's
+   *  durable twin, so a reload still says why nothing was answered. */
+  error?: string;
   /** When it arrived, ms epoch — user and system turns, which have no `meta`
    *  to carry it. Absent when Pi stamped the message without one. */
   at?: number;
@@ -394,7 +398,9 @@ export interface AgentSession {
    * Rejects while streaming.
    */
   rewindToUserTurn(index: number): Promise<void>;
-  prompt(text: string): Promise<void>; // resolves when the turn settles
+  /** Resolves when the turn settles; a refusal before the turn (no model, no
+   *  key) rejects, and the transcript keeps the message as a failed turn. */
+  prompt(text: string): Promise<void>;
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
   /** Persisted non-user input with provenance. Resolves when the turn the input

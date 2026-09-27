@@ -338,6 +338,22 @@ describe("toSessionEvents", () => {
 });
 
 describe("toChatTurns", () => {
+  it("keeps a failed turn's reason, but not an attempt Pi retried past", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "one", timestamp: 1000 },
+      { role: "assistant", timestamp: 1500, content: [], stopReason: "error", errorMessage: "overloaded" },
+      { role: "assistant", timestamp: 2000, content: [{ type: "text", text: "hi" }], stopReason: "stop" },
+      { role: "user", content: "two", timestamp: 3000 },
+      { role: "assistant", timestamp: 3000, content: [], stopReason: "error", errorMessage: "No API key found" },
+    ]);
+    expect(turns.map(({ role, text, error }) => ({ role, text, error }))).toEqual([
+      { role: "user", text: "one", error: undefined },
+      { role: "assistant", text: "hi", error: undefined },
+      { role: "user", text: "two", error: undefined },
+      { role: "assistant", text: "", error: "No API key found" },
+    ]);
+  });
+
   it("attaches the thinking + tool activity that preceded each answer", () => {
     const turns = toChatTurns([
       { role: "user", content: "go", timestamp: 1000 },

@@ -775,17 +775,20 @@ export function renderSnapshot(
         // Between the steps and the answer: where the live stream put the card.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
       }
-      if (!t.text) continue;
-      if (t.role === "system" && t.origin) {
+      if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
         if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
         appendSystemInput(t.text, t.origin);
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.
-      if (live) appendDelta(t.text);
-      else if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
-      else appendTurn(t.role, t.text, false, t.at);
+      if (t.text) {
+        if (live) appendDelta(t.text);
+        else if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
+        else appendTurn(t.role, t.text, false, t.at);
+      }
+      // A refused prompt has no text at all; its row is the reason alone.
+      if (t.error) appendTurn("error", t.error);
     }
     // Whatever is left never appeared in the transcript at all — the bottom is
     // the only honest place for it.

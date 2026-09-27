@@ -351,7 +351,34 @@ export class PiSession implements AgentSession {
     // A turn may have started since the caller read the state. Bare, Pi throws
     // "already processing" and the message is gone (§5); queued, it is the
     // same "delivered when idle" core/queue.ts picks for a mid-turn message.
-    return this.pi.prompt(text, { streamingBehavior: "followUp" });
+    let refused = false;
+    try {
+      await this.pi.prompt(text, { streamingBehavior: "followUp", preflightResult: (ok) => { refused = !ok; } });
+    } catch (error) {
+      if (refused) this.recordRefusal(text, error);
+      throw error;
+    }
+  }
+
+  /** Pi refuses before writing anything (no model, no key), so without this the
+   *  message and its reason would exist only as a live event (§5). Recorded the
+   *  way a provider failure is — an errored reply the model's context drops. */
+  private recordRefusal(text: string, error: unknown): void {
+    const now = Date.now();
+    const manager = this.pi.sessionManager;
+    manager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: now });
+    manager.appendMessage({
+      role: "assistant",
+      content: [],
+      api: this.pi.model?.api ?? "",
+      provider: this.pi.model?.provider ?? "",
+      model: this.pi.model?.id ?? "",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "error",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      timestamp: now,
+    });
+    this.pi.agent.state.messages = manager.buildSessionProjection().messages;
   }
 
   async steer(text: string): Promise<void> {

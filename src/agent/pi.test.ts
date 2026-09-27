@@ -241,7 +241,7 @@ describe("a prompt that races a turn", () => {
     // message is gone. The core decided "prompt" against a state it read one
     // step earlier, so the queue is where a turn that started since must put
     // it — the same place core/queue.ts sends an auto message mid-turn.
-    expect(fake.promptOptions).toEqual([{ streamingBehavior: "followUp" }]);
+    expect(fake.promptOptions).toMatchObject([{ streamingBehavior: "followUp" }]);
   });
 
 });

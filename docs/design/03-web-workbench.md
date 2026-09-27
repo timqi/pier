@@ -156,6 +156,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - Own sends render optimistically and reconcile against the seam's
   `user-message` event by text; a queued message the agent picks up renders as
   a user turn from that same event.
+- A failed turn's reason is an error row live (the `error` event) and after a
+  reload (the history turn's `error`); a prompt Pi refuses before its turn
+  begins (no model, no key) is written to the transcript as a failed turn, so
+  a head the send just created still shows the message and the reason.
 - Assistant markdown: `marked` + DOMPurify, `@tailwindcss/typography`.
   Provisional text paints incrementally in the work log; the final bubble
   renders markdown, attachments and next-step controls. User/error rows are
