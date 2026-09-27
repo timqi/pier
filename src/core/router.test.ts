@@ -460,6 +460,21 @@ describe("opening a session", () => {
     expect(router.conversationOf("s1")).toEqual(KEY);
   });
 
+  it("a stopped adapter's sessions go back to their own stream, and take the chat again when it is back", async () => {
+    router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => KEY);
+    router.registerChannel(im.channel);
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    router.unregisterChannel("slack");
+    expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
+    expect(router.sessionOf(KEY)).toBeUndefined();
+    fake.emit({ type: "turn-end", text: "web only" });
+    expect(im.sent).toEqual([]);
+    router.registerChannel(im.channel);
+    expect(router.conversationOf("s1")).toEqual(KEY);
+    fake.emit({ type: "turn-end", text: "back" });
+    expect(im.sent.map(([, r]) => r.text)).toEqual(["back"]);
+  });
+
   it("no chat key → alias behaviour unchanged", async () => {
     router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => undefined);
     await router.ensure({ channelId: "web", conversationId: "s1" });

@@ -1,7 +1,8 @@
 // Lark (Feishu) adapter: normalize long-connection events, render outbound
-// turns as cards. As on Slack, Pier never posts into a chat's main flow: a
-// conversation is `<chatId>/<rootMessageId>` (`reply_in_thread`; DMs thread
-// too). Lark-specific: `content` is a double-encoded JSON string and a mention
+// turns as cards. As on Slack, Pier never posts into a chat's main flow but the
+// home chat's (docs/design/11-im-conversation.md), which is one conversation
+// keyed `<chatId>`: any other is `<chatId>/<rootMessageId>` (`reply_in_thread`;
+// DMs thread too). Lark-specific: `content` is a double-encoded JSON string and a mention
 // is a `@_user_N` placeholder resolved through `mentions[]`; 👀 is the reaction
 // key `OnIt`, removed by reaction_id; a card callback does not say which thread
 // its message lives in, so every button value carries the root; delivery is
@@ -16,6 +17,7 @@ import type {
 } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { skillsText } from "../core/chain.js";
 import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
@@ -31,6 +33,7 @@ import {
   type LarkClient,
   type LarkMessageEvent,
   type LarkSocket,
+  type LarkTarget,
 } from "./lark-api.js";
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
@@ -207,13 +210,18 @@ export class LarkChannel implements Channel {
     const text = raw.trim();
     const command = parseCommand(text);
     const root = threadOf(msg);
-    const here: ConversationKey = { channelId: this.id, conversationId: conversationId(msg.chatId, root) };
+    // Every message in the home chat, in a topic or not, is the head's, under one key.
+    const home = this.isHome(msg.chatId);
+    const here: ConversationKey = {
+      channelId: this.id,
+      conversationId: home ? msg.chatId : conversationId(msg.chatId, root),
+    };
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", msg.chatId, {
       isDm,
       // Mentioned, or continuing a topic Pier already owns — durable, so it
       // holds after a restart.
-      addressed: mentioned || (!!msg.rootId && !!this.deps.control?.knows(here)),
+      addressed: mentioned || (!home && !!msg.rootId && !!this.deps.control?.knows(here)),
       userId: senderId,
       bindRequest,
     });
@@ -222,15 +230,18 @@ export class LarkChannel implements Channel {
       return;
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
-    if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
+    // The head has no panel and takes `/stop` as a chat command (core/chain.ts).
+    if (home && !text && !attachments.length) return this.log(`bare mention in the home chat ${msg.chatId}, dropped`);
+    if (!home && command?.name === "stop") return this.abortTurn(here, msg.messageId);
+    if (!home && command?.name === "skills") return this.listSkills(here, root);
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
     // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
     // session, so only where this message would start one: outside any topic.
     // The held question carries its markers, so Start sends what the user sent.
-    const question = msg.rootId ? undefined : settingsDraft(text);
-    if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+    const question = msg.rootId || home ? undefined : settingsDraft(text);
+    if (this.panel && !home && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
       return this.panel.open(here, root, question && [question, ...markers].join("\n"));
     }
 
@@ -346,14 +357,16 @@ export class LarkChannel implements Channel {
       ? action.name.slice(CWD_SUBMIT_PREFIX.length)
       : "";
     const root = action.value?.root ?? formRoot;
-    if (!root) {
+    const home = !root && payload.startsWith(OFFER_PREFIX) && this.isHome(action.chatId);
+    if (!root && !home) {
       this.log(`card action without a thread root in ${action.chatId}, dropped`);
       return;
     }
     const key: ConversationKey = {
       channelId: this.id,
-      conversationId: conversationId(action.chatId, root),
+      conversationId: home ? action.chatId : conversationId(action.chatId, root),
     };
+    const to: LarkTarget = home ? { chatId: action.chatId } : { root };
     const admitted = this.gate.admit("action", action.chatId, {
       isDm: this.deps.store.chat("lark", action.chatId)?.kind === "dm",
       addressed: true, // clicking the bot's own button is addressing it
@@ -381,14 +394,14 @@ export class LarkChannel implements Channel {
       : undefined;
     if (label === undefined) {
       this.log(`unknown or stale action ${payload} in chat ${action.chatId}`);
-      await this.api.replyCard(root, card([markdown(STALE_OPTION)]))
+      await this.out.post(to, card([markdown(STALE_OPTION)]))
         .catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // topic shows an answer to a request nobody can see, with nothing to carry the eyes.
     await this.out.retire(action.messageId);
-    const echo = await this.api.replyCard(root, card([markdown(picked(label))]))
+    const echo = await this.out.post(to, card([markdown(picked(label))]))
       .catch((err) => {
         this.log(`option echo failed: ${String(err)}`);
         return undefined;
@@ -416,6 +429,12 @@ export class LarkChannel implements Channel {
     await this.api.replyCard(messageId, card([markdown(STOPPED)]));
   }
 
+  /** The head's `/skills` is MainChain's; a thread has no chain, so it is answered here. */
+  private async listSkills(key: ConversationKey, root: string): Promise<void> {
+    const text = skillsText((await this.deps.control?.skills(key)) ?? []);
+    await this.out.note({ root }, { text, origin: { kind: "chat-command", command: "skills" } });
+  }
+
   // --- bind ------------------------------------------------------------------
 
   /** Groups stay silent, but a DM that swallows every message looks broken
@@ -433,6 +452,17 @@ export class LarkChannel implements Channel {
   }
 
   // --- lookups ---------------------------------------------------------------
+
+  private isHome(chatId: string): boolean {
+    return this.deps.control?.isHome({ channelId: this.id, conversationId: chatId }) ?? false;
+  }
+
+  /** A topic, or the home chat's main flow; undefined for any other chat's. */
+  private target(conversation: string): LarkTarget | undefined {
+    const { chatId, root } = parseConversation(conversation);
+    if (root) return { root };
+    return this.isHome(chatId) ? { chatId } : undefined;
+  }
 
   private async userName(openId: string): Promise<string> {
     const hit = this.names.get(openId);
@@ -458,16 +488,16 @@ export class LarkChannel implements Channel {
   // --- outbound --------------------------------------------------------------
 
   async send(conversation: string, reply: AgentReply): Promise<void> {
-    const { root } = parseConversation(conversation);
-    // No root is a foreign id; posting it would put a turn in the chat's main
-    // flow. Refused loudly, receipts still cleared.
-    if (!root) {
+    const to = this.target(conversation);
+    // No root outside the home chat is a foreign id; posting it would put a
+    // turn in the chat's main flow. Refused loudly, receipts still cleared.
+    if (!to) {
       this.log(`refusing to answer ${conversation}: no thread root in the conversation id`);
       await this.receipts.settle(conversation);
       return;
     }
     // The turn ended either way; a 👀 left up by a failed send looks like work.
-    await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply), reply.meta);
+    await this.receipts.settleAfter(conversation, () => this.out.reply(to, reply), reply.meta);
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of
@@ -476,14 +506,14 @@ export class LarkChannel implements Channel {
     conversation: string,
     note: { text: string; origin: NoteOrigin; at?: number },
   ): Promise<void> {
-    const { chatId, root } = parseConversation(conversation);
-    if (!root) {
+    const to = this.target(conversation);
+    if (!to) {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
-    const messageId = await this.out.note(root, note);
+    const messageId = await this.out.note(to, note);
     if (messageId && awaitsTurn(note.origin)) {
-      this.receipts.mark(conversation, chatId, messageId, note.at);
+      this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);
     }
   }
 }
