@@ -35,14 +35,15 @@ src/
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
-               indexed in pier.db), config.ts, credentials.ts (sealed store +
+               indexed in pier.db), config.ts, config-sync.ts (the credential-blind
+               configuration projection), credentials.ts (sealed store +
                auth.json import), models.ts, roles.ts (the dispatcher's
                and feature lead's contracts, injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
                (backend + auth over agent's `WebContext`), anthropic.ts /
                openai.ts (the hosted-tool wire formats), content.ts,
-               language.ts, http.ts, artifacts.ts (the fetched copy on disk)
+               language.ts, http.ts, json.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
                panel, runtime, routes; per platform: slack / lark
@@ -56,7 +57,9 @@ src/
                three /api/vault routes), providers.ts +
                provider-flows.ts, auth.ts, passkeys.ts (WebAuthn: CBOR/COSE,
                challenges, store, routes), config.ts (scoped agent-file
-               editing), fs.ts (confined resolver + ls/file/mkdir), explorer.ts
+               editing), packages.ts (the package registry routes),
+               config-sync.ts (the subscription's routes), route.ts (a throwing
+               route answers JSON), fs.ts (confined resolver + ls/file/mkdir), explorer.ts
                (git refs, worktrees, diffs), session-state.ts (unread, working
                set), push.ts + webpush.ts (RFC 8291/8292), ui/public/sw.js,
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
@@ -78,11 +81,11 @@ src/
                vt:// = approve); channel tokens are rows here too
                (channels/config.ts)
   socket.ts    the Unix socket (`$PIER_HOME/pier.sock`, 0600) the `pier` CLI
-               reaches the running instance through — `/resolve`, `/task` —
+               reaches the running instance through — `/resolve`, `/task`, `/web`, `/login` —
                every request naming its session; the bits are the auth
-  settings.ts  instance facts a human owns (public URL, model menu, the
-               auto-update switch, which of the built-in `pier` package's
-               resources are on)
+  settings.ts  instance facts a human owns (public URL, model menu, title
+               model, the auto-update switch, which of the built-in `pier`
+               package's resources are on, tools, custom tools, accent)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
   drain.ts     graceful restart: finish running turns and outbound sends,
@@ -90,7 +93,8 @@ src/
   cli.ts       what `pier` does when typed; service.ts is the unit it writes;
                `pier slack` is dispatched to channels/slack-cli.ts with the
                token resolved here (env, or the CLI socket), `pier task` to
-               tasks/cli.ts with the socket request
+               tasks/cli.ts with the socket request, `pier web` to
+               websearch/cli.ts; `pier vault run` and `pier login` are its own
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
@@ -130,9 +134,9 @@ Dependency rules:
 - Logging goes to stdout/stderr only (docs/deploy.md). `PIER_LOG=debug` adds
   per-message tracing; `PIER_LOG=silent` is what test runs use.
 - `tools.ts` is reached only by `main.ts`, `cli.ts`, `tools-task.ts` and
-  `settings.ts` (one function: what a custom tool may be). `tools-task.ts` is
-  reachable from `main.ts` alone and is the one root module importing `tasks/`
-  (the service type-only, `isTerminal`).
+  `settings.ts` (one function: what a custom tool may be). `tools-task.ts` and
+  `config-sync-task.ts` are reachable from `main.ts` alone and are the root
+  modules besides it importing `tasks/` (the service type-only, `isTerminal`).
 - `boards/` imports neither core nor Pi.
 
 The IM channel layer's spec is `docs/design/04-im-channels.md`.
@@ -160,10 +164,12 @@ mirror them. The seams:
   left to run (`turn_end`); `agent_end` covers error, abort, and truncation Pi
   will retry. `notify` carries a persisted `system-input` (delegation, task
   callback, supervisor message) or a service/error note.
-- Slash commands are parsed once in `channels/commands.ts`: trim both ends,
-  require a leading `/`, keep args verbatim. Control
-  that is not a prompt (`/stop`) is wired by `channels/runtime.ts`, which owns
-  the router — the `Channel` seam has one inbound path.
+- Chat commands are parsed by `channels/commands.ts` (`parseCommand`) and, for
+  the head, `core/chain.ts` (`chatCommand`): trim both ends, a leading `/` or
+  `%`, args verbatim ([11 §Chat commands](design/11-im-conversation.md#chat-commands)).
+  Control that is not a prompt (`/stop`) goes through `ChannelControl`
+  (`channels/control.ts`, built in `main.ts`, handed to each adapter by
+  `channels/runtime.ts`) — the `Channel` seam has one inbound path.
 - `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (text
   only — an inbound file is saved to `$PIER_HOME/inbox/` by the receiving
   surface and rides the prompt as a `[name](file:///…)` line; bytes in
@@ -220,13 +226,14 @@ mirror them. The seams:
   dropped and re-created, never retried forever
   ([04](design/04-im-channels.md#conversation-identity)). The continuous
   conversation (`core/chain.ts`) resolves its head, rotating first when due,
-  and dispatches to the head's own `web:` key; the router knows nothing of it.
+  and dispatches to the head's own `web:` key, or the home chat's key for a
+  message from it ([11](design/11-im-conversation.md)); the router knows nothing of it.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters
   react 👀 on each message that entered the turn and clear them when it settles;
   the pending set is durable (`channels/receipts.ts`), cleared at startup and
-  swept past 30 minutes.
+  swept past 10 minutes unless the conversation is still working.
 - **IM permission policy** (`channels/config.ts`): one persisted JSON document
   per platform: token, platform-level seed values, bound users, discovered
   chats. `requireMention` and `requireBind` default to true; a new chat
