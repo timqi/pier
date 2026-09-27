@@ -66,7 +66,7 @@ journalctl --user -u pier | grep 'client:'              # browser-side errors
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`,
 `lark`, `channels`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
-`vault`, `socket`, `settings`, `credentials`, `packages`, `config-sync`,
+`vault`, `socket`, `settings`, `credentials`, `packages`, `passkeys`, `config-sync`,
 `update`, `tools`, `push`, `web`, `web.providers`, `pier`. Level: a syslog priority prefix under
 `$JOURNAL_STREAM`, a level word in a terminal. `client:` is posted back by
 signed-in workbench tabs (`ui/report.ts`): script errors, unhandled rejections,
@@ -166,8 +166,9 @@ pier update           # installs the latest release, then hard-stops/restarts Pi
 pier update --check   # only says whether one exists
 ```
 
-The footer asks `registry.npmjs.org` at boot and at most every 30 minutes and
-shows `v0.0.1 → 0.0.2` when newer exists; a failed check is silent.
+Pier asks `registry.npmjs.org` at boot and at most every 30 minutes; the
+version in the Settings header turns into a badge when a newer one exists
+(`Pier <version> is out`); a failed check is silent.
 
 From a checkout:
 
@@ -268,6 +269,7 @@ Loopback bind; reach it over a tunnel, not a wider bind:
   ... "VACUUM INTO '…'"`, not `cp` (WAL can miss the latest commits).
 - `~/.pier/master.key` — seals the database's credentials and the vault's `auto` rows.
 - `~/.pier/boards/`.
+- `~/.pier/home` — the conversation's memory: `MEMORY.md`, `memory/` daily notes.
 - `~/.pier/db/backups/` — the automatic pre-update and pre-migration copies.
 - `~/.pier/pi` — Pi's session history (unless `PI_CODING_AGENT_DIR` names
   another directory).
