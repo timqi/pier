@@ -49,11 +49,6 @@ export class Chains {
     else this.held -= 1;
   }
 
-  /** The backpressure primitive. */
-  oldest(): Promise<unknown> {
-    return Promise.race(this.active.values()).catch(() => {});
-  }
-
   /** Two adapters handling one message would prompt twice; a hung handler
    *  holding up the Console's save is worse than either, hence the bound. */
   async drain(timeoutMs: number): Promise<void> {

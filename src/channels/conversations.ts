@@ -57,12 +57,6 @@ export class ConversationStore {
     return row && { channelId: row.channel_id, conversationId: row.conversation_id };
   }
 
-  /** Every session some IM conversation answers for, in one query. */
-  boundSessions(): Set<string> {
-    const rows = this.db.prepare(`SELECT session_id FROM conversations`).all() as { session_id: string }[];
-    return new Set(rows.map((r) => r.session_id));
-  }
-
   /** Every thread of one chat: a chat that is gone would otherwise keep its
    *  sessions bound to a conversation nothing can reach. */
   forgetChat(channelId: string, chatId: string): void {
