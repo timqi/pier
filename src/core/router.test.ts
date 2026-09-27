@@ -915,8 +915,8 @@ describe("skill commands by prefix", () => {
   });
 
   it("leaves a word naming no skill, a chat command and plain text as they were", async () => {
-    for (const text of ["/tmp is full", "%status", "/stop", "100% done"]) await send(text);
-    expect(session.prompts).toEqual(["/tmp is full", "%status", "/stop", "100% done"]);
+    for (const text of ["/tmp is full", "%status", "/stop", "100% done", "/s one letter"]) await send(text);
+    expect(session.prompts).toEqual(["/tmp is full", "%status", "/stop", "100% done", "/s one letter"]);
   });
 
   it("sends nothing for a word naming several, and tells the chat which", async () => {

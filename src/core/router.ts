@@ -57,7 +57,8 @@ export class SkillAmbiguous extends Error {}
  *  one skill `word` is a prefix of — of the name, or of the name after any `-`;
  *  the text unchanged when it names none (docs/design/11-im-conversation.md). */
 function skillText(text: string, skills: { name: string }[]): string | SkillAmbiguous {
-  const match = /^[/%](skill:)?([^\s/%]+)(?:[ \t]+([\s\S]*))?$/i.exec(text.trim());
+  // Two characters at least: `/s <text>` is the settings draft's spelling (channels/commands.ts).
+  const match = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i.exec(text.trim());
   const word = match?.[2]?.toLowerCase();
   if (!match || !word || (!match[1] && isChatCommand(word))) return text;
   const names = skills.map((s) => s.name);

@@ -434,7 +434,7 @@ describe("the chat-command completion", () => {
     expect(menu().classList.contains("hidden")).toBe(true);
     type("/");
     expect(menu().classList.contains("hidden")).toBe(false);
-    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress"]);
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name"]);
     expect(onScreen("#command-menu")[0]!.getAttribute("aria-selected")).toBe("true");
     type("/st");
     expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress"]);
@@ -452,10 +452,11 @@ describe("the chat-command completion", () => {
     type("/");
     const down = key({ key: "ArrowDown" });
     expect(down.preventDefault).toHaveBeenCalled();
-    expect(onScreen("#command-menu").map((li) => li.getAttribute("aria-selected"))).toEqual(["false", "true", "false"]);
+    expect(onScreen("#command-menu").map((li) => li.getAttribute("aria-selected"))).toEqual(["false", "true", "false", "false"]);
     key({ key: "ArrowUp" });
     key({ key: "ArrowUp" });
-    expect(onScreen("#command-menu")[2]!.getAttribute("aria-selected")).toBe("true");
+    expect(onScreen("#command-menu")[3]!.getAttribute("aria-selected")).toBe("true");
+    key({ key: "ArrowUp" });
     const enter = key({ key: "Enter" });
     expect(enter.preventDefault).toHaveBeenCalled();
     expect(node("#input").value).toBe("/stop");
@@ -487,7 +488,7 @@ describe("the chat-command completion", () => {
     expect(menu().classList.contains("hidden")).toBe(true);
     expect(key({ key: "ArrowDown" }).preventDefault).not.toHaveBeenCalled(); // the textarea's key again
     type("/s");
-    expect(rows()).toHaveLength(2);
+    expect(rows()).toHaveLength(3);
     continuous(false);
     type("/");
     expect(rows()).toEqual([]);
@@ -503,11 +504,11 @@ describe("the chat-command completion", () => {
     composer.setSkills(skills);
     type("/");
     expect(rows()).toEqual([
-      "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress",
+      "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name",
       "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board.",
     ]);
     type("/s");
-    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress",
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name",
       "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board."]);
     // The exact chain word hides the list, skills that would match included.
     composer.setSkills([{ name: "stop-all", description: "x" }]);
