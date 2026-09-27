@@ -7,7 +7,7 @@ import { EventHub } from "../core/hub.js";
 import { agoLabel } from "../core/reply.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
-import { NOT_IN_LEDGER, type AgentFactory, type AgentRole, type LedgerRun } from "../core/types.js";
+import { NOT_IN_LEDGER, type AgentFactory, type LedgerRun, type TaskRunState } from "../core/types.js";
 import { openItems, openItemsStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
@@ -19,13 +19,15 @@ const run = (runId: string, over: Partial<LedgerRun> = {}): LedgerRun =>
 
 function rig({
   runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
-  roles = {} as Record<string, AgentRole>,
+  leads = [] as string[],
+  workers = [] as { invokedBySessionId: string; state: TaskRunState }[],
   runSessions = {} as Record<string, string>,
 } = {}) {
   const db = openDb(":memory:");
   const store = new TaskStore(db);
   const now = Date.now();
   const ledger: { ids: string[]; since: number }[] = [];
+  const workerReads: string[][] = [];
   const reads: OpenItemReads = {
     ledger: (ids, since) => {
       ledger.push({ ids, since });
@@ -34,24 +36,27 @@ function rig({
     store: {
       openItems: () => store.openItems(),
       getRun: (id) => (runSessions[id] ? { targetSessionId: runSessions[id] } as TaskRun : undefined),
-      roleOf: (id) => roles[id],
+      leads: () => new Map(leads.map((id) => [id, { phase: "build" as const, runId: `c-${id}`, runLive: false, designOpen: false }])),
+      ledgerRuns: (ids) => {
+        workerReads.push(ids);
+        return workers.filter((w) => ids.includes(w.invokedBySessionId)) as TaskRun[];
+      },
     },
   };
   const router = new Router(new EventHub(), () => Promise.reject(new Error("no session")));
   const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
     db.prepare("INSERT INTO open_items VALUES (?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
   const list = (members = ["h1"], designs: LedgerRun[] = []) => openItems(reads, router, members, designs, now);
-  return { now, ledger, router, item, list };
+  return { now, ledger, workerReads, router, item, list };
 }
 
 describe("the open items", () => {
   it("joins each run token through the ledger: found, gone, and a lead with its workers", () => {
     let now = 0;
     const r = rig({
-      roles: { lead1: "lead" },
-      runs: (ids) => ids[0] === "lead1"
-        ? [run("w1"), run("w2", { state: "succeeded", finishedAt: now })]
-        : [run("1prwmabcdef", { name: "lead open items", targetSessionId: "lead1", queuedAt: now - 23 * MIN })],
+      leads: ["lead1"],
+      workers: [{ invokedBySessionId: "lead1", state: "running" }, { invokedBySessionId: "lead1", state: "succeeded" }],
+      runs: () => [run("1prwmabcdef", { name: "lead open items", targetSessionId: "lead1", queuedAt: now - 23 * MIN })],
     });
     now = r.now;
     r.item("open items 视图", "lead designing", ["1prwmabcdef"], 2);
@@ -61,7 +66,8 @@ describe("the open items", () => {
     expect(open.items[0]!.runs).toEqual([{ runId: "gone1", name: "gone1", state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null }]);
     expect(open.items[1]!.runs[0]!.workers).toEqual({ queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 });
     expect(open.unlisted).toEqual([]);
-    expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }, { ids: ["lead1"], since: now - 86_400_000 }]);
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }]);
+    expect(r.workerReads).toEqual([["lead1"]]);
     expect(openItemsStatus(open, now).text).toBe([
       "Waiting on you",
       "- model menu 重选 — merged, restart pending (waiting on you) · run gone1 — not in the ledger",
@@ -157,6 +163,36 @@ describe("the open items", () => {
       "In progress",
       "- Rail again — not on the list (running) · run t2 running 1m",
     ].join("\n"));
+  });
+
+  it("reads every shown lead's workers in one ledger read, three leads or one", () => {
+    const r = rig({
+      leads: ["l1", "l2", "l3"],
+      workers: [
+        { invokedBySessionId: "l1", state: "running" },
+        { invokedBySessionId: "l2", state: "failed" },
+        { invokedBySessionId: "l3", state: "queued" },
+        { invokedBySessionId: "l3", state: "succeeded" },
+      ],
+      runs: () => [
+        run("a", { targetSessionId: "l1" }),
+        run("b", { targetSessionId: "l2" }),
+        run("c", { targetSessionId: "l3", state: "queued" }),
+        run("d", { targetSessionId: "not-a-lead" }),
+      ],
+    });
+    r.item("first", "", ["a"], 2);
+    r.item("second", "", ["b"], 1);
+    const open = r.list();
+    expect(r.workerReads).toEqual([["l2", "l1", "l3"]]);
+    expect(open.items.map((i) => i.runs[0]!.workers)).toEqual([
+      { queued: 0, running: 0, succeeded: 0, failed: 1, cancelled: 0, interrupted: 0, skipped: 0 },
+      { queued: 0, running: 1, succeeded: 0, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 },
+    ]);
+    expect(open.unlisted.map((u) => [u.runId, u.workers])).toEqual([
+      ["c", { queued: 1, running: 0, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 }],
+      ["d", undefined],
+    ]);
   });
 
   it("says nothing is open when nothing is, and asks no ledger before the first head", () => {

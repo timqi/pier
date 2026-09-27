@@ -15,20 +15,12 @@ const log = logger("tasks");
 const IN_FLIGHT = new Set(["queued", "running"]);
 
 /** The task service's own reads the list is joined against. */
-export type OpenItemReads = Pick<TaskService, "ledger"> & { store: Pick<TaskStore, "getRun" | "roleOf" | "openItems"> };
+export type OpenItemReads = Pick<TaskService, "ledger"> & { store: Pick<TaskStore, "getRun" | "leads" | "ledgerRuns" | "openItems"> };
 
 /** `members`: the chain, newest first; `designs`: the open designs of sessions not closed. */
 export function openItems(tasks: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], designs: LedgerRun[], now: number): OpenItems {
   const since = now - LEDGER_WINDOW_MS;
   const runs = members.length ? tasks.ledger(members, since) : [];
-  const withWorkers = (r: LedgerRun): OpenRun => {
-    if (!r.targetSessionId || tasks.store.roleOf(r.targetSessionId) !== "lead") return r;
-    const workers = Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>;
-    for (const w of tasks.ledger([r.targetSessionId], since)) {
-      if (w.state in workers) workers[w.state as TaskRunState] += 1;
-    }
-    return { ...r, workers };
-  };
   const awaiting = new Set(designs.flatMap((d) => (d.targetSessionId ? [d.targetSessionId] : [])));
   const statusOf = (named: OpenRun[]): OpenStatus =>
     named.some((r) => IN_FLIGHT.has(r.state) || (r.targetSessionId && router.stateOf(r.targetSessionId) === "streaming"))
@@ -43,19 +35,34 @@ export function openItems(tasks: OpenItemReads, router: Pick<Router, "stateOf">,
       const session = runs.find((r) => r.runId === id)?.targetSessionId ?? tasks.store.getRun(id)?.targetSessionId ?? null;
       tracked.add(session ?? id);
       const run = runs.find((r) => (session ? r.targetSessionId === session : r.runId === id));
-      return run
-        ? withWorkers(run)
-        : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: session, cwd: null, queuedAt: 0, finishedAt: null };
+      return run ?? { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: session, cwd: null, queuedAt: 0, finishedAt: null };
     }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
     return { problem: row.problem, stage: row.stage, runs: named, status: statusOf(named) };
   });
-  const unlisted = runs.filter((r) => IN_FLIGHT.has(r.state) && !tracked.has(r.targetSessionId ?? r.runId)).map(withWorkers);
+  const unlisted = runs.filter((r) => IN_FLIGHT.has(r.state) && !tracked.has(r.targetSessionId ?? r.runId));
   for (const r of unlisted) tracked.add(r.targetSessionId ?? r.runId);
   const unheld = designs.filter((d) => !tracked.has(d.targetSessionId ?? d.runId)).map((d): OpenItem => {
-    const named = [withWorkers(runs.find((r) => d.targetSessionId && r.targetSessionId === d.targetSessionId) ?? d)];
+    const named = [runs.find((r) => d.targetSessionId && r.targetSessionId === d.targetSessionId) ?? d];
     return { problem: d.name, stage: "", runs: named, status: statusOf(named) };
   });
-  return { items: [...items, ...unheld], unlisted };
+  const all = [...items, ...unheld];
+  // Every shown lead's workers in one read: a ledger call per lead grows with the list.
+  const leads = tasks.store.leads();
+  const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
+  const shown = new Set([...all.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
+  const counts = new Map([...shown].map((id) => [id, Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>]));
+  for (const w of shown.size ? tasks.store.ledgerRuns([...shown], since) : []) {
+    const c = w.invokedBySessionId ? counts.get(w.invokedBySessionId) : undefined;
+    if (c) c[w.state] += 1;
+  }
+  const withWorkers = (r: OpenRun): OpenRun => {
+    const workers = counts.get(leadOf(r) ?? "");
+    return workers ? { ...r, workers: { ...workers } } : r;
+  };
+  return {
+    items: all.map((i) => ({ ...i, runs: i.runs.map(withWorkers) })),
+    unlisted: unlisted.map(withWorkers),
+  };
 }
 
 /** The head's reply's markers, written; answers whether a row changed. */
