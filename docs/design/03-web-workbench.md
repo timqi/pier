@@ -445,9 +445,6 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
     name another skill already took — reads `not loaded — <Pi's diagnostic>`
     beside a switch that stays on. The verdict is Pi's own `loadSkills` in
     Pi's order, where a package's skill shadows Pier's own of that name.
-  - Shadowing is known at session open, not at list time: `standDownShadowed`
-    records what it stood down, `GET` reports the last open's finding, and a
-    built-in no session has opened since reads no state.
   - After any package or switch write, idle sessions are recycled as for an
     agent-file save; sessions mid-turn keep what they opened with.
   - One switch, one write: the `pier` package's skills flip through
