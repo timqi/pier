@@ -88,7 +88,7 @@ const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonE
 
 /** The chat a dialog is opened from: its id keys the remembered folder+diff,
  *  its cwd is where a bare open lands the first time. */
-export type FilesSession = { id: string; cwd: string } | undefined;
+type FilesSession = { id: string; cwd: string } | undefined;
 
 type Show = (session: FilesSession, dir?: string, select?: string, line?: number) => void;
 
