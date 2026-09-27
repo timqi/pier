@@ -99,7 +99,7 @@ describe("the continuous conversation's chain", () => {
     expect(seed?.origin).toEqual({ kind: "session-seed", reason: "first", previousSessionId: null });
     expect(seed?.text).toContain("pier lives in ~/code/pier");
     expect(seed?.text.indexOf("wrote the contract")).toBeLessThan(seed!.text.indexOf("shipped the doc"));
-    expect(seed?.text).toContain("## Runs — in flight, and finished since the previous session started\n\nnone");
+    expect(seed?.text).toContain("## Runs — in flight, or failed since the previous session started (succeeded ones: `pier task runs`)\n\nnone");
     expect(seed?.text).toContain("pier lives in ~/code/pier\n\n## Open\n\nNothing open.\n\n## Runs");
     expect(seed?.text).not.toContain("last exchanges");
     // The seed before the message.
@@ -125,6 +125,10 @@ describe("the continuous conversation's chain", () => {
     const runs: LedgerRun[] = [
       { runId: "r1", name: "fix", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: 1, finishedAt: null },
       { runId: "r2", name: "look", state: "queued", targetSessionId: null, cwd: null, queuedAt: 2, finishedAt: null },
+      { runId: "r3", name: "shipped", state: "succeeded", targetSessionId: "c3", cwd: "/wt3", queuedAt: 3, finishedAt: 4 },
+      { runId: "r4", name: "broke", state: "failed", targetSessionId: "c4", cwd: "/wt4", queuedAt: 5, finishedAt: 6 },
+      { runId: "r5", name: "cut off", state: "interrupted", targetSessionId: "c5", cwd: null, queuedAt: 7, finishedAt: 8 },
+      { runId: "r6", name: "overlapped", state: "skipped", targetSessionId: null, cwd: null, queuedAt: 9, finishedAt: 9 },
     ];
     const r = rig({ runs });
     const turns = [1, 2, 3, 4].flatMap((i) => [
@@ -140,7 +144,10 @@ describe("the continuous conversation's chain", () => {
     expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
-    expect(seed.text).toContain("started\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\n\n");
+    // In flight and failed runs only: a succeeded or skipped one is `pier task runs`' to show.
+    expect(seed.text).toContain("`pier task runs`)\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\nr4 · broke · failed · session c4 · /wt4\nr5 · cut off · interrupted · session c5 · —\n\n");
+    expect(seed.text).not.toContain("r3 ·");
+    expect(seed.text).not.toContain("r6 ·");
     expect(seed.text).toContain("user: question 2\n\nassistant: answer 2");
     expect(seed.text).toContain("assistant: answer 4");
     expect(seed.text).not.toContain("question 1");
@@ -270,7 +277,7 @@ describe("the continuous conversation's chain", () => {
 
   it("cuts each seed part to its budget, the ledger's oldest lines first", async () => {
     const runs: LedgerRun[] = Array.from({ length: 300 }, (_, i) => (
-      { runId: `r${String(300 - i)}`, name: "n", state: "succeeded", targetSessionId: null, cwd: null, queuedAt: 300 - i, finishedAt: 1 }
+      { runId: `r${String(300 - i)}`, name: "n", state: "failed", targetSessionId: null, cwd: null, queuedAt: 300 - i, finishedAt: 1 }
     ));
     const r = rig({ runs });
     mkdirSync(r.home, { recursive: true });
@@ -280,7 +287,7 @@ describe("the continuous conversation's chain", () => {
     const memory = text.slice(0, text.indexOf("\n\n## Open"));
     expect(memory.length).toBeLessThan(13_000);
     expect(memory.endsWith("…")).toBe(true);
-    expect(text).toContain("started\n\nr300 · n · succeeded");
+    expect(text).toContain("`pier task runs`)\n\nr300 · n · failed");
     expect(text).not.toContain("r1 · n");
   });
 

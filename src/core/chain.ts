@@ -78,6 +78,9 @@ function lastExchanges(turns: ChatTurn[], n: number): string {
 const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
 
+/** The seed lists what still needs the head: a run that ended well is `pier task runs`' to show. */
+const SEED_RUNS_HIDDEN: ReadonlySet<string> = new Set(["succeeded", "skipped"]);
+
 /** `/skills`' answer on every surface, the head's and a thread's (channels/). */
 export const skillsText = (skills: { name: string; description: string }[]): string =>
   skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
@@ -221,13 +224,14 @@ export class MainChain {
   private async seed(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
     const today = new Date(this.now());
     const days = [new Date(today.getTime() - 86_400_000), today].map(day);
-    const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now());
+    const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now())
+      .filter((r) => !SEED_RUNS_HIDDEN.has(r.state));
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
     return [
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).text),
-      section("Runs — in flight, and finished since the previous session started", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
+      section("Runs — in flight, or failed since the previous session started (succeeded ones: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
       ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS, `memory/${date}.md`))))),
       section("The previous session's last exchanges", open ? tail(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
     ].filter(Boolean).join("\n\n");
