@@ -314,7 +314,7 @@ function fillStatus(card: HTMLElement): void {
 /** `head` is the caller's: back to ⋯, the title, close. */
 export function openStatus(anchor: HTMLElement, head: HTMLElement): void {
   const card = runCard("border-l-cyan-500");
-  card.classList.add("flex", "flex-col", "gap-2", "text-sm", "leading-6");
+  card.classList.add("px-4", "flex", "flex-col", "gap-2", "text-sm", "leading-6");
   status = card;
   fillStatus(card);
   openPanel(anchor, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans", head, card)).setAttribute("aria-label", "Status");

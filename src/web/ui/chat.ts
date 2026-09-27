@@ -18,6 +18,7 @@ import {
   activityProgress,
   discardProgress,
   finishActivity,
+  FOLD_ROW,
   initTurnActivity,
   renderBackgroundRun,
   replayActivity,
@@ -333,6 +334,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   sealActivity();
   const state = origin.kind === "task-callback" ? origin.state : undefined;
   const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
+  row.classList.add(FOLD_ROW);
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
   const content = runBody(body);

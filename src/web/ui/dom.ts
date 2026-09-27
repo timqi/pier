@@ -166,12 +166,16 @@ export function holdToCopy(el: HTMLElement, text: () => string): void {
   });
 }
 
+/** The fold chevron: one element everywhere a row opens, so a column of rows
+ *  lines their chevrons up by construction. */
+export const chevron = (): SVGElement => icon(ChevronRight, "chev h-3 w-3");
+
 /** Chevron + summary skeleton shared by activity groups and project nodes. */
 export function detailsRow(cls: string, summaryChildren: (HTMLElement | SVGElement)[]): { el: HTMLDetailsElement; summary: HTMLElement } {
   const el = document.createElement("details");
   el.className = cls;
   const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
-  summary.append(icon(ChevronRight, "chev h-3 w-3"), ...summaryChildren);
+  summary.append(chevron(), ...summaryChildren);
   el.append(summary);
   return { el, summary };
 }

@@ -554,9 +554,12 @@ main {
 }
 #turns > [data-kind="system"].system-card {
   width: auto;
-  padding: 0.625rem 0.875rem;
+  padding-block: 0.625rem;
   border-radius: 0.75rem;
 }
+/* Activity groups, system rows and run cards (turn-activity.ts FOLD_ROW): one
+   inline padding, folded or open, so their chevrons share a column. */
+#turns > .fold-row { padding-inline: 0.75rem; }
 #turns > [data-kind="activity"] {
   max-width: 88%;
   margin-bottom: 0;

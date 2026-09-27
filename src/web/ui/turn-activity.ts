@@ -2,11 +2,11 @@
 // steps) and the detached background-run cards, rendered into #turns between
 // chat rows.
 
-import { Check, ChevronRight, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
+import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
-import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
+import { chevron, detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js";
 
@@ -57,9 +57,12 @@ export interface RunHead {
   open?: boolean;
 }
 
-/** Quiet card body; the coloured edge and labelled chip carry type/status. */
-const cardClass = (tone: string): string => `system-card group relative mt-1.5 rounded-xl px-4 py-2.5 ${tone}`;
+/** Quiet card body; the coloured edge and labelled chip carry type/status.
+ *  Inline padding is the placement's: `fold-row` in the transcript. */
+const cardClass = (tone: string): string => `system-card group relative mt-1.5 rounded-xl py-2.5 ${tone}`;
 export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
+/** A transcript row that folds: its chevron sits in the column every such row shares. */
+export const FOLD_ROW = "fold-row";
 export const runBody = (text: string): HTMLElement =>
   h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
@@ -110,7 +113,7 @@ export function runHead(o: RunHead): HTMLElement {
 /** The chevron-led button of a collapsible head. A native button: Enter and
  *  Space toggle it, and the session link beside it stays its own control. */
 function expander(head: HTMLElement, body: HTMLElement, open: boolean): HTMLElement {
-  const toggle = h("button", "flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left pointer-coarse:min-h-11", icon(ChevronRight, "chev h-3 w-3"));
+  const toggle = h("button", "flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left pointer-coarse:min-h-11", chevron());
   toggle.setAttribute("type", "button");
   toggle.setAttribute("aria-expanded", String(open));
   toggle.classList.toggle("chev-open", open);
@@ -161,7 +164,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   }
   const open = row.hasAttribute("data-expanded");
   // Folded like a callback row: the prompt is the delegating turn's own text.
-  row.className = `${cardClass(STATE_STYLE[run.state].edge)} system-row`;
+  row.className = `${cardClass(STATE_STYLE[run.state].edge)} ${FOLD_ROW} system-row`;
   const active = run.state === "queued" || run.state === "running";
   // The header's running chip finds its card by this mark (chat.ts).
   row.toggleAttribute("data-active", active);
@@ -321,7 +324,8 @@ const STATUS_STYLE: Record<ActivityStatus, string> = {
 /** Expanding shows an independent work log, never a disclosure inside prose. */
 function styleGroup(el: HTMLElement, status: ActivityStatus): void {
   el.dataset.status = status;
-  el.className = `px-2 py-1 rounded-xl text-[11.5px] leading-normal open:border open:border-neutral-200 open:px-3 open:py-2 ${STATUS_STYLE[status]}`;
+  // The outline is a ring, not a border: opening must not move the chevron.
+  el.className = `${FOLD_ROW} py-1 rounded-xl text-[11.5px] leading-normal open:ring-1 open:ring-inset open:ring-neutral-200 open:py-2 ${STATUS_STYLE[status]}`;
 }
 
 const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, IconNode> = {

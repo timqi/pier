@@ -89,7 +89,9 @@ updates this document.
   — chevron, kind chip, topic, id in mono — opening in place to a wide neutral
   card; failure text stays on the line, a failed callback red-chipped and an
   interrupted one amber, so the count of lines is the count of things that
-  happened. Chat command answers stay open.
+  happened. Chat command answers stay open. Steps groups, system rows and run
+  cards share one chevron column — one inline padding, one chevron element —
+  folded or open.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
   not yet landed), clear success/failure/interruption for results; running is
   neutral — the spinner carries the motion. Accents small.
