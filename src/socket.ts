@@ -6,8 +6,6 @@
 
 import { chmodSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { readableTitle } from "./core/identity.js";
-import type { AgentFactory } from "./core/types.js";
 import { logger } from "./log.js";
 import { PIER_SOCK } from "./paths.js";
 import { isVaultName, UnknownSecret, VaultLocked, type Vault } from "./vault.js";
@@ -27,7 +25,7 @@ export interface SocketHosts {
   /** `pier web`'s search or fetch, on the instance's model auth; the caller's
    *  session names the active model. */
   web: (params: unknown, callerSessionId: string) => Promise<unknown>;
-  /** `pier search`: the transcripts by what was said in them (`searchSessions`). */
+  /** `pier search`: the transcripts by what was said in them (`core/search.ts`). */
   search: (params: unknown, callerSessionId: string) => Promise<unknown>;
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */
@@ -77,20 +75,6 @@ function operation(name: "task" | "web" | "search"): (typeof ROUTES)[string] {
     }
   };
 }
-
-/** `/search`'s params to hits, each titled with its session's name as it is
- *  now; a session gone from disk is named by its id. */
-export const searchSessions = (factory: Pick<AgentFactory, "search" | "find">) => async (params: unknown): Promise<unknown> => {
-  const { q, limit = 20 } = (params ?? {}) as { q?: unknown; limit?: unknown };
-  const query = typeof q === "string" ? q.trim() : "";
-  if (!query) throw new Error("q must be non-empty words to search for");
-  if (!Number.isInteger(limit)) throw new Error("limit must be an integer");
-  const hits = await factory.search(query, Math.min(50, Math.max(1, limit as number)));
-  return {
-    hits: await Promise.all(hits.map(async (hit) =>
-      ({ ...hit, title: readableTitle((await factory.find(hit.sessionId))?.title) ?? hit.sessionId }))),
-  };
-};
 
 export function servePier(hosts: SocketHosts, path: string = PIER_SOCK): Server {
   const server = createServer((req, res) => void handle(hosts, req, res).catch((err: unknown) => {

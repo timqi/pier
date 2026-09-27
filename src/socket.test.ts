@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { UnknownSecret, VaultLocked, type Resolved } from "./vault.js";
-import { searchSessions, servePier, type SocketHosts } from "./socket.js";
+import { searchSessions } from "./core/search.js";
+import { servePier, type SocketHosts } from "./socket.js";
 
 const servers: Server[] = [];
 afterEach(async () => {

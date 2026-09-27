@@ -33,8 +33,7 @@ Usage
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
   pier task <command> ...     subagents and scheduled tasks from a shell (pier task --help)
   pier web search|fetch ...   the public web through the provider's hosted tools (pier web --help)
-  pier search <q...> [--limit N] [--json]
-                              earlier sessions by what was said in them (skills/pier-search)
+  pier search <q...> ...      earlier sessions by what was said in them (skills/pier-search)
   pier --version | --help
 
 Options for "service install"
@@ -128,7 +127,8 @@ if (values.help || command === "help") {
   const { runWebCli } = await import("./websearch/cli.js");
   process.exitCode = await runWebCli(argv.slice(1), (params) => askPier("/web", { params }, WEB_TIMEOUT_MS));
 } else if (command === "search") {
-  await search(argv.slice(1));
+  const { runSearchCli } = await import("./core/search.js");
+  process.exitCode = await runSearchCli(argv.slice(1), (params) => askPier("/search", { params }));
 } else if (command === "login") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], "pier login");
@@ -141,36 +141,6 @@ if (values.help || command === "help") {
 } else {
   process.stderr.write(`pier: unknown command "${command}"\n\n${HELP}`);
   process.exit(2);
-}
-
-/** One line per hit, or the answer's object with `--json`; argv shape is the
- *  only thing checked here, the route validates the rest (08 §Failure lines). */
-async function search(args: string[]): Promise<void> {
-  const usage = "usage: pier search <q...> [--limit N] [--json]";
-  const { values: v, positionals: words } = (() => {
-    try {
-      return parseArgs({ args, allowPositionals: true, strict: true, options: { limit: { type: "string" }, json: { type: "boolean" } } });
-    } catch (err) {
-      return die(`search: ${err instanceof Error ? err.message : String(err)}\n${usage}`);
-    }
-  })();
-  if (!words.length) die(`search: say what to search for\n${usage}`);
-  const params = { q: words.join(" "), ...(v.limit === undefined ? {} : { limit: Number(v.limit) }) };
-  type Hit = { sessionId: string; title: string; role: string; at: number; snippet: string };
-  const { status, body } = await askPier<{ result?: { hits: Hit[] }; error?: string }>("/search", { params });
-  if (status !== 200 || !body.result) {
-    process.stderr.write(`search: ${body.error ?? `socket answered ${String(status)}`}\n`);
-    process.exitCode = 1;
-    return;
-  }
-  const { hits } = body.result;
-  if (v.json) return say(JSON.stringify(body.result));
-  if (!hits.length) return say("no hits");
-  // The match marks are the palette's to paint; a line is one line.
-  const flat = (text: string): string => text.replaceAll("\u0001", "").replaceAll("\u0002", "").replace(/\s+/g, " ").trim();
-  // sv-SE spells local time as YYYY-MM-DD HH:MM.
-  const when = (at: number): string => new Date(at).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
-  for (const hit of hits) say(`${hit.sessionId} · ${flat(hit.title)} · ${hit.role} · ${when(hit.at)}: ${flat(hit.snippet)}`);
 }
 
 /** Under systemd the install is handed to a second unit: a child of the
