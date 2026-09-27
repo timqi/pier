@@ -320,7 +320,7 @@ channel row holds no credential.
 | Route | Behavior |
 | ----- | -------- |
 | `GET /api/channels/:platform` | config with the token **masked** |
-| `PUT /api/channels/:platform` | full document; masked token = unchanged token |
+| `PUT /api/channels/:platform` | full document; masked token = unchanged token; a `home` DM row clears every other ([11](11-im-conversation.md)) |
 | `POST /api/channels/:platform/bind-code` | issue a single-use code |
 | `DELETE /api/channels/:platform/users/:id` | unbind |
 | `GET /api/models` | backend model catalog, no session needed |
