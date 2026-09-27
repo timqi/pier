@@ -489,6 +489,7 @@ export interface AgentFactory {
   readHistory(sessionId: string): Promise<ChatTurn[] | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
    *  steps — at most one hit per session, best first. How the text is indexed
-   *  is the backend's business; core sees the hits. */
-  search(query: string): Promise<SearchHit[]>;
+   *  is the backend's business; core sees the hits. `limit` caps the hits;
+   *  absent, the backend's own default. */
+  search(query: string, limit?: number): Promise<SearchHit[]>;
 }

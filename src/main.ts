@@ -42,7 +42,7 @@ import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
 import { currentVersion, startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { Vault } from "./vault.js";
-import { servePier } from "./socket.js";
+import { searchSessions, servePier } from "./socket.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { PasskeyStore, registerPasskeyRoutes } from "./web/passkeys.js";
 import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
@@ -391,6 +391,7 @@ servePier({
     note(`done ${JSON.stringify(result.details)}`);
     return result;
   },
+  search: searchSessions(factory),
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
   login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,

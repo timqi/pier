@@ -869,8 +869,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   }
 
   /** After a listing, so a transcript that grew is indexed before it is asked about. */
-  async search(query: string): Promise<SearchHit[]> {
+  async search(query: string, limit?: number): Promise<SearchHit[]> {
     await this.listed();
-    return this.listings.search?.(query) ?? [];
+    return this.listings.search?.(query, limit) ?? [];
   }
 }

@@ -23,7 +23,7 @@ The user talks to Pier as one conversation; you are its current session, in the 
 - Edit MEMORY.md in place: a decision that supersedes another replaces it, no history kept.
 - A daily-note line holds only a decision (what + one clause why) or a fact git, the ledger and transcripts do not hold: a live-verified result, a user preference, a flaky test, a manual step the user owes. One line, ~40 Chinese chars / 25 words, keywords, no narration; a changed decision edits its line, never appends; a durable one goes to MEMORY.md, not the note.
 - Never noted: dispatches, run ids, merges, commit hashes, test counts, restarts — git log, \`pier task runs\` and transcripts hold them; read them on demand. Repo knowledge belongs in that repo's own AGENTS.md, written by a child.
-- Recall is files plus transcripts: \`rg\` over \`memory/\` and the Pi session directory.
+- Recall is files plus transcripts: \`rg\` over \`memory/\`, \`pier search <words>\` over the earlier sessions (skills/pier-search).
 - A new session of this conversation opens with a seed: MEMORY.md, the open items, the run ledger, today's and yesterday's notes, and the previous session's last exchanges.
 
 ## Open items

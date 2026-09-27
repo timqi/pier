@@ -6,6 +6,8 @@
 
 import { chmodSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readableTitle } from "./core/identity.js";
+import type { AgentFactory } from "./core/types.js";
 import { logger } from "./log.js";
 import { PIER_SOCK } from "./paths.js";
 import { isVaultName, UnknownSecret, VaultLocked, type Vault } from "./vault.js";
@@ -25,6 +27,8 @@ export interface SocketHosts {
   /** `pier web`'s search or fetch, on the instance's model auth; the caller's
    *  session names the active model. */
   web: (params: unknown, callerSessionId: string) => Promise<unknown>;
+  /** `pier search`: the transcripts by what was said in them (`searchSessions`). */
+  search: (params: unknown, callerSessionId: string) => Promise<unknown>;
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */
   knows: (sessionId: string) => Promise<boolean>;
@@ -54,6 +58,7 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
   },
   "/task": operation("task"),
   "/web": operation("web"),
+  "/search": operation("search"),
   async "/login"({ login }, _body, _sessionId, answer) {
     const url = login();
     log.info("sign-in link minted for pier login");
@@ -63,7 +68,7 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
 
 /** A CLI verb's params under the caller's session. 422, not 400: the request
  *  was well-formed; what the operation refused is the caller's to read. */
-function operation(name: "task" | "web"): (typeof ROUTES)[string] {
+function operation(name: "task" | "web" | "search"): (typeof ROUTES)[string] {
   return async (hosts, { params }, sessionId, answer) => {
     try {
       answer(200, { result: await hosts[name](params, sessionId) });
@@ -72,6 +77,20 @@ function operation(name: "task" | "web"): (typeof ROUTES)[string] {
     }
   };
 }
+
+/** `/search`'s params to hits, each titled with its session's name as it is
+ *  now; a session gone from disk is named by its id. */
+export const searchSessions = (factory: Pick<AgentFactory, "search" | "find">) => async (params: unknown): Promise<unknown> => {
+  const { q, limit = 20 } = (params ?? {}) as { q?: unknown; limit?: unknown };
+  const query = typeof q === "string" ? q.trim() : "";
+  if (!query) throw new Error("q must be non-empty words to search for");
+  if (!Number.isInteger(limit)) throw new Error("limit must be an integer");
+  const hits = await factory.search(query, Math.min(50, Math.max(1, limit as number)));
+  return {
+    hits: await Promise.all(hits.map(async (hit) =>
+      ({ ...hit, title: readableTitle((await factory.find(hit.sessionId))?.title) ?? hit.sessionId }))),
+  };
+};
 
 export function servePier(hosts: SocketHosts, path: string = PIER_SOCK): Server {
   const server = createServer((req, res) => void handle(hosts, req, res).catch((err: unknown) => {

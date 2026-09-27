@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { UnknownSecret, VaultLocked, type Resolved } from "./vault.js";
-import { servePier, type SocketHosts } from "./socket.js";
+import { searchSessions, servePier, type SocketHosts } from "./socket.js";
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -20,6 +20,16 @@ const STORE: Resolved = {
 };
 
 const KNOWN = ["s1", "s2"];
+
+/** The limits `/search` passed through; `s1` is titled, `gone` no longer on disk. */
+const searched: (number | undefined)[] = [];
+const index = {
+  search: async (_query: string, limit?: number) => {
+    searched.push(limit);
+    return [{ sessionId: "s1", role: "user" as const, at: 1, snippet: "the \u0001parser\u0002" }, { sessionId: "gone", role: "assistant" as const, at: 2, snippet: "x" }];
+  },
+  find: async (id: string) => (id === "s1" ? { id, cwd: "/", createdAt: 0, title: "Fix the parser" } : undefined),
+};
 
 function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolean } = {}): { path: string; calls: string[] } {
   const calls: string[] = [];
@@ -46,6 +56,7 @@ function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolea
       calls.push(`web by ${caller}`);
       return { text: `searched ${JSON.stringify(params)}` };
     },
+    search: searchSessions(index),
     knows: async (id) => KNOWN.includes(id),
     login: () => {
       calls.push("login");
@@ -76,7 +87,7 @@ describe("cli socket", () => {
   it("requires the caller's session on every route, and knows it or refuses", async () => {
     const { path, calls } = start();
     await listening(servers[0]!);
-    for (const url of ["/resolve", "/task", "/web"]) {
+    for (const url of ["/resolve", "/task", "/web", "/search"]) {
       expect(await call(path, JSON.stringify({ names: ["A"], params: {} }), "POST", url))
         .toEqual({ status: 400, body: { error: "PIER_SESSION_ID is required" } });
       expect(await call(path, JSON.stringify({ sessionId: "", names: ["A"] }), "POST", url))
@@ -118,6 +129,23 @@ describe("cli socket", () => {
     const res = await call(path, JSON.stringify({ sessionId: "s2", params: { op: "search", query: "pier" } }), "POST", "/web");
     expect(res).toEqual({ status: 200, body: { result: { text: 'searched {"op":"search","query":"pier"}' } } });
     expect(calls).toEqual(["web by s2"]);
+  });
+
+  it("searches the transcripts, the limit clamped to 1–50, each hit titled as its session is now", async () => {
+    const { path } = start();
+    await listening(servers[0]!);
+    const ask = (params: unknown) => call(path, JSON.stringify({ sessionId: "s1", params }), "POST", "/search");
+    searched.length = 0;
+    expect(await ask({ q: "  parser " })).toEqual({ status: 200, body: { result: { hits: [
+      { sessionId: "s1", title: "Fix the parser", role: "user", at: 1, snippet: "the \u0001parser\u0002" },
+      { sessionId: "gone", title: "gone", role: "assistant", at: 2, snippet: "x" },
+    ] } } });
+    await ask({ q: "parser", limit: 500 });
+    await ask({ q: "parser", limit: 0 });
+    expect(searched).toEqual([20, 50, 1]);
+    expect(await ask({ q: "   " })).toEqual({ status: 422, body: { error: "q must be non-empty words to search for" } });
+    expect(await ask({ q: "parser", limit: 2.5 })).toEqual({ status: 422, body: { error: "limit must be an integer" } });
+    expect(searched).toHaveLength(3);
   });
 
   it("answers 422 with the tool's own words when it refuses", async () => {
