@@ -99,7 +99,7 @@ describe("the continuous conversation's chain", () => {
     expect(seed?.origin).toEqual({ kind: "session-seed", reason: "first", previousSessionId: null });
     expect(seed?.text).toContain("pier lives in ~/code/pier");
     expect(seed?.text.indexOf("wrote the contract")).toBeLessThan(seed!.text.indexOf("shipped the doc"));
-    expect(seed?.text).toContain("## Runs — in flight, or failed since the previous session started (succeeded ones: `pier task runs`)\n\nnone");
+    expect(seed?.text).toContain("## Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)\n\nnone");
     expect(seed?.text).toContain("pier lives in ~/code/pier\n\n## Open\n\nNothing open.\n\n## Runs");
     expect(seed?.text).not.toContain("last exchanges");
     // The seed before the message.

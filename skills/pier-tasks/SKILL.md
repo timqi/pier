@@ -43,7 +43,7 @@ A result is two parts: the conclusion (paths, risks and unverified points one
 line each), then `Needs your decision` only when something does. A child takes
 reversible choices itself (how to push, a rebase strategy) with the recommended
 option, named in its result; it stops only on a destructive or irreversible
-step (force push, deleting data, migrations, deploys, restarts) or a question
+step (force push, deleting what it did not create, migrations, deploys, restarts) or a question
 only you can answer, ending its turn with that as its result; answer it with
 `--run <id> --prompt`. Core owns the join: never aggregate members by hand.
 

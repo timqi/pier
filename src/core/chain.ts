@@ -231,7 +231,7 @@ export class MainChain {
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).text),
-      section("Runs — in flight, or failed since the previous session started (succeeded ones: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
+      section("Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
       ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS, `memory/${date}.md`))))),
       section("The previous session's last exchanges", open ? tail(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
     ].filter(Boolean).join("\n\n");
