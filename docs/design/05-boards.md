@@ -128,8 +128,8 @@ images to `/login`.
 
 One module owns manifest reads and the routes. `readManifest` is the single
 place a slug becomes a path and is validated; every route reaches the
-filesystem through it. Depends on `node:fs` and core types only; registered in
-`main.ts`.
+filesystem through it. Depends on `node:*`, Hono types and the root `log.ts` /
+`paths.ts` leaves, nothing in core; registered in `main.ts`.
 
 ## Agent surface (`skills/pier-boards/SKILL.md`)
 
