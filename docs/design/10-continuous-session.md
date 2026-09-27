@@ -79,7 +79,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn) |
-| Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; each part is cut to its budget (`core/reply.ts` `cut`, the ellipsis its mark): `MEMORY.md` 12K chars, each day's notes 6K, the ledger 4K (newest first, so the oldest go), the exchanges 4K; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
+| Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; each part is cut to its budget: `MEMORY.md` 12K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), each day's notes 6K and the exchanges 4K from the front by whole lines, headed by `… <N> lines omitted, the rest in <memory/<date>.md | session <id>>`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
@@ -198,10 +198,6 @@ never opened.
 
 ## Not built
 
-- A run reporting its session posts a card (`<task name> · <state>`, cwd,
-  web link) as a thread root bound to the child, edited in place; it needs a
-  chat-level DM id in both adapters, replies to more than one attached chat,
-  and a way to post a card root and edit it.
 - Out of this design: workers nested under their lead in In progress (the
   text's `workers` counts are that), a stage derived from git, a done list.
 

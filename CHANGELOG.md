@@ -6,9 +6,22 @@
 
 - The database migrates to schema 33, one-way: it drops five columns nothing read (`session_state.cwd`, `session_state.project_sort`, `conversations.updated_at`, `restart_ledger.created_at`, `push_identity.created_at`); 0.2.0 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
 
+### Added
+
+- Child threads: a design lead's question opens a thread in the home DM (Slack or Lark) bound to its session; replies there reach the lead, and the root is edited on final or failed.
+- `pier search <q…> [--limit N] [--json]`: earlier sessions by what was said in them, over the CLI socket's `/search`; `skills/pier-search` documents it.
+
 ### Changed
 
+- The head's seed cuts each part to its budget: `MEMORY.md` 12K chars, each day's notes 6K, the ledger 4K, the last exchanges 4K; notes and exchanges keep their end, headed by how many lines went and where they still are.
 - Web status panel: one row per session, Waiting on you over In progress, each with a server-derived status tag (`waiting on you`, `pending release`, `running`, `queued`); `/status` groups its lines the same way. `GET /api/continuous/open` answers `{items: [{problem, stage, runs, status}], unlisted}`; design leads awaiting Finalize are items, not a `designs` list.
+
+### Fixed
+
+- A custom tool whose install failed shows the failure on its row instead of `error: null`.
+- Reloading the web after a failed turn keeps the previous answer's next-step buttons.
+- A message with more than 1000 path references checks them in slices instead of rendering every one plain.
+- The open-items list reads the run ledger once for all leads, not once per lead.
 
 ### Removed
 

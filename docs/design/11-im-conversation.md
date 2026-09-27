@@ -272,26 +272,3 @@ through what the head launches (`pier task`), never by a group's message.
   `[Finalize design]` happen there; the head reports the final design in the
   main flow and the build starts.
 
-## Build plan (this change only; delete this section when merged)
-
-Child threads (§Child threads, items 1–5 of the original plan) are built in
-this worktree. Left:
-
-1. `core/chain.ts` `seed`: each part through `cut` at the budgets in
-   [10 §Head lifecycle](10-continuous-session.md#head-lifecycle); the ledger
-   cut after joining newest-first. Test: a 100K memory file seeds under 32K
-   chars with the ellipsis.
-2. `pier search`: `src/socket.ts` route `/search` over
-   `AgentFactory.search` plus `find` for the title; `src/cli.ts` verb
-   (`search <q…> [--limit N] [--json]`), `search:` failure prefix per
-   [08](08-cli-socket.md). Tests: `socket.test.ts` (empty `q` is 422, limit
-   clamped), `cli.test.ts` (one line per hit, `no hits`). Skill
-   `skills/pier-search/SKILL.md`, in `pier-web`'s shape and under 30 lines:
-   when (something said in an earlier session, not in memory), the argv, the
-   line format, that a hit names a session the web opens
-   (`/app/#/session/<id>`), and that `memory/` is `rg`'s, not this.
-3. Docs: [10 Not built](10-continuous-session.md#not-built) (the three items
-   go — done in this worktree); `skills/pier-help/SKILL.md` `pier search`
-   beside `rg` under recall.
-
-Budgets: `core/` +~10 (the seed cuts), root `src/*.ts` +~40 (the route, the verb).
