@@ -42,8 +42,8 @@ export const MANAGED: readonly ManagedTool[] = [
       `pre_remove = ["rtk", "init", "--uninstall", "--agent", "pi", "--global", "--auto-patch"]`,
     summary:
       "Compresses long bash output before it reaches the model. Its install hook " +
-      "writes its own Pi extension (extensions/rtk.ts, listed under the local " +
-      "package) — refreshed on every update.",
+      "writes its own Pi extension (extensions/rtk.ts), and this switch is that " +
+      "extension's too — refreshed on every update.",
   },
   {
     name: "rg",

@@ -119,12 +119,8 @@ export function createRegistry(deps: RegistryDeps) {
     el.onclick = () => deps.browse(dir, select);
     return el;
   };
-  /** A locked switch is drawn as it stands, and `state` says whose it is. */
-  const switchFor = (pkg: Package, r: PackageResource, label: string, hint: string, after: (outcome: Outcome) => void): HTMLElement => {
-    const box = toggle(label, hint, r.enabled, (checked) => void flip(pkg, r, checked).then(after));
-    if (r.locked) for (const input of box.querySelectorAll("input")) input.disabled = true;
-    return box;
-  };
+  const switchFor = (pkg: Package, r: PackageResource, label: string, hint: string, after: (outcome: Outcome) => void): HTMLElement =>
+    toggle(label, hint, r.enabled, (checked) => void flip(pkg, r, checked).then(after));
 
   /** One resource, one switch: the same row in the package pane and the nav. */
   function resourceRow(pkg: Package, r: PackageResource, after: (outcome: Outcome) => void): HTMLElement {
@@ -245,7 +241,6 @@ export function createRegistry(deps: RegistryDeps) {
 
   /** What flipping this switch writes, in one line under it. */
   const hintFor = (pkg: Package, r: PackageResource): string => {
-    if (r.locked) return "Switch it under Tools: the tool's install writes this file and its uninstall removes it.";
     if (pkg.kind === "pier") {
       return r.kind === "skill"
         ? "Pier's own skill. Off, no session is offered it."

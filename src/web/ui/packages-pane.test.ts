@@ -3,7 +3,7 @@
 // install that shows its row before the answer, and a refusal shown as failed.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Package, PackageRegistry } from "../../agent/types.js";
+import type { CatalogEntry, Package, PackageRegistry } from "../../agent/types.js";
 import { h as make } from "./dom.js";
 import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
 
@@ -39,12 +39,17 @@ const pier: Package = {
 };
 const local: Package = {
   source: "local", kind: "local", scope: "global", version: null, installedPath: "/pi", updateAvailable: false,
-  resources: [resource("extension", "rtk", "/pi/extensions/rtk.ts", true, { state: "installed by the rtk tool", locked: true })],
+  resources: [resource("extension", "mine", "/pi/extensions/mine.ts", true, { state: "not loaded — no default export" })],
 };
 const demo: Package = {
   source: "npm:@acme/demo@1.0.0", kind: "npm", scope: "global", version: "1.0.0", installedPath: "/pi/packages/npm/demo",
   updateAvailable: false, resources: [resource("extension", "hello", "/pi/packages/npm/demo/extensions/hello.ts", true)],
 };
+/** The managed binaries: one on, one of the operator's own that failed to install. */
+const catalog: CatalogEntry[] = [
+  { name: "rtk", summary: "", enabled: true, binary: { spec: "github:rtk-ai/rtk", installed: true, version: "1.0", path: "/bin/rtk", error: null } },
+  { name: "mytool", summary: "", enabled: false, custom: true, binary: { spec: "github:me/mytool", installed: false, version: null, path: null, error: "no asset" } },
+];
 let registry: PackageRegistry;
 let root: FakeElement;
 let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
@@ -71,7 +76,7 @@ beforeEach(async () => {
   install = async () => Response.json({ package: { ...demo, source: "npm:new", version: "2.0.0" } });
   fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith("/api/config?")) return Response.json({ dir: "/pi", files: [{ name: "SYSTEM.md", exists: true, readonly: false }] });
-    if (url === "/api/settings") return Response.json({ catalog: [], customTools: [], toolsTaskId: null });
+    if (url === "/api/settings") return Response.json({ catalog, customTools: [], toolsTaskId: null });
     if (url === "/api/packages" && init?.method === "POST") return install();
     if (url === "/api/packages") return Response.json(registry);
     if (url === "/api/packages/resource" && init?.method === "PUT") {
@@ -94,18 +99,20 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Settings → Agent", () => {
   it("draws one tree from the registry: a package row, its resources grouped by kind under it", () => {
     const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.localName === "div").map((el) => el.textContent);
-    expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "extensions", "skills", "extensions", "Tools"]);
-    // pier and local open by default, a third-party package closed.
+    expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "extensions", "skills", "extensions"]);
+    // pier, local and tools open by default, a third-party package closed; each tool once.
     expect(rows().map((el) => el.textContent)).toEqual([
       "Configuration sync", "SYSTEM.md",
       "pieron", "web", "pier-help",
-      "localon", "rtkinstalled by the rtk tool",
+      "localon", "minenot loaded — no default export",
       "demoon",
-      "command-line tools",
+      "toolson", "rtk", "mytoolno assetyours",
     ]);
     expect(chevron("demo").getAttribute("aria-expanded")).toBe("false");
-    // A switched-off resource reads dim; its state is a line in the row, not a tooltip.
+    // A switched-off resource or tool reads dim; its state is a line in the row, not a tooltip.
     expect(row("web")!.className).toContain("text-neutral-400");
+    expect(row("mine")!.className).not.toContain("text-neutral-400");
+    expect(row("mytool")!.className).toContain("text-neutral-400");
     expect(row("rtk")!.className).not.toContain("text-neutral-400");
   });
 
@@ -126,11 +133,18 @@ describe("Settings → Agent", () => {
     expect(rowText("demo")).toBe("demo"); // nothing on any more
   });
 
-  it("draws a locked switch disabled and says whose it is", async () => {
-    row("rtk")!.onclick!();
+  it("opens the one tools pane from the source row or a tool, the picked tool marked", async () => {
+    row("tools")!.onclick!();
     await settled();
-    expect(checkbox().disabled).toBe(true);
-    expect(walk(root).some((el) => el.textContent.startsWith("Switch it under Tools"))).toBe(true);
+    const marked = () => walk(root).filter((el) => el.className.includes("bg-indigo-50") && el.className.includes("max-w-2xl"));
+    expect(walk(root).filter((el) => el.type === "checkbox")).toHaveLength(2);
+    expect(marked()).toHaveLength(0);
+    row("mytool")!.onclick!();
+    await settled();
+    expect(marked().map((el) => el.textContent.startsWith("mytool"))).toEqual([true]);
+    // The tools fold like any source.
+    chevron("tools").onclick!();
+    expect(row("rtk")).toBeUndefined();
   });
 
   it("flips one switch: the PUT names the resource, and both views redraw from the answer", async () => {

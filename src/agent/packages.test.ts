@@ -96,8 +96,7 @@ describe("the registry", () => {
     expect(local.installedPath).toBe(agentDir);
     expect(local.resources).toEqual([
       { kind: "extension", name: "mine", path: join(agentDir, "extensions", "mine.ts"), enabled: false, state: null },
-      // rtk init's file: a local row like any other, its switch the rtk tool's.
-      { kind: "extension", name: "rtk", path: join(agentDir, "extensions", "rtk.ts"), enabled: true, state: "installed by the rtk tool", locked: true },
+      // rtk init's file is the rtk tool's row, not a local one.
       { kind: "skill", name: "x", path: join(agentDir, "skills", "x", "SKILL.md"), enabled: true, state: null },
     ]);
 
@@ -154,9 +153,9 @@ describe("switches", () => {
     expect(settingsJson).toThrow();
   });
 
-  it("refuses to flip rtk.ts: a settings.json pattern would fight the rtk tool's install", async () => {
+  it("has no switch for rtk.ts: a settings.json pattern would fight the rtk tool's install", async () => {
     await expect(store.setEnabled({ source: "local", kind: "extension", path: join(agentDir, "extensions", "rtk.ts"), enabled: false }))
-      .rejects.toMatchObject({ reason: "refused" });
+      .rejects.toMatchObject({ reason: "missing" });
     expect(settingsJson).toThrow();
   });
 
@@ -205,7 +204,7 @@ describe("switches", () => {
     expect(settingsJson()).toEqual({ packages: [pkgDir] });
     // An overridden global resource is the project's row now (Pi: first scope wins).
     const after = await store.list(cwd);
-    expect(row(after.packages, "local").resources.map((r) => r.name)).toEqual(["rtk", "x"]);
+    expect(row(after.packages, "local").resources.map((r) => r.name)).toEqual(["x"]);
     expect(after.packages.find((p) => p.source === "local" && p.scope === "project")?.resources.map((r) => [r.name, r.enabled]))
       .toEqual([["mine", false], ["p", false], ["proj", false]]);
     // Pi's delta: the project's row holds the overridden resource, the global row the rest.

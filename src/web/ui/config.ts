@@ -1,6 +1,7 @@
 // Settings → Agent: one list of everything a session is made of, and one pane
-// to act on the selected item. The agent files and the command-line tools are
-// drawn here; the package registry's panes are packages-pane.ts.
+// to act on the selected item. The agent files and the command-line tools — a
+// source in the package tree, served by ubix rather than Pi — are drawn here;
+// the package registry's panes are packages-pane.ts.
 
 import { ChevronDown, ChevronRight } from "lucide";
 import type { CatalogEntry, ConfigFile, Package } from "../../agent/types.js";
@@ -24,8 +25,10 @@ interface ConfigIndex {
 type Selection =
   | { type: "file"; name: string; readonly: boolean }
   /** One pane for every command-line tool: a row and a switch each, because a
-   *  page per binary is four pages saying the same three facts. */
+   *  page per binary is four pages saying the same three facts. `tool` is that
+   *  pane with one row marked. */
   | { type: "tools" }
+  | { type: "tool"; name: string }
   | { type: "sync" }
   | RegistrySelection;
 
@@ -318,9 +321,30 @@ export function createConfigView(
     return row;
   }
 
-  /** Which package rows are open; a redraw keeps them. Pier's own two start open. */
+  /** Which source rows are open; a redraw keeps them. Pier's own start open. */
   const expanded = new Map<string, boolean>();
-  const isExpanded = (pkg: Package): boolean => expanded.get(pkg.source) ?? (pkg.kind === "pier" || pkg.kind === "local");
+
+  /** A source's row with its chevron, and `children()` under it while open. */
+  function sourceRows(
+    key: string,
+    label: string,
+    row: { active: boolean; dim: boolean; tags: HTMLElement[]; onPick: () => void; openByDefault: boolean },
+    children: () => HTMLElement[],
+  ): HTMLElement[] {
+    const isOpen = expanded.get(key) ?? row.openByDefault;
+    const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
+    if (isOpen) chevron.classList.add("chev-open");
+    chevron.title = `${isOpen ? "Collapse" : "Expand"} ${label}`;
+    chevron.setAttribute("aria-label", chevron.title);
+    chevron.setAttribute("aria-expanded", String(isOpen));
+    chevron.onclick = () => {
+      expanded.set(key, !isOpen);
+      renderNav(lastIndex);
+    };
+    const head = navRow(label, row.active, row.dim, row.onPick, { tags: row.tags, flush: true });
+    const rows = [h("div", `flex items-stretch ${row.active ? "bg-indigo-50" : ""}`, chevron, head)];
+    return isOpen ? [...rows, ...children()] : rows;
+  }
 
   /** A package and, when open, its resources grouped by kind under it. */
   function packageRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
@@ -330,21 +354,18 @@ export function createConfigView(
       tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
     } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
     if (pkg.scope === "project") tags.push(navBadge("project"));
-    // Dim: configured, and not on disk. The built-ins have no install path to speak of.
-    const missing = pkg.installedPath === null && !isBuiltIn(pkg);
-    const isOpen = isExpanded(pkg);
-    const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
-    if (isOpen) chevron.classList.add("chev-open");
-    chevron.title = `${isOpen ? "Collapse" : "Expand"} ${packageLabel(pkg.source)}`;
-    chevron.setAttribute("aria-label", chevron.title);
-    chevron.setAttribute("aria-expanded", String(isOpen));
-    chevron.onclick = () => {
-      expanded.set(pkg.source, !isOpen);
-      renderNav(lastIndex);
-    };
-    const label = navRow(packageLabel(pkg.source), isActive(sel), missing, () => open(sel), { tags, flush: true });
-    const rows = [h("div", `flex items-stretch ${isActive(sel) ? "bg-indigo-50" : ""}`, chevron, label)];
-    if (!isOpen) return rows;
+    return sourceRows(pkg.source, packageLabel(pkg.source), {
+      active: isActive(sel),
+      // Dim: configured, and not on disk. The built-ins have no install path to speak of.
+      dim: pkg.installedPath === null && !isBuiltIn(pkg),
+      tags,
+      onPick: () => open(sel),
+      openByDefault: isBuiltIn(pkg),
+    }, () => resourceRows(pkg, isActive, open));
+  }
+
+  function resourceRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
+    const rows: HTMLElement[] = [];
     // A kind badge only where the name alone does not say which resource this is.
     const names = pkg.resources.map((r) => r.name);
     const ambiguous = new Set(names.filter((n, i) => names.indexOf(n) !== i));
@@ -364,6 +385,26 @@ export function createConfigView(
     return rows;
   }
 
+  /** The managed binaries as one more source: each tool once, dim when off,
+   *  its install error as the second line. */
+  function toolRows(isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
+    const sel: Selection = { type: "tools" };
+    return sourceRows("tools", "tools", {
+      active: isActive(sel),
+      dim: false,
+      tags: catalog.some((t) => t.enabled) ? [onBadge()] : [],
+      onPick: () => open(sel),
+      openByDefault: true,
+    }, () => catalogError
+      ? [h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError)]
+      : catalog.map((t) => {
+        const tsel: Selection = { type: "tool", name: t.name };
+        return navRow(t.name, isActive(tsel), !t.enabled, () => open(tsel), {
+          depth: 1, note: t.binary.error, tags: isCustom(t) ? [navBadge("yours")] : [],
+        });
+      }));
+  }
+
   function renderNav(index: ConfigIndex | null): void {
     if (!index) {
       navList.replaceChildren();
@@ -375,7 +416,7 @@ export function createConfigView(
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name, sel.readonly);
-      else if (sel.type === "tools") openTools();
+      else if (sel.type === "tools" || sel.type === "tool") openTools();
       else if (sel.type === "sync") openSync();
       else if (sel.type === "package") registry.openPackage(sel.source, sel.scope);
       else if (sel.type === "resource") void registry.openResource(sel.source, sel.kind, sel.path);
@@ -398,17 +439,7 @@ export function createConfigView(
     rows.push(navSection("Packages", scope === "global" ? add : undefined));
     if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
     for (const pkg of registry.registry?.packages ?? []) rows.push(...packageRows(pkg, isActive, open));
-    if (scope === "global") {
-      // One row, not one per binary: the tools differ by name and version and
-      // nothing else, so a page each would say the same three facts four times.
-      rows.push(navSection("Tools"));
-      if (catalogError) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError));
-      else {
-        const sel: Selection = { type: "tools" };
-        const on = catalog.filter((t) => t.enabled).length;
-        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), { tags: on ? [onBadge()] : [] }));
-      }
-    }
+    if (scope === "global") rows.push(...toolRows(isActive, open));
     navList.replaceChildren(...rows);
   }
 
@@ -419,7 +450,7 @@ export function createConfigView(
       h(
         "div",
         "flex min-h-0 flex-1 items-center justify-center p-6",
-        empty("Select a file to edit, or a package, extension or skill to switch."),
+        empty("Select a file to edit, or a package, extension, skill or tool to switch."),
       ),
     );
   }
@@ -539,6 +570,7 @@ export function createConfigView(
    *  plus the operator's own blocks. */
   function openTools(note?: SaveOutcome, draft = { name: "", toml: "" }): void {
     paneRequest++;
+    const marked = selection?.type === "tool" ? selection.name : null;
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
 
@@ -570,12 +602,15 @@ export function createConfigView(
       };
       return h(
         "div",
-        "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0",
+        `flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0 ${
+          tool.name === marked ? "rounded bg-indigo-50 ring-8 ring-indigo-50" : ""
+        }`,
         line,
         ...(isCustom(tool) ? [remove] : []),
         box,
       );
     };
+    const rows = catalog.map(row);
 
     // Adding one is declaring it *and* switching it on: nobody writes a block
     // in order to leave it off, and the switch beside it undoes half of that.
@@ -631,7 +666,7 @@ export function createConfigView(
         ),
         catalogError
           ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
-          : h("div", "flex max-w-2xl flex-col", ...catalog.map(row)),
+          : h("div", "flex max-w-2xl flex-col", ...rows),
         h(
           "div",
           "flex max-w-2xl flex-col gap-2 border-t border-neutral-200 pt-4",
@@ -651,6 +686,8 @@ export function createConfigView(
         status,
       ),
     );
+    // The row picked in the nav, in view even below a long list.
+    rows[catalog.findIndex((t) => t.name === marked)]?.scrollIntoView({ block: "nearest" });
   }
 
   /** One switch, flipped: a delta, never the list this page computed — two

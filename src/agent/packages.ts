@@ -32,10 +32,9 @@ const log = logger("packages");
 const CHECK_EVERY_MS = 24 * 60 * 60_000;
 const KINDS = { extensions: "extension", skills: "skill" } as const;
 type ArrayKey = keyof typeof KINDS;
-/** Written by `rtk init -g --agent pi` (the rtk block's `post_install` hook): a `local` file whose
- *  switch is the rtk tool's, so a settings.json pattern would fight the tool. */
+/** Written by `rtk init -g --agent pi` (the rtk block's `post_install` hook): the rtk tool's, so it
+ *  is left out of `local` — the Console switches it as that tool, and a settings.json pattern would fight it. */
 const RTK_FILE = join("extensions", "rtk.ts");
-const RTK_STATE = "installed by the rtk tool";
 
 /** The built-in `pier` package: its switches are pier.db lists, none of it settings.json. */
 export interface PierPackage {
@@ -147,12 +146,11 @@ export class PiPackageStore implements PackageStore {
     row("local", "local", "global", this.agentDir);
     for (const key of Object.keys(KINDS) as ArrayKey[]) {
       for (const r of resolved[key]) {
+        if (r.path === rtkPath) continue;
         const own = r.metadata.origin === "top-level";
         const scope = r.metadata.scope === "project" ? "project" : "global";
-        const resource = resourceRow(KINDS[key], r);
-        if (r.path === rtkPath) Object.assign(resource, { state: RTK_STATE, locked: true });
         row(own ? "local" : r.metadata.source, own ? "local" : kindOf(r.metadata.source), scope, r.metadata.baseDir ?? null)
-          .resources.push(resource);
+          .resources.push(resourceRow(KINDS[key], r));
       }
     }
     // Configured but unresolved (not installed, or empty): still a row.
@@ -298,7 +296,6 @@ export class PiPackageStore implements PackageStore {
   async setEnabled(change: PackageSwitch): Promise<PackageResource> {
     const { source, kind, path, enabled, cwd } = change;
     const { pkg, resource } = await this.#find(change);
-    if (resource.locked) throw new PackageError("refused", `${resource.name} is ${resource.state} — its switch is under Tools`);
     if (pkg.kind === "pier") {
       this.pier.settings.setSkillsOff(withName(this.pier.settings.get().skillsOff, resource.name, !enabled));
     } else {
