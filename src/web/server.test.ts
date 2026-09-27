@@ -97,7 +97,7 @@ const SETTINGS_JSON = {
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
-  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], status: () => ({ text: "Nothing open.", sessions: {} }) });
+  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], status: () => ({ text: "Nothing open.", sessions: {} }), defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }) });
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
@@ -2345,6 +2345,7 @@ describe("the continuous conversation's routes", () => {
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
       ledger, status: () => ({ text: "Nothing open.", sessions: {} }), now: () => clock.now,
+      defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }),
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),

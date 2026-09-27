@@ -133,6 +133,7 @@ const chain = new MainChain(db, {
   factory, router, home: pierPath("home"),
   ledger: (ids, since) => tasks.ledger(ids, since),
   status: (now) => openItemsStatus(tasks.openItems(now), now),
+  defaults: () => piConfig.readDefaults(),
 });
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(taskStore, factory, router, hub, {

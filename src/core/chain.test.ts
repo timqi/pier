@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { AgentDefaults } from "../agent/types.js";
 import { openDb } from "../db.js";
 import { MainChain } from "./chain.js";
 import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
@@ -20,6 +21,8 @@ function rig({
   runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
   head = undefined as string | undefined,
 } = {}) {
+  // Settings' default model and reasoning, as the operator last saved them; a function may throw.
+  const defaults: { value: AgentDefaults | (() => AgentDefaults) } = { value: { defaultModel: null, defaultThinkingLevel: null } };
   const home = join(mkdtempSync(join(tmpdir(), "pier-chain-")), "home");
   const db = openDb(":memory:");
   const clock = { now: Date.now() };
@@ -63,6 +66,7 @@ function rig({
       status.asked.push(now);
       return { text: status.text, sessions: status.sessions };
     },
+    defaults: async () => (typeof defaults.value === "function" ? defaults.value() : defaults.value),
     now: () => clock.now,
   });
   /** A head already in the chain, as a restart finds it: on disk, not live. */
@@ -74,7 +78,7 @@ function rig({
     return s;
   };
   const say = (text: string) => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" });
-  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, status };
+  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -145,6 +149,33 @@ describe("the continuous conversation's chain", () => {
     // The message went to the new head, not the one it was typed against.
     expect(r.sessions.get("m1")!.prompts[0]).toContain("new day");
     expect(r.sessions.get("h1")!.prompts).toEqual([]);
+  });
+
+  it("starts every new head — first, rotated, /new — on the Settings default model and reasoning, read each time", async () => {
+    const r = rig();
+    r.defaults.value = { defaultModel: { provider: "p", id: "default" }, defaultThinkingLevel: "medium" };
+    await r.say("hello");
+    expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "medium" }]);
+
+    // The head was switched by hand; the next head still starts from Settings, as saved now.
+    r.sessions.get("m1")!.setThinkingLevel("high");
+    r.defaults.value = { defaultModel: { provider: "p", id: "newer" }, defaultThinkingLevel: "xhigh" };
+    r.clock.now += 2 * IDLE_MS;
+    expect(await r.say("later")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "xhigh" });
+
+    // Only the reasoning set: the model is the previous head's.
+    r.defaults.value = { defaultModel: null, defaultThinkingLevel: "minimal" };
+    expect(await r.say("/new")).toMatchObject({ sessionId: "m3", command: "new" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "minimal" });
+  });
+
+  it("keeps the previous head's model and effort when Settings cannot be read", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: { provider: "p", id: "strong" }, thinkingLevel: "high" });
+    r.defaults.value = () => { throw new Error("settings.json is not JSON"); };
+    expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
   });
 
   it("starts a new head, named lost, when the head is gone from Pi, and drops the gone one from the chain", async () => {

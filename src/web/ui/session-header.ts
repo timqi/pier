@@ -109,7 +109,7 @@ export function renderHeader(): void {
   // not the head's title. A detached session not listed yet — a task run's
   // own, opened from its run card — is named by its id.
   chatTitle.textContent = conversation
-    ? "Conversation"
+    ? "Pier"
     : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session");
   // The title is what the panel is *about*, so it is also the way in.
   chatTitle.disabled = !s;
@@ -430,5 +430,5 @@ export function barMenu(anchor: HTMLElement): void {
       },
     },
   ];
-  openMenu(anchor, items, conversation ? "Conversation" : s ? (s.title ?? untitled(s.cwd)) : "Session");
+  openMenu(anchor, items, conversation ? "Pier" : s ? (s.title ?? untitled(s.cwd)) : "Session");
 }

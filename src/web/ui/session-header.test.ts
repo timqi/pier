@@ -122,18 +122,18 @@ it("reads the context against where the session compacts", async () => {
 
 // The conversation rotates sessions and spans topics: the header names it as
 // its own name, whatever the head was titled; every other session keeps its own.
-it("titles the continuous conversation Conversation, other sessions by their own title", () => {
+it("titles the continuous conversation Pier, other sessions by their own title", () => {
   const title = () => fake(document.querySelector("#chat-title")).textContent;
   current = { ...session(0), title: "Worker展示功能" };
   header.renderHeader();
   expect(title()).toBe("Worker展示功能");
   conversation = true;
   header.renderHeader();
-  expect(title()).toBe("Conversation");
+  expect(title()).toBe("Pier");
   // Before its first session exists there is no row to title it either.
   current = undefined;
   header.renderHeader();
-  expect(title()).toBe("Conversation");
+  expect(title()).toBe("Pier");
 });
 
 const title = () => fake(document.querySelector("#chat-title"));

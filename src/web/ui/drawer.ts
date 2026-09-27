@@ -134,7 +134,7 @@ export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionIn
 /** The drawer's session rows, for the palette's Running group. */
 export const running = (): SessionInfo[] => inProgress(deps.sessions(), deps.chain());
 
-/** The conversation's head row, whose dot the `‹` and the palette's Conversation row wear. */
+/** The conversation's head row, whose dot the `‹` and the palette's Pier row wear. */
 export const headSession = (): SessionInfo | undefined => {
   const head = deps.chain()[0]?.sessionId;
   return deps.sessions().find((s) => s.id === head);

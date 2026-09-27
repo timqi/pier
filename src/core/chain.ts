@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import { day } from "./identity.js";
@@ -27,6 +28,8 @@ export interface ChainDeps {
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
   /** The open items' one text, for `/status` and the seed; `sessions`, run id → session id, for the card to link. */
   status: (now: number) => { text: string; sessions: Record<string, string> };
+  /** The operator's Settings default model and reasoning, read at each new head. */
+  defaults: () => Promise<AgentDefaults>;
   now?: () => number;
 }
 
@@ -168,11 +171,17 @@ export class MainChain {
       log.warn("the continuous conversation's next session could not be seeded", err);
       throw new Error(`a new session could not start — its seed failed: ${String(err)}`);
     });
+    // An unset or unreadable default keeps the previous head's choice, then Pi's model at low effort.
+    const defaults = await this.deps.defaults().catch((err: unknown) => {
+      log.warn("the Settings defaults could not be read — the next main session keeps the previous one's model", err);
+      return { defaultModel: null, defaultThinkingLevel: null };
+    });
+    const model = defaults.defaultModel ?? open?.model;
     mkdirSync(this.deps.home, { recursive: true });
     const session = await this.deps.factory.create({
       cwd: this.deps.home,
-      ...(open?.model ? { model: open.model } : {}),
-      thinking: open?.thinkingLevel ?? "low",
+      ...(model ? { model } : {}),
+      thinking: defaults.defaultThinkingLevel ?? open?.thinkingLevel ?? "low",
     });
     transact(this.db, () => {
       this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);

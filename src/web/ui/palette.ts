@@ -209,13 +209,13 @@ function render(): void {
   });
   // The one way back from anywhere, so it is first whatever else is listed.
   const head = headSession();
-  const conversation: Target[] = !q || hit("conversation")
-    ? [{ icon: MessagesSquare, label: "Conversation", detail: "", open: open(deps.openContinuous), ...(head ? { session: head } : {}) }]
+  const conversation: Target[] = !q || hit("pier conversation")
+    ? [{ icon: MessagesSquare, label: "Pier", detail: "", open: open(deps.openContinuous), ...(head ? { session: head } : {}) }]
     : [];
   const consoleRows = CONSOLE_TARGETS.filter((t) => !q || hit(`${t.label} ${t.detail}`))
     .map(({ name, icon, label, detail }) => ({ icon, label, detail, open: open(() => deps.openConsole(name)) }));
 
-  // An untitled first section is the Conversation row alone.
+  // An untitled first section is the Pier row alone.
   const sections: [string, (Target | HTMLElement)[]][] = [["", conversation]];
   if (!q) {
     sections.push(

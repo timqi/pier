@@ -79,7 +79,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 | User message, head ≥ 1h (`CHAIN_IDLE_MS`) since its last user message, or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`; the gone head leaves `main_chain` |
-| Rotation | the new head keeps the previous head's model and thinking (`first`/`lost`: default at `low`) and gets one `session-seed` system input, mode `append` (no turn) |
+| Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn) |
 | Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
@@ -97,7 +97,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
 - The head's system prompt is the same bytes every turn: the clock and the
   sender ride the user message, the ledger the seed.
-- A head keeps its model and thinking for its life; a rotation carries them.
+- A head keeps its model and thinking for its life; the next head starts from Settings, not from it.
 - Every system input appends; the head requests the 1h TTL, which is
   `CHAIN_IDLE_MS`.
 - Accepted one-time misses: a rotation, a settings change that edits the
