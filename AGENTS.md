@@ -133,7 +133,7 @@ exists to catch.
 | root `src/*.ts` | 3.35k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix, the vault — store, socket and injector; the vault, the CLI socket and `pier task`'s dispatch are the right things in there, as is the accent preset table, the one server-side copy of what the stylesheet paints |
 | `websearch/` | 1.2k | two hosted tools on two wire formats, the language audit, the fetched copy on disk, the `/web` validator and `pier web`'s argv |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
-| channel adapter file | 400 | transport, render and panel counted separately |
+| channel adapter file | 450 | transport, render and panel counted separately; the home chat gives each adapter a second target (the main flow beside the thread) on every inbound and outbound path |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
 
