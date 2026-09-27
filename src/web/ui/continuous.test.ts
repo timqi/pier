@@ -1,4 +1,4 @@
-// The drawer beside the continuous conversation, drawn on index.html: the
+// The status panel beside the continuous conversation, drawn on index.html: the
 // conversation's own sessions are the bar, not rows; what is in progress is,
 // and so are the open items' live runs no session row stands for.
 import { beforeEach, expect, it, vi } from "vitest";
@@ -53,7 +53,7 @@ it("leaves the conversation's own sessions out of In progress", () => {
 });
 
 // Needs you = unread: a finished lead stays while unread and leaves once viewed;
-// In progress is the palette's Running set, less the chain, and nothing else.
+// In progress is the live sessions less the chain, and nothing else.
 it("keeps a finished lead in progress while unread and drops it once viewed", () => {
   const lead = (id: string, over: Partial<Row> = {}) => row(id, { phase: "design", ...over });
   const rows = [

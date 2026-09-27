@@ -1,7 +1,6 @@
-// The In progress drawer: what is running and what needs you, counted on the
-// bar's status chip and listed in a panel under it, and the full list behind
-// it — `/status` as one card from ⋯. The palette borrows its order, dots and
-// Running set.
+// The status panel: what is running and what needs you, counted on the bar's
+// status chip, listed in the panel it opens, over `/status`'s open items as
+// one card. The palette borrows the dots.
 
 import { getJson } from "./api.js";
 import { $, h, relTime } from "./dom.js";
@@ -124,15 +123,12 @@ const tag = (text: string, title: string): HTMLElement[] => {
   return [el];
 };
 
-/** The palette's Running set, less the conversation's own sessions, which the
- *  bar stands for; a finished lead stays while unread and leaves once viewed. */
+/** The live sessions, less the conversation's own, which the bar stands for;
+ *  a finished lead stays while unread and leaves once viewed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
   return list.filter((s) => isLive(s) && !members.has(s.id));
 }
-
-/** The drawer's session rows, for the palette's Running group. */
-export const running = (): SessionInfo[] => inProgress(deps.sessions(), deps.chain());
 
 /** The conversation's head row, whose dot the `‹` and the palette's Pier row wear. */
 export const headSession = (): SessionInfo | undefined => {
@@ -199,6 +195,8 @@ const runRow = (r: OpenRun): HTMLElement => {
 /** The panel's list while it is open; a render fills it in place. */
 let list: HTMLElement | null = null;
 let rows: HTMLElement[] = [];
+/** Rows, or open items with nothing running: the chip is there, and opens the panel. */
+let shown = false;
 
 /** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
@@ -219,38 +217,55 @@ export function renderDrawer(): void {
   // The app icon counts the chip's set plus the conversation's own unread reply,
   // which the bar stands for instead of a row and is the one most worth a badge.
   setUnreadBadge(waiting + (headSession()?.unread ? 1 : 0));
-  const text = [...(busy ? [`${busy} running`] : []), ...(waiting ? [`${waiting} needs you`] : [])].join(" · ");
+  // Open items that wait with nothing running still get a way in to their stages.
+  const items = deps.open()?.items.length ?? 0;
+  const counts = [...(busy ? [`${busy} running`] : []), ...(waiting ? [`${waiting} needs you`] : [])];
+  const text = (counts.length ? counts : items ? [`${items} open`] : []).join(" · ");
+  shown = !!text;
   chip.textContent = text;
   chip.classList.toggle("hidden", !text);
   chip.classList.toggle("block", !!text);
   chip.classList.toggle("text-amber-700", waiting > 0);
   chip.classList.toggle("text-neutral-600", waiting === 0);
   if (list?.isConnected && !list.closest("[inert]")) {
-    if (!rows.length) closeMenu();
-    else fill(list);
+    if (!shown) closeMenu();
+    else {
+      fill(list);
+      if (status) void fillStatus(status);
+    }
   }
-  if (status?.isConnected && !status.closest("[inert]")) void fillStatus(status);
-  refreshPalette(); // it draws the same rows, from the same list
+  refreshPalette(); // its dots read the same sessions
 }
 
-/** Refill keeping the focused row focused: Escape has to find its way back. */
+/** Refill keeping the focused row focused: Escape has to find its way back.
+ *  No rows: the In progress head goes, and the Open items head loses its gap. */
 function fill(into: HTMLElement): void {
   const focusId = document.activeElement?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
   into.replaceChildren(...rows);
+  into.previousElementSibling?.classList.toggle("hidden", !rows.length);
+  into.nextElementSibling?.classList.toggle("mt-2", rows.length > 0);
   if (!focusId) return;
   rows.find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
 }
 
-/** Nothing to list is the chip's absence, not an empty panel. */
+const HEAD = "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500";
+
+/** Nothing to show is the chip's absence, not an empty panel. */
 export function openDrawer(): void {
   if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
-  if (!rows.length) return;
+  if (!shown) return;
   const ul = h("ul", "");
   ul.dataset.list = "";
+  const card = runCard("border-l-cyan-500");
+  card.classList.add("px-4"); // the transcript's fold-row padding, here the card's own
+  card.append(runBody("Loading…"));
+  const panel = h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm",
+    h("div", HEAD, "In progress"), ul, h("div", HEAD, "Open items"), card);
   fill(ul);
   list = ul;
-  const panel = h("div", "w-80 max-w-full font-sans text-sm", h("div", "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500", "In progress"), ul);
-  openPanel(chip, panel).setAttribute("aria-label", "In progress");
+  status = card;
+  void fillStatus(card);
+  openPanel(chip, panel).setAttribute("aria-label", "Status");
 }
 
 export function initDrawer(d: DrawerDeps): void {
@@ -260,8 +275,7 @@ export function initDrawer(d: DrawerDeps): void {
   chord("shift+p", openDrawer, modalOpen);
 }
 
-// --- ⋯ → Status ------------------------------------------------------------------------
-// `/status`'s own answer (MainChain.status), drawn as the chat draws that card.
+// --- the open items: `/status`'s own answer (MainChain.status), drawn as the chat draws that card.
 
 /** The card while its panel is open; a render refetches it in place. */
 let status: HTMLElement | null = null;
@@ -280,14 +294,4 @@ async function fillStatus(card: HTMLElement): Promise<void> {
     });
   } else body.classList.add("text-red-600");
   card.replaceChildren(body);
-}
-
-/** `head` is the caller's: back to ⋯, the title, close. */
-export function openStatus(anchor: HTMLElement, head: HTMLElement): void {
-  const card = runCard("border-l-cyan-500");
-  card.classList.add("px-4"); // the transcript's fold-row padding, here the card's own
-  card.append(runBody("Loading…"));
-  status = card;
-  void fillStatus(card);
-  openPanel(anchor, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans", head, card)).setAttribute("aria-label", "Status");
 }

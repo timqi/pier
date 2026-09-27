@@ -1,5 +1,5 @@
-// The ⌘K palette on index.html: the Pier row leads, then Running (the
-// drawer's rows), Recent and Actions; a query keeps Pier first while it matches.
+// The ⌘K palette on index.html: the Pier row leads, then Recent (what the
+// status panel does not list) and Actions; a query keeps Pier first while it matches.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FakeElement, installPage, type FakeDocument } from "./dom.testkit.js";
 
@@ -7,7 +7,7 @@ type Row = import("./drawer.js").SessionInfo;
 const row = (id: string, over: Partial<Row> = {}): Row =>
   ({ id, cwd: "/w", title: id, createdAt: 0, state: "idle", unread: false, channel: "web", activeRuns: 0, ...over });
 
-const state = vi.hoisted(() => ({ sessions: [] as Row[], running: [] as Row[], head: undefined as Row | undefined }));
+const state = vi.hoisted(() => ({ sessions: [] as Row[], head: undefined as Row | undefined }));
 vi.mock("./api.js", () => ({ getJson: vi.fn(() => new Promise(() => {})) }));
 vi.mock("./chat.js", () => ({ revealTurn: vi.fn() }));
 vi.mock("./menu.js", () => ({ listStep: vi.fn(), menuOpen: () => false }));
@@ -16,7 +16,6 @@ vi.mock("./drawer.js", () => ({
   headSession: () => state.head,
   isLive: (s: Row) => s.state === "streaming",
   phaseTag: () => [],
-  running: () => state.running,
   stateDot: () => [],
 }));
 
@@ -41,16 +40,15 @@ const list = () => doc.querySelector("#palette-list")!;
 /** Section heads and rows (label, then the cwd's basename), in order. */
 const lines = () => list().children.map((el) => (el.classList.contains("palette-row") ? el.textContent.trim() : `# ${el.textContent.trim()}`));
 
-it("leads with the Pier row, then the drawer's rows, the rest newest first, and Settings", () => {
+it("leads with the Pier row, then the sessions not live newest first, and Settings", () => {
   const head = row("h1", { createdAt: 9 });
   state.head = head;
-  state.running = [row("lead", { state: "streaming", createdAt: 5 })];
-  state.sessions = [head, ...state.running, row("member", { createdAt: 3 }), row("old", { createdAt: 1 })];
+  state.sessions = [head, row("lead", { state: "streaming", createdAt: 5 }), row("member", { createdAt: 3 }), row("old", { createdAt: 1 })];
   palette.togglePalette();
   const got = lines();
   expect(got[0]).toMatch(/^Pier/);
   expect(got.map((l) => l.replace(/\d.*$/, ""))).toEqual([
-    expect.stringMatching(/^Pier/), "# Running", "leadw", "# Recent", "memberw", "oldw", "# Actions", expect.stringMatching(/^Settings/),
+    expect.stringMatching(/^Pier/), "# Recent", "memberw", "oldw", "# Actions", expect.stringMatching(/^Settings/),
   ]);
   list().children[0]!.onclick?.();
   expect(openContinuous).toHaveBeenCalledOnce();

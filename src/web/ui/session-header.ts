@@ -7,7 +7,7 @@ import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
-import { headSession, openStatus, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { togglePalette } from "./palette.js";
@@ -396,13 +396,8 @@ export function barMenu(anchor: HTMLElement): void {
       },
     }] : []),
     {
-      label: "Status",
-      hint: "/status",
-      onSelect: () => openStatus(anchor, panelHead(anchor, "Status", "Close status")),
-    },
-    {
       label: "Session info",
-      separatorBefore: true,
+      separatorBefore: conversation,
       onSelect: () => s && sessionInfo(anchor, s, () => barMenu(anchor)),
       ...later,
     },

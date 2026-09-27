@@ -167,21 +167,22 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - Auto-scroll sticks to the bottom only when already near it; own sends
   force-scroll.
 
-### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
+### Bar and status panel (`session-header.ts`, `drawer.ts`)
 
 - The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
-- The status chip reads `N running · M needs you` and opens In progress; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; running counts the drawer's other rows. Absent at zero, and the drawer cannot open. The app icon badge counts the needs-you rows plus the conversation's own unread reply.
+- The status chip reads `N running · M needs you` and opens the status panel; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; running counts the other In progress rows. With no rows but open items it reads `K open`; with neither it is absent and the panel cannot open. The app icon badge counts the needs-you rows plus the conversation's own unread reply.
 - Context chip: Pier shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
-- The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings; Search is shown on Pier only. Session info and model actions are disabled before the first reply.
-- **Status** opens `/status`'s answer (`GET /api/continuous/status`) as one `system-card` in the drawer's placement, headed ← back to ⋯, Status, ✕: the same text and body as the transcript's `/status` card, each `run <id8>…` with a session opening it and closing the panel; a failed read is said in the card. Refetched in place while open on `sessions-changed`, `task-run-changed` and `open-items-changed`; it posts nothing to the transcript, typing `/status` does.
-- **In progress** lists sessions outside Pier and runs not represented by a session row. A session is in it while streaming, while a run targets it or while runs it launched are in flight (green; sky when only subagents are), or while its last turn is unread (amber); a lead whose run is queued or whose design waits on Finalize is grey, as is a run with no session yet. A failed run's callback reaches the head, so a failure is the head's unread, never a row. Rows: name · `phase` tag · dot, newest first by birth, from `GET /api/sessions` and `GET /api/continuous/open`'s live runs, re-read on `sessions-changed` and `open-items-changed`.
-- A row opens the session in the column (`#/session/<id>`) and closes the drawer; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
-- The drawer is a 20rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
-- Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
+- The ⋯ menu contains Search ⌘K, Session info, Browse files, Model & reasoning…, and Settings; Search is shown on Pier only. Session info and model actions are disabled before the first reply.
+- The status panel is the one place the web shows what is going on: **In progress**, the live rows code computes, over **Open items**, the head's stages as `/status` words them.
+- **In progress** (its head hidden when it has no rows) lists sessions outside Pier and runs not represented by a session row. A session is in it while streaming, while a run targets it or while runs it launched are in flight (green; sky when only subagents are), or while its last turn is unread (amber); a lead whose run is queued or whose design waits on Finalize is grey, as is a run with no session yet. A failed run's callback reaches the head, so a failure is the head's unread, never a row. Rows: name · `phase` tag · dot, newest first by birth, from `GET /api/sessions` and `GET /api/continuous/open`'s live runs, re-read on `sessions-changed` and `open-items-changed`.
+- **Open items** is `/status`'s answer (`GET /api/continuous/status`) as one `system-card`: the same text and body as the transcript's `/status` card, each `run <id8>…` with a session opening it and closing the panel; a failed read is said in the card. Refetched in place while open on `sessions-changed`, `task-run-changed` and `open-items-changed`; it posts nothing to the transcript, typing `/status` does.
+- A row opens the session in the column (`#/session/<id>`) and closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
+- The panel is a 32rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
+- Counts and rows share `drawer.ts` state; session and open-item changes refresh the panel and the palette's dots.
 
 ### Search palette (`palette.ts`, ⌘K)
 
-- Empty query: Pier, Running, Recent and Actions. Pier is always first, with the head's dot — the one way back from anywhere. Running is exactly the drawer's rows; Recent is everything else (finished leads, IM sessions, earlier chain members); Actions is Settings and its topics. On a phone the palette is the ⋯ menu's first item.
+- Empty query: Pier, Recent and Actions; what is running is the status panel's, not the palette's. Pier is always first, with the head's dot — the one way back from anywhere. Recent is the sessions not live (finished leads, IM sessions, earlier chain members); Actions is Settings and its topics. On a phone the palette is the ⋯ menu's first item.
 - Typed query: Pier when "pier" or "conversation" matches, Settings actions, named sessions, then content hits from `GET /api/search?q=`. Content hits search user messages and replies, not steps.
 - Whitespace splits the query into terms; every term must match. Local rows render immediately and content search starts after 80ms.
 - A content hit opens the session at the matched turn when it remains in the transcript.
@@ -191,7 +192,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 - One menu primitive allows one open panel at a time. Outside pointerdown, wheel or focus, Esc, and a scroll that moves its anchor close it; the page's own scrolling (the transcript pinning a reply) does not. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
-- The bar menu provides Search, Status, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- The bar menu provides Search, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 
 ### Chat pane (`chat.ts`, `composer.ts`)
@@ -217,7 +218,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events and folded like a callback —
   `✓ run · <state> · <run name> · <mode> · <duration> · <id8>`, opening
-  to the prompt, kept open across updates; the In progress drawer lists the
+  to the prompt, kept open across updates; the status panel's In progress lists the
   runs still in flight. A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the
   message's creation, delivery and expiry each emit `task-status`. Delegation and

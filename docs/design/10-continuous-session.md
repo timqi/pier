@@ -21,10 +21,10 @@ delivery.
 
 - The run that made a session fixes its role for the session's life
   (`createdRole`, `TaskStore.roleOf`); when its session appears in In progress is
-  [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
+  [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
   (`LEAD`), never on disk; its session appears in In progress as described in
-  [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
+  [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes the head a callback (§Milestones); the head launches a new build lead on
   doc, its prompt opening `Build per `.
@@ -136,9 +136,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run and listed design that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the `/status` card, the ⋯ Status panel (the same text,
-  `GET /api/continuous/status`) and the In progress drawer
-  (`GET /api/continuous/open`), [03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts).
+- Surfaces: the `/status` card and the web's status panel, opened by the bar's
+  status chip — the same text (`GET /api/continuous/status`) under the In progress
+  rows (`GET /api/continuous/open`'s live runs), [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 
 ## Chat commands
 
@@ -181,11 +181,11 @@ The tables are `main_chain` and `open_items` in `db.ts`.
 
 ## Web
 
-The routes (`/api/continuous*`), the In progress drawer, the pane and its
+The routes (`/api/continuous*`), the status panel, the pane and its
 composer are [03](03-web-workbench.md)'s. An earlier member is read off disk,
 never opened.
 
-- In progress is the palette's Running set less the sessions making up the head;
+- In progress is the live sessions less the sessions making up the head;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
 - The head's ⋯ menu is Session info, Browse files,
   Model & reasoning; no Rename or New session here.

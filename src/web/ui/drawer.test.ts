@@ -1,6 +1,6 @@
-// The In progress drawer on index.html: its order and marks, the status chip's
-// counts, and the panel the chip opens.
-import { beforeEach, expect, it, vi } from "vitest";
+// The status panel on index.html: its order and marks, the status chip's
+// counts, and the panel the chip opens — the rows over `/status`'s card.
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ChainMember } from "../../core/types.js";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
 
@@ -36,8 +36,13 @@ let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
 const select = vi.fn();
+/** `/status`'s answers, in order; an empty queue answers "Nothing open.". */
+let answers: Response[] = [];
+const fetch = vi.fn(async () => answers.shift() ?? Response.json({ text: "Nothing open.", sessions: {} }));
 
 beforeEach(async () => {
+  answers = [];
+  vi.stubGlobal("fetch", fetch);
   vi.resetModules();
   vi.clearAllMocks();
   chords.clear();
@@ -49,6 +54,7 @@ beforeEach(async () => {
   open = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open });
 });
+afterEach(() => vi.unstubAllGlobals());
 
 const chip = () => doc.querySelector("#status-chip")!;
 const panelRows = () => doc.querySelectorAll(".session-open");
@@ -89,6 +95,13 @@ it("counts running and needs-you on the chip, omitting a zero half, and is absen
   sessions = [...sessions, row("run", { state: "streaming" })];
   drawer.renderDrawer();
   expect(chip().textContent).toBe("1 running · 2 needs you");
+
+  // Open items with nothing live: the chip still leads to their stages.
+  sessions = [];
+  open = { items: [{ problem: "a", stage: "waiting on you", runs: [] }, { problem: "b", stage: "", runs: [] }], unlisted: [], designs: [] };
+  drawer.renderDrawer();
+  expect(chip().textContent).toBe("2 open");
+  expect(chip().classList.contains("text-neutral-600")).toBe(true);
 });
 
 // The head is the bar, not a row: it never counts on the chip, but its unread
@@ -127,7 +140,7 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   expect(list.querySelectorAll(".session-open").map((b) => b.textContent.trim())).toEqual(["c", "b", "a"]);
 });
 
-it("does not open with nothing to list, and closes when its rows run out", () => {
+it("does not open with nothing to show, and closes when it runs out", () => {
   drawer.renderDrawer();
   drawer.openDrawer();
   expect(menu.openPanel).not.toHaveBeenCalled();
@@ -140,16 +153,21 @@ it("does not open with nothing to list, and closes when its rows run out", () =>
   expect(menu.closeMenu).toHaveBeenCalledOnce();
 });
 
-// ⋯ → Status: `/status`'s own text in the chat's card, a named run opening its
-// session, refetched while open, a failed read said in the card.
-it("draws /status's text as its card and refetches it while open", async () => {
-  const answers: Response[] = [];
-  const fetch = vi.fn(async () => answers.shift()!);
-  vi.stubGlobal("fetch", fetch);
+// Under the rows, `/status`'s own text in the chat's card: a named run opens
+// its session, refetched while open, a failed read said in the card.
+it("draws /status's text as its card under the rows and refetches it while open", async () => {
   const text = "Open\n- Bar — building (running) · run r1abcdef… running 1m";
   answers.push(Response.json({ text, sessions: { r1abcdefgh: "s-r1" } }));
-  drawer.openStatus(document.createElement("button"), document.createElement("header"));
-  const card = () => fake(menu.openPanel.mock.lastCall![1]).querySelectorAll(".system-card");
+  open = { items: [{ problem: "Bar", stage: "building", runs: [] }], unlisted: [], designs: [] };
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  const panel = () => fake(menu.openPanel.mock.lastCall![1]);
+  const card = () => panel().querySelectorAll(".system-card");
+  // No rows: the In progress head is hidden and the Open items head sits at
+  // the top without its gap — the open items are the panel.
+  const list = () => panel().querySelector("[data-list]")!;
+  expect(list().previousElementSibling!.classList.contains("hidden")).toBe(true);
+  expect(list().nextElementSibling!.classList.contains("mt-2")).toBe(false);
   expect(card()).toHaveLength(1);
   expect(card()[0]!.textContent).toBe("Loading…");
   await vi.waitFor(() => expect(card()[0]!.textContent).toBe(text));
@@ -159,14 +177,16 @@ it("draws /status's text as its card and refetches it while open", async () => {
   expect(menu.closeMenu).toHaveBeenCalled();
   expect(select).toHaveBeenCalledWith("s-r1");
 
-  answers.push(Response.json({ text: "Nothing open.", sessions: {} }));
-  open = { items: [], unlisted: [], designs: [] };
+  answers.push(Response.json({ text: "Open\n- Bar — merged", sessions: {} }));
+  open = { items: [{ problem: "Bar", stage: "merged", runs: [] }], unlisted: [], designs: [] };
   drawer.renderDrawer();
-  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("Nothing open."));
+  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("Open\n- Bar — merged"));
 
   answers.push(Response.json({ error: "database is locked" }, { status: 500 }));
   sessions = [row("a", { state: "streaming" })];
   drawer.renderDrawer();
   await vi.waitFor(() => expect(card()[0]!.textContent).toBe("database is locked"));
-  vi.unstubAllGlobals();
+  expect(list().previousElementSibling!.classList.contains("hidden")).toBe(false);
+  expect(list().nextElementSibling!.classList.contains("mt-2")).toBe(true);
+  expect(panelRows().map((b) => b.textContent.trim())).toEqual(["a"]);
 });

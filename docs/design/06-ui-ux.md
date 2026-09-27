@@ -39,8 +39,8 @@ updates this document.
 ## Layout
 
 - **One column**: the conversation fills the width without a permanent rail.
-- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens In progress, its amber `needs you` only for a design awaiting Finalize or a turn the operator sent that finished unseen; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
-- **In progress**: a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
+- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` only for a design awaiting Finalize or a turn the operator sent that finished unseen; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
+- **Status panel**: In progress over the open items, a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
 - **Settings and Files**: overlays that return to their origin with ✕ or Esc. Settings' head contains the version link and theme toggle.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.
 - **Palette**: solid panel with floating-chrome edge and raised shadow; flat

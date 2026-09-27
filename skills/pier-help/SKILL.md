@@ -31,7 +31,7 @@ truth.
 
 ## Pier
 
-- Pier is one conversation: the status chip opens **In progress**; the rest is in ⌘K. IM is unchanged.
+- Pier is one conversation: the status chip opens the status panel — what is running over the open items; the rest is in ⌘K. IM is unchanged.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
   session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
   and the last exchanges.
@@ -39,8 +39,8 @@ truth.
   designs with the user; once the user finalizes, a new build lead builds it
   with workers — each its own session, taking messages directly.
 - `/status` alone in the composer answers with the open items — each problem,
-  its stage and its runs — with no model call; In progress shows
-  only what is running or queued, so `/status` is the full list. `/new` starts
+  its stage and its runs — with no model call; the web's status panel shows
+  the same list under what is running or queued. `/new` starts
   a fresh session now, `/stop` stops the reply in progress.
 
 ## Files and images the user sends

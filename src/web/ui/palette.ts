@@ -7,7 +7,7 @@ import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
 import { listStep, menuOpen } from "./menu.js";
-import { headSession, isLive, phaseTag, running, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, isLive, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { chord } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
@@ -219,7 +219,6 @@ function render(): void {
   const sections: [string, (Target | HTMLElement)[]][] = [["", conversation]];
   if (!q) {
     sections.push(
-      ["Running", running().map(sessionRow)],
       ["Recent", sessions.filter((s) => !isLive(s) && s.id !== head?.id).slice(0, RECENT).map(sessionRow)],
       ["Actions", consoleRows],
     );
@@ -272,7 +271,7 @@ function render(): void {
   setActive(Math.min(active, Math.max(0, rows.length - 1)));
 }
 
-/** Re-drawn by the drawer when the sessions change under an open palette. */
+/** Re-drawn by the status panel when the sessions change under an open palette. */
 export function refreshPalette(): void {
   if (dialog.open) render();
 }

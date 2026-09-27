@@ -17,12 +17,11 @@ vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./chat.js", () => ({ appendTurn: vi.fn() }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
 vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
-const drawer = vi.hoisted(() => ({ head: undefined as unknown, openStatus: vi.fn() }));
+const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
 vi.mock("./drawer.js", () => ({
   headSession: () => drawer.head,
   phaseTag: (s: SessionInfo) => (s.phase ? [Object.assign(document.createElement("span"), { textContent: s.phase })] : []),
   stateDot: () => [document.createElement("i")],
-  openStatus: drawer.openStatus,
   // Marked so the chip's title proves it uses the drawer's words, which
   // drawer.test.ts owns, rather than spelling its own second copy.
 }));
@@ -150,18 +149,16 @@ it("offers Search first on the conversation, and the rest without it on a child"
   current = session(0);
   header.renderHeader();
   const items = await menuItems();
-  expect(items.map((i) => i.label)).toEqual(["Search", "Status", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
   expect(items[0]!.hint).toBe("⌘K");
   items[0]!.onSelect();
   expect(palette.togglePalette).toHaveBeenCalledOnce();
-  items[1]!.onSelect();
-  expect(drawer.openStatus).toHaveBeenCalledOnce();
-  items[5]!.onSelect();
+  items[4]!.onSelect();
   expect(openSettings).toHaveBeenCalledOnce();
 
   conversation = false;
   header.renderHeader();
-  expect((await menuItems()).map((i) => i.label)).toEqual(["Status", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect((await menuItems()).map((i) => i.label)).toEqual(["Session info", "Browse files", "Model & reasoning…", "Settings"]);
 });
 
 // Before the conversation's first reply there is no session to describe or
