@@ -23,8 +23,7 @@ delivery.
   (`createdRole`, `TaskStore.roleOf`); when its session appears in In progress is
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk; its session appears in In progress as described in
-  [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
+  (`LEAD`), never on disk.
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes the head a callback (§Milestones); the head launches a new build lead on
   doc, its prompt opening `Build per `.
@@ -177,7 +176,8 @@ The tables are `main_chain` and `open_items` in `db.ts`.
 - The head is the newest `main_chain` row; the transcripts are the record.
 - `open_items` is Pier's store of the open items, never MEMORY.md.
 - Surfaces reach the conversation through `MainChain`, which dispatches to the
-  head's own `web:<id>` key; the router knows nothing of the chain.
+  head's own `web:<id>` key, or the home chat's key
+  ([11](11-im-conversation.md)); the router knows nothing of the chain.
 
 ## Web
 
@@ -187,8 +187,8 @@ never opened.
 
 - In progress is the live sessions less the sessions making up the head;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
-- The head's ⋯ menu is Session info, Browse files,
-  Model & reasoning; no Rename or New session here.
+- The head's ⋯ menu is Search, Session info, Browse files, Model & reasoning,
+  Settings; no Rename or New session here.
 
 ## Not built
 
