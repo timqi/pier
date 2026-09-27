@@ -25,6 +25,8 @@ const MEMORY_CHARS = 12_000;
 const NOTES_CHARS = 6_000;
 const EXCHANGES_CHARS = 4_000;
 const LEDGER_CHARS = 4_000;
+/** `cut` from the front: notes and exchanges grow at the end, so the newest part stays. */
+const tail = (text: string, max: number): string => (text.length > max ? `…${text.slice(1 - max)}` : text);
 
 interface ChainDeps {
   factory: AgentFactory;
@@ -217,8 +219,8 @@ export class MainChain {
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).text),
       section("Runs — in flight, and finished since the previous session started", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
-      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, cut(await this.read(join("memory", `${date}.md`)), NOTES_CHARS))))),
-      section("The previous session's last exchanges", open ? cut(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS) : ""),
+      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS))))),
+      section("The previous session's last exchanges", open ? tail(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS) : ""),
     ].filter(Boolean).join("\n\n");
   }
 

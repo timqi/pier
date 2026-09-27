@@ -283,6 +283,21 @@ describe("the continuous conversation's chain", () => {
     expect(text).toContain("started\n\nr300 · n · succeeded");
     expect(text).not.toContain("r1 · n");
   });
+
+  it("keeps the end of a day's notes, where the newest entries are", async () => {
+    const r = rig();
+    mkdirSync(join(r.home, "memory"), { recursive: true });
+    const lines = Array.from({ length: 400 }, (_, i) => `- entry ${String(i + 1)} ${"x".repeat(20)}`);
+    writeFileSync(join(r.home, "memory", `${day(new Date(r.clock.now))}.md`), lines.join("\n"));
+    await r.say("hi");
+    const text = r.sessions.get("m1")!.systemInputs[0]!.text;
+    const notes = text.slice(text.indexOf("## memory/"));
+    expect(notes.length).toBeLessThan(6_100);
+    expect(notes).toContain("## memory/");
+    expect(notes).toMatch(/\n\n…/);
+    expect(notes).toContain("- entry 400 ");
+    expect(notes).not.toContain("- entry 1 ");
+  });
 });
 
 describe("the chat commands", () => {
