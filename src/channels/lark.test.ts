@@ -719,14 +719,16 @@ describe("commands and panel", () => {
     expect(bodyText(fallback.card)).toBe("Could not open the panel: Error: card too large");
   });
 
-  it("a bare @bot mention opens the panel too", async () => {
+  it("a bare @bot mention is dropped, loudly; it is not the panel", async () => {
     openGates();
     await feed(message({
       text: "@_user_1",
       messageId: "om_p2",
       mentions: [{ key: "@_user_1", id: { open_id: ME }, name: "Pier" }],
     }));
-    expect(bodyText(client.replied.at(-1)!.card)).toContain("Session");
+    expect(inbound).toEqual([]);
+    expect(client.replied).toEqual([]);
+    expect(dropped.some((m) => m.includes("empty message in"))).toBe(true);
   });
 
   it("sets the draft's directory from a cwd form submit, even after a restart lost the panel", async () => {
@@ -775,25 +777,26 @@ describe("commands and panel", () => {
     expect(bodyText(client.patched.at(-1)!.card)).toContain("running your question");
   });
 
-  it("bare `s <text>` on a topic root triggers too; inside a topic, and bare `s`, are messages", async () => {
+  it("`%s <text>` on a topic root triggers too; inside a topic, unprefixed `s <text>`, and `/s` alone are messages", async () => {
     openGates();
-    await feed(message({ text: "s review the parser", messageId: "om_bare_q" }));
+    await feed(message({ text: "%s review the parser", messageId: "om_pct_q" }));
     expect(inbound).toEqual([]);
     expect(bodyText(client.cards.get([...client.cards.keys()].at(-1)!)!)).toContain("▸ review the parser");
     const before = client.cards.size;
-    await feed(message({ text: "s review the parser", messageId: "om_in_topic", rootId: "om_1" }));
-    await feed(message({ text: "s", messageId: "om_bare_s" }));
-    expect(inbound.map((m) => m.text)).toEqual(["s review the parser", "s"]);
+    await feed(message({ text: "/s review the parser", messageId: "om_in_topic", rootId: "om_1" }));
+    await feed(message({ text: "s review the parser", messageId: "om_bare_q" }));
+    await feed(message({ text: "/s", messageId: "om_bare_s" }));
+    expect(inbound.map((m) => m.text)).toEqual(["/s review the parser", "s review the parser", "/s"]);
     expect(client.cards.size).toBe(before);
   });
 
-  it("`s <text>` carrying an image holds the image with the question; Start sends both", async () => {
+  it("`/s <text>` carrying an image holds the image with the question; Start sends both", async () => {
     openGates();
     await feed(message({
       messageType: "post",
       messageId: "om_q_file",
       content: JSON.stringify({
-        title: "s read this",
+        title: "/s read this",
         content: [[{ tag: "img", image_key: "img_k9" }]],
       }),
     }));
@@ -892,9 +895,9 @@ describe("the home chat", () => {
     expect(client.reactions.filter((r) => !r.add).map((r) => r.messageId).sort()).toEqual(["om_h1", "om_h2"]);
   });
 
-  it("settings, s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
-    await feed(dm({ text: "settings", messageId: "om_s1" }), dm({ text: "/settings", messageId: "om_s2" }), dm({ text: "s fix it", messageId: "om_s3" }), dm({ text: "/stop" }), dm({ text: "%stop" }), dm({ text: "%Status " }));
-    expect(inbound.map((m) => m.text)).toEqual(["settings", "/settings", "s fix it", "/stop", "%stop", "%Status"]);
+  it("settings, /s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
+    await feed(dm({ text: "settings", messageId: "om_s1" }), dm({ text: "/settings", messageId: "om_s2" }), dm({ text: "/s fix it", messageId: "om_s3" }), dm({ text: "/stop" }), dm({ text: "%stop" }), dm({ text: "%Status " }));
+    expect(inbound.map((m) => m.text)).toEqual(["settings", "/settings", "/s fix it", "/stop", "%stop", "%Status"]);
     expect(aborted).toEqual([]);
     expect(client.replied).toEqual([]);
     // Answered by a note, not a turn: nothing would take the 👀 off a command, or off its answer.
@@ -908,7 +911,7 @@ describe("the home chat", () => {
   it("drops a message that is only a mention, loudly", async () => {
     await feed(dm({ text: "@_user_1", mentions: [{ key: "@_user_1", id: { open_id: ME }, name: "Pier" }] }));
     expect(inbound).toEqual([]);
-    expect(dropped.some((m) => m.includes("bare mention in the home chat"))).toBe(true);
+    expect(dropped.some((m) => m.includes("empty message in"))).toBe(true);
   });
 
   it("%stop in another chat's topic aborts that thread", async () => {

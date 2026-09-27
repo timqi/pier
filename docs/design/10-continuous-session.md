@@ -146,12 +146,14 @@ The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
 input, mode `append`, no turn); an unknown `/word` is a message, never an
 error: the composer is not a shell.
 
-| Command | Does | Card |
-| --- | --- | --- |
-| `/new` | rotates now, reason `new` (the idle seed, the divider names it); a head the send already rotated for its own reason is not rotated twice | the new head's seed card is the answer; a streaming head refuses with the send's 409, `the conversation is replying — /stop first`, shown as the composer's error row |
-| `/stop` | aborts the head's running turn (`AgentSession.abort`), children untouched | `stopped` · `nothing running` |
+The commands, their spelling (`/` or `%`) and what each answers on the head
+and in a thread are [11 §Chat commands](11-im-conversation.md#chat-commands).
+`/new` rotates with reason `new` (the idle seed, the divider names it); a head
+the send already rotated for its own reason is not rotated twice; the answer
+is the new head's seed card, and a streaming head's refusal is
+the send's 409, shown as the composer's error row.
 
-- The table is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
+- The word list is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
   composer's completion shows; `chatCommand` (`core/chain.ts`), the transcript
   rebuild (`agent/events.ts`) and the completion
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)) all read it.
@@ -193,8 +195,8 @@ never opened.
 - Phase 3, the IM DM: a platform-level switch sends a DM's top-level
   messages and unbound-thread replies to the main session (answers in the
   DM's main flow), a bound
-  thread's replies to its session, and the chat commands bare on Slack
-  (`status`, as `stop` and `settings` are) to one message in the main flow;
+  thread's replies to its session, and the chat commands to one message in
+  the main flow;
   group chats never change.
 - With it, a run reporting its session posts a card (`<task name> · <state>`,
   cwd, web link) as a thread root bound to the child, edited in place; it

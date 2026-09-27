@@ -244,7 +244,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   /** The card's last draw, once an operation completed: the session as it now
    *  is, no button. The panel is released with it, so nothing can tap it again
-   *  and the card stays as a record; another @bot opens a fresh one. */
+   *  and the card stays as a record; another `/settings` opens a fresh one. */
   private async settle(key: ConversationKey, state: S, note: string): Promise<void> {
     const status = await this.deps.control.status(key);
     if (!status) return this.refresh(key, note);

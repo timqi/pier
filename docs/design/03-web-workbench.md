@@ -244,8 +244,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   IME composition (`isComposing`/229).
 - **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
-  one flat list — the chain commands (`/status`, `/new`, `/stop`, each line
-  from `CHAT_COMMANDS`) only in the continuous conversation, then
+  one flat list — the chain commands (each line from `CHAT_COMMANDS`; the
+  table is [11 §Chat commands](11-im-conversation.md#chat-commands)) only in
+  the continuous conversation, then
   `/skill:<name>` for every skill on the snapshot's `skills`, its
   `description` as the line. A row matches on a prefix of its word or of the
   skill name alone (`/pier-t` → `/skill:pier-tasks`). The exact word of a chain

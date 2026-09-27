@@ -396,11 +396,12 @@ describe("gating", () => {
     expect(inbound).toEqual([]);
     expect(client.sent).toHaveLength(1);
     expect(client.sent[0]!.text).toContain("not bound yet");
+    expect(client.sent[0]!.text).toContain("`%bind <code>`");
   });
 
   it("lets a bind request through the bind gate, in a DM", async () => {
     const code = store.issueBindCode("slack").code;
-    await feed(message({ channel: DM, channel_type: "im", text: `bind ${code}`, ts: "10.1" }));
+    await feed(message({ channel: DM, channel_type: "im", text: `%bind ${code}`, ts: "10.1" }));
     expect(store.isBound("slack", "U42")).toBe(true);
     expect(client.sent[0]!.text).toBe("Bound as Q.");
   });
@@ -1044,33 +1045,39 @@ describe("next-step buttons", () => {
 });
 
 describe("commands", () => {
-  it("stops the turn on a bare `stop` after a mention", async () => {
+  it("stops the turn on `%stop` after a mention", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> stop`, ts: "1706.000100" }));
+    await feed(message({ text: `<@${ME}> %stop`, ts: "1706.000100" }));
     expect(aborted).toEqual(["C100/1706.000100"]);
     expect(client.sent.at(-1)!.text).toBe("⏹ Stopped.");
     expect(inbound).toEqual([]);
   });
 
-  it("does not treat an ordinary sentence starting with a command word as one", async () => {
+  it("takes no bare command words: `stop`, `settings`, `bind` are messages", async () => {
     openGates();
-    await feed(message({ text: "stop the deploy and tell me why", ts: "1707.000100" }));
-    expect(inbound).toHaveLength(1);
+    await feed(
+      message({ text: "stop", ts: "1707.000100" }),
+      message({ text: `<@${ME}> settings`, ts: "1707.000200" }),
+      message({ channel: DM, channel_type: "im", text: "bind ab-CD", ts: "1707.000300" }),
+    );
+    expect(aborted).toEqual([]);
+    expect(inbound.map((m) => m.text).sort()).toEqual(["bind ab-CD", "settings", "stop"]);
     expect(client.sent).toEqual([]);
   });
 
-  it("opens the panel on `settings`, and on a bare mention", async () => {
+  it("opens the panel on `%settings`; a bare mention is dropped, loudly", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> settings`, ts: "1708.000100" }));
+    await feed(message({ text: `<@${ME}> %settings`, ts: "1708.000100" }));
     await feed(message({ text: `<@${ME}>`, ts: "1709.000100" }));
-    expect(client.sent).toHaveLength(2);
-    expect(client.sent.every((s) => s.text === "Settings")).toBe(true);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]!.text).toBe("Settings");
     expect(inbound).toEqual([]);
+    expect(dropped).toContain("empty message in C100/1709.000100, dropped");
   });
 
-  it("`s <text>` on a thread root opens the panel with that question", async () => {
+  it("`%s <text>` on a thread root opens the panel with that question", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> s   what is  new?`, ts: "1720.000100" }));
+    await feed(message({ text: `<@${ME}> %s   what is  new?`, ts: "1720.000100" }));
     expect(inbound).toEqual([]);
     expect(client.sent).toHaveLength(1);
     // Verbatim: the question keeps its own spacing.
@@ -1078,17 +1085,17 @@ describe("commands", () => {
     expect(JSON.stringify(client.sent[0]!.blocks)).toContain("\\\"q\\\":\\\"what is  new?\\\"");
   });
 
-  it("inside a thread `s <text>` is an ordinary message", async () => {
+  it("inside a thread `%s <text>` is an ordinary message", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> s review the parser`, ts: "1721.000200", thread_ts: "1721.000100" }));
-    expect(inbound.map((m) => m.text)).toEqual(["s review the parser"]);
+    await feed(message({ text: `<@${ME}> %s review the parser`, ts: "1721.000200", thread_ts: "1721.000100" }));
+    expect(inbound.map((m) => m.text)).toEqual(["%s review the parser"]);
     expect(client.sent).toEqual([]);
   });
 
-  it("`s <text>` carrying a file holds the file with the question; Start sends both", async () => {
+  it("`%s <text>` carrying a file holds the file with the question; Start sends both", async () => {
     openGates();
     await feed(message({
-      text: `<@${ME}> s read this`,
+      text: `<@${ME}> %s read this`,
       ts: "1710.000100",
       subtype: "file_share",
       files: [{ id: "F7", name: "spec.pdf", mimetype: "application/pdf", url_private_download: "https://files/spec.pdf" }],
@@ -1108,10 +1115,10 @@ describe("commands", () => {
     expect(paths).toHaveLength(1);
   });
 
-  it("a bare `s` is a message (the other spellings: commands.test.ts)", async () => {
+  it("`s <text>` without a prefix, and `%s` alone, are messages (the other spellings: commands.test.ts)", async () => {
     openGates();
-    await feed(message({ text: "s", ts: "1724.000100" }));
-    expect(inbound.map((m) => m.text)).toEqual(["s"]);
+    await feed(message({ text: "s review the parser", ts: "1724.000100" }), message({ text: "%s", ts: "1725.000100" }));
+    expect(inbound.map((m) => m.text)).toEqual(["s review the parser", "%s"]);
     expect(client.sent).toEqual([]);
   });
 });
@@ -1121,14 +1128,14 @@ describe("settings panel", () => {
   const open = async (): Promise<void> => {
     openGates();
     known.add(THREAD);
-    await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
+    await feed(message({ text: `<@${ME}> %settings`, ts: "1710.000100" }));
     client.sent.length = 0;
   };
 
   /** No row for the thread: the panel is a draft. */
   const openDraft = async (): Promise<void> => {
     openGates();
-    await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
+    await feed(message({ text: `<@${ME}> %settings`, ts: "1710.000100" }));
     client.sent.length = 0;
   };
 
@@ -1142,7 +1149,7 @@ describe("settings panel", () => {
   it("reads out the session", async () => {
     openGates();
     known.add(THREAD);
-    await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
+    await feed(message({ text: `<@${ME}> %settings`, ts: "1710.000100" }));
     const body = JSON.stringify(client.sent[0]!.blocks);
     expect(body).toContain("session-");
     expect(body).toContain("/srv/ops");
@@ -1151,7 +1158,7 @@ describe("settings panel", () => {
 
   it("Start creates with the draft and runs the question as the clicker's message, 👀 on the card", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> s review the parser`, ts: "1710.000100" }));
+    await feed(message({ text: `<@${ME}> %s review the parser`, ts: "1710.000100" }));
     expect(client.sent).toHaveLength(1);
     const panelTs = "900.000100"; // the fake's first post
     await feed(click("cfg:pin:1"));

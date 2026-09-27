@@ -28,10 +28,9 @@ top-level or in any thread, goes to the head (`MainChain.send`) under the key
   (`ConversationStore.forgetChat`): a thread session opened there before is
   unreachable from the chat and reads the same as a live one; its transcript
   stays on the web.
-- `/settings`, `@bot` alone and `s <text>` are not commands here: the head
+- `/settings` and `/s <text>` are prose here (§Chat commands): the head
   has no cwd to pick (the home) and its model & reasoning are the web's ⋯
-  menu ([10 §Web](10-continuous-session.md#web)); a message that is only a
-  mention or empty is dropped with a log line.
+  menu ([10 §Web](10-continuous-session.md#web)).
   Real work in a directory is what the head delegates (`pier task run`), never
   a session the phone opens by hand.
 - `ChannelRuntime` hands an adapter's message to `MainChain.send` when
@@ -94,31 +93,30 @@ thread half only for the home chat; any other is refused as today.
 
 ## Chat commands
 
-One grammar on every surface: a message that is `<prefix><word>` (args after
-the word where a command takes them), the prefix `/` or `%`, trimmed and
-case-insensitive. `%` exists because Slack's client eats an unregistered `/`;
-it is accepted everywhere so one spelling works on the phone whichever app it
-is (`parseCommand` in `channels/commands.ts` and `chatCommand` in
-`core/chain.ts` both take `[/%]`; the web composer's completion keeps `/`).
+The one command table for every surface; other docs point here. A command is
+the whole message `<prefix><word>` (args after the word where a command takes
+them), the prefix `/` or `%`, trimmed and case-insensitive. `%` exists because
+Slack's client eats an unregistered `/`; it is accepted everywhere so one
+spelling works on the phone whichever app it is (`parseCommand` in
+`channels/commands.ts` and `chatCommand` in `core/chain.ts` both take `[/%]`;
+the web composer's completion keeps `/`). There is no other spelling: no bare
+words, no unprefixed `s <text>`, and a message that is only a mention (or
+empty) is dropped with a log line, never a command.
 
-| Command | In the home chat | In a thread of any other chat |
+| Command | The head (home chat, web) | A thread of any other chat |
 | --- | --- | --- |
 | `/status` | the head's open items (`MainChain.send`) | prose |
-| `/new` | the next head now | prose |
-| `/stop` | aborts the head's turn | aborts the thread's session |
-| `/settings`, `@bot` alone | dropped, logged | the panel on the thread |
-| `s <text>` (also `/s`, `%s`) | prose | the draft with the question |
-| `/bind <code>` | bind, as today | bind, as today |
+| `/new` | the next head now; a streaming head refuses (`the conversation is replying — /stop first`) | prose |
+| `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running` | aborts the thread's session: `⏹ Stopped.` |
+| `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
+| `/settings` | prose | the panel on the thread ([04 §The in-chat panel](04-im-channels.md#the-in-chat-panel)) |
+| `/s <text>` | prose | on a thread root, the draft with `<text>` as its question; inside a thread, prose |
+| `/bind <code>` (a DM) | bind | bind |
 
 - A head command's answer is the `chat-command` note above; the transcript
   records it as a web-sent command does.
-- Slack's bare words stay as they are elsewhere (`stop`, `settings`, `bind
-  <code>`, exact arity); in the home chat a bare `stop` is the head's `/stop`
-  and `settings` is prose. No bare `status` or `new`: `%status`, `%new` are
-  the spelling there.
 - An unknown `/word` or `%word` is a message, never an error, on every
   surface ([10](10-continuous-session.md#chat-commands)).
-- `skills/pier-help/SKILL.md` §In-chat commands says the prefix rule once.
 
 ### Skill commands by prefix
 
@@ -196,7 +194,7 @@ through what main launches (`pier task`), never by a group's message.
 ## Tests
 
 - `channels/lark.test.ts` (then `slack.test.ts`): a home message, top-level or
-  in a thread, reaches the conversation sink with the home key; `settings`
+  in a thread, reaches the conversation sink with the home key; `/settings`
   there is prose; `/stop` and `%stop` split by chat; a main-flow button
   click echoes top-level with the home key; a home `send`/`notify` posts
   without a thread, a non-home one is still refused.

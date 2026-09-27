@@ -8,11 +8,10 @@ export interface Command {
   args: string;
 }
 
-/** The configure-first trigger, one spelling on both platforms: `s <text>`
- *  (also `/s`, `%s <text>`), the text being the panel's pending question. A bare
- *  `s` carries no question and is prose. */
+/** The configure-first trigger: `/s <text>` or `%s <text>`, the text being the
+ *  panel's pending question. `/s` alone carries no question and is prose. */
 export function settingsDraft(text: string): string | undefined {
-  return /^[/%]?s[ \t]+(\S[\s\S]*)$/i.exec(text.trim())?.[1];
+  return /^[/%]s[ \t]+(\S[\s\S]*)$/i.exec(text.trim())?.[1];
 }
 
 export function parseCommand(text: string): Command | null {

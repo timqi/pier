@@ -229,17 +229,16 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     // The head has no panel and takes `/stop` and `/skills` as chat commands (core/chain.ts).
-    if (home && !text && !attachments.length) return this.log(`bare mention in the home chat ${msg.chatId}, dropped`);
+    if (!text && !attachments.length) return this.log(`empty message in ${here.conversationId}, dropped`);
     if (!home && command?.name === "stop") return this.abortTurn(here, msg.messageId);
     if (!home && command?.name === "skills") return this.listSkills(here);
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
-    // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: outside any topic.
-    // The held question carries its markers, so Start sends what the user sent.
+    // `/s <text>` drafts a session, so only where this message would start one:
+    // outside any topic. The held question carries its markers, so Start sends what the user sent.
     const question = msg.rootId ? undefined : settingsDraft(text);
-    if (this.panel && !home && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+    if (this.panel && !home && (question || command?.name === "settings")) {
       return this.panel.open(here, root, question && [question, ...markers].join("\n"));
     }
 

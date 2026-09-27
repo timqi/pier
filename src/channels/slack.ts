@@ -1,8 +1,8 @@
 // Slack adapter: normalize inbound Socket Mode envelopes, render outbound turns.
 // Pier never posts into a channel's main flow: a conversation is
 // `<channel>/<threadTs>` and the thread is the session. Slack-specific: the
-// client intercepts unregistered slash commands, so `stop` and `settings` are
-// bare words; reactions are short names (`reactions.add` rejects 👀 with
+// client intercepts unregistered slash commands, so `%stop` is the spelling
+// that arrives; reactions are short names (`reactions.add` rejects 👀 with
 // `invalid_name`); unacked envelopes are redelivered, so `event_id` is deduplicated.
 
 import type {
@@ -53,10 +53,6 @@ const DRAIN_TIMEOUT_MS = 5000;
 const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
 
-/** Bare words with exact arity, since there is no leading `/` to key on: "stop
- *  the deploy and tell me why" is a sentence for the agent, not an abort. */
-const BARE_COMMANDS = new Map<string, number>([["stop", 0], ["settings", 0], ["bind", 1]]);
-
 /** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (channel: string, threadTs: string): string => `${channel}/${threadTs}`;
 
@@ -88,22 +84,6 @@ const sharedFiles = (share: SlackAttachment): SlackFile[] =>
  *  coordinates and decides for itself. */
 const INLINE_REPLY_MAX = 30;
 
-interface SlackCommand {
-  name: string;
-  args: string;
-}
-
-/** `/stop` is accepted for muscle memory; a bare `stop` is what actually arrives. */
-function slackCommand(text: string): SlackCommand | undefined {
-  const slash = parseCommand(text);
-  if (slash) return { name: slash.name, args: slash.args };
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  const name = words[0]?.toLowerCase() ?? "";
-  const arity = BARE_COMMANDS.get(name);
-  if (arity === undefined || words.length - 1 !== arity) return undefined;
-  return { name, args: words.slice(1).join(" ") };
-}
-
 export interface SlackDeps {
   store: ChannelStore;
   /** Dropped and malformed input is reported here — never a silent catch. */
@@ -112,7 +92,7 @@ export interface SlackDeps {
   client?: SlackClient;
   /** Injected in tests. */
   receipts?: ReceiptLedger;
-  /** Wired by runtime.ts, so `stop` and the panel never enter the Channel seam. */
+  /** Wired by runtime.ts, so `%stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
 }
 
@@ -255,7 +235,7 @@ export class SlackChannel implements Channel {
     }
 
     const text = this.stripMention(raw);
-    const command = slackCommand(text);
+    const command = parseCommand(text);
     const threadTs = threadOf(event);
     const here: ConversationKey = { channelId: this.id, conversationId: conversationId(channel, threadTs) };
     const bindRequest = command?.name === "bind" && isDm;
@@ -271,15 +251,15 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
+    if (!text && !files.length && !shares.length) return this.log(`empty message in ${here.conversationId}, dropped`);
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
     const shared = await Promise.all(shares.map((share) => this.sharedBlock(share)));
-    // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: a thread root. The
-    // held question carries its markers, so Start sends what the user sent.
+    // `/s <text>` drafts a session, so only where this message would start one:
+    // a thread root. The held question carries its markers, so Start sends what the user sent.
     const question = threadTs === ts ? settingsDraft(text) : undefined;
-    if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
+    if (this.panel && (question || command?.name === "settings")) {
       return this.panel.open(here, channel, threadTs, question && [question, ...shared, ...markers].join("\n"));
     }
 
@@ -406,7 +386,7 @@ export class SlackChannel implements Channel {
     await this.api.postMessage({
       channel,
       thread_ts: threadTs,
-      text: bindHint("`bind <code>`"),
+      text: bindHint("`%bind <code>`"),
     }).catch((err) => this.log(`bind hint failed: ${String(err)}`));
   }
 

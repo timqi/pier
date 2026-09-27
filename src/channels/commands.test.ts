@@ -36,14 +36,15 @@ describe("IM command parsing", () => {
 });
 
 describe("the configure-first trigger", () => {
-  it("takes `s <text>` with or without the slash, args verbatim", () => {
-    expect(settingsDraft("s what is  new?")).toBe("what is  new?");
+  it("takes `/s <text>` and `%s <text>`, args verbatim", () => {
+    expect(settingsDraft("/s what is  new?")).toBe("what is  new?");
     expect(settingsDraft("  /s  review the parser ")).toBe("review the parser");
-    expect(settingsDraft("S ship it")).toBe("ship it");
+    expect(settingsDraft("/S ship it")).toBe("ship it");
     expect(settingsDraft("%s ship it")).toBe("ship it");
   });
 
-  it("is not a bare `s`, nor the other settings words", () => {
+  it("needs the prefix and a question", () => {
+    expect(settingsDraft("s what is new?")).toBeUndefined();
     expect(settingsDraft("s")).toBeUndefined();
     expect(settingsDraft("/s")).toBeUndefined();
     expect(settingsDraft("%s")).toBeUndefined();
