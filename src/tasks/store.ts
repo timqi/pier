@@ -238,8 +238,9 @@ export class TaskStore {
 
   /** What a milestone resumes, and whose supervisor it reports to. */
   latestRunForTarget(sessionId: string): TaskRun | undefined {
+    // Two runs queued in one millisecond are common (a turn and the run it records); ids are random, rowid is insertion order.
     return this.#one(`
-      SELECT json FROM task_runs WHERE json_extract(json, '$.targetSessionId') = ? ORDER BY queued_at DESC, id DESC LIMIT 1
+      SELECT json FROM task_runs WHERE json_extract(json, '$.targetSessionId') = ? ORDER BY queued_at DESC, rowid DESC LIMIT 1
     `, sessionId);
   }
 
