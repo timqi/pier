@@ -1,6 +1,7 @@
 // Slack adapter: normalize inbound Socket Mode envelopes, render outbound turns.
-// Pier never posts into a channel's main flow: a conversation is
-// `<channel>/<threadTs>` and the thread is the session. Slack-specific: the
+// Pier never posts into a channel's main flow but the home DM's
+// (docs/design/11-im-conversation.md), which is one conversation keyed `<channel>`:
+// any other is `<channel>/<threadTs>` and the thread is the session. Slack-specific: the
 // client intercepts unregistered slash commands, so `%stop` is the spelling
 // that arrives; reactions are short names (`reactions.add` rejects 👀 with
 // `invalid_name`); unacked envelopes are redelivered, so `event_id` is deduplicated.
@@ -12,8 +13,10 @@ import type {
   InboundMessage,
   NoteOrigin,
 } from "../core/types.js";
+import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { skillsText } from "../core/chain.js";
 import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
@@ -237,11 +240,13 @@ export class SlackChannel implements Channel {
     const text = this.stripMention(raw);
     const command = parseCommand(text);
     const threadTs = threadOf(event);
-    const here: ConversationKey = { channelId: this.id, conversationId: conversationId(channel, threadTs) };
+    // Every message in the home DM, in a thread or not, is the head's, under one key.
+    const home = this.isHome(channel);
+    const here: ConversationKey = { channelId: this.id, conversationId: home ? channel : conversationId(channel, threadTs) };
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", channel, {
       isDm,
-      addressed: this.addressed(raw, event, here),
+      addressed: this.addressed(raw, event, here, home),
       userId: event.user,
       bindRequest,
     });
@@ -250,7 +255,9 @@ export class SlackChannel implements Channel {
       return;
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
-    if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
+    // The head has no panel and takes `/stop` and `/skills` as chat commands (core/chain.ts).
+    if (!home && command?.name === "stop") return this.abortTurn(here, channel, threadTs);
+    if (!home && command?.name === "skills") return this.listSkills(here);
     if (!text && !files.length && !shares.length) return this.log(`empty message in ${here.conversationId}, dropped`);
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
@@ -259,14 +266,16 @@ export class SlackChannel implements Channel {
     // `/s <text>` drafts a session, so only where this message would start one:
     // a thread root. The held question carries its markers, so Start sends what the user sent.
     const question = threadTs === ts ? settingsDraft(text) : undefined;
-    if (this.panel && (question || command?.name === "settings")) {
+    if (this.panel && !home && (question || command?.name === "settings")) {
       return this.panel.open(here, channel, threadTs, question && [question, ...shared, ...markers].join("\n"));
     }
 
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
-    this.receipts.mark(here.conversationId, channel, ts);
+    // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
+    const answered = home && command && !command.args && isChatCommand(command.name);
+    if (!answered) this.receipts.mark(here.conversationId, channel, ts);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({
       key: here,
@@ -302,10 +311,13 @@ export class SlackChannel implements Channel {
       this.log("incomplete block_actions payload, dropped");
       return;
     }
-    const threadTs = message.thread_ts ?? message.ts;
+    // Any click in the home DM is the head's, echoed where the button was;
+    // anywhere else a top-level message roots a thread.
+    const home = this.isHome(channel);
+    const threadTs = home ? message.thread_ts : message.thread_ts ?? message.ts;
     const key: ConversationKey = {
       channelId: this.id,
-      conversationId: conversationId(channel, threadTs),
+      conversationId: home ? channel : conversationId(channel, message.thread_ts ?? message.ts),
     };
     const admitted = this.gate.admit("action", channel, {
       isDm: (await this.directory.channel(this.api, channel)).kind === "dm",
@@ -315,7 +327,8 @@ export class SlackChannel implements Channel {
     if (!admitted) return;
     // Start's question: the card is the message the click was on, so it carries the 👀.
     const run = (text: string): Promise<void> => this.deliver(key, channel, message.ts, user, text, onMessage);
-    if (await this.panel?.onAction(interaction, key, actionId, run)) return;
+    // The head has no panel: a card left in the DM before it became the home is stale.
+    if (!home && (await this.panel?.onAction(interaction, key, actionId, run))) return;
 
     const text = offeredLabel(message.blocks, actionId);
     if (text === undefined) {
@@ -377,6 +390,12 @@ export class SlackChannel implements Channel {
     await this.api.postMessage({ channel, thread_ts: threadTs, text: STOPPED });
   }
 
+  /** The head's `/skills` is MainChain's; a thread has no chain, so it is answered here. */
+  private async listSkills(key: ConversationKey): Promise<void> {
+    const text = skillsText((await this.deps.control?.skills(key)) ?? []);
+    await this.notify(key.conversationId, { text, origin: { kind: "chat-command", command: "skills" } });
+  }
+
   // --- bind ------------------------------------------------------------------
 
   /** Channels stay silent, but a DM that swallows every message looks broken
@@ -408,10 +427,21 @@ export class SlackChannel implements Channel {
   // --- addressing ------------------------------------------------------------
 
   /** Mentioned, or continuing a thread Pier already owns — durable, so it
-   *  holds after a restart. */
-  private addressed(raw: string, event: SlackMessageEvent, key: ConversationKey): boolean {
+   *  holds after a restart. The home key has no row to know. */
+  private addressed(raw: string, event: SlackMessageEvent, key: ConversationKey, home: boolean): boolean {
     if (this.me && raw.includes(`<@${this.me}>`)) return true;
-    return !!event.thread_ts && !!this.deps.control?.knows(key);
+    return !home && !!event.thread_ts && !!this.deps.control?.knows(key);
+  }
+
+  private isHome(channel: string): boolean {
+    return this.deps.control?.isHome({ channelId: this.id, conversationId: channel }) ?? false;
+  }
+
+  /** A thread, or the home DM's main flow (no `threadTs`); undefined for any other channel's. */
+  private target(conversation: string): { channel: string; threadTs?: string } | undefined {
+    const { channel, threadTs } = parseConversation(conversation);
+    if (threadTs) return { channel, threadTs };
+    return this.isHome(channel) ? { channel } : undefined;
   }
 
   /** Slack does not strip the mention for us. */
@@ -510,10 +540,10 @@ export class SlackChannel implements Channel {
   // --- outbound --------------------------------------------------------------
 
   async send(conversation: string, reply: AgentReply): Promise<void> {
-    const { channel, threadTs } = parseConversation(conversation);
-    // No thread is a foreign id; posting it would put a turn in the channel's
-    // main flow. Refused loudly, receipts still cleared.
-    if (!threadTs) {
+    const to = this.target(conversation);
+    // No thread outside the home DM is a foreign id; posting it would put a
+    // turn in the channel's main flow. Refused loudly, receipts still cleared.
+    if (!to) {
       this.log(`refusing to answer ${conversation}: no thread in the conversation id`);
       await this.receipts.settle(conversation);
       return;
@@ -521,7 +551,7 @@ export class SlackChannel implements Channel {
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(
       conversation,
-      () => this.out.reply(channel, threadTs, reply),
+      () => this.out.reply(to.channel, to.threadTs, reply),
       reply.meta,
     );
   }
@@ -532,13 +562,13 @@ export class SlackChannel implements Channel {
     conversation: string,
     note: { text: string; origin: NoteOrigin; at?: number },
   ): Promise<void> {
-    const { channel, threadTs } = parseConversation(conversation);
-    if (!threadTs) {
+    const to = this.target(conversation);
+    if (!to) {
       this.log(`refusing to post a system note to ${conversation}: no thread in the conversation id`);
       return;
     }
-    const ts = await this.out.note(channel, threadTs, note);
-    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts, note.at);
+    const ts = await this.out.note(to.channel, to.threadTs, note);
+    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
   }
 }
 

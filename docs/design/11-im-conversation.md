@@ -183,7 +183,7 @@ through what the head launches (`pier task`), never by a group's message.
 1. Lark: the home flag and Console switch, the dispatch split, `chatKeyOf`,
    `sendCard`/upload to chat, main-flow buttons, the `%` prefix, `originLabel`
    and the whole `chat-command` note — the operator's first look.
-2. Slack: the same on `postMessage` without `thread_ts`, after 1 is judged.
+2. Slack: the same on `postMessage` without `thread_ts`.
 
 ## Not built
 
@@ -196,7 +196,7 @@ through what the head launches (`pier task`), never by a group's message.
 
 ## Tests
 
-- `channels/lark.test.ts` (then `slack.test.ts`): a home message, top-level or
+- `channels/lark.test.ts` and `slack.test.ts`: a home message, top-level or
   in a thread, reaches the conversation sink with the home key; `/settings`
   there is prose; `/stop` and `%stop` split by chat; a main-flow button
   click echoes top-level with the home key; a home `send`/`notify` posts

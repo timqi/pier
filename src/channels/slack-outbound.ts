@@ -1,5 +1,5 @@
-// How a turn becomes messages in a Slack thread: which renderer, how to chunk
-// against its limit, and what an empty turn still has to say.
+// How a turn becomes messages in a Slack thread, or the home DM's main flow:
+// which renderer, how to chunk against its limit, and what an empty turn still has to say.
 
 import type { AgentReply, NoteOrigin, TurnMeta } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
@@ -29,7 +29,8 @@ export class SlackOutbound {
     private readonly log: (message: string) => void,
   ) {}
 
-  async reply(channel: string, threadTs: string, reply: AgentReply): Promise<void> {
+  /** No `threadTs` is the home DM's main flow (slack.ts target). */
+  async reply(channel: string, threadTs: string | undefined, reply: AgentReply): Promise<void> {
     // A local file link is dead in Slack: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
@@ -62,7 +63,7 @@ export class SlackOutbound {
    *  `ts` of the last message posted, where the caller puts the 👀. */
   async note(
     channel: string,
-    threadTs: string,
+    threadTs: string | undefined,
     note: { text: string; origin: NoteOrigin },
   ): Promise<string | undefined> {
     let ts: string | undefined;
@@ -80,7 +81,7 @@ export class SlackOutbound {
    *  workspace; a rejection degrades to the translated mrkdwn path. */
   private async post(
     channel: string,
-    threadTs: string,
+    threadTs: string | undefined,
     body: string,
     trailing: SlackBlock[],
   ): Promise<string | undefined> {

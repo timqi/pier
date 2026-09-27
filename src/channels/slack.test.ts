@@ -10,7 +10,7 @@ import { openDb } from "../db.js";
 import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
-import { noteBody } from "./lines.js";
+import { noteBody, STALE_OPTION } from "./lines.js";
 import type { ChannelControl } from "./control.js";
 import { ReceiptLedger } from "./receipts.js";
 import { SlackChannel } from "./slack.js";
@@ -161,6 +161,8 @@ let claimed: string[];
 let known: Set<string>;
 /** Conversations mid-turn: what keeps a receipt off the stale sweep. */
 let working: Set<string>;
+/** The home DM's channel id, when the test made one. */
+let homeChannel: string | undefined;
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   pins_: ModelMenuEntry[];
@@ -229,6 +231,8 @@ function fakeControl() {
       return [] as string[];
     },
     knows: (key: ConversationKey) => known.has(key.conversationId),
+    isHome: (key: ConversationKey) => key.conversationId === homeChannel,
+    skills: () => Promise.resolve([{ name: "pier-tasks", description: "delegate work" }]),
     abort: (key: ConversationKey) => {
       aborted.push(key.conversationId);
       return Promise.resolve();
@@ -279,6 +283,7 @@ beforeEach(async () => {
   claimed = [];
   known = new Set();
   working = new Set();
+  homeChannel = undefined;
   control = fakeControl();
   channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
   await channel.start((msg) => inbound.push(msg));
@@ -1120,6 +1125,123 @@ describe("commands", () => {
     await feed(message({ text: "s review the parser", ts: "1724.000100" }), message({ text: "%s", ts: "1725.000100" }));
     expect(inbound.map((m) => m.text)).toEqual(["s review the parser", "%s"]);
     expect(client.sent).toEqual([]);
+  });
+});
+
+describe("the home chat", () => {
+  const HOME = "D77";
+  const dm = (over: Partial<SlackMessageEvent>) => message({ channel: HOME, channel_type: "im", ...over });
+  const homeKey = { channelId: "slack", conversationId: HOME };
+
+  beforeEach(() => {
+    bind();
+    homeChannel = HOME;
+  });
+
+  it("keys every message by the DM, top-level or in a thread, and 👀 under that key", async () => {
+    await feed(dm({ text: "morning", ts: "1800.000100" }), dm({ text: "and this", ts: "1800.000200", thread_ts: "1800.000100" }));
+    expect(inbound.map((m) => [m.key, m.text])).toEqual([[homeKey, "morning"], [homeKey, "and this"]]);
+    expect(client.reactions.map((r) => r.ts)).toEqual(["1800.000100", "1800.000200"]);
+    // The head's turn-end, delivered under the DM's id, settles both.
+    await channel.send(HOME, { text: "hi", suggestions: [] });
+    expect(client.reactions.filter((r) => !r.add).map((r) => r.ts).sort()).toEqual(["1800.000100", "1800.000200"]);
+  });
+
+  it("/settings, /s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
+    await feed(
+      dm({ text: "/settings", ts: "1801.000100" }),
+      dm({ text: "/s fix it", ts: "1801.000200" }),
+      dm({ text: "/stop", ts: "1801.000300" }),
+      dm({ text: "%stop", ts: "1801.000400" }),
+      dm({ text: "%Status ", ts: "1801.000500" }),
+    );
+    expect(inbound.map((m) => m.text)).toEqual(["/settings", "/s fix it", "/stop", "%stop", "%Status"]);
+    expect(aborted).toEqual([]);
+    expect(client.sent).toEqual([]);
+    // Answered by a note, not a turn: nothing would take the 👀 off a command, or off its answer.
+    expect(client.reactions.map((r) => r.ts)).toEqual(["1801.000100", "1801.000200"]);
+    await channel.notify(HOME, { text: "nothing running", origin: { kind: "chat-command", command: "stop" } });
+    await channel.notify(HOME, { text: "seed", origin: { kind: "session-seed", reason: "new", previousSessionId: null } });
+    expect(client.sent.map((p) => [p.thread_ts, p.text])).toEqual([
+      [undefined, "_/stop_\n> nothing running"],
+      [undefined, "_↺ new session · new_\n> seed"],
+    ]);
+    expect(client.reactions).toHaveLength(2);
+  });
+
+  it("drops a message that is only a mention, loudly", async () => {
+    await feed(dm({ text: `<@${ME}>`, ts: "1802.000100" }));
+    expect(inbound).toEqual([]);
+    expect(dropped).toContain(`empty message in ${HOME}, dropped`);
+  });
+
+  it("%stop in another channel's thread aborts that thread", async () => {
+    openGates();
+    await feed(message({ text: "%stop", ts: "1803.000200", thread_ts: "1700.000100" }));
+    expect(aborted).toEqual(["C100/1700.000100"]);
+    expect(inbound).toEqual([]);
+  });
+
+  it("posts turns, notes and files to the main flow; any other channel without a thread is still refused", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pier-slack-home-")), "a.txt");
+    writeFileSync(path, "x");
+    await channel.send(HOME, { text: `done [a.txt](file://${path})`, suggestions: ["More"] });
+    await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
+    expect(client.sent.map((p) => [p.channel, p.thread_ts, p.text])).toEqual([
+      [HOME, undefined, "done a.txt"],
+      [HOME, undefined, "_⚠ failed_\n> Pier restarted"],
+    ]);
+    expect(client.uploads).toEqual([{ channel: HOME, threadTs: undefined, name: "a.txt", size: 1 }]);
+    await channel.send(CHANNEL, { text: "lost", suggestions: [] });
+    await channel.notify(CHANNEL, { text: "lost", origin: { kind: "error" } });
+    expect(client.sent).toHaveLength(2);
+    expect(dropped).toContain(`refusing to answer ${CHANNEL}: no thread in the conversation id`);
+    expect(dropped).toContain(`refusing to post a system note to ${CHANNEL}: no thread in the conversation id`);
+  });
+
+  it("a main-flow button echoes top-level and steers the label in under the DM's key", async () => {
+    await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+    const offer = client.sent.at(-1)!;
+    await feed(interaction({
+      channel: { id: HOME },
+      message: { ts: "900.000100", blocks: offer.blocks },
+      actions: [{ action_id: "sg:0" }],
+    }));
+    expect(client.updated.at(-1)!.ts).toBe("900.000100");
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: undefined, text: "▸ Deploy" });
+    expect(client.reactions.at(-1)).toEqual({ channel: HOME, ts: "901.000100", name: "eyes", add: true });
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  it("a button in an old thread of the home DM still steers the head, echoed in that thread", async () => {
+    await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+    const offer = client.sent.at(-1)!;
+    await feed(interaction({
+      channel: { id: HOME },
+      message: { ts: "900.000200", thread_ts: "800.000100", blocks: offer.blocks },
+      actions: [{ action_id: "sg:0" }],
+    }));
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "800.000100", text: "▸ Deploy" });
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  it("a panel card left in the DM before it became the home is stale, never a session under the home key", async () => {
+    await feed(interaction({
+      channel: { id: HOME },
+      message: { ts: "900.000300", thread_ts: "800.000200", blocks: [] },
+      actions: [{ action_id: "cfg:start" }],
+    }));
+    expect(control.created).toEqual([]);
+    expect(inbound).toEqual([]);
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "800.000200", text: STALE_OPTION });
+  });
+
+  it("/skills in another channel's thread lists the thread session's skills as a note", async () => {
+    openGates();
+    await feed(message({ text: "/skills", ts: "1804.000200", thread_ts: "1700.000100" }));
+    expect(inbound).toEqual([]);
+    expect(client.sent.at(-1)).toMatchObject({ channel: CHANNEL, thread_ts: "1700.000100" });
+    expect(client.sent.at(-1)!.text).toContain("> pier-tasks — delegate work");
   });
 });
 

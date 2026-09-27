@@ -219,7 +219,7 @@ Identity is **per-turn, never baked into a session**: a thread is shared.
 ## Conversation identity
 
 A `conversationId` is opaque to core. Slack and Lark spell it
-`<channelId>/<threadTs>` (Lark's home chat: `<chatId>`, [11](11-im-conversation.md));
+`<channelId>/<threadTs>` (the home chat: `<chatId>`, [11](11-im-conversation.md));
 the chat half has one decoder (`chatOf`).
 
 `ConversationStore` (`conversations.ts`) makes routing survive a restart. A
@@ -398,7 +398,8 @@ Answer these first.
   footer is a `context` block. The cwd prompt is a `views.open` modal with the
   conversation id in `private_metadata`.
 - `parseConversation("C100")` yields an empty thread; posting with
-  `thread_ts: ""` lands in the main flow. Refused loudly, receipts settled.
+  `thread_ts: ""` lands in the main flow. Refused loudly outside the home DM
+  ([11](11-im-conversation.md)), receipts settled.
 
 ## Lark facts
 
