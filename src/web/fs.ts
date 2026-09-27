@@ -73,6 +73,9 @@ export function registerFsRoutes(app: Hono): void {
   });
 
   guarded(app, "GET", "/api/fs/file", 404, async (c) => {
+    // The Files viewer frames a PDF; every other route stays DENY (auth.ts).
+    // On every answer, a 304 included: its headers replace the cached ones.
+    c.header("x-frame-options", "SAMEORIGIN");
     const file = await scoped(c.req.query("root"), c.req.query("path"));
     const handle = await open(file);
     let streaming = false;

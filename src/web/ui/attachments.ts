@@ -288,10 +288,7 @@ function card(url: string, name: string): HTMLElement {
   eye.title = "Preview";
   eye.onclick = (ev) => {
     ev.preventDefault();
-    // A PDF in its own tab: every response carries X-Frame-Options: DENY
-    // (auth.ts), so no frame — the Files viewer's included — may show one.
-    if (ext === "pdf") window.open(url, "_blank", "noopener");
-    else openInFiles(sessionId, null, pathOf(url));
+    openInFiles(sessionId, null, pathOf(url));
   };
   actions.append(eye);
   const download = document.createElement("a");

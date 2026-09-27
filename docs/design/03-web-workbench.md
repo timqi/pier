@@ -289,9 +289,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   listing route reports. Relative paths resolve against the session's cwd. A
   path under the cwd opens with the cwd as the tree's root, anything else with
   its own folder as the root; a folder lands there, a path with no row reads
-  "No such file: <name>". An attachment card's eye opens its file the same way,
-  except a PDF, which opens in its own tab: every response carries
-  `X-Frame-Options: DENY`, so no frame may show one. A pointer press leaves no focus ring on one; a keyboard focus does.
+  "No such file: <name>". An attachment card's eye opens its file the same way.
+  A pointer press leaves no focus ring on one; a keyboard focus does.
 - **Copy**: a fenced block has a Copy button in its corner; any inline code
   span — a file reference included — copies on a 450 ms press-and-hold that
   stays put, flashing green or red in place and swallowing the click it would
@@ -352,7 +351,9 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   repository (`GET /api/explorer/git` answers `branch: null`) the branch chip,
   the whole compare band, the changed-only funnel and the diff stepper are
   absent, and an empty folder reads "Empty." rather than "No changes." — the
-  filter is not in force. On a phone the dialog is full-screen, inside the
+  filter is not in force. A PDF shows inline in the viewer's frame:
+  `GET /api/fs/file` answers `X-Frame-Options: SAMEORIGIN`, every other
+  response `DENY`. On a phone the dialog is full-screen, inside the
   safe-area insets, tree above viewer.
 
   The Agent nav, drawn from one `GET /api/packages` answer. The management

@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { ALL, AuthStore, requireAuth, registerAuthRoutes} from "./auth.js";
+import { registerFsRoutes } from "./fs.js";
 
 /** A store on a throwaway file, plus the password it printed on first boot. */
 function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")): {
@@ -52,6 +53,7 @@ function app(s: AuthStore): Hono {
   a.get("/b/report/1a-sig/", (c) => c.text("viewed"));
   a.all("/b/report/1a-sig/", (c) => c.text("viewed write"));
   a.get("/boards/report/", (c) => c.text("private"));
+  registerFsRoutes(a);
   return a;
 }
 
@@ -132,6 +134,36 @@ describe("requireAuth", () => {
     // A published board sets its own nosniff (boards/boards.ts); one value, not two.
     const board = await a.request("/p/report/");
     expect(board.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  // The Files viewer frames a PDF from /api/fs/file; nothing else is frameable.
+  it("lets only the file route be framed, and only by the same origin", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-auth-fs-")));
+    writeFileSync(join(root, "doc.pdf"), "%PDF-1.4\n");
+    const url = `/api/fs/file?${new URLSearchParams({ root, path: "doc.pdf" })}`;
+    const res = await a.request(url, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    // A revalidation's headers replace the cached ones, so the 304 says it too.
+    const again = await a.request(url, { headers: { cookie, "if-none-match": res.headers.get("etag") ?? "" } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    const missing = await a.request(`/api/fs/file?${new URLSearchParams({ root, path: "nope.pdf" })}`, { headers: { cookie } });
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    // Every other route, the listing beside it included, stays DENY.
+    const listing = await a.request(`/api/fs/ls?${new URLSearchParams({ root })}`, { headers: { cookie } });
+    expect(listing.headers.get("x-frame-options")).toBe("DENY");
+    expect((await a.request("/api/sessions", { headers: { cookie } })).headers.get("x-frame-options")).toBe("DENY");
+    // Past the password only: a stranger's frame gets the login boundary's DENY.
+    const stranger = await a.request(url);
+    expect(stranger.status).toBe(401);
+    expect(stranger.headers.get("x-frame-options")).toBe("DENY");
   });
 
   it("refuses a write without redirecting it", async () => {
