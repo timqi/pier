@@ -293,8 +293,7 @@ describe("the continuous conversation's chain", () => {
     const text = r.sessions.get("m1")!.systemInputs[0]!.text;
     const notes = text.slice(text.indexOf("## memory/"));
     expect(notes.length).toBeLessThan(6_100);
-    expect(notes).toContain("## memory/");
-    expect(notes).toMatch(/\n\n…/);
+    expect(notes).toMatch(/^## memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 219 lines omitted, the rest in memory\/\1\.md\n- entry 220 x/);
     expect(notes).toContain("- entry 400 ");
     expect(notes).not.toContain("- entry 1 ");
   });
