@@ -853,6 +853,38 @@ describe("ManagedTools.status", () => {
     expect(r.lines().filter((line) => line === "ubix list --json")).toHaveLength(2);
   });
 
+  it("names why a switched-on tool is absent from the last sync's report", async () => {
+    // `ubix list` never mentions a tool that failed to install, so the row
+    // would otherwise read as a clean "not installed".
+    const r = rig({
+      answer: (call) =>
+        call.args[0] === "list"
+          ? ok(JSON.stringify({ schema_version: 1, tools: [] }))
+          : {
+            code: 1,
+            stdout: upgradeJson({
+              name: "rtk",
+              action: "failed",
+              from_version: null,
+              to_version: null,
+              reason: null,
+              error: "no asset for linux-amd64",
+            }),
+            stderr: "1 tool(s) failed",
+          },
+    });
+    const before = await r.tools.status(["rtk"]);
+    expect(before.find((e) => e.name === "rtk")?.binary.error).toBe("not installed — the last sync did not reach it");
+    await r.tools.sync(on("rtk"));
+    const after = await r.tools.status(["rtk"]);
+    expect(after.find((e) => e.name === "rtk")?.binary).toMatchObject({
+      installed: false,
+      error: "no asset for linux-amd64",
+    });
+    // A tool that is off and absent is simply off.
+    expect(after.find((e) => e.name === "rg")?.binary.error).toBeNull();
+  });
+
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {
     const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "state.toml is locked" }) });
     const [rtk] = await r.tools.status([]);

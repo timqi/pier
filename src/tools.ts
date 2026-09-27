@@ -510,6 +510,8 @@ export class ManagedTools {
   readonly #fetch: typeof fetch;
   readonly #root: string;
   #lock: SyncLock | undefined;
+  /** Why a tool is absent lives only here: `ubix list` never names one that failed to install. */
+  #lastSync: ToolSyncReport | undefined;
   readonly #db: () => DatabaseSync;
 
   constructor(options: { exec?: Exec; fetch?: typeof fetch; root?: string; db?: () => DatabaseSync } = {}) {
@@ -578,7 +580,8 @@ export class ManagedTools {
       // The only thing that changes what `list` answers; drop the memo both sides.
       this.#listed = undefined;
       try {
-        return await this.#converge(tools, customTools, fence);
+        this.#lastSync = await this.#converge(tools, customTools, fence);
+        return this.#lastSync;
       } finally {
         this.#listed = undefined;
       }
@@ -650,7 +653,11 @@ export class ManagedTools {
     }
     return base.map((entry) => {
       const state = states.find((s) => s.name === entry.name);
-      if (!state) return entry;
+      if (!state) {
+        if (!entry.enabled) return entry;
+        const synced = this.#lastSync?.entries.find((e) => e.name === entry.name);
+        return withBinary(entry, { error: synced?.error ?? "not installed — the last sync did not reach it" });
+      }
       const gone = state.installed === true && state.exists === false;
       // `npm:` lands in fnm's node prefix and `pixi:` in its own: installed,
       // but not where Pier's PATH points, and the row has to say so.
