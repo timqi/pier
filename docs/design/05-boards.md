@@ -78,7 +78,7 @@ The [skill](../../skills/pier-boards/SKILL.md) owns their usage and presentation
 guidance: content determines layout, status has text labels, graphics serve
 understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 
-## Routes (`src/boards/boards.ts`, ≤ 240 lines of code incl. the filesystem side)
+## Routes (`src/boards/boards.ts`)
 
 | Route | Behavior |
 | ----- | -------- |

@@ -130,7 +130,7 @@ Dependency rules:
   serves from a callback `main.ts` injects.
 - Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`,
   `vault.ts`: every area may import them; they import nothing outside the root
-  layer (`settings.ts` names `core/types.ts` types, type-only).
+  layer (`settings.ts` imports `core/types.ts`, the browser-safe vocabulary).
 - Logging goes to stdout/stderr only (docs/deploy.md). `PIER_LOG=debug` adds
   per-message tracing; `PIER_LOG=silent` is what test runs use.
 - `tools.ts` is reached only by `main.ts`, `cli.ts`, `tools-task.ts` and
