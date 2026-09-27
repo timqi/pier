@@ -18,6 +18,7 @@ import type {
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { LarkChannel } from "./lark.js";
+import { STALE_OPTION } from "./lines.js";
 import type {
   LarkCard,
   LarkCardAction,
@@ -948,6 +949,21 @@ describe("the home chat", () => {
     const echoId = [...client.cards.keys()].at(-1)!;
     expect(client.reactions.at(-1)).toEqual({ messageId: echoId, emoji: "OnIt", add: true });
     expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  it("a button in an old topic of the home chat still steers the head, echoed in that topic", async () => {
+    await act({ messageId: "om_old_offer", chatId: HOME, operatorId: USER, value: { key: "sg:0", root: "om_old", label: "Deploy" } });
+    expect(bodyText(client.replied.at(-1)!.card)).toBe("▸ Deploy");
+    expect(client.replied.at(-1)!.to).toBe("om_old");
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  it("a panel card left in the chat before it became the home is stale, never a session under the home", async () => {
+    await act({ messageId: "om_old_panel", chatId: HOME, operatorId: USER, value: { key: "cfg:start", root: "om_old", draft: { q: "review" } } });
+    await act({ messageId: "om_old_panel", chatId: HOME, operatorId: USER, name: "cwdgo:om_old", formValue: { cwd: "/tmp" } });
+    expect(control.created).toEqual([]);
+    expect(inbound).toEqual([]);
+    expect(client.replied.map((r) => [r.to, bodyText(r.card)])).toEqual([["om_old", STALE_OPTION], ["om_old", STALE_OPTION]]);
   });
 
   it("/skills in another chat's topic lists the thread session's skills as a note", async () => {

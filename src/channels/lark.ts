@@ -356,8 +356,10 @@ export class LarkChannel implements Channel {
       ? action.name.slice(CWD_SUBMIT_PREFIX.length)
       : "";
     const root = action.value?.root ?? formRoot;
-    const home = !root && payload.startsWith(OFFER_PREFIX) && this.isHome(action.chatId);
-    if (!root && !home) {
+    // Any tap in the home chat is the head's, echoed where the card was;
+    // anywhere else only a topic's card is Pier's.
+    const home = this.isHome(action.chatId);
+    if (!root && !(home && payload.startsWith(OFFER_PREFIX))) {
       this.log(`card action without a thread root in ${action.chatId}, dropped`);
       return;
     }
@@ -365,18 +367,19 @@ export class LarkChannel implements Channel {
       channelId: this.id,
       conversationId: home ? action.chatId : conversationId(action.chatId, root),
     };
-    const to: LarkTarget = home ? { chatId: action.chatId } : { root };
+    const to: LarkTarget = root ? { root } : { chatId: action.chatId };
     const admitted = this.gate.admit("action", action.chatId, {
       isDm: this.deps.store.chat("lark", action.chatId)?.kind === "dm",
       addressed: true, // clicking the bot's own button is addressing it
       userId: action.operatorId,
     });
     if (!admitted) return;
-    if (formRoot && action.formValue) {
+    // The head has no panel: a card left in the chat before it became the home is stale.
+    if (!home && formRoot && action.formValue) {
       await this.panel?.onCwdSubmit(key, action, root);
       return;
     }
-    if (payload.startsWith(PANEL_PREFIX)) {
+    if (!home && payload.startsWith(PANEL_PREFIX)) {
       // Start's question: the card is the message the tap was on, so it carries the 👀.
       const run = (text: string): Promise<void> => this.deliver(key, action, action.messageId, text, onMessage);
       if (!(await this.panel?.onAction(action, key, payload, root, run))) {
