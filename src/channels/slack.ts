@@ -42,7 +42,7 @@ import {
 } from "./slack-api.js";
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
-import { readThread } from "./slack-thread.js";
+import { sharedBlock } from "./slack-thread.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const WORKING = "eyes";
@@ -82,10 +82,6 @@ const sharesOf = (event: SlackMessageEvent): SlackAttachment[] =>
 
 const sharedFiles = (share: SlackAttachment): SlackFile[] =>
   share.files ?? share.original_message?.files ?? [];
-
-/** A token budget, not a Slack limit: past this the agent gets the
- *  coordinates and decides for itself. */
-const INLINE_REPLY_MAX = 30;
 
 interface SlackDeps {
   store: ChannelStore;
@@ -263,7 +259,7 @@ export class SlackChannel implements Channel {
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
-    const shared = await Promise.all(shares.map((share) => this.sharedBlock(share)));
+    const shared = await Promise.all(shares.map((share) => sharedBlock(this.directory, this.api, this.log, share)));
     // `/s <text>` drafts a session, so only where this message would start one:
     // a thread root. The held question carries its markers, so Start sends what the user sent.
     const question = threadTs === ts ? settingsDraft(text) : undefined;
@@ -465,72 +461,6 @@ export class SlackChannel implements Channel {
       return event.user ? `DM · ${await this.directory.user(this.api, event.user)}` : channel;
     }
     return name ?? channel;
-  }
-
-  /** The eager thread read is not gated: a human handing the agent a message
-   *  is the same act as an upload. */
-  private async sharedBlock(share: SlackAttachment): Promise<string> {
-    const source = share.original_message;
-    const ts = share.ts ?? source?.ts;
-    const threadTs = share.thread_ts ?? source?.thread_ts ?? ts;
-    const replies = share.reply_count ?? source?.reply_count;
-    // A share of a reply is one message; only a parent has a thread.
-    const parent = share.channel_id && ts && threadTs === ts && replies
-      ? { channel: share.channel_id, ts, replies }
-      : null;
-    // `name<id>` is the sender prefix's grammar (core/identity.ts).
-    const author = share.author_id
-      ? `${await this.directory.user(this.api, share.author_id)}<${share.author_id}>`
-      : share.author_name || share.author_subname;
-    const where = share.channel_name
-      ? `#${share.channel_name}${share.channel_id ? `<${share.channel_id}>` : ""}`
-      : share.channel_id;
-    const head = [
-      "shared message",
-      author && `from ${author}`,
-      where && `in ${where}`,
-      ts && `at ${ts}`,
-    ].filter(Boolean).join(" ");
-    // `fallback` is Slack's plain-text rendering when a share's `text` is
-    // empty (a file-only forward, or a body that is all blocks); "" is normal.
-    const body = (share.text || share.fallback || source?.text || "").trim();
-    const thread = parent && parent.replies <= INLINE_REPLY_MAX
-      ? await this.sharedThread(parent.channel, parent.ts, parent.replies)
-      : { transcript: false, lines: [] };
-    // The coordinates in `pier slack`'s own words (skills/pier-slack).
-    const hint = parent && !thread.transcript
-      ? `[thread: ${parent.replies} replies — channel ${parent.channel}, thread_ts ${parent.ts}]`
-      : "";
-    // The transcript opens with the shared message itself.
-    return [`[${head}]`, thread.transcript ? "" : body, ...thread.lines, hint]
-      .filter(Boolean).join("\n");
-  }
-
-  /** A read that fails or comes back cut says so in the prompt (§5). */
-  private async sharedThread(
-    channel: string,
-    ts: string,
-    replies: number,
-  ): Promise<{ transcript: boolean; lines: string[] }> {
-    try {
-      // One over the budget, so an undercounting reply_count still reports as cut.
-      const read = await readThread(this.directory, this.api, channel, ts, INLINE_REPLY_MAX + 2);
-      if (!read.messages.length) return { transcript: false, lines: [] };
-      return {
-        transcript: true,
-        lines: [
-          `[thread: ${replies} replies, oldest first — ${read.format}]`,
-          ...read.messages,
-          ...(read.truncated ? [`[thread partly read: cut at ${read.count} lines]`] : []),
-        ],
-      };
-    } catch (err) {
-      this.log(`shared thread ${channel}/${ts} not read: ${String(err)}`);
-      return {
-        transcript: false,
-        lines: [`[thread not read: ${err instanceof Error ? err.message : String(err)}]`],
-      };
-    }
   }
 
   private saveAttachments(files: SlackFile[]): Promise<string[]> {
