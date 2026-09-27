@@ -601,7 +601,7 @@ main {
 }
 /* --- system rows (chat.ts appendSystemInput) ---------------------------------
    Folded, a line at the divider's weight; opened, the card it was. One id on
-   the line: the run's when there is one, else the session's. */
+   the line: the session's link when there is one, else the run's. */
 #turns > .system-row:not([data-expanded]) {
   margin-block: 0.25rem;
   padding-block: 0.125rem;
@@ -609,7 +609,7 @@ main {
   box-shadow: none;
 }
 .system-row:not([data-expanded])::before { display: none; }
-.system-row:not([data-expanded]) :is(.run-thinking, .run-id ~ .run-session) { display: none; }
+.system-row:not([data-expanded]) :is(.run-thinking, .run-id:has(~ .run-session)) { display: none; }
 /* The line stays one line: its ids never wrap under the name, and below md the
    model and a run's mode · duration give way to them. */
 .system-row:not([data-expanded]) .run-meta { flex-wrap: nowrap; }

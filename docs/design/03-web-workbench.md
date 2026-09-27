@@ -208,14 +208,15 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   leave no empty log; interrupted work stays visible. System inputs
   (seed, callback, delegation) are one line, opening to the card:
   `↺ session seed · <reason> · <previous id8>`, `⟵ callback · <state> · <run
-  name> · <model> · <run id8>`, `⟶ delegation · <run name> · <run id8>`. A
+  name> · <model> · <id8>`, `⟶ delegation · <run name> · <id8>`, where `<id8>`
+  is the other session's id, a link to it, else the run id as text. A
   click or ↵ expands in place; expansion is per row, in memory. A
   `/status` answer, `Stayed silent — <reason>` and chat command answers stay
   one open line or card. A compaction (Pi's automatic one) leaves one system
   line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events and folded like a callback —
-  `✓ run · <state> · <run name> · <mode> · <duration> · <run id8>`, opening
+  `✓ run · <state> · <run name> · <mode> · <duration> · <id8>`, opening
   to the prompt, kept open across updates; the In progress drawer lists the
   runs still in flight. A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the

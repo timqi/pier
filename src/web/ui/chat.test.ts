@@ -136,6 +136,24 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   expect(runCard().children.at(-1)!.textContent).toBe("Build per the design doc.");
 });
 
+it("names a run card by its session once there is one, and by the run id until then", async () => {
+  const run = {
+    runId: "ykt7hre3nzenaweb", taskId: "t7", taskName: "Pier 产品简化合并", state: "queued" as const, targetSessionId: null,
+    sessionMode: "fresh" as const, prompt: "研究一下", queuedAt: 1, startedAt: null, finishedAt: null, queuedMessages: 0,
+  };
+  const { renderBackgroundRun } = await import("./turn-activity.js");
+  renderBackgroundRun(run);
+  const runCard = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
+  expect(runCard().querySelector(".run-id")!.textContent).toBe("ykt7hre3");
+  expect(runCard().querySelector(".run-session")).toBeNull();
+  renderBackgroundRun({ ...run, state: "running", targetSessionId: "s7abcdef1234", startedAt: 2 });
+  const session = runCard().querySelector(".run-session")!;
+  expect(session.localName).toBe("button");
+  expect(session.textContent).toBe("s7abcdef");
+  session.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s7abcdef1234");
+});
+
 it("replays a refused prompt as the user's row and the reason", () => {
   chat.renderSnapshot([
     { role: "user", text: "hello" },

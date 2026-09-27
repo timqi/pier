@@ -121,7 +121,7 @@ export function runHead(o: RunHead): HTMLElement {
   }
   if (o.sessionId && o.sessionId !== "console") {
     const id = o.sessionId;
-    const session = h("button", "run-session flex-none text-indigo-600 hover:underline", shortId(id));
+    const session = h("button", "run-session flex-none cursor-pointer text-indigo-600 hover:underline pointer-coarse:min-h-11", shortId(id));
     session.title = `Open session ${id}`;
     session.onclick = () => deps.select(id);
     meta.append(session);
