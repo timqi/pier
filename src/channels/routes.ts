@@ -42,10 +42,9 @@ function parseChats(raw: unknown, known: ChatConfig[]): ChatConfig[] {
   return known.map((base) => {
     const edit = edits.get(base.id);
     if (!edit) return base;
-    const { home: _home, ...rest } = base;
     return {
-      ...rest,
-      ...(edit.home === true && base.kind === "dm" ? { home: true as const } : {}),
+      ...base,
+      home: edit.home === true && base.kind === "dm" ? true : undefined,
       enabled: asBool(edit.enabled),
       requireMention: asBool(edit.requireMention),
       requireBind: asBool(edit.requireBind),

@@ -1,5 +1,6 @@
-// How a turn becomes cards in a Lark thread (or the home chat's main flow): one card per chunk, footer and
-// buttons on the last, and what an empty turn still has to say.
+// How a turn becomes cards in a Lark thread, or the home chat's main flow: one
+// card per chunk, footer and buttons on the last, and what an empty turn still
+// has to say.
 
 import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";

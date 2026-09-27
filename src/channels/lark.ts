@@ -15,6 +15,7 @@ import type {
   InboundMessage,
   NoteOrigin,
 } from "../core/types.js";
+import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
@@ -212,10 +213,7 @@ export class LarkChannel implements Channel {
     const root = threadOf(msg);
     // Every message in the home chat, in a topic or not, is the head's, under one key.
     const home = this.isHome(msg.chatId);
-    const here: ConversationKey = {
-      channelId: this.id,
-      conversationId: home ? msg.chatId : conversationId(msg.chatId, root),
-    };
+    const here: ConversationKey = { channelId: this.id, conversationId: home ? msg.chatId : conversationId(msg.chatId, root) };
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", msg.chatId, {
       isDm,
@@ -230,17 +228,17 @@ export class LarkChannel implements Channel {
       return;
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
-    // The head has no panel and takes `/stop` as a chat command (core/chain.ts).
+    // The head has no panel and takes `/stop` and `/skills` as chat commands (core/chain.ts).
     if (home && !text && !attachments.length) return this.log(`bare mention in the home chat ${msg.chatId}, dropped`);
     if (!home && command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    if (!home && command?.name === "skills") return this.listSkills(here, root);
+    if (!home && command?.name === "skills") return this.listSkills(here);
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
     // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
     // session, so only where this message would start one: outside any topic.
     // The held question carries its markers, so Start sends what the user sent.
-    const question = msg.rootId || home ? undefined : settingsDraft(text);
+    const question = msg.rootId ? undefined : settingsDraft(text);
     if (this.panel && !home && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
       return this.panel.open(here, root, question && [question, ...markers].join("\n"));
     }
@@ -248,7 +246,9 @@ export class LarkChannel implements Channel {
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
-    this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
+    // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
+    const answered = home && command && !command.args && isChatCommand(command.name);
+    if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({
       key: here,
@@ -430,9 +430,9 @@ export class LarkChannel implements Channel {
   }
 
   /** The head's `/skills` is MainChain's; a thread has no chain, so it is answered here. */
-  private async listSkills(key: ConversationKey, root: string): Promise<void> {
+  private async listSkills(key: ConversationKey): Promise<void> {
     const text = skillsText((await this.deps.control?.skills(key)) ?? []);
-    await this.out.note({ root }, { text, origin: { kind: "chat-command", command: "skills" } });
+    await this.notify(key.conversationId, { text, origin: { kind: "chat-command", command: "skills" } });
   }
 
   // --- bind ------------------------------------------------------------------

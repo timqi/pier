@@ -7,11 +7,11 @@ import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
 export type ChannelPlatform = "slack" | "lark";
 
-const PLATFORMS: readonly string[] = ["slack", "lark"];
+export const PLATFORMS: readonly ChannelPlatform[] = ["slack", "lark"];
 
 /** Validate at the boundary: an unknown platform is a 404, not a new row. */
 export const isChannelPlatform = (v: unknown): v is ChannelPlatform =>
-  typeof v === "string" && PLATFORMS.includes(v);
+  typeof v === "string" && (PLATFORMS as readonly string[]).includes(v);
 
 /** Every adapter spells its ids `<chatId>` or `<chatId>/<thread>`, so the chat
  *  half has one decoder; the thread half genuinely differs per platform. */

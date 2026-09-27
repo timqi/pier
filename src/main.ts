@@ -160,10 +160,9 @@ const control = createControl({
   modelMenu: () => settings.get().modelMenu,
 });
 const channels = new ChannelRuntime(channelStore, router, chain, control);
-/** The head answers in the home chat while its adapter runs (docs/design/11); down,
- *  it is web-only and Web Push resumes. An older member keeps no delivery: re-keyed
- *  on an adapter's start it would take the home key from the head. Any other
- *  session: its conversations row. */
+/** The head answers in the home chat while its adapter runs (docs/design/11), else on
+ *  the web with Web Push; an older member gets no home key, or an adapter's start
+ *  would re-key it over the head. Any other session: its conversations row. */
 function chatKeyOf(sessionId: string): ConversationKey | undefined {
   const home = channelStore.home();
   if (home && channels.live(home.platform) && chain.chainOf(sessionId)?.[0] === sessionId) {

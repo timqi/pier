@@ -13,6 +13,7 @@ import {
   type ChatKind,
   type ChatPolicy,
   defaultChannelConfig,
+  PLATFORMS,
 } from "./types.js";
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
@@ -30,7 +31,6 @@ const CREDENTIAL_NAMES: Record<ChannelPlatform, Record<CredentialKey, string>> =
   slack: { token: "SLACK_TOKEN", appToken: "SLACK_APP_TOKEN" },
   lark: { token: "LARK_APP_ID", appToken: "LARK_APP_SECRET" },
 };
-const PLATFORMS = Object.keys(CREDENTIAL_NAMES) as ChannelPlatform[];
 const credentials = (platform: ChannelPlatform): [CredentialKey, string][] =>
   Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][];
 

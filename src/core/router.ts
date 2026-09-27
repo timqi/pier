@@ -31,6 +31,7 @@ function keyOf(key: ConversationKey): string {
  *  Channel is registered under them — so they share a lock in `ensure`. */
 const isAlias = (key: ConversationKey): boolean =>
   key.channelId === "web" || key.channelId === "task";
+const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
 
 interface Attached {
   session: AgentSession;
@@ -62,14 +63,14 @@ export class SkillAmbiguous extends Refused {}
  *  the text unchanged when it names none (docs/design/11-im-conversation.md). */
 function skillText(text: string, skills: { name: string }[]): string | SkillAmbiguous {
   // Two characters at least: `/s <text>` is the settings draft's spelling (channels/commands.ts).
-  const match = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i.exec(text.trim());
-  const word = match?.[2]?.toLowerCase();
-  if (!match || !word || (!match[1] && isChatCommand(word))) return text;
+  const [, kept, spelled, rest] = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i.exec(text.trim()) ?? [];
+  const word = spelled?.toLowerCase();
+  if (!word || (!kept && isChatCommand(word))) return text;
   const names = skills.map((s) => s.name);
   const found = names.includes(word) ? [word] : names.filter((name) =>
     name.split("-").some((_, i, parts) => parts.slice(i).join("-").startsWith(word)));
   if (found.length > 1) return new SkillAmbiguous(`/${word} matches ${found.join(", ")} — say more`);
-  return found[0] ? `/skill:${found[0]}${match[3] ? ` ${match[3]}` : ""}` : text;
+  return found[0] ? `/skill:${found[0]}${rest ? ` ${rest}` : ""}` : text;
 }
 
 export class Router {
@@ -102,7 +103,7 @@ export class Router {
   /** A session its adapter's stop sent back to its own stream takes its chat again. */
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
-    for (const attached of this.bySession.values()) this.toChat(attached, channel.id);
+    for (const attached of this.bySession.values()) this.toChat(attached);
   }
 
   /** A stopped adapter's sessions answer on their own stream until it is back:
@@ -111,17 +112,26 @@ export class Router {
     this.channels.delete(channelId);
     for (const key of this.byKey.keys()) if (key.startsWith(`${channelId}:`)) this.byKey.delete(key);
     for (const attached of this.bySession.values()) {
-      if (attached.key.channelId === channelId) attached.key = { channelId: "web", conversationId: attached.session.id };
+      if (attached.key.channelId === channelId) attached.key = webKey(attached.session.id);
     }
   }
 
   /** The durable chat outranks the alias that happened to open the session
    *  first (a restart, the web speaking first), same rule as `reached`. */
-  private toChat(attached: Attached, channelId?: string): void {
+  private toChat(attached: Attached): void {
     const chat = isAlias(attached.key) ? this.chatKeyOf(attached.session.id) : undefined;
-    if (!chat || (channelId && chat.channelId !== channelId)) return;
-    this.byKey.set(keyOf(chat), attached.session);
+    if (!chat || !this.channels.has(chat.channelId)) return;
+    this.hold(chat, attached.session);
     attached.key = chat;
+  }
+
+  /** A chat key taken from another session (the chain's rotation) leaves it,
+   *  or two sessions would answer one chat. */
+  private hold(key: ConversationKey, session: AgentSession): void {
+    const previous = this.byKey.get(keyOf(key));
+    const left = previous && previous !== session ? this.bySession.get(previous.id) : undefined;
+    if (left && keyOf(left.key) === keyOf(key)) left.key = webKey(left.session.id);
+    this.byKey.set(keyOf(key), session);
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
@@ -230,7 +240,7 @@ export class Router {
   attach(key: ConversationKey, session: AgentSession): void {
     const existing = this.bySession.get(session.id);
     if (existing?.session === session) {
-      this.byKey.set(keyOf(key), session);
+      this.hold(key, session);
       this.reached(session, key);
       return;
     }
@@ -244,7 +254,7 @@ export class Router {
         log.error(`disposing replaced session ${session.id} failed`, err)
       );
     }
-    this.byKey.set(keyOf(key), session);
+    this.hold(key, session);
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
     // Delivery reads `attached.key` live: a chat attaching after the workbench
     // opened the session takes over (`reached`), and the closure must follow.
@@ -356,7 +366,7 @@ export class Router {
   private async useQueue<T>(
     sessionId: string,
     action: (session: AgentSession) => Promise<T>,
-    key: ConversationKey = { channelId: "web", conversationId: sessionId },
+    key: ConversationKey = webKey(sessionId),
   ): Promise<T> {
     if (this.queueOperations.has(sessionId)) throw new QueueOperationError("busy", "Queue operation in progress");
     this.queueOperations.add(sessionId);

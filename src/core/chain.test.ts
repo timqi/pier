@@ -353,6 +353,8 @@ describe("a send under a chat's key", () => {
     expect(await send(r, "back")).toEqual({ sessionId: "m2", rotated: "idle" });
     expect(r.router.sessionOf(KEY)?.id).toBe("m2");
     expect(r.router.conversationOf("m2")).toEqual(KEY);
+    // The previous head keeps no delivery: its next turn would otherwise answer in the chat too.
+    expect(r.router.conversationOf("m1")).toEqual({ channelId: "web", conversationId: "m1" });
     expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "session-seed", reason: "idle" })]);
     expect(r.sessions.get("m2")!.prompts[0]).toContain("back");
   });

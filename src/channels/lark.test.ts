@@ -892,11 +892,17 @@ describe("the home chat", () => {
     expect(client.reactions.filter((r) => !r.add).map((r) => r.messageId).sort()).toEqual(["om_h1", "om_h2"]);
   });
 
-  it("settings, s <text> and /stop are the head's text; no panel, no abort", async () => {
-    await feed(dm({ text: "settings" }), dm({ text: "/settings" }), dm({ text: "s fix it" }), dm({ text: "/stop" }), dm({ text: "%stop" }));
-    expect(inbound.map((m) => m.text)).toEqual(["settings", "/settings", "s fix it", "/stop", "%stop"]);
+  it("settings, s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
+    await feed(dm({ text: "settings", messageId: "om_s1" }), dm({ text: "/settings", messageId: "om_s2" }), dm({ text: "s fix it", messageId: "om_s3" }), dm({ text: "/stop" }), dm({ text: "%stop" }), dm({ text: "%Status " }));
+    expect(inbound.map((m) => m.text)).toEqual(["settings", "/settings", "s fix it", "/stop", "%stop", "%Status"]);
     expect(aborted).toEqual([]);
     expect(client.replied).toEqual([]);
+    // Answered by a note, not a turn: nothing would take the 👀 off a command, or off its answer.
+    expect(client.reactions.map((r) => r.messageId)).toEqual(["om_s1", "om_s2", "om_s3"]);
+    await channel.notify(HOME, { text: "nothing running", origin: { kind: "chat-command", command: "stop" } });
+    await channel.notify(HOME, { text: "seed", origin: { kind: "session-seed", reason: "new", previousSessionId: null } });
+    expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*/stop*\n> nothing running", "*↺ new session · new*\n> seed"]);
+    expect(client.reactions).toHaveLength(3);
   });
 
   it("drops a message that is only a mention, loudly", async () => {

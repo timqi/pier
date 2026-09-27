@@ -23,9 +23,11 @@ export function originLabel(origin: NoteOrigin): string {
 }
 
 /** Is a turn coming once this note is posted? On IM the note is the only
- *  message that turn has to wear the 👀; an error note reports a turn that
- *  already ended, and a receipt on it would hang until the stale sweep. */
-export const awaitsTurn = (origin: NoteOrigin): boolean => origin.kind !== "error";
+ *  message that turn has to wear the 👀; a receipt on any other would hang
+ *  until the stale sweep: an error reports a turn that already ended, a chat
+ *  command's answer starts none, and the message that made a seed wears its own. */
+export const awaitsTurn = (origin: NoteOrigin): boolean =>
+  origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed";
 
 /** Punctuation that may be lifted out of a `**strong**` run: nothing a reader
  *  can see changes, and the delimiter comes off a character the parser refuses

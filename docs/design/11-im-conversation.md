@@ -47,16 +47,18 @@ top-level or in any thread, goes to the head (`MainChain.send`) under the key
 ## The head's key
 
 - The home key is the head's delivery key: `Router`'s `chatKeyOf(sessionId)`
-  (wired in `main.ts`) answers the home key for any member of the chain while
-  the home chat's adapter is live (`ChannelRuntime.live`), else the
-  `conversations` row as today. Attaching the head under `web:` or `task:`
+  (wired in `main.ts`) answers the home key for the head while the home
+  chat's adapter is live (`ChannelRuntime.live`), else the `conversations` row
+  as today; an older member gets no home key, so an adapter's start cannot
+  re-key it over the head. Attaching the head under `web:` or `task:`
   takes the chat key by the existing rule (an alias never outranks a chat), so
   every turn-end and every system input of the head reaches the home chat
   through the existing `Router.attach` subscription — callbacks, delegations,
   the seed, a chat command's answer, an error — and the web sees the same
   events on the hub.
 - A rotation attaches the next head the same way; the previous head keeps
-  no delivery.
+  no delivery (`Router.attach` moves the key: the session that held it goes
+  back to its own alias).
 - `conversations` never holds a row for the home key: `Router.ensure(home)`
   is reached only after `MainChain.send` attached the head, so nothing can
   resolve the home key into a new session. `control.knows(home)` is false and
@@ -83,7 +85,10 @@ thread half only for the home chat; any other is refused as today.
 | a restart note (`drain.ts`) | the same `notify`, main flow |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
-  comes off with the head's turn-end, as any conversation's.
+  comes off with the head's turn-end, as any conversation's. A chat command
+  wears none — its answer is a note, and no turn would take it off — and
+  neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
+  message that caused a seed already wears its own.
 - `originLabel` today labels every non-task origin `↩ task callback`; the two
   new kinds are the first non-task origins to reach an adapter.
 
