@@ -234,21 +234,31 @@ export interface OpenRun extends LedgerRun {
   workers?: Record<TaskRunState, number>;
 }
 
-/** What the continuous conversation is solving, as main last said it
- *  (docs/design/10-continuous-session.md#open-items). */
-export interface OpenItems {
-  /** By `updated_at`, oldest first. */
-  /** `runs`: each named run's session, by its newest run; `live` whether any is working now. */
-  items: { problem: string; stage: string; runs: OpenRun[]; live?: "running" | "idle" }[];
-  /** Chain runs in flight in no item's session. */
-  unlisted: OpenRun[];
-  /** Design leads that have not reported `Design final:` and are not closed,
-   *  by their creating run: the user decides when each is final. */
-  designs: LedgerRun[];
+/** Where an open item stands, read from its runs and sessions, never from its
+ *  stage text: `running` while any run is queued or running or its session
+ *  streams; else `waiting on you` while its session's design awaits Finalize;
+ *  else `pending release` when every run succeeded; else `waiting on you`. */
+export type OpenStatus = "running" | "waiting on you" | "pending release";
+
+/** `runs`: each named run's session, by its newest run. */
+export interface OpenItem {
+  problem: string;
+  stage: string;
+  runs: OpenRun[];
+  status: OpenStatus;
 }
 
-/** The `state` of a run an item names that the ledger no longer holds; its `name` is the id. */
-export const NOT_IN_LEDGER = "not in the ledger";
+/** What the continuous conversation is solving, as main last said it
+ *  (docs/design/10-continuous-session.md#open-items). A session is in one
+ *  item or one `unlisted` run, never two. */
+export interface OpenItems {
+  /** Main's items by `updated_at`, oldest first; then each design lead that has
+   *  not reported `Design final:`, is not closed and no item holds, named by its
+   *  creating run: the user decides when each is final. */
+  items: OpenItem[];
+  /** Chain runs in flight in no item's session. */
+  unlisted: OpenRun[];
+}
 
 /** A `--after` follow-up waiting for its target session to idle, as that
  *  session's queue shows it; `runName` is the run it was parked on. */

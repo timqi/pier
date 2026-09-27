@@ -2,13 +2,13 @@
 // joined to the run ledger by session, a lead's workers counted by state, and
 // the one text every surface shows (docs/design/10-continuous-session.md#open-items).
 
-import { openItemMarkers, runStatus, workerCounts } from "../core/reply.js";
+import { openItemMarkers, openRunText } from "../core/reply.js";
 import type { Router } from "../core/router.js";
-import { LEDGER_WINDOW_MS, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
+import { LEDGER_WINDOW_MS, NOT_IN_LEDGER, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
 import type { TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
-import { NOT_IN_LEDGER, type OpenItems, type OpenRun } from "./types.js";
+import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "./types.js";
 
 const log = logger("tasks");
 
@@ -29,9 +29,16 @@ export function openItems(tasks: OpenItemReads, router: Pick<Router, "stateOf">,
     }
     return { ...r, workers };
   };
+  const awaiting = new Set(designs.flatMap((d) => (d.targetSessionId ? [d.targetSessionId] : [])));
+  const statusOf = (named: OpenRun[]): OpenStatus =>
+    named.some((r) => IN_FLIGHT.has(r.state) || (r.targetSessionId && router.stateOf(r.targetSessionId) === "streaming"))
+      ? "running"
+      : named.some((r) => r.targetSessionId && awaiting.has(r.targetSessionId))
+        ? "waiting on you"
+        : named.length && named.every((r) => r.state === "succeeded") ? "pending release" : "waiting on you";
   // An item names a session through any of its runs: the session's newest run stands for it.
   const tracked = new Set<string>();
-  const items = tasks.store.openItems().map((row) => {
+  const items = tasks.store.openItems().map((row): OpenItem => {
     const named = row.runIds.map((id): OpenRun => {
       const session = runs.find((r) => r.runId === id)?.targetSessionId ?? tasks.store.getRun(id)?.targetSessionId ?? null;
       tracked.add(session ?? id);
@@ -40,11 +47,15 @@ export function openItems(tasks: OpenItemReads, router: Pick<Router, "stateOf">,
         ? withWorkers(run)
         : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: session, cwd: null, queuedAt: 0, finishedAt: null };
     }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
-    const busy = named.some((r) => IN_FLIGHT.has(r.state) || (r.targetSessionId && router.stateOf(r.targetSessionId) === "streaming"));
-    return { problem: row.problem, stage: row.stage, runs: named, ...(named.length ? { live: busy ? "running" as const : "idle" as const } : {}) };
+    return { problem: row.problem, stage: row.stage, runs: named, status: statusOf(named) };
   });
   const unlisted = runs.filter((r) => IN_FLIGHT.has(r.state) && !tracked.has(r.targetSessionId ?? r.runId)).map(withWorkers);
-  return { items, unlisted, designs };
+  for (const r of unlisted) tracked.add(r.targetSessionId ?? r.runId);
+  const unheld = designs.filter((d) => !tracked.has(d.targetSessionId ?? d.runId)).map((d): OpenItem => {
+    const named = [withWorkers(runs.find((r) => d.targetSessionId && r.targetSessionId === d.targetSessionId) ?? d)];
+    return { problem: d.name, stage: "", runs: named, status: statusOf(named) };
+  });
+  return { items: [...items, ...unheld], unlisted };
 }
 
 /** The head's reply's markers, written; answers whether a row changed. */
@@ -54,30 +65,31 @@ export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: s
   return markers.length > 0 && store.markOpenItems(markers, now) > 0;
 }
 
-const workersText = (workers: Record<TaskRunState, number> | undefined): string =>
-  workers ? ` · workers: ${workerCounts(workers)}` : "";
+/** An `unlisted` run's stage: main named it in no item. */
+const UNLISTED = "not on the list";
 
-const runText = (r: OpenRun, now: number): string =>
-  r.state === NOT_IN_LEDGER
-    ? `run ${r.runId} — ${NOT_IN_LEDGER}`
-    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${workersText(r.workers)}`;
+/** `status` is an item's, or `queued` for an unlisted run not started, as the panel tags it. */
+const itemLine = (i: Omit<OpenItem, "status"> & { status: string }, now: number): string =>
+  `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""} (${i.status})${i.runs.map((r) => ` · ${openRunText(r, now)}`).join("")}`;
 
-/** The one string every surface shows for the open items: `/status` and the seed. */
-function renderOpenItems({ items, unlisted, designs }: OpenItems, now: number): string {
-  if (!items.length && !unlisted.length && !designs.length) return "Nothing open.";
-  const open = items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.live ? ` (${i.live})` : ""}${i.runs.map((r) => ` · ${runText(r, now)}`).join("")}`);
-  const rest = unlisted.map((r) => `- ${r.name} — ${runStatus(r, now)}${workersText(r.workers)}`);
-  const decide = designs.map((r) => `- ${r.name} · ${runText(r, now)}`);
+/** The one string every surface shows for the open items: `/status` and the seed.
+ *  Grouped as the status panel groups them (web/ui/drawer.ts): what waits on the user first. */
+function renderOpenItems({ items, unlisted }: OpenItems, now: number): string {
+  if (!items.length && !unlisted.length) return "Nothing open.";
+  const waiting = items.filter((i) => i.status !== "running").map((i) => itemLine(i, now));
+  const running = [
+    ...items.filter((i) => i.status === "running").map((i) => itemLine(i, now)),
+    ...unlisted.map((r) => itemLine({ problem: r.name, stage: UNLISTED, runs: [r], status: r.state === "queued" ? "queued" : "running" }, now)),
+  ];
   return [
-    ...(open.length ? ["Open", ...open] : []),
-    ...(rest.length ? ["Not on the list", ...rest] : []),
-    ...(decide.length ? ["Designs for you to finalize", ...decide] : []),
+    ...(waiting.length ? ["Waiting on you", ...waiting] : []),
+    ...(running.length ? ["In progress", ...running] : []),
   ].join("\n");
 }
 
-/** `/status`'s card: the text, and run id → session id for every named run and listed design that has one. */
+/** `/status`'s card: the text, and run id → session id for every run it names that has one. */
 export function openItemsStatus(open: OpenItems, now: number): { text: string; sessions: Record<string, string> } {
-  const sessions = Object.fromEntries([...open.items.flatMap((i) => i.runs), ...open.designs]
+  const sessions = Object.fromEntries([...open.items.flatMap((i) => i.runs), ...open.unlisted]
     .flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
   return { text: renderOpenItems(open, now), sessions };
 }

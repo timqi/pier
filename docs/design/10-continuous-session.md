@@ -115,28 +115,34 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   else `TaskStore.getRun`) and shows that session's newest run in the ledger's
   last 24h, so a lead woken again stays the same item (none there reads `run <id>
   — not in the ledger`, `NOT_IN_LEDGER`), a lead run's with its workers counted
-  by state; `live` is `running` while any of those runs is queued or running or
-  its session streams, else `idle`; `unlisted` is the chain's queued and running
-  runs in no item's session; `renderOpenItems` is the one text.
+  by state; `unlisted` is the chain's queued and running runs in no item's
+  session; `renderOpenItems` is the one text.
+- Each item's `status` is read from its runs and sessions, never its stage:
+  `running` while a run is queued or running or its session streams, else
+  `waiting on you` while its session's design awaits Finalize, else `pending
+  release` when every run succeeded, else `waiting on you`.
 - An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
   backlog in MEMORY.md.
-- `designs`: every design lead not closed whose runs have not reported
-  `Design final:` (`TaskService.openDesigns` over `TaskStore.leads`), by its
-  creating run — the user's to finalize.
-- The text: `Open`, one line per item, `- <problem> — <stage> (<live>)`, each run rendered
-  ` · run <id8>… <state> <age>` and a lead's ` · workers: <counts>`, then `Not
-  on the list`, then `Designs for you to finalize`, `- <name> · run <id8>… …`;
-  `Nothing open.` when all are empty.
+- Every design lead not closed whose runs have not reported `Design final:`
+  (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
+  named by its creating run, unless an item or an unlisted run already holds
+  its session: a session is in the list once.
+- The text: `Waiting on you`, the items not `running`, then `In progress`, the
+  `running` items and each unlisted run as `- <name> — not on the list`; a line
+  is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
+  it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
+  `core/reply.ts`) and a lead's ` · workers: <counts>`; `Nothing open.` when
+  both are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, its origin
-  carrying `sessions`, run id → session id for every named run and listed design that has one; any
+  carrying `sessions`, run id → session id for every run it names that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the `/status` card and the web's status panel, opened by the bar's
-  status chip — the same text (`GET /api/continuous/status`) under the In progress
-  rows (`GET /api/continuous/open`'s live runs), [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
+- Surfaces: the `/status` card, and the web's status panel, opened by the bar's
+  status chip — the same groups and statuses as rows (`GET /api/continuous/open`),
+  [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 
 ## Chat commands
 

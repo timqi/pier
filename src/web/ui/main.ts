@@ -423,13 +423,18 @@ function connectWorkspace(): void {
       return;
     }
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
-      // A run starting or settling changes its launcher's activeRuns dot.
+      // A run starting or settling changes its launcher's activeRuns dot and its
+      // item's status (refreshSessions re-reads the open items with the list).
       if (e.type === "task-run-changed") void refreshSessions();
       return;
     }
     if (e.type === "open-items-changed") {
       void refreshOpenItems();
       return;
+    }
+    // A session an item holds streaming is that item running.
+    if (openItems && [...openItems.items.flatMap((i) => i.runs), ...openItems.unlisted].some((r) => r.targetSessionId === e.sessionId)) {
+      void refreshOpenItems();
     }
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;

@@ -1,5 +1,5 @@
 // The status panel on index.html: its order and marks, the status chip's
-// counts, and the panel the chip opens — the rows over `/status`'s card.
+// counts, and the panel the chip opens — what waits on you over what runs.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ChainMember } from "../../core/types.js";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
@@ -36,13 +36,8 @@ let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
 const select = vi.fn();
-/** `/status`'s answers, in order; an empty queue answers "Nothing open.". */
-let answers: Response[] = [];
-const fetch = vi.fn(async () => answers.shift() ?? Response.json({ text: "Nothing open.", sessions: {} }));
 
 beforeEach(async () => {
-  answers = [];
-  vi.stubGlobal("fetch", fetch);
   vi.resetModules();
   vi.clearAllMocks();
   chords.clear();
@@ -54,10 +49,18 @@ beforeEach(async () => {
   open = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => vi.restoreAllMocks());
 
 const chip = () => doc.querySelector("#status-chip")!;
 const panelRows = () => doc.querySelectorAll(".session-open");
+/** A row as it reads: label, who, second line, status. */
+const cells = (b: import("./dom.testkit.js").FakeElement): string[] => {
+  const [name, status] = b.children;
+  const [line, detail] = name!.children;
+  const [label, who] = line!.children;
+  return [label!.textContent, who?.textContent ?? "", detail!.textContent, status!.textContent];
+};
+const labels = () => panelRows().map((b) => cells(b)[0]);
 
 it("draws no dot on an idle row and paints one only for something to look at", () => {
   const dot = (over: Partial<Row>) => fake(drawer.stateDot(row("x", over))[0] ?? null as never);
@@ -96,11 +99,15 @@ it("counts running and needs-you on the chip, omitting a zero half, and is absen
   drawer.renderDrawer();
   expect(chip().textContent).toBe("1 running · 2 needs you");
 
-  // Open items with nothing live: the chip still leads to their stages.
+  // Open items count as the groups their rows are in; the icon badge stays a turn to look at.
   sessions = [];
-  open = { items: [{ problem: "a", stage: "waiting on you", runs: [] }, { problem: "b", stage: "", runs: [] }], unlisted: [], designs: [] };
+  open = { items: [{ problem: "a", stage: "", runs: [], status: "waiting on you" }, { problem: "b", stage: "", runs: [], status: "running" }], unlisted: [] };
   drawer.renderDrawer();
-  expect(chip().textContent).toBe("2 open");
+  expect(chip().textContent).toBe("1 running · 1 needs you");
+  expect(badge).toHaveBeenLastCalledWith(0);
+  open = { items: [{ problem: "b", stage: "", runs: [], status: "running" }], unlisted: [] };
+  drawer.renderDrawer();
+  expect(chip().textContent).toBe("1 running");
   expect(chip().classList.contains("text-neutral-600")).toBe(true);
 });
 
@@ -121,8 +128,8 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   drawer.renderDrawer();
   chip().onclick?.();
   expect(menu.openPanel).toHaveBeenCalledOnce();
-  const list = doc.querySelector("[data-list]")!;
-  expect(panelRows().map((b) => b.textContent.trim())).toEqual(["b", "a"]);
+  const list = doc.querySelector("[data-list='running']")!;
+  expect(labels()).toEqual(["b", "a"]);
   expect(panelRows()[0]!.getAttribute("aria-current")).toBe("page");
 
   // Open again is a close; the chord is the same toggle and stands down under a modal.
@@ -137,7 +144,8 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   // A render under the open panel refills it in place.
   sessions = [row("c", { activeRuns: 1, createdAt: 3 }), ...sessions];
   drawer.renderDrawer();
-  expect(list.querySelectorAll(".session-open").map((b) => b.textContent.trim())).toEqual(["c", "b", "a"]);
+  expect(labels()).toEqual(["b", "c", "a"]);
+  expect(list.querySelectorAll(".session-open").map((b) => cells(b)[0])).toEqual(["c", "a"]);
 });
 
 it("does not open with nothing to show, and closes when it runs out", () => {
@@ -153,40 +161,56 @@ it("does not open with nothing to show, and closes when it runs out", () => {
   expect(menu.closeMenu).toHaveBeenCalledOnce();
 });
 
-// Under the rows, `/status`'s own text in the chat's card: a named run opens
-// its session, refetched while open, a failed read said in the card.
-it("draws /status's text as its card under the rows and refetches it while open", async () => {
-  const text = "Open\n- Bar — building (running) · run r1abcdef… running 1m";
-  answers.push(Response.json({ text, sessions: { r1abcdefgh: "s-r1" } }));
-  open = { items: [{ problem: "Bar", stage: "building", runs: [] }], unlisted: [], designs: [] };
+// One row per session, grouped by who acts next: an item names its status in
+// words, its stage and runs as the second line, and opens its run's session.
+it("groups the rows waiting on you over in progress, each session once, an item as problem · who · detail · status", () => {
+  vi.spyOn(Date, "now").mockReturnValue(10 * 60_000);
+  const run = (runId: string, over: Partial<import("../../tasks/types.js").OpenRun> = {}) =>
+    ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
+  sessions = [
+    row("s-lead1abcdef", { title: "多入口统一对话", phase: "design", designOpen: true, state: "streaming", createdAt: 3 }),
+    row("s-free", { title: "free", unread: true, createdAt: 2 }),
+    row("s-q", { title: "queued lead", phase: "build", runLive: true, createdAt: 1 }),
+  ];
+  open = {
+    items: [
+      { problem: "子任务 thread", stage: "design lead narrowing scope (running)", status: "waiting on you",
+        runs: [run("lead1abcdef", { state: "succeeded", finishedAt: 0 })] },
+      { problem: "0.2.1 清理上线", stage: "merged", status: "waiting on you", runs: [] },
+      { problem: "auth review", stage: "worker running", status: "running", runs: [run("w1", { queuedAt: 5 * 60_000 })] },
+    ],
+    unlisted: [run("q1", { name: "Queued one", state: "queued", targetSessionId: null, queuedAt: 9 * 60_000 })],
+  };
   drawer.renderDrawer();
   drawer.openDrawer();
-  const panel = () => fake(menu.openPanel.mock.lastCall![1]);
-  const card = () => panel().querySelectorAll(".system-card");
-  // No rows: the In progress head is hidden and the Open items head sits at
-  // the top without its gap — the open items are the panel.
-  const list = () => panel().querySelector("[data-list]")!;
-  expect(list().previousElementSibling!.classList.contains("hidden")).toBe(true);
-  expect(list().nextElementSibling!.classList.contains("mt-2")).toBe(false);
-  expect(card()).toHaveLength(1);
-  expect(card()[0]!.textContent).toBe("Loading…");
-  await vi.waitFor(() => expect(card()[0]!.textContent).toBe(text));
-  expect(fetch).toHaveBeenLastCalledWith("/api/continuous/status", undefined);
-  const link = card()[0]!.querySelectorAll("button").find((b) => b.textContent === "run r1abcdef…")!;
-  link.onclick?.();
-  expect(menu.closeMenu).toHaveBeenCalled();
-  expect(select).toHaveBeenCalledWith("s-r1");
+  const group = (name: string) => doc.querySelector(`[data-list='${name}']`)!.querySelectorAll(".session-open").map(cells);
+  expect(group("waiting")).toEqual([
+    ["子任务 thread", "lead · design", "run lead1abc… succeeded 10m ago · design lead narrowing scope (running)", "waiting on you"],
+    ["0.2.1 清理上线", "", "merged", "waiting on you"],
+    ["free", "", "turn finished — not viewed yet · active 10m ago", "waiting on you"],
+  ]);
+  expect(group("running")).toEqual([
+    ["auth review", "worker", "run w1 running 5m · worker running", "running"],
+    ["Queued one", "", "run q1 queued 1m", "queued"],
+    ["queued lead", "lead · build", "run queued · active 10m ago", "queued"],
+  ]);
+  expect(chip().textContent).toBe("3 running · 3 needs you");
+  // The lead's session is the item's row, not a row of its own.
+  expect(labels()).not.toContain("多入口统一对话");
+  panelRows()[0]!.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s-lead1abcdef");
+});
 
-  answers.push(Response.json({ text: "Open\n- Bar — merged", sessions: {} }));
-  open = { items: [{ problem: "Bar", stage: "merged", runs: [] }], unlisted: [], designs: [] };
-  drawer.renderDrawer();
-  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("Open\n- Bar — merged"));
-
-  answers.push(Response.json({ error: "database is locked" }, { status: 500 }));
+it("hides a group's head while it has no rows", () => {
   sessions = [row("a", { state: "streaming" })];
   drawer.renderDrawer();
-  await vi.waitFor(() => expect(card()[0]!.textContent).toBe("database is locked"));
-  expect(list().previousElementSibling!.classList.contains("hidden")).toBe(false);
-  expect(list().nextElementSibling!.classList.contains("mt-2")).toBe(true);
-  expect(panelRows().map((b) => b.textContent.trim())).toEqual(["a"]);
+  drawer.openDrawer();
+  const head = (name: string) => doc.querySelector(`[data-list='${name}']`)!.previousElementSibling!;
+  expect(head("waiting").classList.contains("hidden")).toBe(true);
+  expect(head("running").classList.contains("hidden")).toBe(false);
+  expect(head("running").classList.contains("mt-2")).toBe(false);
+  sessions = [...sessions, row("b", { unread: true })];
+  drawer.renderDrawer();
+  expect(head("waiting").classList.contains("hidden")).toBe(false);
+  expect(head("running").classList.contains("mt-2")).toBe(true);
 });

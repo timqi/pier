@@ -66,7 +66,7 @@ export const FOLD_ROW = "fold-row";
 export const runBody = (text: string): HTMLElement =>
   h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
-/** `/status`'s text names a run as `run <id8>…` (tasks/open-items.ts renderOpenItems);
+/** `/status`'s text names a run as `run <id8>…` (core/reply.ts `openRunText`);
  *  each one whose session `sessions` carries opens it — in the chat card and the Status panel. */
 export function linkRuns(content: HTMLElement, sessions: Record<string, string>, open: (sessionId: string) => void): void {
   const text = content.textContent ?? "";

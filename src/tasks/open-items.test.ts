@@ -7,11 +7,11 @@ import { EventHub } from "../core/hub.js";
 import { agoLabel } from "../core/reply.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
-import type { AgentFactory, AgentRole, LedgerRun } from "../core/types.js";
+import { NOT_IN_LEDGER, type AgentFactory, type AgentRole, type LedgerRun } from "../core/types.js";
 import { openItems, openItemsStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import { NOT_IN_LEDGER, type TaskRun } from "./types.js";
+import type { TaskRun } from "./types.js";
 
 const MIN = 60_000;
 const run = (runId: string, over: Partial<LedgerRun> = {}): LedgerRun =>
@@ -63,8 +63,9 @@ describe("the open items", () => {
     expect(open.unlisted).toEqual([]);
     expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }, { ids: ["lead1"], since: now - 86_400_000 }]);
     expect(openItemsStatus(open, now).text).toBe([
-      "Open",
-      "- model menu 重选 — merged, restart pending (idle) · run gone1 — not in the ledger",
+      "Waiting on you",
+      "- model menu 重选 — merged, restart pending (waiting on you) · run gone1 — not in the ledger",
+      "In progress",
       "- open items 视图 — lead designing (running) · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
     ].join("\n"));
   });
@@ -86,11 +87,11 @@ describe("the open items", () => {
     // The window is the ledger's: `pier task runs`' last 24h.
     expect(r.ledger[0]!.since).toBe(now - 86_400_000);
     expect(openItemsStatus(open, now).text).toBe([
-      "Open",
-      "- the problem (idle) · run r-named failed just now",
-      "Not on the list",
-      "- Build it — running 5m",
-      "- Next — queued 1m",
+      "Waiting on you",
+      "- the problem (waiting on you) · run r-named failed just now",
+      "In progress",
+      "- Build it — not on the list (running) · run r-live running 5m",
+      "- Next — not on the list (queued) · run r-queued queued 1m",
     ].join("\n"));
   });
 
@@ -106,34 +107,56 @@ describe("the open items", () => {
     const open = r.list();
     expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
     expect(open.unlisted).toEqual([]);
-    expect(openItemsStatus(open, now).text).toBe("Open\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
+    expect(openItemsStatus(open, now).text).toBe("In progress\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
   });
 
-  it("reads an item running while its session streams, though its run has finished", () => {
+  // The status is the runs' and sessions', whatever the stage text says.
+  it("reads an item running while its session streams, though its run has finished, and pending release once idle", () => {
     let now = 0;
     const r = rig({ runs: () => [run("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN })] });
     now = r.now;
-    r.item("fix", "lead building", ["r1"], 1);
-    expect(r.list().items[0]!.live).toBe("idle");
+    r.item("fix", "lead building (running)", ["r1"], 1);
+    expect(r.list().items[0]!.status).toBe("pending release");
     const lead = fakeSession("lead1");
     r.router.attach({ channelId: "task", conversationId: "lead1" }, lead);
     lead.setState("streaming");
-    expect(r.list().items[0]!.live).toBe("running");
+    expect(r.list().items[0]!.status).toBe("running");
   });
 
   // A design lead's turn ends on the user; until it reports `Design final:` it is theirs to decide.
-  it("lists the designs waiting on the user last, each linking its session from `/status`", () => {
+  it("lists the designs no item holds after the items, waiting on the user, each linking its session from `/status`", () => {
     const design = run("d1abcdefgh", { name: "Rail redesign", state: "succeeded", targetSessionId: "s-d1", finishedAt: 0 });
     const r = rig();
     r.item("model menu", "merged", [], 1);
     const status = openItemsStatus(r.list(["h1"], [design]), r.now);
     expect(status.text).toBe([
-      "Open",
-      "- model menu — merged",
-      "Designs for you to finalize",
-      `- Rail redesign · run d1abcdef… succeeded ${agoLabel(0, r.now)}`,
+      "Waiting on you",
+      "- model menu — merged (waiting on you)",
+      `- Rail redesign (waiting on you) · run d1abcdef… succeeded ${agoLabel(0, r.now)}`,
     ].join("\n"));
     expect(status.sessions).toEqual({ d1abcdefgh: "s-d1" });
+  });
+
+  // One session is one row: an item or an in-flight run holding a design's session stands for it.
+  it("never lists a session twice: a design under its item, or under its live run", () => {
+    let now = 0;
+    const d1 = run("d1", { name: "多入口统一对话", state: "succeeded", targetSessionId: "s-d1", finishedAt: 0 });
+    const d2 = run("d2", { name: "Rail", state: "succeeded", targetSessionId: "s-d2", finishedAt: 0 });
+    const r = rig({ runs: () => [
+      run("t1", { name: "子任务 thread", state: "succeeded", targetSessionId: "s-d1", finishedAt: now - 11 * MIN }),
+      run("t2", { name: "Rail again", targetSessionId: "s-d2", queuedAt: now - MIN }),
+    ] });
+    now = r.now;
+    r.item("子任务 thread", "design lead narrowing scope (running)", ["t1"], 1);
+    const open = r.list(["h1"], [d1, d2]);
+    expect(open.items.map((i) => [i.problem, i.status])).toEqual([["子任务 thread", "waiting on you"]]);
+    expect(open.unlisted.map((u) => u.runId)).toEqual(["t2"]);
+    expect(openItemsStatus(open, now).text).toBe([
+      "Waiting on you",
+      "- 子任务 thread — design lead narrowing scope (running) (waiting on you) · run t1 succeeded 11m ago",
+      "In progress",
+      "- Rail again — not on the list (running) · run t2 running 1m",
+    ].join("\n"));
   });
 
   it("says nothing is open when nothing is, and asks no ledger before the first head", () => {

@@ -199,6 +199,9 @@ export interface LedgerRun {
   finishedAt: number | null;
 }
 
+/** The `state` of a run an open item names that the ledger no longer holds; its `name` is the id. */
+export const NOT_IN_LEDGER = "not in the ledger";
+
 export interface BackgroundRun {
   runId: string;
   taskId: string;

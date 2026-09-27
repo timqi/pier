@@ -98,7 +98,7 @@ beforeEach(async () => {
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
     if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [], rotateAt: 60_000 }));
-    if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [], designs: [] }));
+    if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
     const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
     if (one && !init?.method) {
       const id = one[1] as string;
@@ -307,7 +307,7 @@ it("re-reads the open items when a turn end wrote a marker", async () => {
   const drawer = await import("./drawer.js");
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-  const open = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [], designs: [] };
+  const open = { items: [{ problem: "p", stage: "s", runs: [], status: "waiting on you" }], unlisted: [] };
   fetcher.mockClear();
   fetcher.mockImplementationOnce(() => Promise.resolve(Response.json(open)));
   vi.mocked(drawer.renderDrawer).mockClear();

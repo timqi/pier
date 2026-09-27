@@ -493,11 +493,8 @@ export function createServer(
   // The chain, newest first; the client pages back through it with /history.
   app.get("/api/continuous", (c) => c.json({ chain: continuous.members(), rotateAt: CHAIN_FULL_TOKENS }));
 
-  // The drawer's run rows.
-  app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [], designs: [] }));
-
-  // ⋯ → Status: `/status`'s answer, without posting it.
-  app.get("/api/continuous/status", (c) => c.json(continuous.status()));
+  // The status panel's rows.
+  app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [] }));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.

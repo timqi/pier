@@ -4,7 +4,7 @@
 // and units live here.
 
 import { replaceOutsideCode } from "./inbound-file.js";
-import { TASK_RUN_STATES } from "./types.js";
+import { NOT_IN_LEDGER, TASK_RUN_STATES } from "./types.js";
 import type { AgentReply, LedgerRun, NoteOrigin, TaskRunState, ThinkingLevel, TurnMeta } from "./types.js";
 
 // The syntax is told in agent/roles.ts; this file parses it back.
@@ -93,6 +93,13 @@ export const runStatus = (r: LedgerRun, now: number): string =>
 /** A lead's launches by state, in the states' own order: "2 running, 1 failed". */
 export const workerCounts = (workers: Record<TaskRunState, number>): string =>
   TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`).join(", ") || "none";
+
+/** A run behind an open item, `run <id8>… <state> <age>`, a lead's with its workers;
+ *  web/ui/turn-activity.ts `linkRuns` reads the token back. */
+export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, number> }, now: number): string =>
+  r.state === NOT_IN_LEDGER
+    ? `run ${r.runId} — ${NOT_IN_LEDGER}`
+    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}`;
 
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {

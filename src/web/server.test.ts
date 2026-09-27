@@ -2407,18 +2407,10 @@ describe("the continuous conversation's routes", () => {
   it("answers the open items the task service lists", async () => {
     const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
     const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "queued", targetSessionId: null };
-    const open: OpenItems = { items: [{ problem: "open items", stage: "worker running", runs: [live], live: "running" }], unlisted: [stray], designs: [] };
+    const open: OpenItems = { items: [{ problem: "open items", stage: "worker running", runs: [live], status: "running" }], unlisted: [stray] };
     const res = await chainRig(undefined, open).app.request("/api/continuous/open");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(open);
-  });
-
-  it("answers `/status`'s text for the Status panel without posting it or opening a head", async () => {
-    const { app, factory } = chainRig();
-    const res = await app.request("/api/continuous/status");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ text: "Nothing open.", sessions: {} });
-    expect(factory.create).not.toHaveBeenCalled();
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

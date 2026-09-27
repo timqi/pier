@@ -1,16 +1,15 @@
-// The status panel: what is running and what needs you, counted on the bar's
-// status chip, listed in the panel it opens, over `/status`'s open items as
-// one card. The palette borrows the dots.
+// The status panel: what needs you and what is running, counted on the bar's
+// status chip and listed in the panel it opens — the open items and the live
+// sessions no item holds, one row each. The palette borrows the dots.
 
-import { getJson } from "./api.js";
-import { $, h, relTime } from "./dom.js";
+import { $, agoLabel, h } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
-import { linkRuns, runBody, runCard } from "./turn-activity.js";
+import { openRunText } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
-import type { OpenItems, OpenRun } from "../../tasks/types.js";
+import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "../../tasks/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -114,9 +113,6 @@ export const phaseTag = (s: SessionInfo): HTMLElement[] => {
   return tag(s.phase, s.phase === "design" ? "lead — designing with you" : "lead — building per the design");
 };
 
-/** A worker's session is never a row, so its run's state picks the mark. */
-const runDot = (r: OpenRun): HTMLElement[] => (r.state === "running" ? markDot(WORKING) : []);
-
 const tag = (text: string, title: string): HTMLElement[] => {
   const el = h("span", "flex-none rounded bg-neutral-100 px-1 text-[0.6875rem] font-medium leading-4 text-neutral-500", text);
   el.title = title;
@@ -141,61 +137,118 @@ export const headSession = (): SessionInfo | undefined => {
 const ROW = "flex items-center gap-1 rounded-[10px] px-1.5 hover:bg-neutral-100";
 const OPEN = "session-open flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left";
 
-/** A readable channel initial without a box on every IM row. */
-const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500";
+/** A row's one status: an open item's (tasks/types.ts `OpenStatus`), or a free
+ *  session's, whose lead run may still be queued. */
+type RowStatus = OpenStatus | "queued";
 
-/** Typing into a Slack thread's session sends to the people in that thread.
- *  `web` is nearly every row, so it is not said; one letter, name in the tooltip. */
-const channelChip = (s: SessionInfo): HTMLElement[] =>
-  s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
+/** Status is said in words; the tone only repeats it. */
+const STATUS_TONE: Record<RowStatus, string> = {
+  "waiting on you": "bg-amber-50 text-amber-700",
+  running: "bg-green-50 text-green-700",
+  queued: "bg-neutral-100 text-neutral-600",
+  "pending release": "bg-neutral-100 text-neutral-600",
+};
 
-function row(label: string, marks: HTMLElement[], id: string, title: string, open: () => void, extra: HTMLElement[] = []): HTMLElement {
+/** Every panel row reads the same: what it is, who works it, and — as the
+ *  second line — where it stands and for how long; then its one status. */
+interface PanelRow {
+  id: string;
+  label: string;
+  who: string;
+  detail: string;
+  status: RowStatus;
+  title: string;
+  open: () => void;
+}
+
+function row(r: PanelRow): HTMLElement {
   const li = h("li", ROW);
-  const button = h("button", OPEN, h("span", "min-w-0 flex-1 truncate", label), ...marks);
+  const name = h("span", "min-w-0 flex-1 py-1",
+    h("span", "flex min-w-0 items-center gap-1.5", h("span", "min-w-0 truncate", r.label), ...(r.who ? tag(r.who, r.who) : [])),
+    h("span", "block truncate text-xs leading-4 text-neutral-500", r.detail));
+  const status = h("span", `flex-none rounded px-1.5 text-[0.6875rem] font-medium leading-5 ${STATUS_TONE[r.status]}`, r.status);
+  const button = h("button", OPEN, name, status);
   button.setAttribute("type", "button");
   button.onclick = () => {
     closeMenu();
-    open();
+    r.open();
   };
-  if (id === deps.currentId()) button.setAttribute("aria-current", "page");
-  li.dataset.sessionId = id;
-  li.title = title;
-  li.append(button, ...extra);
+  if (r.id === deps.currentId()) button.setAttribute("aria-current", "page");
+  li.dataset.sessionId = r.id;
+  li.title = r.title;
+  li.append(button);
   return li;
 }
 
+/** A lead with its phase; a session outside the web by the channel it answers. */
+const whoOf = (s: SessionInfo | undefined): string =>
+  s?.phase ? `lead · ${s.phase}` : s?.channel && s.channel !== "web" ? s.channel : "";
+
+const MARK_ROW: Record<Mark, [RowStatus, (s: SessionInfo) => string]> = {
+  working: ["running", () => "working"],
+  unread: ["waiting on you", () => "turn finished — not viewed yet"],
+  runs: ["running", (s) => `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`],
+  queued: ["queued", () => "run queued"],
+  design: ["waiting on you", () => "design — finalize when it is ready"],
+};
+
 // The facts the row has no room for, on the native tooltip: where it runs,
-// when it last moved, and — for an IM session — who it answers.
-const sessionRow = (s: SessionInfo): HTMLElement =>
-  row(s.title ?? "untitled", [...phaseTag(s), ...stateDot(s)], s.id, [
-    s.cwd,
-    `active ${relTime(lastActive(s))} ago · created ${new Date(s.createdAt).toLocaleDateString()}`,
-    ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : []),
-  ].join("\n"), () => deps.select(s.id), channelChip(s));
-
-const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
-
-/** The open items' live runs no session row stands for (a worker's), after the
- *  session rows; what waits on the user is `/status`'s. */
-function openRuns(listed: Set<string>): OpenRun[] {
-  const open = deps.open();
-  if (!open) return [];
-  return [...open.items.flatMap((i) => i.runs), ...open.unlisted]
-    .filter((r) => live(r) && !(r.targetSessionId && listed.has(r.targetSessionId)));
+// when it was created, and — for an IM session — who it answers.
+function sessionRow(s: SessionInfo, mark: Mark): PanelRow {
+  const [status, says] = MARK_ROW[mark];
+  return {
+    id: s.id, label: s.title ?? "untitled", who: whoOf(s), status,
+    detail: `${says(s)} · active ${agoLabel(lastActive(s))}`,
+    title: [s.cwd, `created ${new Date(s.createdAt).toLocaleDateString()}`, ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : [])].join("\n"),
+    open: () => deps.select(s.id),
+  };
 }
 
-const runRow = (r: OpenRun): HTMLElement => {
-  const target = r.targetSessionId;
-  return row(r.name, [...tag("run", `run ${r.runId} · ${r.state}`), ...runDot(r)], `run:${r.runId}`,
-    `run ${r.runId} · ${r.state}${r.cwd ? `\n${r.cwd}` : ""}`, () => (target ? deps.select(target) : deps.openContinuous()));
-};
+/** An open item: its problem, who runs it (the first run's session, a lead's
+ *  with its phase), its runs and stage as the second line; it opens that session, else the conversation. */
+function itemRow(i: OpenItem, now: number): PanelRow {
+  // Runs first: a long stage truncates, and the state and age are what the row must keep.
+  const detail = [...i.runs.map((r) => openRunText(r, now)), i.stage].filter(Boolean).join(" · ");
+  const run = i.runs.find((r) => r.targetSessionId);
+  const target = run?.targetSessionId ?? undefined;
+  const who = run ? whoOf(deps.sessions().find((s) => s.id === target)) || (run.workers ? "lead" : "worker") : "";
+  return {
+    id: target ?? `item:${i.problem}`, label: i.problem, who, detail, status: i.status,
+    title: [i.problem, detail, ...i.runs.flatMap((r) => (r.cwd ? [r.cwd] : []))].filter(Boolean).join("\n"),
+    open: () => (target ? deps.select(target) : deps.openContinuous()),
+  };
+}
+
+/** An unlisted run: an item of its own, queued until it starts. */
+const unlistedRow = (r: OpenRun, now: number): PanelRow => ({
+  ...itemRow({ problem: r.name, stage: "", runs: [r], status: "running" }, now),
+  ...(r.state === "queued" ? { status: "queued" as const } : {}),
+});
+
+/** The open items, then the unlisted runs, then the live sessions none of them
+ *  holds: one row per session, split by who acts next. */
+function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; sessions: SessionInfo[] } {
+  const open = deps.open() ?? { items: [], unlisted: [] };
+  const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
+  const sessions = inProgress(deps.sessions(), deps.chain());
+  const all = [
+    ...open.items.map((i) => itemRow(i, now)),
+    ...open.unlisted.map((r) => unlistedRow(r, now)),
+    ...sessions.flatMap((s) => {
+      const mark = markOf(s);
+      return mark && !held.has(s.id) ? [sessionRow(s, mark)] : [];
+    }),
+  ];
+  const waits = (r: PanelRow): boolean => r.status === "waiting on you" || r.status === "pending release";
+  return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), sessions };
+}
 
 // --- the chip and the panel -------------------------------------------------------------
 
-/** The panel's list while it is open; a render fills it in place. */
-let list: HTMLElement | null = null;
-let rows: HTMLElement[] = [];
-/** Rows, or open items with nothing running: the chip is there, and opens the panel. */
+/** The panel's two lists while it is open; a render fills them in place. */
+let lists: [HTMLElement, HTMLElement] | null = null;
+let rows: [HTMLElement[], HTMLElement[]] = [[], []];
+/** Any row: the chip is there, and opens the panel. */
 let shown = false;
 
 /** Short-circuit: a rebuild replaces every node, and
@@ -209,43 +262,37 @@ export function renderDrawer(): void {
   const key = renderKey();
   if (key === drawn) return;
   drawn = key;
-  const sessions = inProgress(deps.sessions(), deps.chain());
-  const runs = openRuns(new Set(deps.sessions().map((s) => s.id)));
-  const waiting = sessions.filter((s) => needsYou(markOf(s))).length;
-  const busy = sessions.length + runs.length - waiting;
-  rows = [...sessions.map(sessionRow), ...runs.map(runRow)];
-  // The app icon counts the chip's set plus the conversation's own unread reply,
-  // which the bar stands for instead of a row and is the one most worth a badge.
-  setUnreadBadge(waiting + (headSession()?.unread ? 1 : 0));
-  // Open items that wait with nothing running still get a way in to their stages.
-  const items = deps.open()?.items.length ?? 0;
-  const counts = [...(busy ? [`${busy} running`] : []), ...(waiting ? [`${waiting} needs you`] : [])];
-  const text = (counts.length ? counts : items ? [`${items} open`] : []).join(" · ");
+  const { waiting, running, sessions } = groups(Date.now());
+  rows = [waiting, running];
+  // The app icon counts a turn to look at — unread, or a design to finalize —
+  // plus the conversation's own unread reply, which the bar stands for instead of a row.
+  setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
+  const counts = [...(running.length ? [`${running.length} running`] : []), ...(waiting.length ? [`${waiting.length} needs you`] : [])];
+  const text = counts.join(" · ");
   shown = !!text;
   chip.textContent = text;
   chip.classList.toggle("hidden", !text);
   chip.classList.toggle("block", !!text);
-  chip.classList.toggle("text-amber-700", waiting > 0);
-  chip.classList.toggle("text-neutral-600", waiting === 0);
-  if (list?.isConnected && !list.closest("[inert]")) {
+  chip.classList.toggle("text-amber-700", waiting.length > 0);
+  chip.classList.toggle("text-neutral-600", waiting.length === 0);
+  if (lists?.[0].isConnected && !lists[0].closest("[inert]")) {
     if (!shown) closeMenu();
-    else {
-      fill(list);
-      if (status) void fillStatus(status);
-    }
+    else fill(lists);
   }
   refreshPalette(); // its dots read the same sessions
 }
 
 /** Refill keeping the focused row focused: Escape has to find its way back.
- *  No rows: the In progress head goes, and the Open items head loses its gap. */
-function fill(into: HTMLElement): void {
+ *  A group with no rows loses its head. */
+function fill(into: [HTMLElement, HTMLElement]): void {
   const focusId = document.activeElement?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
-  into.replaceChildren(...rows);
-  into.previousElementSibling?.classList.toggle("hidden", !rows.length);
-  into.nextElementSibling?.classList.toggle("mt-2", rows.length > 0);
+  into.forEach((ul, i) => {
+    ul.replaceChildren(...rows[i]!);
+    ul.previousElementSibling?.classList.toggle("hidden", !rows[i]!.length);
+  });
+  into[1].previousElementSibling?.classList.toggle("mt-2", rows[0].length > 0);
   if (!focusId) return;
-  rows.find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
+  rows.flat().find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
 }
 
 const HEAD = "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500";
@@ -254,17 +301,13 @@ const HEAD = "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500";
 export function openDrawer(): void {
   if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!shown) return;
-  const ul = h("ul", "");
-  ul.dataset.list = "";
-  const card = runCard("border-l-cyan-500");
-  card.classList.add("px-4"); // the transcript's fold-row padding, here the card's own
-  card.append(runBody("Loading…"));
+  const [waiting, running] = [h("ul", ""), h("ul", "")];
+  waiting.dataset.list = "waiting";
+  running.dataset.list = "running";
   const panel = h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm",
-    h("div", HEAD, "In progress"), ul, h("div", HEAD, "Open items"), card);
-  fill(ul);
-  list = ul;
-  status = card;
-  void fillStatus(card);
+    h("div", HEAD, "Waiting on you"), waiting, h("div", HEAD, "In progress"), running);
+  lists = [waiting, running];
+  fill(lists);
   openPanel(chip, panel).setAttribute("aria-label", "Status");
 }
 
@@ -273,25 +316,4 @@ export function initDrawer(d: DrawerDeps): void {
   chip.onclick = openDrawer;
   // Stands down under a modal: the palette is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
-}
-
-// --- the open items: `/status`'s own answer (MainChain.status), drawn as the chat draws that card.
-
-/** The card while its panel is open; a render refetches it in place. */
-let status: HTMLElement | null = null;
-let statusSeq = 0;
-
-/** A later fetch wins: renders can land faster than answers. */
-async function fillStatus(card: HTMLElement): Promise<void> {
-  const seq = ++statusSeq;
-  const got = await getJson<{ text: string; sessions: Record<string, string> }>("/api/continuous/status", "Could not load status");
-  if (seq !== statusSeq) return;
-  const body = runBody(got.ok ? got.value.text : got.error);
-  if (got.ok) {
-    linkRuns(body, got.value.sessions, (id) => {
-      closeMenu();
-      deps.select(id);
-    });
-  } else body.classList.add("text-red-600");
-  card.replaceChildren(body);
 }

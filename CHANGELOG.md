@@ -6,6 +6,14 @@
 
 - The database migrates to schema 33, one-way: it drops five columns nothing read (`session_state.cwd`, `session_state.project_sort`, `conversations.updated_at`, `restart_ledger.created_at`, `push_identity.created_at`); 0.2.0 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
 
+### Changed
+
+- Web status panel: one row per session, Waiting on you over In progress, each with a server-derived status tag (`waiting on you`, `pending release`, `running`, `queued`); `/status` groups its lines the same way. `GET /api/continuous/open` answers `{items: [{problem, stage, runs, status}], unlisted}`; design leads awaiting Finalize are items, not a `designs` list.
+
+### Removed
+
+- `GET /api/continuous/status`: the panel draws rows from `/api/continuous/open`; `/status` in chat is unchanged.
+
 ## 0.2.0 — 2026-09-27
 
 ### Highlights
