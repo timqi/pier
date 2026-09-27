@@ -39,7 +39,7 @@ afterEach(() => vi.unstubAllGlobals());
 async function pane(): Promise<FakeElement> {
   const built = createModelMenuPane();
   built.load();
-  await vi.waitFor(() => expect(getJson).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(getJson).toHaveBeenCalledTimes(4));
   await Promise.resolve();
   return fake(built.el);
 }
@@ -208,4 +208,29 @@ it("stages a row's tier from its select and saves it on the entry, none leaving 
       { provider: "openai", id: "free-model", thinking: "low", tier: "cheap" },
     ],
   });
+});
+
+it("shows the menu and the defaults as stored, editing neither, while the subscription is on", async () => {
+  vi.mocked(getJson).mockImplementation((url: string) =>
+    Promise.resolve(
+      url.startsWith("/api/models")
+        ? { ok: true, value: [pinned, free] }
+        : url.startsWith("/api/config/defaults")
+        ? { ok: true, value: { defaultModel: pinned, defaultThinkingLevel: null } }
+        : url.startsWith("/api/config-sync")
+        ? { ok: true, value: { enabled: true } }
+        : { ok: true, value: { modelMenu: [{ ...stored, tier: "hardest" }] } },
+    ) as never
+  );
+  const el = await pane();
+  const notes = el.querySelectorAll("p").filter((p) => p.textContent.includes("Managed by the configuration subscription"));
+  expect(notes.map((p) => p.hidden)).toEqual([false, false]);
+  const fieldsets = el.querySelectorAll("fieldset");
+  expect(fieldsets.map((f) => f.disabled)).toEqual([true, true]);
+  // The rows are drawn from the source's copy, tier and all.
+  expect(el.textContent).toContain("anthropic/pinned-model");
+  expect(el.querySelectorAll("select").find((s) => s.textContent.includes("tier: none"))!.value).toBe("hardest");
+  expect(vi.mocked(launchField).mock.lastCall![1]).toEqual({ model: pinned, thinking: null });
+  // The title model is the machine's, not the source's.
+  expect(fieldsets.some((f) => f.textContent.includes("Title model"))).toBe(false);
 });

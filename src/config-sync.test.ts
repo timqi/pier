@@ -9,14 +9,14 @@ import { PiConfigStore } from "./agent/config.js";
 import { registerConfigShareRoute } from "./web/config-sync.js";
 import { normalizeAgentSnapshot } from "./agent/config-sync.js";
 import type { AgentConfigSnapshot, AgentConfigSync } from "./agent/types.js";
-import { ConfigSync, configJson, configSourceUrl, CONFIG_SYNC_BYTES, downloadConfig, type ConfigDownload } from "./config-sync.js";
+import { ConfigSync, configJson, configSourceUrl, CONFIG_SCHEMA_VERSION, CONFIG_SYNC_BYTES, downloadConfig } from "./config-sync.js";
 import { openDb } from "./db.js";
 import { SettingsStore } from "./settings.js";
 
 const SOURCE = "https://source.example/config-sync/token";
 const agent = (text = "local"): AgentConfigSnapshot => ({ files: { "SYSTEM.md": text, "AGENTS.md": null }, providers: {} });
-const document = (text = "remote") => ({ schemaVersion: 1, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model", thinking: "medium", tier: "balanced" }] });
-const answer = (text = "remote", etag = '"one"'): ConfigDownload => ({ status: 200, etag, body: JSON.stringify(document(text)) });
+const document = (text = "remote") => ({ schemaVersion: CONFIG_SCHEMA_VERSION, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model", thinking: "medium", tier: "balanced" }] });
+const answer = (text = "remote"): string => JSON.stringify(document(text));
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
@@ -31,7 +31,7 @@ function rig() {
     try { commit?.(configJson(before) !== configJson(local)); } catch (err) { local = before; throw err; }
   });
   const config: AgentConfigSync = { exportSnapshot: async () => structuredClone(local), applySnapshot: apply };
-  const download = vi.fn(async (): Promise<ConfigDownload> => answer());
+  const download = vi.fn(async (): Promise<string> => answer());
   const reload = vi.fn(async () => {});
   const deps = { db, settings, config, normalizeAgent: normalizeAgentSnapshot, download, reload };
   const sync = new ConfigSync(deps);
@@ -41,7 +41,7 @@ function rig() {
 }
 
 describe("configuration subscription", () => {
-  it("downloads on enable, persists state/ETag, and keeps unrelated settings", async () => {
+  it("downloads on enable, persists state, and keeps unrelated settings", async () => {
     const r = rig();
     r.settings.setPublicUrl("https://local.example");
     r.settings.setTools(["rtk"]);
@@ -51,34 +51,58 @@ describe("configuration subscription", () => {
     expect(r.settings.get()).toMatchObject({ publicUrl: "https://local.example", tools: ["rtk"], modelMenu: document().modelMenu });
     expect(r.reload).toHaveBeenCalledTimes(1);
     expect(new ConfigSync(r.deps).status()).toMatchObject({ enabled: true, sourceUrl: SOURCE });
-    expect(r.state().etag).toBe('"one"');
+    expect(Object.keys(r.state()).sort()).toEqual(["enabled", "error", "instanceId", "lastApplied", "lastChecked", "needsReload", "token", "url"]);
   });
 
-  it("304 and identical 200 never write files or reload, including after restart", async () => {
+  it("drops the keys an older Pier persisted and keeps the rest", async () => {
+    const r = rig();
+    r.db.prepare("UPDATE settings SET value = ? WHERE key = 'configSync'").run(JSON.stringify({
+      instanceId: "kept", token: null, url: SOURCE, enabled: true, etag: '"old"', appliedHash: "abc",
+      lastChecked: 5, lastApplied: 4, error: null, needsReload: false,
+    }));
+    const sync = new ConfigSync(r.deps);
+    expect(sync.status()).toMatchObject({ enabled: true, sourceUrl: SOURCE, lastChecked: 5, lastApplied: 4 });
+    await sync.pause();
+    expect(r.state()).toEqual({ instanceId: "kept", token: null, url: SOURCE, enabled: false, lastChecked: 5, lastApplied: 4, error: null, needsReload: false });
+  });
+
+  it("an identical download never writes files or reloads, including after restart", async () => {
     const r = rig(); await r.enable();
     const restarted = new ConfigSync(r.deps);
     r.apply.mockClear(); r.reload.mockClear();
-    r.download.mockResolvedValueOnce({ status: 304, etag: '"untrusted"', body: "" });
-    expect(await restarted.sync()).toContain("304");
-    expect(r.download).toHaveBeenLastCalledWith(SOURCE, '"one"', expect.any(AbortSignal));
-    expect(r.state().etag).toBe('"one"');
-    r.download.mockResolvedValueOnce(answer("remote", '"two"'));
-    expect(await restarted.sync()).toContain("200");
-    expect(r.state().etag).toBe('"two"');
-    expect(r.apply).toHaveBeenCalledTimes(2); expect(r.reload).not.toHaveBeenCalled();
+    expect(await restarted.sync()).toContain("unchanged");
+    expect(r.download).toHaveBeenLastCalledWith(SOURCE, expect.any(AbortSignal));
+    expect(r.apply).toHaveBeenCalledTimes(1); expect(r.reload).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed/version/secret-bearing documents without replacing a good configuration or ETag", async () => {
+  it("rejects malformed/secret-bearing documents without replacing a good configuration", async () => {
     const r = rig(); await r.enable();
-    for (const body of ["{bad", JSON.stringify({ ...document(), schemaVersion: 2 }), JSON.stringify({ ...document(), settings: {} }),
+    for (const body of ["{bad", JSON.stringify({ ...document(), settings: {} }),
       JSON.stringify({ ...document(), modelMenu: [...document().modelMenu, { provider: "a", id: "b", thinking: "low", tier: "fastest" }] }),
       JSON.stringify({ ...document(), agent: { ...agent(), providers: { evil: { models: [], apiKey: "secret" } } } })]) {
-      r.download.mockResolvedValueOnce({ status: 200, etag: '"bad"', body });
+      r.download.mockResolvedValueOnce(body);
       await expect(r.sync.sync()).rejects.toThrow();
       expect(r.local()).toEqual(agent("remote"));
-      expect(r.state().etag).toBe('"one"');
-      expect(r.sync.status().error).toBeTruthy();
+      expect(r.sync.status()).toMatchObject({ enabled: true, error: expect.any(String) });
     }
+  });
+
+  it("pauses on a source of another schema version, naming both, and applies nothing", async () => {
+    const r = rig(); await r.enable();
+    r.settings.setModelMenu([]);
+    for (const published of [CONFIG_SCHEMA_VERSION - 1, CONFIG_SCHEMA_VERSION + 1, "2", undefined]) {
+      r.download.mockResolvedValueOnce(JSON.stringify({ ...document("newer"), schemaVersion: published }));
+      await expect(r.sync.subscribe(SOURCE)).rejects.toThrow(`this Pier reads v${String(CONFIG_SCHEMA_VERSION)}`);
+      expect(r.sync.status()).toMatchObject({ enabled: false, sourceUrl: SOURCE });
+      expect(r.sync.status().error).toMatch(typeof published === "number" ? `schema v${String(published)}` : "unknown version");
+      expect(r.local()).toEqual(agent("remote"));
+      expect(r.settings.get().modelMenu).toEqual([]);
+    }
+    // Paused, not broken: the hourly check is a no-op until the operator resumes.
+    expect(await r.sync.sync()).toContain("paused");
+    await r.enable();
+    expect(r.sync.status()).toMatchObject({ enabled: true, error: null });
+    expect(r.settings.get().modelMenu).toEqual(document().modelMenu);
   });
 
   it("does not enable or change configuration after a first download failure", async () => {
@@ -87,80 +111,68 @@ describe("configuration subscription", () => {
     await expect(r.enable()).rejects.toThrow("offline");
     expect(r.sync.status()).toMatchObject({ enabled: false, sourceUrl: "", error: "offline" });
     expect(r.local()).toEqual(agent());
-    expect(r.state().etag).toBeNull();
     await expect(r.sync.subscribe("http://localhost/")).rejects.toThrow("HTTPS");
     expect(r.sync.status().error).toContain("HTTPS");
   });
 
-  it("preserves the old ETag after apply failure and exposes the failure", async () => {
+  it("keeps the configuration after apply failure and exposes the failure", async () => {
     const r = rig(); await r.enable();
-    r.download.mockResolvedValueOnce(answer("new", '"new"'));
+    r.download.mockResolvedValueOnce(answer("new"));
     r.apply.mockRejectedValueOnce(new Error("disk full"));
     await expect(r.sync.sync()).rejects.toThrow("disk full");
     expect(r.local()).toEqual(agent("remote"));
-    expect(r.state().etag).toBe('"one"');
-    expect(r.sync.status().error).toBe("disk full");
+    expect(r.sync.status()).toMatchObject({ enabled: true, error: "disk full" });
   });
 
-  it("saves reload debt and retries it on 304 without rewriting configuration", async () => {
+  it("saves reload debt and retries it on an unchanged download without rewriting configuration", async () => {
     const r = rig();
     r.reload.mockRejectedValueOnce(new Error("adapter failed"));
     await expect(r.enable()).rejects.toThrow("reload failed");
     expect(r.sync.status()).toMatchObject({ enabled: true, needsReload: true });
-    expect(r.state().etag).toBe('"one"');
     r.apply.mockClear();
-    r.download.mockResolvedValueOnce({ status: 304, etag: null, body: "" });
     await r.sync.sync();
     expect(r.sync.status()).toMatchObject({ needsReload: false, error: null });
     expect(r.apply).toHaveBeenCalledTimes(1);
   });
 
-  it("clears conditional requests after local drift and rejects unsolicited 304", async () => {
+  it("puts the source back over a local edit, made before or during the download", async () => {
     const r = rig(); await r.enable(); r.edit("outside edit");
-    r.download.mockResolvedValueOnce({ status: 304, etag: null, body: "" });
-    await expect(r.sync.sync()).rejects.toThrow("matching local configuration");
-    expect(r.download).toHaveBeenLastCalledWith(SOURCE, null, expect.any(AbortSignal));
     await r.sync.sync(); expect(r.local()).toEqual(agent("remote"));
-  });
-
-  it.each([200, 304] as const)("reconciles edits made during a %s download before reporting success", async (status) => {
-    const r = rig(); await r.enable();
     r.download.mockImplementationOnce(async () => {
       r.edit("edited during download");
       r.settings.setModelMenu([]);
-      return status === 304 ? { status, etag: null, body: "" } : answer();
+      return answer();
     });
     await r.sync.sync();
     expect(r.local()).toEqual(agent("remote"));
     expect(r.settings.get().modelMenu).toEqual(document().modelMenu);
-    expect(r.reload).toHaveBeenCalledTimes(2);
+    expect(r.reload).toHaveBeenCalledTimes(3);
     expect(r.sync.status().error).toBeNull();
   });
 
-  it("pauses without changing files and resumes with the saved ETag", async () => {
+  it("pauses without changing files and resumes on the saved or a new source", async () => {
     const r = rig(); await r.enable();
     await r.sync.pause();
     expect(r.local()).toEqual(agent("remote"));
     expect(r.sync.status()).toMatchObject({ enabled: false, sourceUrl: SOURCE });
     expect(await r.sync.sync()).toContain("paused");
-    r.download.mockResolvedValueOnce({ status: 304, etag: null, body: "" });
     await r.enable();
-    expect(r.download).toHaveBeenLastCalledWith(SOURCE, '"one"', expect.any(AbortSignal));
+    expect(r.download).toHaveBeenLastCalledWith(SOURCE, expect.any(AbortSignal));
     expect(r.sync.status().enabled).toBe(true);
     await r.sync.pause();
     await r.sync.subscribe("https://other.example/config-sync/new");
-    expect(r.download).toHaveBeenLastCalledWith("https://other.example/config-sync/new", null, expect.any(AbortSignal));
+    expect(r.download).toHaveBeenLastCalledWith("https://other.example/config-sync/new", expect.any(AbortSignal));
   });
 
   it("serializes manual/hourly checks and pause behind an active download", async () => {
     const r = rig(); await r.enable();
-    let finish!: (value: ConfigDownload) => void;
+    let finish!: (value: string) => void;
     r.download.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const first = r.sync.sync();
     await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
     const pause = r.sync.pause();
     const second = r.sync.sync();
-    finish(answer("next", '"next"'));
+    finish(answer("next"));
     await first; await pause;
     expect(await second).toContain("paused");
     expect(r.local()).toEqual(agent("next"));
@@ -196,7 +208,7 @@ describe("configuration subscription", () => {
 
   it("rolls back an import cancelled while waiting to apply", async () => {
     const r = rig(); await r.enable();
-    r.download.mockResolvedValueOnce(answer("cancelled", '"cancelled"'));
+    r.download.mockResolvedValueOnce(answer("cancelled"));
     const apply = r.apply.getMockImplementation()!;
     let release!: () => void;
     r.apply.mockImplementationOnce(async (...args) => {
@@ -209,13 +221,12 @@ describe("configuration subscription", () => {
     controller.abort(); release();
     await expect(pending).rejects.toThrow(/abort/i);
     expect(r.local()).toEqual(agent("remote"));
-    expect(r.state().etag).toBe('"one"');
     expect(r.reload).toHaveBeenCalledTimes(1);
   });
 
   it("rolls back files and menu when the final state write fails", async () => {
     const r = rig(); await r.enable();
-    r.download.mockResolvedValueOnce({ ...answer(), body: JSON.stringify({ ...document("new"), modelMenu: [] }) });
+    r.download.mockResolvedValueOnce(JSON.stringify({ ...document("new"), modelMenu: [] }));
     r.db.exec(`CREATE TEMP TRIGGER fail_sync_state BEFORE UPDATE ON settings
       WHEN NEW.key = 'configSync' AND json_extract(NEW.value, '$.error') IS NULL
       BEGIN SELECT RAISE(FAIL, 'state write failed'); END`);
@@ -225,20 +236,19 @@ describe("configuration subscription", () => {
     expect(new ConfigSync(r.deps).status()).toEqual(r.sync.status());
   });
 
-  it("rolls back files, menu and ETag together when the database commit fails", async () => {
+  it("rolls back files and menu together when the database commit fails", async () => {
     const r = rig(); await r.enable();
-    r.download.mockResolvedValueOnce({ ...answer("new", '"new"'), body: JSON.stringify({ ...document("new"), modelMenu: [] }) });
+    r.download.mockResolvedValueOnce(JSON.stringify({ ...document("new"), modelMenu: [] }));
     vi.spyOn(r.settings, "setModelMenu").mockImplementationOnce(() => { throw new Error("DB write failed"); });
     await expect(r.sync.sync()).rejects.toThrow("DB write failed");
     expect(r.local()).toEqual(agent("remote"));
     expect(r.settings.get().modelMenu).toEqual(document().modelMenu);
-    expect(r.state().etag).toBe('"one"');
     expect(r.sync.status().error).toBe("DB write failed");
   });
 });
 
 describe("two isolated configuration stores over HTTP", () => {
-  it("transfers definitions, revalidates after reopen, and retains local secrets on source revocation", async () => {
+  it("transfers definitions, stays put after reopen, and retains local secrets on source revocation", async () => {
     const root = mkdtempSync(join(tmpdir(), "pier-sync-http-"));
     const sourceDir = join(root, "source"); const clientDir = join(root, "client");
     mkdirSync(sourceDir); mkdirSync(clientDir);
@@ -268,13 +278,11 @@ describe("two isolated configuration stores over HTTP", () => {
       const statuses: number[] = [];
       // Only transport is redirected to loopback; the production URL, redirect
       // and JSON checks remain tested in config-sync.test.ts.
-      const download = async (raw: string, etag: string | null, signal: AbortSignal): Promise<ConfigDownload> => {
-        const res = await fetch(`http://127.0.0.1:${port}${new URL(raw).pathname}`, {
-          signal, headers: etag ? { "if-none-match": etag } : {},
-        });
+      const download = async (raw: string, signal: AbortSignal): Promise<string> => {
+        const res = await fetch(`http://127.0.0.1:${port}${new URL(raw).pathname}`, { signal });
         statuses.push(res.status);
-        if (res.status !== 200 && res.status !== 304) throw new Error(`Source returned HTTP ${res.status}`);
-        return { status: res.status, etag: res.headers.get("etag"), body: await res.text() };
+        if (res.status !== 200) throw new Error(`Source returned HTTP ${res.status}`);
+        return res.text();
       };
       const reload = vi.fn(async () => {});
       const openClient = () => new ConfigSync({ db: clientDb, settings: new SettingsStore(clientDb), config: new PiConfigStore(clientDir),
@@ -296,7 +304,7 @@ describe("two isolated configuration stores over HTTP", () => {
       await client.sync();
       clientDb.close(); clientDb = openDb(join(clientDir, "pier.db")); client = openClient();
       await client.sync();
-      expect(statuses).toEqual([200, 304, 304]);
+      expect(statuses).toEqual([200, 200, 200]);
       expect(reload).toHaveBeenCalledTimes(1);
       await sourceConfig.writeFile({ kind: "global" }, "SYSTEM.md", "Updated rules");
       await client.sync(); expect(reload).toHaveBeenCalledTimes(2);
@@ -311,16 +319,16 @@ describe("two isolated configuration stores over HTTP", () => {
 });
 
 describe("configuration publication", () => {
-  it("publishes a stable content ETag and rotation/revocation invalidates the old capability", async () => {
+  it("publishes the current schema version, and rotation/revocation invalidates the old capability", async () => {
     const r = rig();
     const first = await r.sync.publish();
     const token = first.publishedPath!.split("/").at(-1)!;
     const published = await r.sync.published(token);
-    expect(published?.etag).toMatch(/^"[a-f0-9]{64}"$/);
+    expect(JSON.parse(published!)).toMatchObject({ schemaVersion: CONFIG_SCHEMA_VERSION, agent: agent() });
     expect(await r.sync.published(token)).toEqual(published);
     expect(await r.sync.published("wrong")).toBeNull();
     r.edit("new source");
-    expect((await r.sync.published(token))?.etag).not.toBe(published?.etag);
+    expect(JSON.parse((await r.sync.published(token))!)).toMatchObject({ agent: agent("new source") });
     const second = await r.sync.publish();
     expect(await r.sync.published(token)).toBeNull();
     await r.sync.revoke();
@@ -367,7 +375,7 @@ describe("configuration publication", () => {
     const published = await r.sync.publish();
     const shared = (await r.sync.published(published.publishedPath!.split("/").at(-1)!))!;
     await r.sync.revoke();
-    r.download.mockResolvedValueOnce({ status: 200, etag: shared.etag, body: shared.body });
+    r.download.mockResolvedValueOnce(shared);
     await expect(r.enable()).rejects.toThrow("itself");
     expect(r.sync.status().enabled).toBe(false);
   });
@@ -383,8 +391,8 @@ describe("configuration source fetch boundary", () => {
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); });
   afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
-  function reply(status: number, body: string, headers: Record<string, string> = { "content-type": "application/json", etag: '"test"' }): Response {
-    return new Response(status === 304 ? null : body, { status, headers });
+  function reply(status: number, body: string, headers: Record<string, string> = { "content-type": "application/json" }): Response {
+    return new Response(body, { status, headers });
   }
   const requested = (): string[] => fetchMock.mock.calls.map((call) => (call[0] as URL).href);
 
@@ -395,21 +403,18 @@ describe("configuration source fetch boundary", () => {
     expect(configSourceUrl(" https://example.com/config-sync/token ").href).toBe("https://example.com/config-sync/token");
   });
 
-  it("sends the conditional request to the source URL", async () => {
+  it("sends the request to the source URL", async () => {
     fetchMock.mockResolvedValue(reply(200, "{}"));
-    expect(await downloadConfig("https://example.com:8443/config-sync/token", '"old"', AbortSignal.timeout(1000)))
-      .toEqual({ status: 200, etag: '"test"', body: "{}" });
+    expect(await downloadConfig("https://example.com:8443/config-sync/token", AbortSignal.timeout(1000))).toBe("{}");
     expect(requested()).toEqual(["https://example.com:8443/config-sync/token"]);
     expect(fetchMock).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({
-      method: "GET", redirect: "manual",
-      headers: { accept: "application/json", "if-none-match": '"old"' },
+      method: "GET", redirect: "manual", headers: { accept: "application/json" },
     }));
   });
 
   it("reaches private and loopback sources", async () => {
-    fetchMock.mockResolvedValue(reply(304, ""));
-    expect(await downloadConfig("https://pier.internal/config-sync/token", '"old"', AbortSignal.timeout(1000)))
-      .toEqual({ status: 304, etag: '"test"', body: "" });
+    fetchMock.mockResolvedValue(reply(200, "{}"));
+    expect(await downloadConfig("https://pier.internal/config-sync/token", AbortSignal.timeout(1000))).toBe("{}");
   });
 
   it("follows HTTPS redirects, including relative ones, up to a ceiling", async () => {
@@ -417,29 +422,28 @@ describe("configuration source fetch boundary", () => {
       .mockResolvedValueOnce(reply(302, "", { location: "https://cdn.example.com/token" }))
       .mockResolvedValueOnce(reply(301, "", { location: "/moved/token" }))
       .mockResolvedValueOnce(reply(200, "{}"));
-    expect(await downloadConfig("https://example.com/token", null, AbortSignal.timeout(1000)))
-      .toEqual({ status: 200, etag: '"test"', body: "{}" });
+    expect(await downloadConfig("https://example.com/token", AbortSignal.timeout(1000))).toBe("{}");
     expect(requested()).toEqual([
       "https://example.com/token", "https://cdn.example.com/token", "https://cdn.example.com/moved/token",
     ]);
 
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(reply(302, "", { location: "https://example.com/loop" }));
-    await expect(downloadConfig("https://example.com/token", null, AbortSignal.timeout(1000))).rejects.toThrow("too many times");
+    await expect(downloadConfig("https://example.com/token", AbortSignal.timeout(1000))).rejects.toThrow("too many times");
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("refuses a redirect that leaves HTTPS", async () => {
     fetchMock.mockResolvedValue(reply(302, "", { location: "http://169.254.169.254/" }));
-    await expect(downloadConfig("https://example.com/token", null, AbortSignal.timeout(1000))).rejects.toThrow("not HTTPS");
+    await expect(downloadConfig("https://example.com/token", AbortSignal.timeout(1000))).rejects.toThrow("not HTTPS");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not accept HTML or read oversized JSON", async () => {
     fetchMock.mockResolvedValue(reply(200, "html", { "content-type": "text/html" }));
-    await expect(downloadConfig("https://example.com/token", null, AbortSignal.timeout(1000))).rejects.toThrow("JSON");
+    await expect(downloadConfig("https://example.com/token", AbortSignal.timeout(1000))).rejects.toThrow("JSON");
     fetchMock.mockResolvedValue(reply(200, "x".repeat(CONFIG_SYNC_BYTES + 1)));
-    await expect(downloadConfig("https://example.com/token", null, AbortSignal.timeout(1000))).rejects.toThrow("1 MiB");
+    await expect(downloadConfig("https://example.com/token", AbortSignal.timeout(1000))).rejects.toThrow("1 MiB");
   });
 
   it("reports cancellation and refuses revoked links without exposing the token", async () => {
@@ -447,11 +451,11 @@ describe("configuration source fetch boundary", () => {
     fetchMock.mockImplementation((_url: URL, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
       init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
     }));
-    const pending = downloadConfig("https://example.com/private-token", null, controller.signal);
+    const pending = downloadConfig("https://example.com/private-token", controller.signal);
     controller.abort();
     await expect(pending).rejects.toThrow("cancelled");
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(reply(404, ""));
-    await expect(downloadConfig("https://example.com/private-token", null, AbortSignal.timeout(1000))).rejects.toThrow("revoked");
+    await expect(downloadConfig("https://example.com/private-token", AbortSignal.timeout(1000))).rejects.toThrow("revoked");
   });
 });

@@ -138,7 +138,13 @@ const chain = new MainChain(db, {
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(taskStore, factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
-  systemActions: { "config-sync": (signal) => configSync.sync(signal) },
+  systemActions: {
+    // A schema gap pauses the subscription mid-run; the task's own switch follows it.
+    "config-sync": async (signal) => {
+      try { return await configSync.sync(signal); }
+      finally { await configurationSync.reconcile(); }
+    },
+  },
   continuous: chain,
 });
 const configurationSync = configSyncTask(tasks, configSync);
@@ -199,12 +205,8 @@ const reloadInstance = async (includeWatched = false): Promise<number> => {
   return router.evictIdle(0, Date.now(), { includeWatched });
 };
 
-// Remote outages keep the last local configuration available.
-if (configSync.status().enabled) {
-  // sync() already logged the cause; this line says what the boot did about it.
-  try { await configSync.sync(); }
-  catch { log.error("Startup configuration sync failed; using the last local configuration"); }
-}
+// No sync at boot: a restart is not a reason to replace the configuration;
+// the owned task's next check is.
 await configurationSync.reconcile();
 tasks.start();
 readyForConfigReload = true;
@@ -331,6 +333,7 @@ app.route("/", createServer({
   packages,
   providers: factory,
   settings,
+  subscribed: () => configSync.status().enabled,
   // Assembled here: the catalog spawns ubix, which web/ may not.
   catalog: async () => {
     const { tools, customTools } = settings.get();

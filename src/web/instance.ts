@@ -15,6 +15,7 @@ import {
 } from "../settings.js";
 // Type-only: erased at build, so web/ runs nothing from tools.ts.
 import type { CustomTool } from "../tools.js";
+import { managedRefusal } from "./config-sync.js";
 import { boundHost, type PasskeyStore } from "./passkeys.js";
 import type { ToolsSyncNote } from "./types.js";
 import type { UpdateCheck } from "../update.js";
@@ -79,11 +80,14 @@ export function registerInstanceRoutes(
     onSettingsChanged?: () => void;
     /** A passkey is bound to the public URL's host: moving it would lock the operator out. */
     passkeys?: PasskeyStore;
+    /** The configuration subscription is on: the model menu is the source's. */
+    subscribed?: () => boolean;
   },
 ): void {
   const {
     settings,
     passkeys,
+    subscribed = () => false,
     updates,
     updater = null,
     secrets,
@@ -239,6 +243,7 @@ export function registerInstanceRoutes(
       writes.push(() => settings.setAccent(accent));
     }
     if (body?.modelMenu !== undefined) {
+      if (subscribed()) return managedRefusal(c);
       const menu = parseModelMenu(body.modelMenu);
       if (typeof menu === "string") return refuse(menu);
       writes.push(() => settings.setModelMenu(menu));

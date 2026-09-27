@@ -401,6 +401,36 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
     both back unchanged.
   - Console-only: no agent tool installs packages; one operation at a time
     (`busy` names the source), 409 for a second.
+
+  Configuration sync (`src/config-sync.ts`; Agent › Instance › Configuration
+  sync): one instance publishes, another follows.
+  - The document, `GET /config-sync/:token` (no password; the 64-hex token is
+    the capability, rotated by Publish, dropped by Revoke): `{schemaVersion,
+    instanceId, agent: {files: {SYSTEM.md, AGENTS.md}, providers, defaults},
+    modelMenu}` — `providers` without `apiKey`, `headers`, `baseUrl`;
+    `defaults` the settings.json pair. `SNAPSHOT_FILES` (`agent/types.ts`)
+    is the file list. Publish and subscribe are exclusive per instance.
+  - `POST /api/config-sync {action: publish|revoke|subscribe|pause|sync}`
+    (`url` with `subscribe`; HTTPS only, not this instance's own link);
+    `GET` the `ConfigSyncStatus` (`web/types.ts`). The subscription is the
+    hourly task "Configuration sync" (`config-sync-task.ts`), on while
+    `enabled`; no sync at boot.
+  - The source is the authority. Every sync downloads the whole document and
+    replaces every field it carries — the three files, the defaults, the
+    menu — inside one transaction, rolled back together; a local edit made
+    between two syncs is put back. While `enabled`, the Console shows those
+    fields as stored and takes no edit: `PUT /api/settings {modelMenu}`,
+    `PUT /api/config/defaults` and `PUT /api/config/files/<synced>` (global
+    scope) answer 409 `Managed by the configuration subscription…`; the
+    `/api/config` index marks such a file `managed`, and the Models cards
+    and the file viewer carry the one note. Pause to edit. The title model,
+    the public URL and project files are the machine's, never synced.
+  - Version gate: `schemaVersion` is `CONFIG_SCHEMA_VERSION`, bumped by any
+    change to the document's shape (a menu row's fields included). A
+    subscriber applies only its own version; any other pauses the
+    subscription (`enabled: false`) with an `error` naming both versions,
+    shown in red on the panel until the operator upgrades the older instance
+    and resumes. No field-level compatibility, no merge.
   - `rtk` is a tool, shown once: its ubix hooks write and remove
     `<agentDir>/extensions/rtk.ts`, so that file is no `local` row and its
     one switch is the tool's.

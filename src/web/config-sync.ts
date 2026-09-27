@@ -1,12 +1,17 @@
 // HTTP presentation of the injected configuration subscription. The sole
 // public route is registered before auth; every management action is after it.
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { ConfigSync } from "../config-sync.js";
 import { logger } from "../log.js";
 import type { ConfigSyncStatus } from "./types.js";
 
 const log = logger("config-sync");
+
+/** The one answer every route that writes a synced field gives while the
+ *  subscription is on: the source owns it, and the Console says where. */
+export const managedRefusal = (c: Context): Response =>
+  c.json({ error: "Managed by the configuration subscription — pause it under Agent → Configuration sync to edit here" }, 409);
 
 export function registerConfigShareRoute(app: Hono, sync: Pick<ConfigSync, "published">): void {
   app.get("/config-sync/:token", async (c) => {
@@ -22,12 +27,9 @@ export function registerConfigShareRoute(app: Hono, sync: Pick<ConfigSync, "publ
     try {
       const published = await sync.published(token);
       if (!published) return c.json({ error: "not found" }, 404);
-      c.header("etag", published.etag);
       c.header("x-content-type-options", "nosniff");
-      const tags = c.req.header("if-none-match")?.split(",").map((value) => value.trim().replace(/^W\//, ""));
-      if (tags?.includes(published.etag) || tags?.includes("*")) return c.body(null, 304);
       c.header("content-type", "application/json; charset=utf-8");
-      return c.body(published.body);
+      return c.body(published);
     } catch {
       // Never let the app's path logger print a capability URL.
       log.error("Could not export shared configuration");

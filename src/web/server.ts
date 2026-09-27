@@ -162,6 +162,9 @@ export interface WebDeps {
   channelOf?: (sessionId: string) => string | undefined;
   /** The continuous conversation (docs/design/10-continuous-session.md). */
   continuous: MainChain;
+  /** The configuration subscription is on: what it carries is the source's,
+   *  and the routes that would edit it locally refuse. */
+  subscribed?: () => boolean;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -213,6 +216,7 @@ export function createServer(
     backgroundRuns,
     activeBackgroundRunCounts,
     parkedMessages,
+    subscribed,
     taskSessions,
     leads,
     openItems,
@@ -642,9 +646,10 @@ export function createServer(
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),
     passkeys,
+    subscribed,
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
-  registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file") });
+  registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file"), subscribed });
   registerPackageRoutes(app, { factory, packages, onConfigWritten: () => recycle("the package registry") });
   registerFsRoutes(app);
   registerExplorerRoutes(app);

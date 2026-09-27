@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { isThinkingLevel } from "../core/types.js";
-import { isProviderApi, validateEndpoint, validateProviderSetup } from "./types.js";
+import { isProviderApi, SNAPSHOT_FILES, validateEndpoint, validateProviderSetup } from "./types.js";
 import { pierPath } from "../paths.js";
 import { mergeSnapshotProviders, normalizeAgentSnapshot, snapshotProviders } from "./config-sync.js";
 import type { ModelRef } from "../core/types.js";
@@ -29,7 +29,6 @@ const PROJECT_FILES = ["AGENTS.md"];
 // go through writeDefaults, and are the only fields a snapshot carries. The
 // Console shows the file and never edits it; the rest of it is machine-local.
 const READONLY_FILES = ["settings.json"];
-const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 /** What a first boot writes (docs/deploy.md says why each key): the list the
  *  Console installs into, Pi's attribution headers off — a server is not a
  *  person to survey — and a retry budget of minutes, because an unattended

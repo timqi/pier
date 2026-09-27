@@ -12,6 +12,7 @@ import { h } from "./dom.js";
 import { btn, button, card, CONTROL_TRIGGER, empty, field, select, setStatus } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { launchField, modelPicker, type LaunchChoice } from "./model-picker.js";
+import { MANAGED_NOTE, subscribed } from "./config-sync.js";
 
 interface MenuEntry extends ModelRef {
   thinking: ThinkingLevel;
@@ -33,6 +34,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let dirty = false;
   let titleModel: ModelRef | undefined;
   let defaults: LaunchChoice = { model: null, thinking: null };
+  /** The menu and the defaults are the subscription source's while it is on:
+   *  both cards are shown as stored and take no edit. */
+  let managed = false;
   // A move redraws the list, so the arrow that was pressed has to be handed
   // its focus back or a keyboard walk up the list ends after one step. Held by
   // the entry, not its key: one model may be pinned on several rows.
@@ -46,6 +50,11 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   const save = button("Save menu", true);
   const listBox = h("div", "flex min-w-0 flex-col gap-2");
   const adder = h("div", "flex items-center gap-2");
+  // A disabled fieldset disables every control in it, rows the redraw adds
+  // included, so no control needs to know; `contents` keeps the card's gap.
+  const menuFields = h("fieldset", "contents") as HTMLFieldSetElement;
+  const defaultFields = h("fieldset", "contents") as HTMLFieldSetElement;
+  const managedNotes = [0, 1].map(() => h("p", "text-[12px] leading-snug text-amber-700", MANAGED_NOTE));
   // w-full alongside max-w: a flex child's min-width would otherwise let an
   // overflowing row widen the card past its column (which is how this page
   // first shipped broken).
@@ -253,6 +262,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     renderAdder();
     renderDefaults();
     renderTitleModel();
+    menuFields.disabled = managed;
+    defaultFields.disabled = managed;
+    for (const note of managedNotes) note.hidden = !managed;
   }
 
   async function saveMenu(): Promise<void> {
@@ -270,12 +282,14 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   function load(): void {
     if (dirty) return; // an unsaved edit survives tab hops; reload happens on save
     void (async () => {
-      const [settings, models, stored] = await Promise.all([
+      const [settings, models, stored, sourced] = await Promise.all([
         getJson<{ modelMenu: MenuEntry[]; titleModel?: ModelRef }>("/api/settings", "Could not load the menu"),
         getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
         getJson<AgentDefaults>("/api/config/defaults", "Could not read the default model"),
+        subscribed(),
       ]);
       if (!settings.ok) return setStatus(status, "failed", settings.error);
+      managed = sourced;
       entries = settings.value.modelMenu;
       titleModel = settings.value.titleModel;
       catalog = models.ok ? models.value : [];
@@ -288,27 +302,32 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     })();
   }
 
+  menuFields.append(
+    managedNotes[0]!,
+    field("Pinned models", listBox, {
+      hint: "The tier is what a dispatcher names — `--model balanced` is the first balanced row, and the "
+        + "balanced rows below it are tried in turn when it is not in the catalog. The arrows set that order, "
+        + "the order pickers and `pier task --model ?` list.",
+    }),
+    field("Add", adder, {
+      hint: "The list is the live catalog — only models that exist right now can be pinned. "
+        + "A model may be pinned again at another reasoning level, each row with its own tier.",
+    }),
+    h("div", "flex items-center gap-3", save, status),
+  );
+  defaultFields.append(managedNotes[1]!, defaultBox);
   el.append(
     card(
       "Model menu",
       "Which few models this deployment favors, each with a usual reasoning level and a tier. " +
         "Pinned entries lead every model picker, and agents delegating work name a tier instead of guessing ids.",
-      field("Pinned models", listBox, {
-        hint: "The tier is what a dispatcher names — `--model balanced` is the first balanced row, and the "
-          + "balanced rows below it are tried in turn when it is not in the catalog. The arrows set that order, "
-          + "the order pickers and `pier task --model ?` list.",
-      }),
-      field("Add", adder, {
-        hint: "The list is the live catalog — only models that exist right now can be pinned. "
-          + "A model may be pinned again at another reasoning level, each row with its own tier.",
-      }),
-      h("div", "flex items-center gap-3", save, status),
+      menuFields,
     ),
     card(
       "New sessions",
       "The model and reasoning effort a session starts on when nothing names one — a channel, chat or task with " +
         "its own launch choice overrides it. Pi default leaves the pick to Pi. Stored in settings.json; applies to sessions opened from now on.",
-      defaultBox,
+      defaultFields,
     ),
     card(
       "Session titles",

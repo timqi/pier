@@ -3,8 +3,9 @@
 
 import type { Hono } from "hono";
 import { isThinkingLevel, type AgentFactory } from "../core/types.js";
-import type { AgentDefaults, ConfigScope, ConfigStore } from "../agent/types.js";
+import { SNAPSHOT_FILES, type AgentDefaults, type ConfigScope, type ConfigStore } from "../agent/types.js";
 import { normalizeModelRef } from "../settings.js";
+import { managedRefusal } from "./config-sync.js";
 import { guarded } from "./route.js";
 
 export interface ConfigRouteDeps {
@@ -12,12 +13,18 @@ export interface ConfigRouteDeps {
   config: ConfigStore;
   /** An agent file is read when a session opens; idle ones are recycled after a save. */
   onConfigWritten?: () => void;
+  /** The configuration subscription is on: the global files it carries and
+   *  the defaults are the source's, refused here. */
+  subscribed?: () => boolean;
 }
 
 export function registerConfigRoutes(
   app: Hono,
-  { factory, config, onConfigWritten }: ConfigRouteDeps,
+  { factory, config, onConfigWritten, subscribed = () => false }: ConfigRouteDeps,
 ): void {
+  const managed = (scope: ConfigScope, name: string): boolean =>
+    scope.kind === "global" && subscribed() && (SNAPSHOT_FILES as readonly string[]).includes(name);
+
   // Only cwds Pi already knows are accepted — never an arbitrary path.
   const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
     if (!raw || raw === "global") return { kind: "global" };
@@ -32,7 +39,7 @@ export function registerConfigRoutes(
     return c.json({
       // Where this scope's files live on disk — the UI labels "Global" with it.
       dir: scope.kind === "global" ? config.globalDir : scope.cwd,
-      files: await config.listFiles(scope),
+      files: (await config.listFiles(scope)).map((file) => ({ ...file, managed: managed(scope, file.name) })),
     });
   });
 
@@ -51,6 +58,7 @@ export function registerConfigRoutes(
       return c.json({ error: "content and expected content required" }, 400);
     }
     const name = c.req.param("name");
+    if (managed(scope, name)) return managedRefusal(c);
     await config.writeFile(scope, name, body.content, body.expected);
     onConfigWritten?.();
     return c.json({ ok: true, content: await config.readFile(scope, name) });
@@ -63,6 +71,7 @@ export function registerConfigRoutes(
   });
 
   guarded(app, "PUT", "/api/config/defaults", 400, async (c) => {
+    if (subscribed()) return managedRefusal(c);
     const defaults = parseDefaults(await c.req.json().catch(() => null));
     if (!defaults) {
       return c.json({ error: "defaultModel must be {provider, id} or null; defaultThinkingLevel a reasoning level or null" }, 400);

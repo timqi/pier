@@ -7,6 +7,10 @@ import type { ModelRef, ThinkingLevel } from "../core/types.js";
 /** Where agent configuration lives: Pi's global dir or a project checkout. */
 export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
 
+/** The global files the configuration document carries (`web/config-sync.ts`):
+ *  the three whole, settings.json only its two defaults. */
+export const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
+
 /** One whitelisted agent file. `readonly` marks the file Pier itself writes:
  *  the Console shows it and offers no editor. */
 export interface ConfigFile {

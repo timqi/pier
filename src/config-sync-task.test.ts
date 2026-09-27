@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfigSync } from "./config-sync.js";
+import { CONFIG_SCHEMA_VERSION, ConfigSync } from "./config-sync.js";
 import { configSyncTask } from "./config-sync-task.js";
 import { normalizeAgentSnapshot } from "./agent/config-sync.js";
 import type { AgentFactory } from "./core/types.js";
@@ -22,9 +22,9 @@ function rig() {
   const hub = new EventHub(); const router = new Router(hub, unused);
   const settings = new SettingsStore(db);
   let agent: AgentConfigSnapshot = { files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {} };
-  const download = vi.fn(async () => ({ status: 200 as const, etag: '"one"', body: JSON.stringify({
-    schemaVersion: 1, instanceId: "source", agent: { ...agent, files: { "SYSTEM.md": "remote", "AGENTS.md": null } }, modelMenu: [],
-  }) }));
+  const download = vi.fn(async () => JSON.stringify({
+    schemaVersion: CONFIG_SCHEMA_VERSION, instanceId: "source", agent: { ...agent, files: { "SYSTEM.md": "remote", "AGENTS.md": null } }, modelMenu: [],
+  }));
   const sync = new ConfigSync({ db, settings, normalizeAgent: normalizeAgentSnapshot, download, reload: async () => {},
     config: { exportSnapshot: async () => structuredClone(agent), applySnapshot: async (next, commit) => {
       const changed = JSON.stringify(agent) !== JSON.stringify(next);
@@ -73,12 +73,12 @@ describe("configuration sync owned task", () => {
   it("records deterministic runs and reports download failure through the task history", async () => {
     const r = rig(); await r.enable();
     expect(await r.owned.run()).toContain("unchanged");
-    expect(runResultText(r.store.listRuns(r.owned.status().taskId!)[0]!)).toBe("Configuration unchanged (200)");
+    expect(runResultText(r.store.listRuns(r.owned.status().taskId!)[0]!)).toBe("Configuration unchanged");
     r.download.mockRejectedValueOnce(new Error("offline"));
     await expect(r.owned.run()).rejects.toThrow("offline");
     expect(r.store.listRuns(r.owned.status().taskId!)).toEqual(expect.arrayContaining([
       expect.objectContaining({ state: "failed", error: "Error: offline" }),
-      expect.objectContaining({ state: "succeeded", result: { type: "system", text: "Configuration unchanged (200)" } }),
+      expect.objectContaining({ state: "succeeded", result: { type: "system", text: "Configuration unchanged" } }),
     ]));
   });
 

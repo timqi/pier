@@ -256,6 +256,8 @@ function setup(
     : null;
   const continuous = idleChain(factory, router, hub, db);
   const tasks = new TaskService(new TaskStore(db), factory, router, hub, { modelMenu: () => [], continuous });
+  /** The configuration subscription's switch, as main.ts reads it from ConfigSync. */
+  const subscription = { enabled: false };
   const app = new Hono();
   const onUnlocked = vi.fn();
   // Stands in for channels/conversations.ts: session id → the IM channel that owns it.
@@ -278,6 +280,7 @@ function setup(
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, updates, updater, secrets, onUnlocked,
     continuous,
+    subscribed: () => subscription.enabled,
     // Assembled like main.ts does: data only, never a subprocess — spawning
     // ubix is the instance layer's business.
     catalog: async () => {
@@ -348,6 +351,7 @@ function setup(
     onToolsChanged,
     catalogState,
     parkNextCatalogRead,
+    subscription,
     reload,
   };
 }
@@ -1570,7 +1574,7 @@ describe("workbench server", () => {
     expect(globalRes.headers.get("cache-control")).toBe("no-store");
     expect(await globalRes.json()).toEqual({
       dir: "/home/t/.pier/pi",
-      files: [{ name: "SYSTEM.md", exists: true, readonly: false }],
+      files: [{ name: "SYSTEM.md", exists: true, readonly: false, managed: false }],
     });
     // /tmp is a session cwd (factory.list); anything else is rejected — and a
     // project scope's dir is its own cwd.
@@ -1601,6 +1605,41 @@ describe("workbench server", () => {
       body: "{}",
     });
     expect(noBody.status).toBe(400);
+  });
+
+  it("marks the synced fields managed while subscribed and refuses to edit them, project files aside", async () => {
+    const { app, config, settings, subscription } = setup();
+    subscription.enabled = true;
+    const index = await app.request("/api/config");
+    expect(((await index.json()) as { files: { managed: boolean }[] }).files).toEqual([
+      { name: "SYSTEM.md", exists: true, readonly: false, managed: true },
+    ]);
+    const project = await app.request("/api/config?scope=/tmp");
+    expect(((await project.json()) as { files: { managed: boolean }[] }).files.every((file) => !file.managed)).toBe(true);
+    const before = config.calls.length;
+    const refused = [
+      await app.request("/api/config/files/SYSTEM.md", { method: "PUT", body: JSON.stringify({ content: "new", expected: "content" }) }),
+      await app.request("/api/config/defaults", { method: "PUT", body: JSON.stringify({ defaultModel: null, defaultThinkingLevel: null }) }),
+      await app.request("/api/settings", {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelMenu: [{ provider: "anthropic", id: "claude-opus-4-5", thinking: "high", tier: "hardest" }] }),
+      }),
+    ];
+    for (const res of refused) {
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toMatch(/Managed by the configuration subscription/);
+    }
+    expect(config.calls.length).toBe(before);
+    expect(settings.get().modelMenu).toEqual([]);
+    // A project file is the checkout's, never the source's; the public URL is the machine's.
+    const projectWrite = await app.request("/api/config/files/SYSTEM.md?scope=/tmp", {
+      method: "PUT", body: JSON.stringify({ content: "new", expected: "content" }),
+    });
+    expect(projectWrite.status).toBe(200);
+    const url = await app.request("/api/settings", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ publicUrl: "https://pier.example.com" }),
+    });
+    expect(url.status).toBe(200);
   });
 
   it("reads and writes the session defaults as a unit, answering with the stored state", async () => {

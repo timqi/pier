@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { ConfigSync } from "../config-sync.js";
+import { CONFIG_SCHEMA_VERSION, ConfigSync } from "../config-sync.js";
 import { normalizeAgentSnapshot } from "../agent/config-sync.js";
 import type { AgentConfigSnapshot } from "../agent/types.js";
 import { openDb } from "../db.js";
@@ -47,17 +47,10 @@ describe("configuration sharing HTTP boundary", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     const value = await response.json() as Record<string, unknown>;
     expect(Object.keys(value).sort()).toEqual(["agent", "instanceId", "modelMenu", "schemaVersion"]);
-    const etag = response.headers.get("etag")!;
+    expect(value.schemaVersion).toBe(CONFIG_SCHEMA_VERSION);
     const head = await r.app.request(path, { method: "HEAD" });
     expect(head.status).toBe(405); expect(await head.text()).toBe("");
-    expect(head.headers.get("etag")).toBeNull();
     expect(head.headers.get("allow")).toBe("GET");
-    for (const validator of [etag, `W/${etag}`, `"other", ${etag}`, "*"]) {
-      const unchanged = await r.app.request(path, { headers: { "if-none-match": validator } });
-      expect(unchanged.status).toBe(304);
-      expect(await unchanged.text()).toBe("");
-      expect(unchanged.headers.get("etag")).toBe(etag);
-    }
     expect((await r.app.request("/api/private")).status).toBe(401);
     expect((await r.app.request("/api/config-sync")).status).toBe(401);
     expect((await r.app.request("/api/config-sync", { method: "POST", body: JSON.stringify({ action: "publish" }) })).status).toBe(401);
@@ -65,12 +58,12 @@ describe("configuration sharing HTTP boundary", () => {
     expect((await r.app.request(`${path}/anything`)).status).not.toBe(200);
   });
 
-  it("does not honor an old ETag after revocation or token rotation", async () => {
+  it("refuses the old link after token rotation, and both after revocation", async () => {
     const r = await rig();
     const { publishedPath: path } = await (await r.post("publish")).json() as { publishedPath: string };
-    const etag = (await r.app.request(path)).headers.get("etag")!;
+    expect((await r.app.request(path)).status).toBe(200);
     await r.post("publish");
-    const invalid = await r.app.request(path, { headers: { "if-none-match": etag } });
+    const invalid = await r.app.request(path);
     expect(invalid.status).toBe(404);
     expect(invalid.headers.get("cache-control")).toBe("no-store");
     await r.post("revoke");

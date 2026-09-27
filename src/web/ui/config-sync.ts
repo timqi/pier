@@ -5,6 +5,17 @@ import { failure, getJson, sendJson } from "./api.js";
 import { copyBtn, h } from "./dom.js";
 import { button, field, setStatus, textInput, toggle } from "./form.js";
 
+/** What every pane showing a synced field says while the subscription is on;
+ *  the server refuses the write with the same pointer. */
+export const MANAGED_NOTE = "Managed by the configuration subscription: the source's copy is applied on every sync. "
+  + "To edit here, pause it under Agent → Configuration sync.";
+
+/** Whether the subscription is on, read by the panes that show a synced field. */
+export const subscribed = async (): Promise<boolean> => {
+  const got = await getJson<ConfigSyncStatus>("/api/config-sync", "", { cache: "no-store" });
+  return got.ok && got.value.enabled;
+};
+
 export function configSyncPane(): { el: HTMLElement; dispose(): void } {
   const el = h("div", "min-h-0 min-w-0 flex-1 overflow-y-auto p-4");
   const body = h("div", "mx-auto flex max-w-3xl min-w-0 flex-col gap-4");

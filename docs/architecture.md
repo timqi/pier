@@ -104,7 +104,7 @@ src/
                owns, coalescing a burst of switches into a single run
   service.ts   the systemd units `pier service install` writes
   config-sync.ts the configuration subscription: fetch (HTTPS, 1 MiB cap),
-               apply, ETag
+               the schema-version gate, apply as one transaction
   config-sync-task.ts the hourly task that subscription owns
 ```
 

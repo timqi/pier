@@ -14,16 +14,18 @@ import { badge, BAND, btn, CONTROL, CONTROL_TRIGGER, empty, field, PANE, setStat
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
 import { closeMenu, openMenu } from "./menu.js";
-import { configSyncPane } from "./config-sync.js";
+import { configSyncPane, MANAGED_NOTE } from "./config-sync.js";
 import { createRegistry, isBuiltIn, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
 interface ConfigIndex {
   dir: string;
-  files: ConfigFile[];
+  /** `managed`: the configuration subscription carries this file, so the
+   *  source's copy is the only one — the viewer, no editor, while it is on. */
+  files: (ConfigFile & { managed: boolean })[];
 }
 
 type Selection =
-  | { type: "file"; name: string; readonly: boolean }
+  | { type: "file"; name: string; readonly: boolean; managed: boolean }
   /** One pane for every command-line tool: a row and a switch each, because a
    *  page per binary is four pages saying the same three facts. `tool` is that
    *  pane with one row marked. */
@@ -415,7 +417,7 @@ export function createConfigView(
       closeSync();
       selection = sel;
       renderNav(index); // re-highlight
-      if (sel.type === "file") void openFile(sel.name, sel.readonly);
+      if (sel.type === "file") void openFile(sel.name, sel.readonly, sel.managed);
       else if (sel.type === "tools" || sel.type === "tool") openTools();
       else if (sel.type === "sync") openSync();
       else if (sel.type === "package") registry.openPackage(sel.source, sel.scope);
@@ -429,7 +431,7 @@ export function createConfigView(
     }
     rows.push(navSection("Files"));
     for (const f of index.files) {
-      const sel: Selection = { type: "file", name: f.name, readonly: f.readonly };
+      const sel: Selection = { type: "file", name: f.name, readonly: f.readonly, managed: f.managed };
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
     }
     // Install, remove and update write the global settings.json only.
@@ -459,9 +461,9 @@ export function createConfigView(
     pane.replaceChildren(h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
   }
 
-  /** A `readonly` file is Pier's to write: the viewer, no editor, and one
-   *  line on where its content comes from. */
-  async function openFile(name: string, readonly: boolean): Promise<void> {
+  /** A `readonly` file is Pier's to write, a `managed` one the subscription
+   *  source's: the viewer, no editor, and one line on where its content comes from. */
+  async function openFile(name: string, readonly: boolean, managed: boolean): Promise<void> {
     const request = ++paneRequest;
     const got = await getJson<{ content: string }>(
       `/api/config/files/${encodeURIComponent(name)}${q()}`,
@@ -522,14 +524,14 @@ export function createConfigView(
     const showRead = async (): Promise<void> => {
       const lang = await langFor(name); // first file of the session waits for hljs
       if (request !== paneRequest) return;
+      const note = managed ? MANAGED_NOTE : readonly
+        ? "Pier manages this file: the default model is set in Settings → Models; other keys are edited on disk, then pier reload."
+        : null;
       pane.replaceChildren(
-        readonly
+        note
           ? paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only"))
           : paneBar(name, status, actions(edit)),
-        ...(readonly
-          ? [h("p", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500",
-            "Pier manages this file: the default model is set in Settings → Models; other keys are edited on disk, then pier reload.")]
-          : []),
+        ...(note ? [h("p", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500", note)] : []),
         h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang)),
       );
     };
