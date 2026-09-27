@@ -396,6 +396,16 @@ describe("the on-disk index", () => {
     expect(said.search("stage")[0]?.snippet).toBe("the parser is fixed now");
   });
 
+  it("leaves no marker or button row in a snippet whose match is only in the buttons", async () => {
+    const said = new IndexedListing(dir, db, (text) => splitSpeaker(text).text, saidText);
+    const reply = "stable 已更新到 `34cd771` 并构建成功，15 秒后自动重启。我这里还没确认 Pier 已经起来。\n\n重启后可以照 [实测清单](file:///home/qiqi/.pier/artifacts/live-verify-checklist.md) 逐项试。另外 `lead.test.ts` 偶发失败还没修，要修的话说一声。\n\n<done>计划内遗留</done>\n\n---\n[修 flaky 测试] | [先不做]";
+    await write("--p--", "s1", [header("s1", "/p"), assistant(reply, 61_000)]);
+    await said.scan();
+    const snippet = said.search("flaky")[0]?.snippet;
+    expect(snippet).toBe("stable 已更新到 `34cd771` 并构建成功，15 秒后自动重启。我这里还没确认 Pier 已经起来。\n\n重启后可以照…");
+    expect(said.search("偶发失败")[0]?.snippet).not.toMatch(/<done>|---|\[先不做\]/);
+  });
+
   it("finds a two-character CJK query by substring, newest first, marked the same way", async () => {
     await write("--p--", "s1", [header("s1", "/p"), user("修复解析器的问题", 60_000)]);
     await write("--q--", "s2", [header("s2", "/q"), user("解析失败了", 70_000), assistant("已经修好", 71_000)]);
