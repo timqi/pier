@@ -360,6 +360,7 @@ export class FakeElement extends EventTarget {
     setTimeout(() => this.dispatchEvent(new Event("close")));
   }
   scrollIntoView(): void {}
+  getAnimations(): Animation[] { return []; }
   getClientRects(): object[] { return []; }
   getBoundingClientRect(): { x: number; y: number; width: number; height: number; top: number; right: number; bottom: number; left: number } {
     return { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
@@ -399,6 +400,7 @@ export class FakeDocument extends EventTarget {
     const el = focused.get(this);
     return el?.isConnected ? el : this.body;
   }
+  contains(other: unknown): boolean { return this.documentElement.contains(other); }
   createElement(tag: string): FakeElement { return new FakeElement(tag.toLowerCase()); }
   createElementNS(namespaceURI: string, tag: string): FakeElement {
     return new FakeElement(namespaceURI === HTML_NS ? tag.toLowerCase() : tag, namespaceURI);

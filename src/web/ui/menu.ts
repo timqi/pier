@@ -1,5 +1,6 @@
-// Anchored popover: one open at a time, closed by outside pointerdown, Esc,
-// scroll or resize. Used by the session context menu and the model picker.
+// Anchored popover: one open at a time, closed by outside pointerdown, focus
+// or wheel, Esc, a scroll that moves the anchor, or resize. Used by the
+// session context menu and the model picker.
 
 import { Check, X } from "lucide";
 import { icon } from "./icons.js";
@@ -82,15 +83,18 @@ function onKey(ev: KeyboardEvent): void {
   closeMenu();
 }
 
-/** Page scroll moves the anchor away; scrolling inside the panel must not. */
+/** Only a scroller holding the anchor moves it away from the panel. `scroll`
+ *  also fires for the page's own writes (the transcript pinning a new reply),
+ *  so the user's scrolling elsewhere is read from `wheel`, never from here. */
 function onScroll(ev: Event): void {
-  if (panel && !panel.contains(ev.target as Node)) closeMenu();
+  if (trigger && (ev.target as Node).contains(trigger)) closeMenu();
 }
 
 export function closeMenu(): void {
   if (!panel) return;
   document.removeEventListener("pointerdown", onOutside, true);
   document.removeEventListener("focusin", onOutside, true);
+  document.removeEventListener("wheel", onOutside, true);
   document.removeEventListener("keydown", onKey, true);
   window.removeEventListener("scroll", onScroll, true);
   window.removeEventListener("resize", closeMenu);
@@ -171,6 +175,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElemen
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);
   document.addEventListener("focusin", onOutside, true);
+  document.addEventListener("wheel", onOutside, { capture: true, passive: true });
   document.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", onScroll, true);
   window.addEventListener("resize", closeMenu);

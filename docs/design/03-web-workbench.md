@@ -185,7 +185,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Menus (`menu.ts`, `model-picker.ts`)
 
-- One menu primitive allows one open panel at a time. Outside pointerdown, focus leaving, Esc and page scroll close it. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
+- One menu primitive allows one open panel at a time. Outside pointerdown, wheel or focus, Esc, and a scroll that moves its anchor close it; the page's own scrolling (the transcript pinning a reply) does not. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
 - The bar menu provides Search, Status, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
