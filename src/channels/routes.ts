@@ -1,6 +1,7 @@
 // Settings → Channels HTTP surface: one document per platform.
 
 import type { Hono } from "hono";
+import type { AgentDefaults } from "../agent/types.js";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
 import { PIER_WORKSPACE } from "../paths.js";
 import type { ChannelStore } from "./config.js";
@@ -10,6 +11,7 @@ import {
   type ChannelConfig,
   type ChannelView,
   type ChatConfig,
+  type LaunchDefaults,
   defaultChannelConfig,
   isChannelPlatform,
 } from "./types.js";
@@ -62,8 +64,20 @@ export function registerChannelRoutes(
   store: ChannelStore,
   runtime: Pick<ChannelRuntime, "reload">,
   conversations: Pick<ConversationStore, "forgetChat">,
+  /** Settings' default model and reasoning, what a chat's empty values launch with. */
+  agentDefaults: () => Promise<AgentDefaults>,
 ): void {
-  app.get("/api/channels/:platform", (c) => {
+  /** Resolved here so the Console names the model a launch gets, not "Pi default". */
+  async function launchDefaults(): Promise<LaunchDefaults> {
+    try {
+      const { defaultModel, defaultThinkingLevel } = await agentDefaults();
+      return { cwd: PIER_WORKSPACE, model: defaultModel, thinking: defaultThinkingLevel };
+    } catch (err) {
+      return { cwd: PIER_WORKSPACE, model: null, thinking: null, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  app.get("/api/channels/:platform", async (c) => {
     const platform = c.req.param("platform");
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
     const config = store.get(platform);
@@ -72,7 +86,7 @@ export function registerChannelRoutes(
       ...config,
       token: maskToken(config.token),
       appToken: maskToken(config.appToken),
-      workspace: PIER_WORKSPACE,
+      defaults: await launchDefaults(),
     };
     return c.json(view);
   });
@@ -93,9 +107,6 @@ export function registerChannelRoutes(
       appToken: kept(asString(body.appToken), current.appToken),
       requireMention: asBool(body.requireMention),
       requireBind: asBool(body.requireBind),
-      cwd: asString(body.cwd),
-      model: asModel(body.model),
-      thinking: asThinking(body.thinking),
       users: current.users,
       chats: parseChats(body.chats, current.chats),
       bindCode: current.bindCode,

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { AgentDefaults } from "../agent/types.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { PIER_WORKSPACE } from "../paths.js";
@@ -11,6 +12,7 @@ let store: ChannelStore;
 let app: Hono;
 let reloads: number;
 let forgotten: string[];
+let agentDefaults: () => Promise<AgentDefaults>;
 
 beforeEach(() => {
   const vault = new Map<string, string>();
@@ -24,7 +26,14 @@ beforeEach(() => {
     },
   } as unknown as ChannelRuntime;
   forgotten = [];
-  registerChannelRoutes(app, store, runtime, { forgetChat: (channelId, chatId) => void forgotten.push(`${channelId}:${chatId}`) });
+  agentDefaults = () => Promise.resolve({ defaultModel: { provider: "anthropic", id: "claude-opus-4-5" }, defaultThinkingLevel: "low" });
+  registerChannelRoutes(
+    app,
+    store,
+    runtime,
+    { forgetChat: (channelId, chatId) => void forgotten.push(`${channelId}:${chatId}`) },
+    () => agentDefaults(),
+  );
 });
 
 const get = async (path = "/api/channels/slack"): Promise<ChannelView> => {
@@ -48,11 +57,18 @@ describe("channel config routes", () => {
     expect((await app.request("/api/channels/slack")).status).toBe(200);
   });
 
-  it("names the workspace an empty directory resolves to, and a save does not store it", async () => {
+  it("names what an empty chat value resolves to, and a save does not store it", async () => {
     const view = await get();
-    expect(view.workspace).toBe(PIER_WORKSPACE);
-    await put(view);
-    expect(store.get("slack")).not.toHaveProperty("workspace");
+    expect(view.defaults).toEqual({ cwd: PIER_WORKSPACE, model: { provider: "anthropic", id: "claude-opus-4-5" }, thinking: "low" });
+    await put({ ...view, cwd: "/srv/x", model: view.defaults.model });
+    expect(store.get("slack")).not.toHaveProperty("defaults");
+    expect(store.get("slack")).not.toHaveProperty("cwd");
+    expect(store.get("slack")).not.toHaveProperty("model");
+  });
+
+  it("still serves the page when Settings cannot be read, and says why", async () => {
+    agentDefaults = () => Promise.reject(new Error("settings.json is not JSON"));
+    expect((await get()).defaults).toEqual({ cwd: PIER_WORKSPACE, model: null, thinking: null, error: "settings.json is not JSON" });
   });
 
   it("never returns the token, and keeps it when the mask comes back", async () => {
@@ -82,15 +98,12 @@ describe("channel config routes", () => {
   it("round-trips a model, and treats a half-filled one as none", async () => {
     store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
     const cfg = await get();
-    cfg.model = { provider: "anthropic", id: "claude-opus-4-5" };
-    cfg.thinking = "high";
     cfg.chats[0]!.model = { provider: "openai", id: "" } as never;
     cfg.chats[0]!.thinking = "nonsense" as never;
     cfg.chats[0]!.requireMention = false;
     cfg.chats[0]!.cwd = "/srv/ops";
     await put(cfg);
     const saved = store.get("slack");
-    expect(saved).toMatchObject({ model: { provider: "anthropic", id: "claude-opus-4-5" }, thinking: "high" });
     // A half-filled model and an unknown reasoning level both read as "none".
     expect(saved.chats[0]).toMatchObject({ model: null, thinking: null, requireMention: false, cwd: "/srv/ops" });
   });

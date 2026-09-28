@@ -51,9 +51,12 @@ export class ChannelStore {
     const row = this.db.prepare("SELECT json FROM channels WHERE platform = ?").get(platform) as
       | { json: string }
       | undefined;
-    const config = row
-      ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
-      : defaultChannelConfig();
+    // A row from when the platform had its own launch values: those are ignored,
+    // chats follow the instance default, and the next save drops them.
+    const { cwd: _cwd, model: _model, thinking: _thinking, ...stored } = row
+      ? (JSON.parse(row.json) as Partial<ChannelConfig> & Record<"cwd" | "model" | "thinking", unknown>)
+      : {};
+    const config: ChannelConfig = { ...defaultChannelConfig(), ...stored };
     for (const [key, name] of credentials(platform)) {
       config[key] = this.vault.get(name) ?? "";
     }
@@ -201,19 +204,13 @@ export class ChannelStore {
   }
 
   /** What a session launched in this chat starts with: the chat's own value,
-   *  else the platform's, else the workspace directory (created here, so a
-   *  launch never meets it missing). An empty model or thinking is the Settings
-   *  default, which is Pi's to apply, read at the launch and not here. */
+   *  else the workspace directory (created here, so a launch never meets it
+   *  missing). An empty model or thinking is the Settings default, which is
+   *  Pi's to apply, read at the launch and not here. */
   launch(platform: ChannelPlatform, chatId: string): Pick<ChatPolicy, "cwd" | "model" | "thinking"> {
-    const config = this.cached(platform);
-    const chat = this.policy(platform, chatId);
-    const cwd = chat.cwd || config.cwd;
+    const { cwd, model, thinking } = this.policy(platform, chatId);
     if (!cwd) mkdirSync(PIER_WORKSPACE, { recursive: true });
-    return {
-      cwd: cwd || PIER_WORKSPACE,
-      model: chat.model ?? config.model,
-      thinking: chat.thinking ?? config.thinking,
-    };
+    return { cwd: cwd || PIER_WORKSPACE, model, thinking };
   }
 
   isBound(platform: ChannelPlatform, userId: string): boolean {

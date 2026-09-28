@@ -8,7 +8,7 @@ import { PIER_WORKSPACE } from "../paths.js";
 import { Secrets } from "../secrets.js";
 import { Vault } from "../vault.js";
 import { ChannelStore, gate } from "./config.js";
-import type { ChatPolicy } from "./types.js";
+import { type ChatPolicy, defaultChannelConfig } from "./types.js";
 
 let db: DatabaseSync;
 let secrets: Secrets;
@@ -95,9 +95,6 @@ describe("channel config store", () => {
   it("discovers a chat once, seeding its gates and following the launch defaults", () => {
     const seeded = store.get("slack");
     seeded.requireMention = false;
-    seeded.cwd = "/srv/work";
-    seeded.model = { provider: "anthropic", id: "claude-opus-4-5" };
-    seeded.thinking = "high";
     store.save("slack", seeded);
     store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
     store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
@@ -113,24 +110,15 @@ describe("channel config store", () => {
       thinking: null,
       botId: "",
     }]);
-    // Gates are seeds; the launch values are read when a session starts.
+    // Gates are seeds: moving the platform's leaves an existing chat alone.
     const moved = store.get("slack");
     moved.requireMention = true;
-    moved.cwd = "/elsewhere";
-    moved.model = { provider: "openai", id: "gpt-5" };
     store.save("slack", moved);
     expect(store.policy("slack", "C100")).toMatchObject({ requireMention: false });
-    expect(store.launch("slack", "C100")).toEqual({
-      cwd: "/elsewhere",
-      model: { provider: "openai", id: "gpt-5" },
-      thinking: "high",
-    });
   });
 
-  it("launches on the chat's own value first, then the platform's, else leaves it to Settings", () => {
+  it("launches on the chat's own value, else the workspace and Settings", () => {
     const config = store.get("slack");
-    config.cwd = "/srv/work";
-    config.thinking = "low";
     const seed = { enabled: true, requireMention: true, requireBind: true, botId: "" };
     config.chats = [
       { id: "own", name: "own", kind: "group", ...seed, cwd: "/srv/own", model: { provider: "a", id: "m" }, thinking: "high" },
@@ -138,13 +126,25 @@ describe("channel config store", () => {
     ];
     store.save("slack", config);
     expect(store.launch("slack", "own")).toEqual({ cwd: "/srv/own", model: { provider: "a", id: "m" }, thinking: "high" });
-    // The platform has no model: null is the Settings default, which Pi applies.
-    expect(store.launch("slack", "follow")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
-    expect(store.launch("slack", "unknown")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
-    // No directory anywhere: the workspace, never the process cwd nor the main session's home.
-    config.cwd = "";
-    store.save("slack", config);
-    expect(store.launch("slack", "follow").cwd).toBe(PIER_WORKSPACE);
+    // null is the Settings default, which Pi applies; the directory is the
+    // workspace, never the process cwd nor the main session's home.
+    expect(store.launch("slack", "follow")).toEqual({ cwd: PIER_WORKSPACE, model: null, thinking: null });
+    expect(store.launch("slack", "unknown")).toEqual({ cwd: PIER_WORKSPACE, model: null, thinking: null });
+  });
+
+  it("ignores the launch values a row stored at platform level, and drops them on save", () => {
+    db.prepare("INSERT INTO channels(platform, json) VALUES ('slack', ?)").run(JSON.stringify({
+      ...defaultChannelConfig(),
+      cwd: "/srv/old",
+      model: { provider: "anthropic", id: "claude-opus-4-5" },
+      thinking: "high",
+      chats: [{ id: "C1", name: "c", kind: "group", enabled: true, requireMention: true, requireBind: true, cwd: "", model: null, thinking: null, botId: "" }],
+    }));
+    expect(store.get("slack")).not.toHaveProperty("cwd");
+    expect(store.launch("slack", "C1")).toEqual({ cwd: PIER_WORKSPACE, model: null, thinking: null });
+    store.save("slack", store.get("slack"));
+    const row = db.prepare("SELECT json FROM channels WHERE platform = 'slack'").get() as { json: string };
+    expect(JSON.parse(row.json)).not.toHaveProperty("model");
   });
 
   it("clears the rows no message restamped under the current bot, the home DM aside", () => {
@@ -207,7 +207,6 @@ describe("channel config store", () => {
   it("a chat answers with its own values, an unknown one with the seed", () => {
     const config = store.get("slack");
     config.requireMention = true;
-    config.cwd = "/srv/work";
     const seed = { requireMention: true, requireBind: true, cwd: "/srv/work", model: null, thinking: null, botId: "" };
     config.chats = [
       { id: "a", name: "a", kind: "group", enabled: true, ...seed, requireMention: false },

@@ -339,7 +339,7 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks);
-registerChannelRoutes(app, channelStore, { reload: startChannels }, conversations);
+registerChannelRoutes(app, channelStore, { reload: startChannels }, conversations, () => piConfig.readDefaults());
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 registerPushRoutes(app, {

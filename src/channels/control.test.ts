@@ -187,16 +187,7 @@ describe("the launch record", () => {
     expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/default", model: SONNET, thinking: "high" });
   });
 
-  it("a chat left on Default launches on the platform's values as they are at launch", async () => {
-    const config = store.get("slack");
-    Object.assign(config, { cwd: "/srv/platform", model: SONNET });
-    store.save("slack", config);
-    await control.newSession(KEY);
-    // No thinking anywhere: passed as absent, so Pi applies the Settings default.
-    expect(factory.created).toEqual([{ cwd: "/srv/platform", model: SONNET }]);
-  });
-
-  it("with no directory anywhere, a thread starts in the workspace, created if missing", async () => {
+  it("a chat left on Default starts in the workspace, created if missing, and leaves the model to Settings", async () => {
     rmSync(PIER_WORKSPACE, { recursive: true, force: true });
     await control.newSession(KEY);
     expect(factory.created).toEqual([{ cwd: PIER_WORKSPACE }]);

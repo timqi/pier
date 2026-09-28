@@ -1,8 +1,8 @@
 // IM channel configuration types — the wire contract shared by the store, the
 // adapters and the Console view (type-only, so no node builtins here). Defaults
 // are least-privilege. The platform's gates are seeds copied into a chat on
-// discovery, so a switch means what it says; its launch values are a fallback
-// an empty chat value follows at every launch.
+// discovery, so a switch means what it says; a chat's empty launch value
+// follows the instance default (the workspace, Settings' model) at every launch.
 
 import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
@@ -29,12 +29,11 @@ export interface ChatConfig {
   enabled: boolean;
   requireMention: boolean;
   requireBind: boolean;
-  /** Where this chat's sessions start; "" → the platform default, read at launch. */
+  /** Where this chat's sessions start; "" → `$PIER_HOME/workspace`, read at launch. */
   cwd: string;
-  /** null → the platform default, then the Settings default, read at launch. */
+  /** null → the Settings default, read at launch. */
   model: ModelRef | null;
-  /** null → the platform default, then the Settings default. Pi clamps a level
-   *  a model cannot do. */
+  /** null → the Settings default. Pi clamps a level a model cannot do. */
   thinking: ThinkingLevel | null;
   /** The bot identity this chat was last seen under, restamped by every
    *  message: a DM's id means nothing to any other bot, so the Console can name
@@ -64,8 +63,8 @@ export interface BindCode {
  *  wrong try that voided the code — which the sender is told. */
 export type BindOutcome = "bound" | "invalid" | "voided";
 
-/** Platform-level gates seed newly discovered chats; the launch values are
- *  what a chat's empty ones follow. */
+/** Platform-level gates seed newly discovered chats; launch values are the
+ *  chats' own. */
 export interface ChannelConfig {
   enabled: boolean;
   /** The platform's primary credential: Slack's bot token (`xoxb-`), Lark's
@@ -79,11 +78,6 @@ export interface ChannelConfig {
   appToken: string;
   requireMention: boolean;
   requireBind: boolean;
-  /** "" → `$PIER_HOME/workspace`. */
-  cwd: string;
-  /** null → the Settings default. */
-  model: ModelRef | null;
-  thinking: ThinkingLevel | null;
   users: BoundUser[];
   chats: ChatConfig[];
   bindCode: BindCode | null;
@@ -92,10 +86,20 @@ export interface ChannelConfig {
   botId: string;
 }
 
+/** What a chat's empty launch value resolves to, read-only in the Console:
+ *  the workspace directory and the Settings default model and reasoning
+ *  (null → Pi's own). `error` when settings.json could not be read. */
+export interface LaunchDefaults {
+  cwd: string;
+  model: ModelRef | null;
+  thinking: ThinkingLevel | null;
+  error?: string;
+}
+
 /** `GET /api/channels/:platform`: the config, tokens masked, plus the
- *  directory an empty platform `cwd` resolves to, so the Console names it. */
+ *  defaults an empty chat value resolves to, so the Console names them. */
 export interface ChannelView extends ChannelConfig {
-  workspace: string;
+  defaults: LaunchDefaults;
 }
 
 /** What the runtime asks about one chat. */
@@ -107,9 +111,6 @@ export const defaultChannelConfig = (): ChannelConfig => ({
   appToken: "",
   requireMention: true,
   requireBind: true,
-  cwd: "",
-  model: null,
-  thinking: null,
   users: [],
   chats: [],
   bindCode: null,

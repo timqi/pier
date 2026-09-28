@@ -248,14 +248,15 @@ conversation id is the adapter's business.
 
 - **Gates are seeds, launch values follow.** Platform-level `requireMention` /
   `requireBind` are copied into a chat the first time the bot sees it and never
-  touch an existing one. A chat's `cwd` / `model` / `thinking` left empty
-  (`""` / `null`) follows the default, resolved at every session launch
-  (`ChannelStore.launch`): chat value > platform default > Settings default
-  (Pi's, applied when Pier passes none); a directory set nowhere is
-  `$PIER_HOME/workspace`, created at launch — never the process cwd, and never
-  `home`, which is the main session's (the home DM keeps it). The Console shows such a field as
-  `Default (<resolved value>)`, and clearing it is the reset. Migration 35
-  turned every chat value then equal to its platform's into a follow.
+  touch an existing one. The platform has no launch values: a chat's `cwd` /
+  `model` / `thinking` left empty (`""` / `null`) follows the instance default,
+  resolved at every session launch (`ChannelStore.launch`) — the directory is
+  `$PIER_HOME/workspace`, created at launch (never the process cwd, never
+  `home`, which is the main session's; the home DM keeps it), the model and
+  reasoning are the Settings default (Pi's, applied when Pier passes none).
+  The Console shows such a field as `Default (<resolved value>)`, and clearing
+  it is the reset. A stored row's platform-level `cwd` / `model` / `thinking`
+  is ignored on read and dropped by the next save — no migration.
 - **DMs are bind-only**: `if (isDm) return bound || bindRequest`. The two flags
   are group settings.
 - Group denials are silent; DM denials say how to bind, throttled per sender.
@@ -327,14 +328,16 @@ and `sweep`:
 
 ## Console surface
 
-One tab and one document per platform: token, defaults, bound users, discovered
-chats. The token fields save through `ChannelStore` into the vault under fixed
+One tab and one document per platform: token, gate seeds, bound users,
+discovered chats. The Default row is read-only but for the two seeds: it shows
+the workspace directory and the Settings default model and reasoning, with a
+link to Settings → Models to change them. The token fields save through `ChannelStore` into the vault under fixed
 names (`CREDENTIAL_NAMES` in `config.ts`, [07-vault.md](07-vault.md)); the
 channel row holds no credential.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/channels/:platform` | config with the token **masked**, plus `workspace` (`ChannelView`) |
+| `GET /api/channels/:platform` | config with the token **masked**, plus `defaults` — the workspace directory and the Settings default model and reasoning, resolved server-side; `error` when settings.json cannot be read (`ChannelView`) |
 | `PUT /api/channels/:platform` | full document; masked token = unchanged token; a `home` DM row clears every other ([11](11-im-conversation.md)) |
 | `POST /api/channels/:platform/bind-code` | issue a single-use code |
 | `DELETE /api/channels/:platform/users/:id` | unbind |

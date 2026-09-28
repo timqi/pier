@@ -4,8 +4,7 @@
 import { Check, LoaderCircle, TriangleAlert } from "lucide";
 import { icon } from "./icons.js";
 import type { ModelRef } from "../../core/types.js";
-import type { AgentDefaults } from "../../agent/types.js";
-import type { ChannelConfig, ChannelPlatform, ChannelView, ChatConfig, ChatKind } from "../../channels/types.js";
+import type { ChannelConfig, ChannelPlatform, ChannelView, ChatConfig, ChatKind, LaunchDefaults } from "../../channels/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { getJson, sendJson } from "./api.js";
 import {
@@ -30,8 +29,9 @@ const CHATS_NOTE = "Discovered from inbound traffic — no platform reliably lis
 
 /** A row no message has restamped under the current bot. */
 const isStale = (cfg: ChannelConfig, chat: ChatConfig): boolean => chat.botId !== cfg.botId;
-/** What a session launches with; a chat's row resolves each empty field one level up. */
+/** What a session launches with; a chat's row resolves each empty field to the default. */
 type Launch = LaunchChoice & { cwd: string };
+const NOTHING_SET: Launch = { cwd: "", model: null, thinking: null };
 
 // --- view ---------------------------------------------------------------------
 
@@ -43,16 +43,11 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     ? (stored as ChannelPlatform)
     : "slack";
   let config: ChannelConfig | null = null;
-  /** The directory an empty platform cwd resolves to, as the server names it. */
-  let workspace = "";
+  /** What a chat's empty launch value resolves to, as the server resolved it. */
+  let defaults: LaunchDefaults = { cwd: "", model: null, thinking: null };
   /** Rows open for editing, "" the platform default's; kept across re-renders. */
   const expanded = new Set<string>();
-  const followsCwd = (cfg: ChannelConfig): string => `Default (${cfg.cwd || workspace})`;
   let models: ModelRef[] = [];
-  /** Settings → Models' default, what a platform left on Default resolves to. */
-  let settingsDefault: LaunchChoice = { model: null, thinking: null };
-  /** Chat cwd inputs on Default, whose placeholder names the platform's as it is typed. */
-  let cwdFollowers: HTMLInputElement[] = [];
 
   // Segmented, not a second pill strip: two rows of the same chrome read as
   // two levels of one navigation. Sticky, so a long page still names the
@@ -148,26 +143,22 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   }
 
   async function load(): Promise<void> {
-    // The catalogue once per view visit; the Settings default on every load,
-    // since Settings → Models may have moved it while this page was open.
-    const [list, defaults, got] = await Promise.all([
+    // The catalogue once per view visit; the defaults ride every load, since
+    // Settings → Models may have moved them while this page was open.
+    const [list, got] = await Promise.all([
       models.length ? null : getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
-      getJson<AgentDefaults>("/api/config/defaults", "Could not read the Settings default model"),
       getJson<ChannelView>(`/api/channels/${platform}`, "Failed to load"),
     ]);
     if (list?.ok) models = list.value;
-    if (defaults.ok) settingsDefault = { model: defaults.value.defaultModel, thinking: defaults.value.defaultThinkingLevel };
-    else showStatus("failed");
     if (!got.ok) {
       config = null;
       renderTabs();
       pane.replaceChildren(empty(got.error));
       return;
     }
-    const { workspace: dir, ...rest } = got.value;
-    workspace = dir;
+    const { defaults: resolved, ...rest } = got.value;
+    defaults = resolved;
     config = rest;
-    if (defaults.ok) showStatus("clean");
     render();
   }
 
@@ -318,46 +309,39 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     return bar;
   }
 
-  function platformRow(cfg: ChannelConfig, parent: Launch): HTMLElement {
-    const row = launchRow("", {
+  /** Read-only but for the two seeds: the directory is the workspace, the
+   *  model and reasoning are Settings', changed there. */
+  function platformRow(cfg: ChannelConfig, parent: LaunchDefaults): HTMLElement {
+    const value = (text: string): HTMLElement => h("span", "min-w-0 truncate text-[13px] text-neutral-700", text);
+    const settings = h("a", "flex-none text-[12px] text-indigo-600 hover:underline", "Change in Settings") as HTMLAnchorElement;
+    settings.href = "#/settings/models";
+    const model = h(
+      "div",
+      "flex min-h-8 items-center gap-2",
+      value([parent.model?.id ?? "Pi default", parent.thinking ? thinkingLabel(parent.thinking) : ""].filter(Boolean).join(" · ")),
+      settings,
+    );
+    return launchRow("", {
       name: "Default",
       dim: false,
       badges: [badge("every chat", "bg-indigo-50 text-indigo-700 ring-indigo-200")],
-      summary: () => launchSummary(cfg, parent),
-    }, () => {
-      const cwd = dirInput(cfg.cwd, `Default (${parent.cwd})`, set((v) => {
-        cfg.cwd = v;
-        for (const input of cwdFollowers) input.placeholder = followsCwd(cfg);
-        row.repaint();
-      }));
-      return [
-        h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. Directory, model and reasoning are read at every launch by each chat left on Default. DMs are always bound-users-only."),
-        h(
-          "div",
-          "flex flex-wrap items-center gap-x-6 gap-y-2",
-          toggle("Require mention in groups", "", cfg.requireMention, set((v) => (cfg.requireMention = v))),
-          toggle("Require bound user", "", cfg.requireBind, set((v) => (cfg.requireBind = v))),
-        ),
-        h(
-          "div",
-          "grid grid-cols-1 gap-3 sm:grid-cols-2",
-          field("Working directory", cwd.el),
-          launchField("Model & reasoning", cfg, models, set((next) => {
-            cfg.model = next.model;
-            cfg.thinking = next.thinking;
-            render();
-          }), settingsDefault),
-        ),
-        rowActions(cfg.cwd || cfg.model || cfg.thinking ? () => {
-          cfg.cwd = "";
-          cfg.model = null;
-          cfg.thinking = null;
-          queueSave();
-          render();
-        } : null),
-      ];
-    });
-    return row.el;
+      summary: () => launchSummary(NOTHING_SET, parent),
+    }, () => [
+      h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. A chat left on Default launches in the workspace directory with the Settings default model and reasoning, read at every launch. DMs are always bound-users-only."),
+      h(
+        "div",
+        "flex flex-wrap items-center gap-x-6 gap-y-2",
+        toggle("Require mention in groups", "", cfg.requireMention, set((v) => (cfg.requireMention = v))),
+        toggle("Require bound user", "", cfg.requireBind, set((v) => (cfg.requireBind = v))),
+      ),
+      h(
+        "div",
+        "grid grid-cols-1 gap-3 sm:grid-cols-2",
+        field("Working directory", h("div", "flex min-h-8 items-center", value(parent.cwd))),
+        field("Model & reasoning", model),
+      ),
+      ...(parent.error ? [h("span", "text-[12.5px] text-amber-700", `Could not read the Settings default: ${parent.error}`)] : []),
+    ]).el;
   }
 
   function chatRow(cfg: ChannelConfig, chat: ChatConfig, parent: Launch): HTMLElement {
@@ -429,11 +413,10 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       return out;
     }
     // Empty follows the platform's, so clearing the field is the reset.
-    const cwd = dirInput(chat.cwd, followsCwd(cfg), set((v) => {
+    const cwd = dirInput(chat.cwd, `Default (${parent.cwd})`, set((v) => {
       chat.cwd = v;
       repaint();
     }));
-    cwdFollowers.push(cwd.input);
     out.push(
       h(
         "div",
@@ -457,15 +440,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   }
 
   function chats(cfg: ChannelConfig): HTMLElement {
-    // What a field left on Default resolves to, one level up.
-    const settings: Launch = { cwd: workspace, ...settingsDefault };
-    const platformLaunch: Launch = {
-      cwd: cfg.cwd || settings.cwd,
-      model: cfg.model ?? settings.model,
-      thinking: cfg.thinking ?? settings.thinking,
-    };
-    const list = h("div", "flex flex-col gap-2", platformRow(cfg, settings));
-    if (cfg.chats.length) list.append(...cfg.chats.map((chat) => chatRow(cfg, chat, platformLaunch)));
+    const list = h("div", "flex flex-col gap-2", platformRow(cfg, defaults));
+    if (cfg.chats.length) list.append(...cfg.chats.map((chat) => chatRow(cfg, chat, defaults)));
     else list.append(empty("None yet. Chats appear here after the bot sees a message in them."));
     const stale = cfg.chats.filter((chat) => isStale(cfg, chat) && !chat.home).length;
     const clear = button(`Clear stale (${String(stale)})`);
@@ -486,7 +462,6 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   function render(): void {
     if (!config) return;
     renderTabs();
-    cwdFollowers = [];
     const column = h("div", "mx-auto flex max-w-3xl flex-col gap-4");
     column.append(connection(config), users(config), chats(config));
     pane.replaceChildren(column);

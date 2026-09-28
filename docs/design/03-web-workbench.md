@@ -332,10 +332,10 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   and a chat's enable switch; on a phone the summary takes a second line. The
   chevron opens it in place to its switches (the default's are the seeds),
   directory, model & reasoning, `Reset to default` while anything is set, and a
-  chat's id and Remove (confirms); folding it shows the result. A field left
-  empty reads `Default (<resolved value>)`: the platform's directory resolves
-  to `workspace` from the GET, its model to Settings → Models' default, read on
-  every load. A row whose owner differs wears an amber badge and, open, a
+  chat's id and Remove (confirms); folding it shows the result. The default's
+  directory and model are read-only — the GET's `defaults`, resolved
+  server-side on every load — with "Change in Settings" to
+  `#/settings/models`. A chat field left empty reads `Default (<resolved value>)`. A row whose owner differs wears an amber badge and, open, a
   one-line stale reason; while any row but the home DM is stale the card ends
   in `Clear stale (N)` (confirms). A DM row carries "This DM is the conversation"
   ([11](11-im-conversation.md)); on, the row's summary, directory and model
