@@ -30,7 +30,7 @@
     "prepack": "npm run build",
     "build:web": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "lint": "oxlint src",
+    "lint": "oxlint src --format=default --deny-warnings",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
