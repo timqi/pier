@@ -108,7 +108,7 @@ unit override and API keys in Settings → Models.
 pier service install     # --port, --host, --pier-home, --force
 pier service status
 pier service uninstall
-pier restart             # drain running work, then restart
+pier restart             # restart; running turns resume after it
 pier reload              # re-read channel config and recycle idle sessions
 pier backup              # snapshot the database before a manual update
 pier update              # latest release, then hard-stop/restart the service
@@ -142,15 +142,21 @@ npm test          # vitest
 Pier asks `registry.npmjs.org` at boot and every 30 minutes; the version in
 the Settings header turns into a badge when a release is out (`Pier <version>
 is out`) and opens a panel: source link,
-**Update now**, **Update automatically** (idle instance only). Both drain first
-and hand the install to the updater unit; off systemd the panel says `pier
-update`. The updater writes `~/.pier/db/backups/pier.db.release-<version>.bak`
+**Update now**, **Update automatically** (idle instance only). Both hand the
+install to the updater unit, and a turn its stop cuts resumes at boot; off
+systemd the panel says `pier update`. The updater writes `~/.pier/db/backups/pier.db.release-<version>.bak`
 (the release being replaced; three kept) first. Schema upgrades are one-way;
 `docs/deploy.md` has the rollback.
 
 `main` is the only development line. `just release [patch|minor|major]` checks,
 tags and pushes; the tag builds and publishes to npm and a GitHub Release. The
 version shown is `package.json`'s.
+
+- A release is **minor** when rolling back to the previous version cannot run
+  without restoring a backup — a migration, a CLI, config or API change, a
+  user-visible feature; anything else is **patch**.
+- A minor release requires a `CHANGELOG.md` entry; for a patch it is optional,
+  and a one-line summary in the GitHub release is enough.
 
 ## License
 

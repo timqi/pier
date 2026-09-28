@@ -1,9 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-28
+
+### Upgrade notes
+
+- The database migrates to schema 34, one-way: it adds `turns_in_flight`; 0.3.1 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
+- `pier restart` is `systemctl --user restart --no-block pier`: no drain, no `SIGUSR2`. Off systemd, stop and start the process yourself.
 
 ### Changed
 
+- Stop and resume: systemd owns every restart — `pier restart`, `systemctl --user restart|stop pier`, the updater, a crash or SIGKILL. A stop aborts running turns and exits in seconds; at boot each cut turn continues in its session and each agent run on its own row (same id, same callback), both opening with a restart note, and a queued run stays queued. What cannot resume is told in its chat, or ends `interrupted` ([13-stop-and-resume.md](docs/design/13-stop-and-resume.md)).
+- The head continues a child whose result falls short of the stage's goal (`· until <condition>`), up to three times unless the user sets another cap, counting `· auto n/3` in the stage; at the cap it waits on the user.
+- Dispatch and callback cards name the run's tier, model and reasoning; on the phone the badge is quiet text under the label.
 - `pier task run --prompt`, each `--member` and `pier task save` with a prompt require `--model` — a tier (`hardest | balanced | cheap`) or a model on the operator's menu; the refusal prints the menu. A child no longer inherits the caller's live model. `--session`, `--run`, `--bash` and `--task-id` are unchanged.
 
 ### Added
@@ -16,7 +24,17 @@
 
 ### Fixed
 
+- An open item's status reads the run store, not `pier task runs`' 24h window: a succeeded-but-unreleased item no longer turns `stopped` by age, and only `waiting on you` counts as needing the user.
+- The status chip opens the panel whenever it has rows; a panel of only `pending release`, `stopped` or queued rows reads `K open`.
+- A clipped run result keeps its head and its tail, so the verified final state and `Needs your decision` survive the cut; the omission line names `pier task recover` for the full text.
+- Requests that arrive before the boot's vault unlock wait for it instead of failing with `secrets locked`.
+- A lead's milestone and every restart resume carry the user's `lang=` stamp too.
+
 - The head no longer drifts into English after an English callback: every callback and run message it receives opens with `[lang=<code>]`, the language its user last wrote in, read off the transcript so it survives a restart and carried on the seed across a rotation, and the contracts say the reply language is the most recent `lang=`, never the surrounding context's. Every user message carries `lang=<code>` in its header, not only a change of language, so a stamp said once is not outvoted by English context; `ok`, an emoji or a link carries the last one. The chat and the web do not show the stamp.
+
+### Removed
+
+- The in-process drain: `SIGUSR2`, its 5-minute deadline and the gates that refused work while draining.
 
 ## 0.3.1 — 2026-09-28
 
