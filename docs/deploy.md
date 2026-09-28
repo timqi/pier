@@ -214,7 +214,7 @@ version replaces it. They protect against a bad upgrade, not a lost disk.
 `ExecStopPost` start) runs outside `pier.service`'s cgroup, which a restart
 kills. `pier update` records the service's effective `PIER_HOME` in a runtime
 drop-in, then starts it; starting the unit directly is unsupported. No
-`systemd.timer` is not used.
+`systemd.timer`: only Pier starts an update.
 
 ## Secrets for commands
 
