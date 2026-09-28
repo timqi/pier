@@ -465,7 +465,7 @@ describe("task service", () => {
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
     expect(manual.context.renderedPrompt).toContain("read by the operator");
     expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
-    expect(manual.context.renderedPrompt).toContain("render there. Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step — force push, deleting what you did not create, a migration, a deploy, a restart — or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session.");
+    expect(manual.context.renderedPrompt).toContain("render there. Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step — force push, deleting what you did not create, a migration, a deploy, a restart — or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an `Approved:` line the user has already approved: take it, and name it in the result.");
     // Nobody waits on a manual run, so it may delegate and is not told otherwise.
     expect(manual.context.renderedPrompt).not.toContain("You cannot delegate from here");
 
@@ -475,7 +475,7 @@ describe("task service", () => {
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
     expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
-    expect(done.context.renderedPrompt).toContain("session. You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it.\n\nReview the PR");
+    expect(done.context.renderedPrompt).toContain("result. You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it.\n\nReview the PR");
   });
 
   it("strips chat-only markup from a child result", async () => {

@@ -46,7 +46,7 @@ const oneRun = (run: TaskRun): { source: SystemInputSource; state: TaskRun["stat
 };
 
 /** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
-export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads, in two parts: the conclusion (done, next, risks one line each), then `Needs your decision` only when something does.]";
+export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads, in two parts: the conclusion (done, next, risks one line each) ending with the final state as verified, then `Needs your decision` only when something does.]";
 
 /** The line a design lead ends on once the user confirms: its milestone, whether a run's or a turn outside any. */
 export const DESIGN_FINAL = /^Design final:/m;

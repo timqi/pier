@@ -40,12 +40,16 @@ or it is killed and reported as timed out. A non-zero exit still delivers what
 it printed.
 
 A result is two parts: the conclusion (paths, risks and unverified points one
-line each), then `Needs your decision` only when something does. A child takes
+line each, ending with the final state the child verified — the commit and the
+branch it is merged into, the ref pushed, the service's active-since — which you
+trust rather than re-check), then `Needs your decision` only when something does. A child takes
 reversible choices itself (how to push, a rebase strategy) with the recommended
 option, named in its result; it stops only on a destructive or irreversible
 step (force push, deleting what it did not create, migrations, deploys, restarts) or a question
 only you can answer, ending its turn with that as its result; answer it with
-`--run <id> --prompt`. Core owns the join: never aggregate members by hand.
+`--run <id> --prompt`. A step the user already approved goes in the prompt as a
+line `Approved: <step>` (`Approved: pier restart`): the child takes it instead
+of asking. Core owns the join: never aggregate members by hand.
 
 ## Model choice
 

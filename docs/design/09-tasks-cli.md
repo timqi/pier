@@ -204,7 +204,7 @@ A session's role is fixed by the run that made it, for the session's life
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session represented in the head's history counts as the one
 that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
-`parentRunId` links only a `task` action's child, which a cancel walks. The run preamble (`tasks/agent.ts`) fixes the result's shape — the conclusion, then `Needs your decision` only when something does — and the stop rule: reversible choices are the run's own, named in the result; a destructive or irreversible step, or a question only the reader can answer, ends the turn with it; it also tells a supervised run or a worker
+`parentRunId` links only a `task` action's child, which a cancel walks. The run preamble (`tasks/agent.ts`) fixes the result's shape — the conclusion, then `Needs your decision` only when something does — and the stop rule: reversible choices are the run's own, named in the result; a destructive or irreversible step, or a question only the reader can answer, ends the turn with it, unless the prompt names the step on an `Approved:` line; the conclusion ends with the verified final state; it also tells a supervised run or a worker
 in one sentence that `pier task` is refused, and a lead that it may delegate.
 
 ## Skill

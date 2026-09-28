@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openItemMarkers } from "../core/reply.js";
-import { DISPATCHER, surfacePrompt } from "./roles.js";
+import { DISPATCHER, LEAD, surfacePrompt } from "./roles.js";
 
 describe("the dispatcher contract", () => {
   it("shows the goal in a marker the parser reads back, the goal in the stage", () => {
@@ -20,6 +20,13 @@ describe("the dispatcher contract", () => {
     for (const owned of ["follows the change's difficulty", "for orientation, never for waiting", "substring of provider"]) {
       expect(DISPATCHER).not.toContain(owned);
     }
+  });
+
+  it("hands an approval down as the preamble's Approved: line and trusts the child's final state", () => {
+    // The worker preamble (tasks/agent.ts) honors exactly this line, so both sides name it the same.
+    for (const contract of [DISPATCHER, LEAD]) expect(contract).toContain("`Approved: <step>`");
+    expect(DISPATCHER).toContain("never re-check it with your own commands");
+    expect(LEAD).toContain("ending with the final state as verified");
   });
 });
 

@@ -36,6 +36,12 @@ describe("Pier system prompt", () => {
     expect(prompt.indexOf("# Working style")).toBeLessThan(prompt.indexOf("# Tools"));
     expect(pierSystemPrompt()).not.toContain("undefined");
   });
+
+  it("lets the run preamble's Approved: line override the ask-first rule for that step only", () => {
+    const prompt = pierSystemPrompt();
+    expect(prompt).toContain("ask first; unattended, don't do them");
+    expect(prompt).toContain("`Approved: <step>` line was asked and answered — take that step, and only that one");
+  });
 });
 
 describe("config files", () => {
