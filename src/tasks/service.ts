@@ -75,10 +75,13 @@ export class TaskService {
       /** A design lead's run settled: the user's turn (`waiting`), its `Design
        *  final:` (`final`), or a run of it that did not succeed (`failed`). */
       designLead?: (run: TaskRun, state: "waiting" | "final" | "failed") => void;
+      /** A child run ended abnormally where no callback note in the head's chat
+       *  says so (`owesNotice`); the chat is told through the restart ledger. */
+      abnormalEnd?: (run: TaskRun) => void;
     },
   ) {
-    const headOf = (id: string): string => instance.continuous.chainOf(id)?.[0] ?? id;
-    const conversation = (): string | null => instance.continuous.members()[0]?.sessionId ?? null;
+    const headOf = (id: string): string => this.headOf(id);
+    const conversation = (): string | null => this.head();
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable, (runId) => {
@@ -89,7 +92,7 @@ export class TaskService {
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone, conversation);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
-      cancel: (id) => { this.cancel(id); },
+      cancel: (id, by) => { this.cancel(id, by); },
       prepareMember: (taskId, groupId, callerSessionId) => this.prepareRun(taskId, null, "agent", null, {
         invokedBySessionId: callerSessionId,
         sourceSessionId: callerSessionId,
@@ -109,7 +112,7 @@ export class TaskService {
       }),
       waitForRun: (id) => this.waitForRun(id),
       cancel: (id) => { this.cancel(id); },
-      settled: (run) => this.settled(run),
+      settled: (run, unasked) => this.settled(run, unasked),
       changed: (run) => this.changed(run),
     });
     this.runs = new TaskRunQueue(
@@ -200,6 +203,7 @@ export class TaskService {
     for (const run of this.store.interruptRunning(now)) {
       log.warn(`run ${run.id} (${run.context.definition.name}) interrupted by a restart`);
       this.changed(run);
+      this.abnormalEnd(run, false);
     }
     this.messages.expirePending();
     this.definitions.resetNextRuns(now);
@@ -395,17 +399,19 @@ export class TaskService {
   }
 
   /** Cascades down a `task` action's chain: a child must not outlive the run
-   *  that waits on it. */
-  cancel(id: string): TaskRun {
+   *  that waits on it. `by` is the asking session: the head asks for the user,
+   *  any other session did not, so that run's end is noticed; the cascade is not. */
+  cancel(id: string, by?: string): TaskRun {
     const run = this.getRun(id);
+    const unasked = by !== undefined && this.headOf(by) !== this.head();
     for (const target of [run, ...this.descendants(run)]) {
-      if (!isTerminal(target.state)) this.execution.cancel(target.id);
+      if (!isTerminal(target.state)) this.execution.cancel(target.id, unasked && target === run);
     }
     return this.getRun(id);
   }
 
-  cancelGroup(id: string): TaskGroup {
-    return this.groups.cancelAll(id);
+  cancelGroup(id: string, by?: string): TaskGroup {
+    return this.groups.cancelAll(id, by);
   }
 
   getGroup(id: string): { group: TaskGroup; members: TaskRun[] } {
@@ -560,12 +566,35 @@ export class TaskService {
     }
   }
 
-  private settled(run: TaskRun): void {
+  private settled(run: TaskRun, unasked: boolean): void {
     const waiters = this.waiters.get(run.id);
     if (waiters) for (const resolve of waiters) resolve(run);
     this.waiters.delete(run.id);
     this.groups.onSettled(run);
     this.designLead(run);
+    this.abnormalEnd(run, unasked);
+  }
+
+  private head(): string | null {
+    return this.instance.continuous.members()[0]?.sessionId ?? null;
+  }
+
+  private headOf(id: string): string {
+    return this.instance.continuous.chainOf(id)?.[0] ?? id;
+  }
+
+  /** A reporter that throws must not unwind the settle. */
+  private abnormalEnd(run: TaskRun, unasked: boolean): void {
+    const group = run.groupId === null ? undefined : this.store.getGroup(run.groupId);
+    const resultTo = group ? group.callbackSessionId : run.callbackSessionId;
+    const head = this.head();
+    const toHead = resultTo !== null && head !== null && this.headOf(resultTo) === head;
+    if (!this.instance.abnormalEnd || !owesNotice(run, unasked, toHead)) return;
+    try {
+      this.instance.abnormalEnd(run);
+    } catch (err) {
+      log.error(`run ${run.id}: its ${run.state} end could not be noticed`, err);
+    }
   }
 
   private backgroundRun(run: TaskRun): BackgroundRun {
@@ -596,6 +625,17 @@ export class TaskService {
       this.hub.emit(run.invokedBySessionId, { type: "task-status", run: this.backgroundRun(run) });
     }
   }
+}
+
+/** A child run's abnormal end the home chat would not otherwise see. An
+ *  interruption always: its callback lands while no chat is connected. A failure
+ *  or a cancel only when its result goes to a lead or nobody — the head's
+ *  callback note says it — and a cancel only when no one asked for the user. */
+export function owesNotice(run: TaskRun, unasked: boolean, resultToHead: boolean): boolean {
+  if (run.invokedBySessionId === null) return false;
+  if (run.state === "interrupted") return true;
+  if (resultToHead) return false;
+  return run.state === "failed" || (run.state === "cancelled" && unasked);
 }
 
 function ledgerRun(run: TaskRun): LedgerRun {

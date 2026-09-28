@@ -134,6 +134,7 @@ thread half only for the home chat; any other is refused.
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | a failure | `⚠ failed` note |
 | a restart note (`drain.ts`) | the same `notify`, main flow |
+| a child run's abnormal end | `⚠ failed` note, `"<name>" ended <state> — <error>` over the run ref; through the restart ledger, so an interruption recorded before the chats connect still arrives |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
   comes off with the head's turn-end, as any conversation's. A chat command
@@ -215,6 +216,14 @@ through what the head launches (`pier task`), never by a group's message.
 - A message typed on the web is not mirrored into the DM; the head's answer
   is, whichever surface asked. The web is the record, the DM the phone.
 - No home chat, or its adapter down: Web Push.
+- A run a session launched that ends abnormally is told in the home chat when
+  nothing else there would say so (`owesNotice`, `tasks/service.ts`): an
+  interruption always; a failure, or a cancel no one asked for the user (asked
+  by a session other than the head — not the head's, a cascade's or a
+  first-wins join's), only when its result goes to a lead or nobody, since the
+  head's callback note already carries it. A run that calls `pier restart`
+  finishes before the drain exits, so it is not interrupted and needs no
+  exemption.
 
 ## Storage
 
@@ -258,6 +267,8 @@ through what the head launches (`pier task`), never by a group's message.
   `<chat>/<thread>`, without one to the head; `openThread` returns the thread
   id and posts the root in the main flow. `tasks/lead.test.ts`: `designLead`
   fires `waiting` on `LEAD_TURN`, `final`, `failed`, for a design lead only.
+  `tasks/service.test.ts` (§abnormal-end notice): which ends owe a notice, the
+  cancel's asker, the boot write-off, a throwing reporter.
 
 ## Acceptance
 

@@ -8,6 +8,7 @@
 
 ### Added
 
+- A run a session launched that ends interrupted, failed, or cancelled without the user asking is told in the home chat (`"<name>" ended <state> — <error>`), delivered through the restart ledger so an interruption reaches the chat once it reconnects; a failure or cancel whose result the head's callback note already shows posts nothing more ([11-im-conversation.md](docs/design/11-im-conversation.md#notifications)).
 - `pier task stats [--days <n>]`: finished agent runs by launch tier, role and model, with each row's recent task names, so the operator can read whether dispatch follows the tier rule ([12-model-tiers.md](docs/design/12-model-tiers.md)).
 
 ## 0.3.1 — 2026-09-28

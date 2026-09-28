@@ -14,7 +14,7 @@ const log = logger("tasks");
 
 interface GroupHost {
   getRun(id: string): TaskRun;
-  cancel(id: string): void;
+  cancel(id: string, by?: string): void;
   prepareMember(taskId: string, groupId: string, callerSessionId: string): TaskRun;
   startMember(run: TaskRun): void;
 }
@@ -80,8 +80,8 @@ export class TaskGroups {
     return { group, members: group.memberRunIds.map((runId) => this.host.getRun(runId)) };
   }
 
-  cancelAll(id: string): TaskGroup {
-    for (const runId of this.get(id).memberRunIds) this.host.cancel(runId);
+  cancelAll(id: string, by?: string): TaskGroup {
+    for (const runId of this.get(id).memberRunIds) this.host.cancel(runId, by);
     return this.get(id);
   }
 

@@ -12,6 +12,12 @@ import type { TaskCallback, TaskRun } from "./types.js";
 export const runRef = (run: TaskRun): string =>
   `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
 
+/** What the home chat is told of a child run's abnormal end (service.ts `owesNotice`). */
+export const abnormalNote = (run: TaskRun): string => {
+  const why = run.error?.split("\n")[0]?.slice(0, 200);
+  return `"${run.context.definition.name}" ended ${run.state}${why && why !== run.state ? ` — ${why}` : ""}\n${runRef(run)}`;
+};
+
 /** What a run worked on: the session's record once it opened, the launch's
  *  before; the tier only while the model is the pin it named. */
 export const runModel = ({ context }: TaskRun): RunModel => {

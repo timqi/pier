@@ -31,7 +31,7 @@ import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
-import { runResultText, runSource } from "./tasks/callbacks.js";
+import { abnormalNote, runResultText, runSource } from "./tasks/callbacks.js";
 import { openItemsStatus } from "./tasks/open-items.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -160,6 +160,17 @@ tasks = new TaskService(taskStore, factory, router, hub, {
       text: state === "failed" ? run.error ?? run.state : runResultText(run),
     }, state).catch((err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
   },
+  // Through the ledger: an interruption is recorded while no chat is connected.
+  abnormalEnd: (run) => {
+    const home = channelStore.home();
+    if (!home) {
+      log.info(`run ${run.id} ended ${run.state}; no home chat to tell`);
+      return;
+    }
+    restartLedger.record({ channelId: home.platform, conversationId: home.chatId, note: abnormalNote(run) });
+    // An adapter that is down logs the note as waiting (drain.ts) rather than holding it silently.
+    void tellChats();
+  },
 });
 const configurationSync = configSyncTask(tasks, configSync);
 
@@ -205,17 +216,23 @@ resolveIm = resolveConversation(
 // down the web surface, which is where the operator repairs it. The chats a
 // previous restart cut off are told as soon as channels are up (drain.ts).
 const restartLedger = new RestartLedger(db);
+let ledgerDelivery = Promise.resolve();
+/** One pass at a time: two concurrent passes would each post the same entry. */
+const tellChats = (): Promise<void> =>
+  (ledgerDelivery = ledgerDelivery.then(() => deliverLedger(restartLedger, (entry) =>
+    channels.notify(entry.channelId, entry.conversationId, entry.note)))
+    .catch((err: unknown) => log.error("restart-note delivery failed", err)));
+/** Every path that brings an adapter up delivers what waited for it: boot,
+ *  reload, and a Console save that enables it or moves the home chat. */
 const startChannels = async (): Promise<void> => {
   await channels.reload();
-  await deliverLedger(restartLedger, (entry) =>
-    channels.notify(entry.channelId, entry.conversationId, entry.note))
-    .catch((err: unknown) => log.error("restart-note delivery failed", err));
+  await tellChats();
 };
 /** Adapters re-read their configuration and sessions are let go, so the next
  *  message re-opens them with current skills, extensions, prompts and
  *  credentials. SIGHUP and the Console's Reload are both this call. */
 const reloadInstance = async (includeWatched = false): Promise<number> => {
-  await channels.reload();
+  await startChannels();
   return router.evictIdle(0, Date.now(), { includeWatched });
 };
 
@@ -251,9 +268,7 @@ const takeWorkAgain = (why: string): void => {
   router.endDrain();
   tasks.unpause();
   // Turns the drain deadline-aborted must not wait for a restart days away (§5).
-  void deliverLedger(restartLedger, (entry) =>
-    channels.notify(entry.channelId, entry.conversationId, entry.note))
-    .catch((err: unknown) => log.error("restart-note delivery failed", err));
+  void tellChats();
 };
 /** `systemctl start --no-block` returns when the job is queued; the real
  *  outcome is a SIGTERM after a registry download on someone else's network.
@@ -327,7 +342,7 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks);
-registerChannelRoutes(app, channelStore, channels, conversations);
+registerChannelRoutes(app, channelStore, { reload: startChannels }, conversations);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 registerPushRoutes(app, {

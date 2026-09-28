@@ -11,12 +11,14 @@ import type { TaskResult, TaskRun } from "./types.js";
 
 const log = logger("tasks");
 const SHUTDOWN = Symbol("shutdown");
+/** A cancel the user did not ask for: the run's end is the home chat's to hear (service.ts). */
+const UNASKED = Symbol("unasked cancel");
 
 interface ExecutionHost {
   runChild(taskId: string, parent: TaskRun): TaskRun;
   waitForRun(id: string): Promise<TaskRun>;
   cancel(id: string): void;
-  settled(run: TaskRun): void;
+  settled(run: TaskRun, unasked: boolean): void;
   changed(run: TaskRun): void;
 }
 
@@ -41,9 +43,9 @@ export class TaskExecution {
     for (const controller of this.controllers.values()) controller.abort(SHUTDOWN);
   }
 
-  cancel(id: string): void {
+  cancel(id: string, unasked = false): void {
     log.info(`run ${id} cancel requested`);
-    this.controllers.get(id)?.abort();
+    this.controllers.get(id)?.abort(unasked ? UNASKED : undefined);
   }
 
   private async execute(run: TaskRun): Promise<void> {
@@ -120,7 +122,7 @@ export class TaskExecution {
         }
       }
       this.host.changed(run);
-      this.host.settled(run);
+      this.host.settled(run, run.state === "cancelled" && controller.signal.reason === UNASKED);
       if (run.callbackState === "pending") void this.callbacks.deliver(run);
     }
   }

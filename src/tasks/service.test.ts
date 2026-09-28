@@ -12,10 +12,10 @@ import type {
   ModelRef,
   ThinkingLevel,
 } from "../core/types.js";
-import { runResultText, TaskCallbacks } from "./callbacks.js";
+import { abnormalNote, runRef, runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
-import { TaskService } from "./service.js";
+import { owesNotice, TaskService } from "./service.js";
 import type { GroupSummary, RunSummary } from "./operations.js";
 import { TaskStore } from "./store.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
@@ -2147,5 +2147,84 @@ describe("pier task stats", () => {
     expect(service.stats(40).rows.find((row) => row.tier === "cheap")?.names).toEqual(["cheap", "old"]);
     await expect(service.handle({ operation: "stats", days: 0 }, "head")).rejects.toThrow("days must be a positive whole number");
     await expect(service.handle({ operation: "stats", days: 1 }, "head")).resolves.toMatchObject({ days: 1 });
+  });
+});
+
+describe("abnormal-end notice", () => {
+  const withHead = (abnormalEnd: (run: TaskRun) => void) => ({
+    ...BARE,
+    continuous: {
+      chainOf: (id: string) => (id === "head" ? ["head"] : undefined),
+      members: () => [{ sessionId: "head", startedAt: 1, reason: "first" as const }],
+    },
+    abnormalEnd,
+  });
+
+  it("owes one for an interruption always, a failure or an unasked cancel only off the head, never a root run", () => {
+    const task = { id: "t" } as TaskDefinition;
+    const run = (over: Partial<TaskRun>) => storedRun("r", task, 1, { invokedBySessionId: "lead", ...over });
+    expect(owesNotice(run({ state: "interrupted" }), false, true)).toBe(true);
+    expect(owesNotice(run({ state: "failed" }), false, false)).toBe(true);
+    expect(owesNotice(run({ state: "failed" }), false, true)).toBe(false);
+    expect(owesNotice(run({ state: "cancelled" }), true, false)).toBe(true);
+    expect(owesNotice(run({ state: "cancelled" }), false, false)).toBe(false);
+    expect(owesNotice(run({ state: "cancelled" }), true, true)).toBe(false);
+    expect(owesNotice(run({ state: "succeeded" }), false, false)).toBe(false);
+    expect(owesNotice(run({ state: "skipped" }), false, false)).toBe(false);
+    expect(owesNotice(run({ state: "interrupted", invokedBySessionId: null }), false, false)).toBe(false);
+  });
+
+  it("notices a failed child whose result goes to a lead or nobody, not one the head's callback carries", async () => {
+    const noticed: TaskRun[] = [];
+    const { cwd, service } = setup(fakeSession("head"), withHead((run) => noticed.push(run)));
+    const task = await service.create(bashDraft(cwd, "exit 3"));
+    const fail = (callbackSessionId: string | null, invokedBySessionId: string | null = "lead") =>
+      service.waitForRun(service.run(task.id, null, invokedBySessionId ? "agent" : "manual", null, { invokedBySessionId, callbackSessionId }).id);
+    const toLead = await fail("lead");
+    const toNobody = await fail(null);
+    await fail("head", "head");
+    await fail(null, null);
+    expect(noticed.map((run) => run.id)).toEqual([toLead.id, toNobody.id]);
+    expect(abnormalNote(toLead)).toBe(`"command" ended failed — Error: bash exited 3\n${runRef(toLead)}`);
+  });
+
+  it("notices a cancel asked by a session other than the head, not the head's, the cascade's or the internal one", async () => {
+    const noticed: TaskRun[] = [];
+    const { cwd, service } = setup(fakeSession("head"), withHead((run) => noticed.push(run)));
+    const task = await service.create(bashDraft(cwd, "sleep 5"));
+    const cancel = (by?: string) => {
+      const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead" });
+      service.cancel(run.id, by);
+      return service.waitForRun(run.id);
+    };
+    const byLead = await cancel("lead");
+    await cancel("head");
+    await cancel();
+    // `pier task cancel` names its caller.
+    const viaCli = service.run(task.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: null });
+    await service.handle({ operation: "cancel", run_id: viaCli.id }, "lead");
+    await service.waitForRun(viaCli.id);
+    expect(noticed.map((run) => [run.id, run.state])).toEqual([[byLead.id, "cancelled"], [viaCli.id, "cancelled"]]);
+    expect(abnormalNote(byLead)).toBe(`"command" ended cancelled\n${runRef(byLead)}`);
+  });
+
+  it("notices a run written off at boot even when its result goes to the head", async () => {
+    const noticed: TaskRun[] = [];
+    const { cwd, store, service } = setup(fakeSession("head"), withHead((run) => noticed.push(run)));
+    onTestFinished(() => service.stop());
+    const task = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("cut", task, Date.now(), {
+      state: "running", finishedAt: null, result: null, invokedBySessionId: "head", callbackSessionId: "head",
+    }));
+    service.start(60_000);
+    expect(noticed.map((run) => [run.id, run.state])).toEqual([["cut", "interrupted"]]);
+    expect(abnormalNote(noticed[0]!)).toContain("ended interrupted — Pier restarted while the run was active");
+  });
+
+  it("a reporter that throws does not unwind the settle", async () => {
+    const { cwd, service } = setup(fakeSession("head"), withHead(() => { throw new Error("ledger down"); }));
+    const task = await service.create(bashDraft(cwd, "exit 1"));
+    const done = await service.waitForRun(service.run(task.id, null, "agent", null, { invokedBySessionId: "lead" }).id);
+    expect(done.state).toBe("failed");
   });
 });

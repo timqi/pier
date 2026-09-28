@@ -310,14 +310,14 @@ export async function handleTask(
     if (typeof input.group_id === "string") {
       const { group, members } = host.getGroup(input.group_id);
       for (const member of members) assertOwns(member);
-      const cancelled = host.cancelGroup(group.id);
+      const cancelled = host.cancelGroup(group.id, callerSessionId);
       return summarizeGroup(cancelled, cancelled.memberRunIds.map((id) => host.getRun(id)));
     }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(run);
     // cancel() only aborts; the row flips ~100 ms later. A receipt still saying
     // `running` reads as "cancel failed", so wait for the flip, briefly.
-    host.cancel(run.id);
+    host.cancel(run.id, callerSessionId);
     return summarize(await cancelledOrCurrent(host, run.id, CANCEL_WAIT_MS));
   }
   if (input.operation === "message") {
