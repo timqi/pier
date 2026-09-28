@@ -1,6 +1,6 @@
 // The facade the rest of Pier talks to about tasks, and the clock behind it:
-// the tick, the boot recovery that writes off interrupted runs, and the pause a
-// drain needs. Decisions belong to the files beside it.
+// the tick and the boot pass over the runs the last process left in flight.
+// Decisions belong to the files beside it.
 
 import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
@@ -16,7 +16,7 @@ import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
-import type { TaskStore } from "./store.js";
+import { INTERRUPTED, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
 import type { CallbackMode, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { createdRole, isTerminal } from "./types.js";
@@ -194,11 +194,7 @@ export class TaskService {
 
   start(tickMs = 1000): void {
     if (this.timer) return;
-    // A service started again after pause()/stop() takes work again; without
-    // this, the refusal would outlive the drain that justified it.
-    this.paused = false;
     const now = Date.now();
-    this.resumeAfterRestart(now);
     this.messages.expirePending();
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
@@ -206,16 +202,37 @@ export class TaskService {
     this.runTimer(tickMs);
   }
 
-  /** The runs the last process left `running`: what the boot does with each
-   *  (docs/design/13-stop-and-resume.md §Task runs). */
-  resumeAfterRestart(now = Date.now()): void {
-    // A run that was running when the process died: it is being written off
-    // here, and the previous boot's log is where its work stopped.
-    for (const run of this.store.interruptRunning(now)) {
+  /** The runs the last process left in flight, once, after secrets and
+   *  adapters are up so a resumed model has its credentials
+   *  (docs/design/13-stop-and-resume.md §Task runs). `at`/`downMs` are the
+   *  restart the resumed turn is told about. */
+  resumeAfterRestart(at: number, downMs: number): void {
+    for (const run of this.store.inFlightRuns()) {
+      // A child's parent is a `task` action, which never resumes: a child must
+      // not outlive the run that waits on it.
+      if (run.parentRunId === null && run.state === "queued") {
+        this.execution.start(run);
+        continue;
+      }
+      const { action, trigger } = run.context.definition;
+      const probing = trigger.type === "watch" && run.resumedFromRunId === null && run.matched !== true;
+      if (run.parentRunId === null && action.type === "agent" && !probing) {
+        log.info(`run ${run.id} (${run.context.definition.name}) resumes after a restart`);
+        this.execution.start(run, { at, downMs });
+        continue;
+      }
+      // The previous boot's log is where its work stopped.
       log.warn(`run ${run.id} (${run.context.definition.name}) interrupted by a restart`);
+      run.state = "interrupted";
+      run.error = INTERRUPTED;
+      run.finishedAt = at;
+      if (run.callbackSessionId) run.callbackState = "pending";
+      this.store.saveRun(run);
       this.changed(run);
       this.abnormalEnd(run, false);
     }
+    this.callbacks.recover(at);
+    this.groups.recover(at);
   }
 
   private runTimer(tickMs: number): void {
@@ -227,36 +244,14 @@ export class TaskService {
     this.timer.unref();
   }
 
-  /** For a handover that never started. Not `start()`: its boot recovery would
-   *  write off runs this process is still running. */
-  unpause(tickMs = 1000): void {
-    if (this.timer) return;
-    this.paused = false;
-    this.runTimer(tickMs);
-  }
-
+  /** The clock only: no run is touched, so what is in flight stays in flight
+   *  for the next boot's pass. */
   stop(): void {
-    this.pause();
-    this.execution.stop();
-  }
-
-  /** New root runs are refused, running ones left for the drain to wait on;
-   *  children of a finishing run stay allowed, or the drain fails its own work. */
-  pause(): void {
-    this.paused = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
 
-  private paused = false;
-
-  private refusePaused(parentRunId: string | null = null): void {
-    if (this.paused && parentRunId === null) {
-      throw new Error("Pier is restarting — new task runs are not accepted; retry after the restart");
-    }
-  }
-
-  /** Runs a drain still has to wait for (queued ones start when a slot frees). */
+  /** Runs in flight, queued ones included: the auto-update's idle check. */
   activeRunCount(): number {
     return this.store.countActiveRuns();
   }
@@ -386,7 +381,6 @@ export class TaskService {
     parentRunId: string | null,
     provenance: RunProvenance,
   ): TaskRun {
-    this.refusePaused(parentRunId);
     const task = this.get(taskId);
     // `enabled:false` pauses scheduling only; manual and agent triggers still
     // run a paused task on demand. Archiving is the terminal state.
@@ -431,7 +425,6 @@ export class TaskService {
     callbackSessionId: string | null,
     callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
-    this.refusePaused();
     return this.groups.runAll(definitions, join, callerSessionId, callbackSessionId, callbackMode);
   }
 
@@ -469,7 +462,6 @@ export class TaskService {
     message: string,
     provenance: ResumeProvenance,
   ): TaskRun {
-    this.refusePaused();
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
     if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {
       throw new Error("only persisted Agent runs can be resumed");
@@ -492,8 +484,8 @@ export class TaskService {
     if (this.store.roleOf(sessionId) !== "lead" || this.store.countOwedTo(sessionId) > 0) return "plain";
     const last = this.store.latestRunForTarget(sessionId);
     if (!last || last.callbackSessionId === null) return "plain";
-    // A running turn reports upstream when it ends; a drain leaves the result to the next boot.
-    if (!isTerminal(last.state) || this.paused) return "wait";
+    // A running turn reports upstream when it ends.
+    if (!isTerminal(last.state)) return "wait";
     try {
       // One transaction: a crash between the resume and the marks would resume twice.
       const run = this.store.transact(() => {

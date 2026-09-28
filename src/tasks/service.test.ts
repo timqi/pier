@@ -12,6 +12,7 @@ import type {
   ModelRef,
   ThinkingLevel,
 } from "../core/types.js";
+import { restartInput } from "../core/reply.js";
 import { abnormalNote, runRef, runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
@@ -127,21 +128,6 @@ describe("outbox backoff", () => {
   });
 });
 
-describe("drain pause", () => {
-  it("refuses new root runs and resumes while paused; children stay allowed", async () => {
-    const { cwd, service } = setup();
-    const task = await service.create(bashDraft(cwd, "echo hi"));
-    const before = await service.waitForRun(service.run(task.id).id);
-    expect(before.state).toBe("succeeded");
-
-    service.pause();
-    expect(() => service.run(task.id)).toThrow(/restarting/);
-    expect(() => service.resume(before.id, "go on")).toThrow(/restarting/);
-    // A child of a run that is still finishing is the drain's own work.
-    expect(() => service.run(task.id, null, "task", before.id)).not.toThrow();
-  });
-});
-
 describe("callback recovery across database connections", () => {
   function diskRig() {
     const home = mkdtempSync(join(tmpdir(), "pier-callback-restart-"));
@@ -188,7 +174,7 @@ describe("callback recovery across database connections", () => {
       let closed = false;
       const rig = { store, service, parent, hub, close() {
         if (closed) return;
-        service.pause();
+        service.stop();
         db.close();
         closed = true;
       } };
@@ -198,7 +184,7 @@ describe("callback recovery across database connections", () => {
     return { home, boot, history };
   }
 
-  it("writes off queued and running rows after reopen and tells their parent once", async () => {
+  it("writes off a running bash row after reopen and tells its parent once; a queued row runs on its own id", async () => {
     const disk = diskRig();
     const first = disk.boot();
     const task = await first.service.create(bashDraft(disk.home, "true"));
@@ -215,25 +201,31 @@ describe("callback recovery across database connections", () => {
       if (event.type === "task-status") statuses.push({ runId: event.run.runId, state: event.run.state });
     });
     second.service.start(60_000);
+    // Not before the pass: the boot waits for credentials to resume anything.
+    expect(second.service.getRun("running").state).toBe("running");
+    second.service.resumeAfterRestart(Date.now(), 5_000);
     await vi.waitFor(() => {
-      for (const id of ["queued", "running"]) expect(second.service.getRun(id)).toMatchObject({
+      expect(second.service.getRun("running")).toMatchObject({
         state: "interrupted", callbackState: "delivered", finishedAt: expect.any(Number),
         error: "Pier restarted while the run was active",
       });
+      expect(second.service.getRun("queued")).toMatchObject({ state: "succeeded", callbackState: "delivered" });
     });
     expect(statuses).toEqual(expect.arrayContaining([
-      { runId: "queued", state: "interrupted" }, { runId: "running", state: "interrupted" },
+      { runId: "running", state: "interrupted" }, { runId: "queued", state: "succeeded" },
     ]));
-    expect(second.parent.systemInputs).toHaveLength(1);
-    expect(second.parent.systemInputs[0]!.origin).toMatchObject({ runIds: ["queued", "running"] });
-    expect(second.parent.systemInputs[0]!.text).toContain("state: interrupted");
-    expect(second.parent.systemInputs[0]!.text).toContain("Pier restarted while the run was active");
+    expect(statuses).not.toContainEqual({ runId: "queued", state: "interrupted" });
+    const interrupted = second.parent.systemInputs.find((input) => input.text.includes("state: interrupted"));
+    expect(interrupted?.origin).toMatchObject({ runIds: ["running"] });
+    expect(interrupted?.text).toContain("Pier restarted while the run was active");
+    const delivered = second.parent.systemInputs.length;
     second.close();
     const third = disk.boot();
     third.service.start(60_000);
+    third.service.resumeAfterRestart(Date.now(), 5_000);
     expect(third.store.listPendingCallbacks()).toEqual([]);
     expect(third.parent.systemInputs).toEqual([]);
-    expect(disk.history()).toHaveLength(1);
+    expect(disk.history()).toHaveLength(delivered);
   });
 
   it.each(["accept", "reject"] as const)("recovers pending callbacks after a boot that can only %s input", async (mode) => {
@@ -794,6 +786,9 @@ describe("task service", () => {
     busy.setState("streaming");
     const { service, store, hub } = setup(busy);
     const advance = skewClock();
+    // Before the message: start()'s boot recovery expires pending ones.
+    service.start(20);
+    onTestFinished(() => service.stop());
     const queued: number[] = [];
     hub.subscribe("owner", (event) => { if (event.type === "task-status") queued.push(event.run.queuedMessages); });
     const task = await service.create({
@@ -813,9 +808,6 @@ describe("task service", () => {
     expect(service.parkedMessages(busy.id)).toEqual([{ messageId: message.id, runName: "worker", text: "Also check the tests" }]);
     expect(service.backgroundRuns("owner")[0]?.queuedMessages).toBe(1);
 
-    // The sweep alone, not start(): its boot recovery expires pending messages.
-    service.unpause(20);
-    onTestFinished(() => service.stop());
     busy.setState("idle");
     advance(retryDelay(1) + 100);
     await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
@@ -2004,7 +1996,7 @@ describe("owned system actions", () => {
     expect(service.getRun(done.id)).toMatchObject({ state: "failed", error: "Error: apply failed" });
   });
 
-  it.each(["cancel", "timeout", "stop"] as const)("observes %s even when the cooperative handler resolves after abort", async (operation) => {
+  it.each(["cancel", "timeout"] as const)("observes %s even when the cooperative handler resolves after abort", async (operation) => {
     vi.useFakeTimers();
     onTestFinished(() => { vi.useRealTimers(); });
     const handler = vi.fn((signal: AbortSignal) => new Promise<string>((resolve) => {
@@ -2018,13 +2010,12 @@ describe("owned system actions", () => {
     expect(service.activeRunCount()).toBe(1);
     expect(service.run(task.id)).toMatchObject({ state: "skipped", skipReason: "overlap" });
     if (operation === "cancel") service.cancel(run.id);
-    else if (operation === "stop") service.stop();
     else await vi.advanceTimersByTimeAsync(1000);
     const done = await service.waitForRun(run.id);
     expect(handler.mock.calls[0]![0].aborted).toBe(true);
     expect(done).toMatchObject({
-      state: { cancel: "cancelled", timeout: "failed", stop: "interrupted" }[operation],
-      error: { cancel: "cancelled", timeout: "task timed out", stop: "Pier restarted while the run was active" }[operation],
+      state: { cancel: "cancelled", timeout: "failed" }[operation],
+      error: { cancel: "cancelled", timeout: "task timed out" }[operation],
       result: null,
     });
     expect(service.activeRunCount()).toBe(0);
@@ -2039,6 +2030,7 @@ describe("owned system actions", () => {
     const restarted = new TaskService(store, factory, router, hub, BARE);
     restarted.start(60_000);
     onTestFinished(() => restarted.stop());
+    restarted.resumeAfterRestart(Date.now(), 0);
     expect(restarted.getRun("interrupted-system")).toMatchObject({ state: "interrupted", error: "Pier restarted while the run was active" });
     expect(restarted.get(task.id)).toMatchObject({ enabled: true, creator: "config-sync" });
     expect(restarted.get(task.id).nextRunAt).toBeGreaterThan(now);
@@ -2158,6 +2150,94 @@ describe("pier task stats", () => {
   });
 });
 
+describe("resume after a restart", () => {
+  /** Sessions opened by id, so the run's session and its callback's are two. */
+  async function rig(sessions: Record<string, AgentSession | Error>) {
+    const { cwd, factory, hub, store } = setup();
+    const router = new Router(hub, async ({ conversationId }) => {
+      const session = sessions[conversationId];
+      if (!session) throw new Error(`no session ${conversationId}`);
+      if (session instanceof Error) throw session;
+      return session;
+    });
+    const service = new TaskService(store, factory, router, hub, BARE);
+    const task = await service.create({ name: "worker", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" } });
+    const cut = (prompted: boolean): void => store.saveRun(storedRun("cut", task, 1000, {
+      state: "running", startedAt: 1000, finishedAt: null, result: null,
+      targetSessionId: "child", sessionMode: "fresh", invokedBySessionId: "parent", sourceSessionId: "parent",
+      callbackSessionId: "parent", background: true,
+      context: { definition: task, ...(prompted ? { sessionId: "child", renderedPrompt: "the prompt" } : {}) },
+    }));
+    return { router, store, service, task, cut };
+  }
+
+  it("continues a prompted agent run on its own row with the restart input, and still calls back", async () => {
+    const child = fakeSession("child");
+    const parent = fakeSession("parent");
+    const { store, service, task, cut } = await rig({ child, parent });
+    cut(true);
+    const at = Date.now();
+    service.resumeAfterRestart(at, 7_000);
+    expect(await service.waitForRun("cut")).toMatchObject({
+      state: "succeeded", startedAt: 1000, error: null,
+      result: { type: "agent", text: "agent result", sessionId: "child" },
+      context: { sessionId: "child", renderedPrompt: "the prompt" },
+    });
+    expect(child.systemInputs).toEqual([{
+      text: restartInput(at, 7_000),
+      origin: { kind: "restart", at, downMs: 7_000, taskId: task.id, runId: "cut", sourceSessionId: "parent", source: expect.objectContaining({ taskName: "worker" }) },
+      mode: "prompt",
+    }]);
+    await vi.waitFor(() => expect(store.getRun("cut")?.callbackState).toBe("delivered"));
+    expect(parent.systemInputs).toEqual([expect.objectContaining({ origin: expect.objectContaining({ kind: "task-callback", runId: "cut" }) })]);
+  });
+
+  it("gives a run whose session was never prompted its prompt, not the restart text", async () => {
+    const child = fakeSession("child");
+    const { service, cut } = await rig({ child, parent: fakeSession("parent") });
+    cut(false);
+    service.resumeAfterRestart(Date.now(), 7_000);
+    expect(await service.waitForRun("cut")).toMatchObject({ state: "succeeded" });
+    expect(child.systemInputs).toHaveLength(1);
+    expect(child.systemInputs[0]).toMatchObject({ origin: { kind: "task-delegation", runId: "cut" }, mode: "prompt" });
+    expect(child.systemInputs[0]!.text).toContain("Work");
+  });
+
+  it("fails a resume whose session cannot open, with why, and calls back", async () => {
+    const parent = fakeSession("parent");
+    const { store, service, cut } = await rig({ child: new Error("session file gone"), parent });
+    cut(true);
+    service.resumeAfterRestart(Date.now(), 7_000);
+    const done = await service.waitForRun("cut");
+    expect(done.state).toBe("failed");
+    expect(done.error).toContain("could not resume after a restart: ");
+    expect(done.error).toContain("session file gone");
+    await vi.waitFor(() => expect(store.getRun("cut")?.callbackState).toBe("delivered"));
+  });
+
+  it.each(["aborted", "rejected"] as const)("leaves the row running when its turn is %s while stopping", async (end) => {
+    const child = fakeSession("child", { hold: true });
+    if (end === "rejected") {
+      const held = child.systemInput.bind(child);
+      child.systemInput = async (...args) => {
+        await held(...args);
+        throw new Error("turn cut");
+      };
+    }
+    const { router, store, service, cut } = await rig({ child, parent: fakeSession("parent") });
+    cut(true);
+    service.resumeAfterRestart(Date.now(), 7_000);
+    await vi.waitFor(() => expect(child.state).toBe("streaming"));
+    router.stopping();
+    await child.abort();
+    let settled = false;
+    void service.waitForRun("cut").then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    expect(store.getRun("cut")).toMatchObject({ state: "running", finishedAt: null, callbackState: null });
+  });
+});
+
 describe("abnormal-end notice", () => {
   const withHead = (abnormalEnd: (run: TaskRun) => void) => ({
     ...BARE,
@@ -2224,7 +2304,7 @@ describe("abnormal-end notice", () => {
     store.saveRun(storedRun("cut", task, Date.now(), {
       state: "running", finishedAt: null, result: null, invokedBySessionId: "head", callbackSessionId: "head",
     }));
-    service.start(60_000);
+    service.resumeAfterRestart(Date.now(), 0);
     expect(noticed.map((run) => [run.id, run.state])).toEqual([["cut", "interrupted"]]);
     expect(abnormalNote(noticed[0]!)).toContain("ended interrupted — Pier restarted while the run was active");
   });

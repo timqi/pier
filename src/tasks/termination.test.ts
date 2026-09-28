@@ -83,7 +83,7 @@ describe("a run that has to be killed", () => {
     });
     const run = service.run(task.id);
     onTestFinished(async () => {
-      service.stop();
+      service.cancel(run.id);
       await service.waitForRun(run.id);
       rmSync(cwd, { recursive: true, force: true });
     });
@@ -93,20 +93,6 @@ describe("a run that has to be killed", () => {
       state: operation === "timeout" ? "failed" : "cancelled",
       error: operation === "timeout" ? "task timed out" : "cancelled",
       result: { type: "bash", exitCode: 0, stdout: "cleaned\n" },
-    });
-  });
-
-  it("ends a run stopped by shutdown interrupted, and keeps a user cancel cancelled", async () => {
-    const { cwd, service } = setup();
-    onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
-    const cancelled = service.run((await service.create({ ...bashDraft(cwd, "sleep 5"), name: "cancelled" })).id);
-    const stopped = service.run((await service.create({ ...bashDraft(cwd, "sleep 5"), name: "stopped" })).id);
-    service.cancel(cancelled.id);
-    // A shutdown landing during the cancel's TERM grace does not rewrite it.
-    service.stop();
-    expect(await service.waitForRun(cancelled.id)).toMatchObject({ state: "cancelled", error: "cancelled" });
-    expect(await service.waitForRun(stopped.id)).toMatchObject({
-      state: "interrupted", error: "Pier restarted while the run was active",
     });
   });
 
@@ -121,7 +107,7 @@ describe("a run that has to be killed", () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     onTestFinished(async () => {
       clearTimeout(timer);
-      service.stop();
+      service.cancel(run.id);
       await service.waitForRun(run.id);
       rmSync(cwd, { recursive: true, force: true });
     });
@@ -141,7 +127,7 @@ describe("a run that has to be killed", () => {
     });
     const run = service.run(task.id);
     onTestFinished(async () => {
-      service.stop();
+      service.cancel(run.id);
       await service.waitForRun(run.id);
       rmSync(cwd, { recursive: true, force: true });
     });

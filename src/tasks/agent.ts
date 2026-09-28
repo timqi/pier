@@ -3,7 +3,7 @@
 // model's context and someone's rate limit, so the caps are here).
 
 import type { AgentFactory, AgentRole, AgentSession } from "../core/types.js";
-import { quietLabel, splitReply } from "../core/reply.js";
+import { quietLabel, restartInput, splitReply } from "../core/reply.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
@@ -15,6 +15,9 @@ import { createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from
 // fan-out, not for this machine's CPU.
 const MAX_ACTIVE_AGENTS = 6;
 const log = logger("tasks");
+
+/** The restart a resumed run's turn is told about (service.ts's boot pass). */
+export interface Restart { at: number; downMs: number }
 
 /** Every session gets the chat-surface contract, task runs included, so the
  *  delegation prompt says which of it does not apply. Skipped on resume. */
@@ -52,11 +55,16 @@ export class AgentTaskRunner {
     action: AgentTaskAction,
     signal: AbortSignal,
     start: () => void,
+    restart?: Restart,
   ): Promise<TaskResult> {
     // Reserve reuse order before resolving the session: a slow resume must not
     // let a later run pass it. Fresh runs each have their own queue key.
     return this.withSession(run.targetSessionId ?? run.id, signal, async () => {
-      const reused = run.targetSessionId ? await this.resolveSession(run, action, signal) : undefined;
+      const reused = run.targetSessionId
+        ? await this.resolveSession(run, action, signal).catch((error: unknown) => {
+          throw restart ? new Error(`could not resume after a restart: ${error instanceof Error ? error.message : String(error)}`) : error;
+        })
+        : undefined;
       if (reused) await this.waitUntilIdle(reused, signal);
       await this.acquireSlot(run, signal);
       try {
@@ -77,10 +85,13 @@ export class AgentTaskRunner {
         const input = run.input === undefined || run.input === null
           ? ""
           : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
-        const prompt = run.context.resumePrompt ??
+        // A session already prompted has the prompt in its transcript; one
+        // that was not has heard nothing, so it gets the prompt.
+        const resumed = restart && run.context.sessionId ? restart : undefined;
+        const prompt = resumed ? restartInput(resumed.at, resumed.downMs) : run.context.resumePrompt ??
           `${preamble(run, this.store.supervised(run), this.store.roleOf(session.id))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
-        run.context.renderedPrompt = prompt;
+        if (!resumed) run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
         let text = "";
         // How it ended, too: a provider outage ends with an empty reply, which
@@ -102,20 +113,21 @@ export class AgentTaskRunner {
           // Pre-abort does not fire a newly registered listener; keep the check
           // inside finally's scope so it also restores retention/subscriptions.
           signal.throwIfAborted();
+          const fields = { taskId: run.taskId, runId: run.id, sourceSessionId: run.sourceSessionId, source: runSource(run) };
           const turn = session.systemInput(
             prompt,
-            {
-              kind: "task-delegation",
-              taskId: run.taskId,
-              runId: run.id,
-              sourceSessionId: run.sourceSessionId,
-              source: runSource(run),
-            },
+            resumed ? { kind: "restart", ...resumed, ...fields } : { kind: "task-delegation", ...fields },
             "prompt",
           );
           await Promise.resolve();
           this.messages.deliverPendingControls(run);
-          await this.untilAborted(turn, signal);
+          try {
+            await this.untilAborted(turn, signal);
+          } finally {
+            // The stop aborted this turn: the row stays `running` for the next
+            // boot to resume, and the process exits before this would settle.
+            if (this.router.isStopping()) await new Promise<never>(() => {});
+          }
           if (signal.aborted) throw new Error("cancelled");
           // Before the fallback: on a reused session it would read the previous
           // turn's answer back as this run's result.

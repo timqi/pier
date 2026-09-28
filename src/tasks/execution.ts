@@ -2,15 +2,14 @@
 // settled exactly once. The lifecycle command.ts and agent.ts share.
 
 import { logger } from "../log.js";
-import type { AgentTaskRunner } from "./agent.js";
+import type { AgentTaskRunner, Restart } from "./agent.js";
 import { settleCallback, type TaskCallbacks } from "./callbacks.js";
 import { runBash } from "./command.js";
 import type { TaskDefinitions } from "./definitions.js";
-import { INTERRUPTED, type TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import type { TaskResult, TaskRun } from "./types.js";
 
 const log = logger("tasks");
-const SHUTDOWN = Symbol("shutdown");
 /** A cancel the user did not ask for: the run's end is the home chat's to hear (service.ts). */
 const UNASKED = Symbol("unasked cancel");
 
@@ -33,14 +32,9 @@ export class TaskExecution {
     private readonly host: ExecutionHost,
   ) {}
 
-  start(run: TaskRun): void {
-    void this.execute(run);
-  }
-
-  /** Shutdown: the abort still kills each detached bash group, which boot
-   *  recovery could not, but the run ends as that recovery would record it. */
-  stop(): void {
-    for (const controller of this.controllers.values()) controller.abort(SHUTDOWN);
+  /** `restart`: a `running` row the last process left, continued on the same record. */
+  start(run: TaskRun, restart?: Restart): void {
+    void this.execute(run, restart);
   }
 
   cancel(id: string, unasked = false): void {
@@ -48,14 +42,15 @@ export class TaskExecution {
     this.controllers.get(id)?.abort(unasked ? UNASKED : undefined);
   }
 
-  private async execute(run: TaskRun): Promise<void> {
+  private async execute(run: TaskRun, restart?: Restart): Promise<void> {
     const controller = new AbortController();
     this.controllers.set(run.id, controller);
     let timedOut = false;
     let cause: unknown;
     let timeout: NodeJS.Timeout | undefined;
     // The budget is the run's own: waiting for an agent slot or a busy session
-    // (agent.ts) is bounded by cancellation and restart, never by the timeout.
+    // (agent.ts) is bounded by cancellation and restart, never by the timeout;
+    // a resumed run's counts from the resume, the downtime is not its own.
     const start = (): void => {
       timeout ??= setTimeout(() => {
         if (controller.signal.aborted) return;
@@ -70,7 +65,7 @@ export class TaskExecution {
     };
     try {
       const { definition } = run.context;
-      if (definition.trigger.type === "watch" && !run.resumedFromRunId) {
+      if (definition.trigger.type === "watch" && !run.resumedFromRunId && !restart) {
         start();
         run.probe = await runBash(definition.trigger.script, definition.trigger.cwd, run.input, controller.signal);
         run.matched = run.probe.exitCode === 0;
@@ -78,7 +73,7 @@ export class TaskExecution {
         if (run.probe.exitCode === 1) run.result = { type: "watch", matched: false };
         else if (run.probe.exitCode !== 0) throw new Error(`watch probe exited ${String(run.probe.exitCode)}`);
       }
-      if (run.matched !== false) run.result = await this.executeAction(run, controller.signal, start);
+      if (run.matched !== false) run.result = await this.executeAction(run, controller.signal, start, restart);
       controller.signal.throwIfAborted();
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
@@ -88,11 +83,9 @@ export class TaskExecution {
       }
     } catch (error) {
       // A killed child reports `exited null`; report why we aborted instead.
-      // The first abort's reason wins: a shutdown after a user cancel stays cancelled.
       const aborted = controller.signal.aborted;
-      const interrupted = aborted && !timedOut && controller.signal.reason === SHUTDOWN;
-      run.state = aborted ? (timedOut ? "failed" : interrupted ? "interrupted" : "cancelled") : "failed";
-      run.error = timedOut ? "task timed out" : interrupted ? INTERRUPTED : aborted ? "cancelled" : String(error);
+      run.state = aborted && !timedOut ? "cancelled" : "failed";
+      run.error = timedOut ? "task timed out" : aborted ? "cancelled" : String(error);
       cause = timedOut ? run.error : error;
     } finally {
       clearTimeout(timeout);
@@ -127,7 +120,7 @@ export class TaskExecution {
     }
   }
 
-  private async executeAction(run: TaskRun, signal: AbortSignal, start: () => void): Promise<TaskResult> {
+  private async executeAction(run: TaskRun, signal: AbortSignal, start: () => void, restart?: Restart): Promise<TaskResult> {
     signal.throwIfAborted();
     const action = run.context.definition.action;
     if (action.type === "bash") {
@@ -169,6 +162,6 @@ export class TaskExecution {
         signal.removeEventListener("abort", onAbort);
       }
     }
-    return this.agent.execute(run, action, signal, start);
+    return this.agent.execute(run, action, signal, start, restart);
   }
 }

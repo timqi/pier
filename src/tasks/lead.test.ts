@@ -213,21 +213,6 @@ describe("a feature lead", () => {
     service.stop();
   });
 
-  it("leaves a drain's last result pending for the next start, not as a plain callback", async () => {
-    const { service, sessions, store, bash, leadRan } = rig();
-    await leadRan();
-    const task = await bash("sleep 0.2; echo drained");
-    const worker = service.run(task.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
-    service.pause();
-    await service.waitForRun(worker.id);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(sessions.get("lead")!.systemInputs).toEqual([]);
-    expect(store.getRun(worker.id)!.callbackState).toBe("pending");
-    service.unpause(20);
-    await laterBy(11_000, () => vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1)));
-    service.stop();
-  });
-
   it("counts only results owed to it: a --callback none run and a finished race's losers hold no wave open", async () => {
     const { service, sessions, bash, leadRan } = rig();
     await leadRan();
