@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   truncateSync,
   writeFileSync,
@@ -13,7 +14,7 @@ import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { MainChain } from "../core/chain.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
@@ -2252,6 +2253,20 @@ describe("the app shell", () => {
   });
 
   it("keeps no copy a rebuild would invalidate: the shell, and a bundle it no longer names", async () => {
+    // The server reads the shell from the vite output, which a clean tree has
+    // not built; a stand-in is created only where none exists, and only it removed.
+    const bundle = new URL("./public/", import.meta.url);
+    const index = new URL("index.html", bundle);
+    const madeDir = !existsSync(bundle);
+    const madeIndex = !existsSync(index);
+    if (madeIndex) {
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(index, readFileSync(new URL("./ui/index.html", import.meta.url)));
+    }
+    onTestFinished(() => {
+      if (madeDir) rmSync(bundle, { recursive: true, force: true });
+      else if (madeIndex) rmSync(index, { force: true });
+    });
     const { app } = setup();
     const shell = await app.request("/app/");
     expect(shell.status).toBe(200);
