@@ -91,8 +91,9 @@ describe("channel config store", () => {
     });
   });
 
-  it("discovers a chat once, seeded from the platform defaults", () => {
+  it("discovers a chat once, seeding its gates and following the launch defaults", () => {
     const seeded = store.get("slack");
+    seeded.requireMention = false;
     seeded.cwd = "/srv/work";
     seeded.model = { provider: "anthropic", id: "claude-opus-4-5" };
     seeded.thinking = "high";
@@ -104,22 +105,63 @@ describe("channel config store", () => {
       name: "Ops",
       kind: "group",
       enabled: true,
-      requireMention: true,
+      requireMention: false,
       requireBind: true,
-      cwd: "/srv/work",
-      model: { provider: "anthropic", id: "claude-opus-4-5" },
-      thinking: "high",
+      cwd: "",
+      model: null,
+      thinking: null,
       botId: "",
     }]);
-    // Seeds, not inheritance: moving the platform default leaves the chat put.
+    // Gates are seeds; the launch values are read when a session starts.
     const moved = store.get("slack");
-    moved.requireMention = false;
+    moved.requireMention = true;
     moved.cwd = "/elsewhere";
+    moved.model = { provider: "openai", id: "gpt-5" };
     store.save("slack", moved);
-    expect(store.policy("slack", "C100")).toMatchObject({
-      requireMention: true,
-      cwd: "/srv/work",
+    expect(store.policy("slack", "C100")).toMatchObject({ requireMention: false });
+    expect(store.launch("slack", "C100")).toEqual({
+      cwd: "/elsewhere",
+      model: { provider: "openai", id: "gpt-5" },
+      thinking: "high",
     });
+  });
+
+  it("launches on the chat's own value first, then the platform's, else leaves it to Settings", () => {
+    const config = store.get("slack");
+    config.cwd = "/srv/work";
+    config.thinking = "low";
+    const seed = { enabled: true, requireMention: true, requireBind: true, botId: "" };
+    config.chats = [
+      { id: "own", name: "own", kind: "group", ...seed, cwd: "/srv/own", model: { provider: "a", id: "m" }, thinking: "high" },
+      { id: "follow", name: "follow", kind: "group", ...seed, cwd: "", model: null, thinking: null },
+    ];
+    store.save("slack", config);
+    expect(store.launch("slack", "own")).toEqual({ cwd: "/srv/own", model: { provider: "a", id: "m" }, thinking: "high" });
+    // The platform has no model: null is the Settings default, which Pi applies.
+    expect(store.launch("slack", "follow")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
+    expect(store.launch("slack", "unknown")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
+  });
+
+  it("clears the rows no message restamped under the current bot, the home DM aside", () => {
+    // Before any identity nothing is stale.
+    store.discoverChat("slack", { id: "C0", name: "Early", kind: "group" });
+    store.discoverChat("slack", { id: "D0", name: "Home", kind: "dm" });
+    store.setHome("slack", "D0");
+    expect(store.clearStale("slack")).toEqual([]);
+    // Unstamped rows become stale once an identity is recorded.
+    store.claimBot("slack", "U1");
+    store.discoverChat("slack", { id: "C1", name: "Old", kind: "group" });
+    expect(store.clearStale("slack")).toEqual(["C0"]);
+    expect(store.get("slack").chats.map((c) => c.id)).toEqual(["D0", "C1"]);
+    // A swap keeps the old bot's groups, stale, until traffic restamps them.
+    store.discoverChat("slack", { id: "C2", name: "Busy", kind: "group" });
+    store.claimBot("slack", "U2");
+    store.discoverChat("slack", { id: "C2", name: "Busy", kind: "group" });
+    store.discoverChat("slack", { id: "C3", name: "New", kind: "group" });
+    expect(store.get("slack").chats.map((c) => [c.id, c.botId])).toEqual([["C1", "U1"], ["C2", "U2"], ["C3", "U2"]]);
+    expect(store.clearStale("slack")).toEqual(["C1"]);
+    expect(store.get("slack").chats.map((c) => c.id)).toEqual(["C2", "C3"]);
+    expect(store.clearStale("slack")).toEqual([]);
   });
 
   it("stamps every chat with the bot that saw it, and restamps on the next message", () => {
@@ -171,7 +213,7 @@ describe("channel config store", () => {
     expect(store.policy("slack", "b")).toMatchObject({ requireMention: true, enabled: false, cwd: "/srv/b" });
     // Unknown chats fall back to the globals rather than being denied outright;
     // discovery runs first, and the bind gate is what keeps them harmless.
-    expect(store.policy("slack", "zzz")).toMatchObject({ enabled: true, requireMention: true });
+    expect(store.policy("slack", "zzz")).toMatchObject({ enabled: true, requireMention: true, cwd: "" });
   });
 
   it("redeems a bind code exactly once", () => {

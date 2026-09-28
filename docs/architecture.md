@@ -236,9 +236,10 @@ mirror them. The seams:
   the pending set is durable (`channels/receipts.ts`), cleared at startup and
   swept past 10 minutes unless the conversation is still working.
 - **IM permission policy** (`channels/config.ts`): one persisted JSON document
-  per platform: token, platform-level seed values, bound users, discovered
+  per platform: token, platform-level defaults, bound users, discovered
   chats. `requireMention` and `requireBind` default to true; a new chat
-  *copies* the platform values once — no runtime inheritance. `gate()` is the
+  *copies* the platform gates once, and its empty launch values follow the
+  platform's, then Settings', at every launch. `gate()` is the
   whole inbound decision; denials are silent.
 - **IM inbound is `mode: "steer"`.**
 - **Errors**: a malformed inbound message is logged and dropped at the seam.

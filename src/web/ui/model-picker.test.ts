@@ -55,3 +55,14 @@ it("keeps pinned effort while isolating radio groups across pickers", async () =
   pin.onclick!();
   expect(onPick).toHaveBeenLastCalledWith(models[0], "high");
 });
+
+it("names what an unset launch follows, and resets to it", async () => {
+  const onChange = vi.fn();
+  const inherited = { model: models[0]!, thinking: "high" as const };
+  const field = fake(launchField("Model", { model: null, thinking: null }, models, onChange, inherited));
+  const open = button(field, /Default \(test-model · High\)/)!;
+  open.onclick!();
+  const panel = fake(vi.mocked(openPanel).mock.lastCall![1]);
+  button(panel, /^Default$/)!.onclick!();
+  expect(onChange).toHaveBeenLastCalledWith({ model: null, thinking: null });
+});

@@ -324,8 +324,11 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
 
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
   switch, sticky in the topic's scroller; the chats card names the current bot,
-  and a row whose owner differs wears an amber badge, a one-line reason and
-  Remove (confirms). A DM row carries "This DM is the conversation"
+  and a row whose owner differs wears an amber badge and a one-line stale
+  reason; every row has Remove (confirms), and while any row but the home DM
+  is stale the card ends in `Clear stale (N)` (confirms). A chat's directory
+  and model left empty read `Default (<resolved value>)`; the platform's model
+  resolves to Settings → Models' default. A DM row carries "This DM is the conversation"
   ([11](11-im-conversation.md)); on, the row's directory and model give way to
   one line pointing at the conversation's ⋯ menu. Vault (`#/settings/vault`): the
   rows `name · level · updated` with Remove (confirms), and the add row —

@@ -374,6 +374,18 @@ const MIGRATIONS: readonly string[] = [
     at INTEGER NOT NULL
   );
   `,
+  // 35 — a chat's launch value equal to its platform's becomes "follow" (channels/config.ts `launch`).
+  `
+  -- Per field; channels.json spelled out because json_each has a json column.
+  UPDATE channels SET json = json_set(json, '$.chats', (
+    SELECT json_group_array(json_set(chat.value,
+      '$.cwd', iif(chat.value ->> '$.cwd' = channels.json ->> '$.cwd', '', chat.value ->> '$.cwd'),
+      '$.model', iif(chat.value -> '$.model' = channels.json -> '$.model', json('null'), chat.value -> '$.model'),
+      '$.thinking', iif(chat.value ->> '$.thinking' = channels.json ->> '$.thinking', NULL, chat.value ->> '$.thinking')
+    ) ORDER BY chat.key) FROM json_each(channels.json, '$.chats') AS chat
+  ))
+  WHERE json_type(json, '$.chats') = 'array';
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

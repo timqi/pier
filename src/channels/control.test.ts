@@ -185,6 +185,15 @@ describe("the launch record", () => {
     expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/default", model: SONNET, thinking: "high" });
   });
 
+  it("a chat left on Default launches on the platform's values as they are at launch", async () => {
+    const config = store.get("slack");
+    Object.assign(config, { cwd: "/srv/platform", model: SONNET });
+    store.save("slack", config);
+    await control.newSession(KEY);
+    // No thinking anywhere: passed as absent, so Pi applies the Settings default.
+    expect(factory.created).toEqual([{ cwd: "/srv/platform", model: SONNET }]);
+  });
+
   it("setModel and setThinking amend the record", async () => {
     await control.newSession(KEY, { cwd: "/srv/pier" });
     await control.setModel(KEY, SONNET);

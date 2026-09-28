@@ -80,11 +80,11 @@ interface ControlDeps {
 export function createControl({ router, factory, conversations, store, modelMenu }: ControlDeps): ChannelControl {
   const launchFor = (key: ConversationKey): Partial<AgentLaunchOptions> => {
     if (!isChannelPlatform(key.channelId)) return {};
-    const policy = store.policy(key.channelId, chatOf(key.conversationId));
+    const launch = store.launch(key.channelId, chatOf(key.conversationId));
     return {
-      cwd: policy.cwd || undefined,
-      model: policy.model ?? undefined,
-      thinking: policy.thinking ?? undefined,
+      cwd: launch.cwd || undefined,
+      model: launch.model ?? undefined,
+      thinking: launch.thinking ?? undefined,
     };
   };
 

@@ -4,6 +4,7 @@
 import { Check, LoaderCircle, TriangleAlert } from "lucide";
 import { icon } from "./icons.js";
 import type { ModelRef } from "../../core/types.js";
+import type { AgentDefaults } from "../../agent/types.js";
 import type { ChannelConfig, ChannelPlatform, ChatConfig, ChatKind } from "../../channels/types.js";
 import { getJson, sendJson } from "./api.js";
 import {
@@ -15,7 +16,7 @@ import {
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, btn, button, card, empty, field, rowActionClass, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
-import { launchField } from "./model-picker.js";
+import { launchField, type LaunchChoice } from "./model-picker.js";
 
 const PLATFORMS: [ChannelPlatform, string][] = [["slack", "Slack"], ["lark", "Lark"]];
 
@@ -25,6 +26,10 @@ const KIND_STYLE: Record<ChatKind, string> = {
 };
 
 const CHATS_NOTE = "Discovered from inbound traffic — no platform reliably lists every chat a bot is in.";
+
+/** A row no message has restamped under the current bot. */
+const isStale = (cfg: ChannelConfig, chat: ChatConfig): boolean => chat.botId !== cfg.botId;
+const followsCwd = (cfg: ChannelConfig): string => `Default (${cfg.cwd || "pier process cwd"})`;
 
 // --- view ---------------------------------------------------------------------
 
@@ -37,6 +42,10 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     : "slack";
   let config: ChannelConfig | null = null;
   let models: ModelRef[] = [];
+  /** Settings → Models' default, what a platform left on Default resolves to. */
+  let settingsDefault: LaunchChoice = { model: null, thinking: null };
+  /** Chat cwd inputs on Default, whose placeholder names the platform's as it is typed. */
+  let cwdFollowers: HTMLInputElement[] = [];
 
   // Segmented, not a second pill strip: two rows of the same chrome read as
   // two levels of one navigation. Sticky, so a long page still names the
@@ -136,6 +145,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (!models.length) {
       const list = await getJson<ModelRef[]>("/api/models", "Could not load the model catalog");
       if (list.ok) models = list.value;
+      const defaults = await getJson<AgentDefaults>("/api/config/defaults", "Could not read the Settings default model");
+      if (defaults.ok) settingsDefault = { model: defaults.value.defaultModel, thinking: defaults.value.defaultThinkingLevel };
     }
     const got = await getJson<ChannelConfig>(`/api/channels/${platform}`, "Failed to load");
     if (!got.ok) {
@@ -158,7 +169,10 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     // signs everything with an App ID + App Secret pair. Either way the
     // adapter needs both credentials before it can start.
     const appToken = textInput(cfg.appToken, lark ? "" : "xapp-…", set((v) => (cfg.appToken = v)), true);
-    const cwd = dirInput(cfg.cwd, "(pier process cwd)", set((v) => (cfg.cwd = v)));
+    const cwd = dirInput(cfg.cwd, "(pier process cwd)", set((v) => {
+      cfg.cwd = v;
+      for (const input of cwdFollowers) input.placeholder = followsCwd(cfg);
+    }));
     return card(
       "Connection",
       lark
@@ -175,7 +189,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       lark
         ? field("App Secret", appToken, { hint: "From Credentials & Basic Info, beside the App ID." })
         : field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." }),
-      field("Default working directory", cwd.el, { hint: "Where sessions this channel opens start." }),
+      field("Default working directory", cwd.el, { hint: "Where sessions start in every chat left on Default." }),
       // Threads are the whole design on both platforms, so the explanation is a
       // fact on the card, not a setting.
       h(
@@ -189,15 +203,15 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
 
   function defaults(cfg: ChannelConfig): HTMLElement {
     return card(
-      "Defaults for new chats",
-      "Copied into a group the first time the bot sees it; changing them here never touches a group that already exists. DMs are always bound-users-only.",
+      "Defaults",
+      "The two switches are copied into a group the first time the bot sees it and never touch one that exists. Model and reasoning are read at every launch by each chat left on Default. DMs are always bound-users-only.",
       toggle("Require mention in groups", "Ignore group messages that do not @mention or reply to the bot.", cfg.requireMention, set((v) => (cfg.requireMention = v))),
       toggle("Require bound user", "Only users bound with a code below can drive the agent.", cfg.requireBind, set((v) => (cfg.requireBind = v))),
       launchField("Model & reasoning", cfg, models, set((next) => {
         cfg.model = next.model;
         cfg.thinking = next.thinking;
         render();
-      })),
+      }), settingsDefault),
     );
   }
 
@@ -247,7 +261,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const box = h("div", `group rounded-xl border px-3.5 py-3 transition-colors ${chat.enabled ? "border-neutral-200 bg-white" : "border-neutral-200 bg-neutral-50/60"}`);
     // A DM's id belongs to the bot that opened it, and two DMs with the same
     // person read identically: the row says whose it is, or nobody's.
-    const stale = chat.botId !== cfg.botId;
+    const stale = isStale(cfg, chat);
     const remove = btn("Remove", rowActionClass());
     remove.onclick = async () => {
       const name = chat.name || chat.id;
@@ -297,8 +311,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         "span",
         "w-full text-[12.5px] text-amber-700",
         chat.botId
-          ? `Last seen under bot ${chat.botId}${cfg.botId ? `, not the current ${cfg.botId}` : ""} — remove it if nothing arrives here.`
-          : "No message since Pier started recording bot identities — remove it if nothing arrives here.",
+          ? `Stale: last seen under bot ${chat.botId}${cfg.botId ? `, not the current ${cfg.botId}` : ""} — a message here makes it current again.`
+          : "Stale: no message since Pier started recording bot identities — a message here makes it current again.",
       ));
     }
 
@@ -306,7 +320,9 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       box.append(head, switches, h("p", "mt-3 text-[13px] text-neutral-400", "The conversation's model and reasoning are set from its ⋯ menu."));
       return box;
     }
-    const cwd = dirInput(chat.cwd, "", set((v) => (chat.cwd = v)));
+    // Empty follows the platform's, so clearing the field is the reset.
+    const cwd = dirInput(chat.cwd, followsCwd(cfg), set((v) => (chat.cwd = v)));
+    cwdFollowers.push(cwd.input);
     const grid = h(
       "div",
       "mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2",
@@ -315,7 +331,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         chat.model = next.model;
         chat.thinking = next.thinking;
         render();
-      })),
+      }), { model: cfg.model ?? settingsDefault.model, thinking: cfg.thinking ?? settingsDefault.thinking }),
     );
     box.append(head, switches, grid);
     return box;
@@ -325,16 +341,26 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const list = h("div", "flex flex-col gap-2.5");
     if (cfg.chats.length) list.append(...cfg.chats.map((chat) => chatRow(cfg, chat)));
     else list.append(empty("None yet. Chats appear here after the bot sees a message in them."));
+    const stale = cfg.chats.filter((chat) => isStale(cfg, chat) && !chat.home).length;
+    const clear = button(`Clear stale (${String(stale)})`);
+    clear.onclick = async () => {
+      if (!window.confirm(`Remove ${String(stale)} stale ${stale === 1 ? "chat" : "chats"}? Threads in them lose their sessions; a chat the bot can still reach comes back on its next message.`)) return;
+      const res = await fetch(`/api/channels/${platform}/clear-stale`, { method: "POST" });
+      if (!res.ok) showStatus("failed");
+      await load();
+    };
     return card(
       platform === "slack" ? "Channels" : "Chats",
       cfg.botId ? `${CHATS_NOTE} Current bot: ${cfg.botId}.` : CHATS_NOTE,
       list,
+      ...(stale ? [h("div", "flex", clear)] : []),
     );
   }
 
   function render(): void {
     if (!config) return;
     renderTabs();
+    cwdFollowers = [];
     const column = h("div", "mx-auto flex max-w-3xl flex-col gap-4");
     column.append(connection(config), defaults(config), users(config), chats(config));
     pane.replaceChildren(column);

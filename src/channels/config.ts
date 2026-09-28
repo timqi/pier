@@ -116,7 +116,7 @@ export class ChannelStore {
 
   /** No platform reliably lists every chat a bot is in, so discovery is passive
    *  and happens on every message: the unchanged case must cost no clone. A new
-   *  chat copies the platform defaults and owns them from then on. */
+   *  chat copies the platform's gates and follows its launch defaults. */
   discoverChat(platform: ChannelPlatform, chat: { id: string; name: string; kind: ChatKind }): void {
     // Traffic is the proof of ownership: a message in this chat reached the bot
     // running now, so the row is stamped with it and a row no message renews
@@ -154,6 +154,19 @@ export class ChannelStore {
     return true;
   }
 
+  /** The Console's one-click sweep after a swap: every row no message has
+   *  restamped under the current bot, the home DM aside — the conversation is
+   *  not a row to lose by accident. Returns the chat ids dropped. */
+  clearStale(platform: ChannelPlatform): string[] {
+    const config = this.get(platform);
+    const stale = (chat: ChatConfig): boolean => chat.botId !== config.botId && !chat.home;
+    const dropped = config.chats.filter(stale).map((c) => c.id);
+    if (!dropped.length) return [];
+    config.chats = config.chats.filter((c) => !stale(c));
+    this.save(platform, config);
+    return dropped;
+  }
+
   /** A DM's id belongs to the bot it was opened with, so a new app or a rotated
    *  token leaves DMs no one can reach and nothing on screen tells them apart
    *  from the live ones — they are dropped. Group ids survive the swap. Returns
@@ -179,9 +192,22 @@ export class ChannelStore {
       enabled: true,
       requireMention: config.requireMention,
       requireBind: config.requireBind,
-      cwd: config.cwd,
-      model: config.model,
-      thinking: config.thinking,
+      cwd: "",
+      model: null,
+      thinking: null,
+    };
+  }
+
+  /** What a session launched in this chat starts with: the chat's own value,
+   *  else the platform's; still empty is the Settings default, which is Pi's
+   *  to apply, read at the launch and not here. */
+  launch(platform: ChannelPlatform, chatId: string): Pick<ChatPolicy, "cwd" | "model" | "thinking"> {
+    const config = this.cached(platform);
+    const chat = this.policy(platform, chatId);
+    return {
+      cwd: chat.cwd || config.cwd,
+      model: chat.model ?? config.model,
+      thinking: chat.thinking ?? config.thinking,
     };
   }
 

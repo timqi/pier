@@ -121,6 +121,18 @@ describe("channel config routes", () => {
     expect(forgotten).toEqual(["slack:D1"]);
   });
 
+  it("clears stale chats with their threads, keeping the current bot's", async () => {
+    store.claimBot("slack", "U1");
+    store.discoverChat("slack", { id: "C1", name: "old", kind: "group" });
+    store.claimBot("slack", "U2");
+    store.discoverChat("slack", { id: "C2", name: "new", kind: "group" });
+    expect((await app.request("/api/channels/nope/clear-stale", { method: "POST" })).status).toBe(404);
+    const res = await app.request("/api/channels/slack/clear-stale", { method: "POST" });
+    expect(await res.json()).toEqual({ cleared: ["C1"] });
+    expect(store.get("slack").chats.map((c) => c.id)).toEqual(["C2"]);
+    expect(forgotten).toEqual(["slack:C1"]);
+  });
+
   it("a home DM clears the other platform's and drops its threads only when it changed", async () => {
     store.discoverChat("slack", { id: "D1", name: "qiqi", kind: "dm" });
     store.discoverChat("slack", { id: "C1", name: "ops", kind: "group" });

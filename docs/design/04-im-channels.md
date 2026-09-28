@@ -246,9 +246,14 @@ conversation id is the adapter's business.
 `gate()` in `config.ts` is the whole inbound decision. Four verdicts:
 `allow | chat-disabled | not-addressed | not-bound`.
 
-- **Seeds, not inheritance.** Platform-level `requireMention` / `requireBind` /
-  `cwd` / `model` / `thinking` are copied into a chat the first
-  time the bot sees it; a platform default never touches an existing chat.
+- **Gates are seeds, launch values follow.** Platform-level `requireMention` /
+  `requireBind` are copied into a chat the first time the bot sees it and never
+  touch an existing one. A chat's `cwd` / `model` / `thinking` left empty
+  (`""` / `null`) follows the default, resolved at every session launch
+  (`ChannelStore.launch`): chat value > platform default > Settings default
+  (Pi's, applied when Pier passes none); the Console shows such a field as
+  `Default (<resolved value>)`, and clearing it is the reset. Migration 35
+  turned every chat value then equal to its platform's into a follow.
 - **DMs are bind-only**: `if (isDm) return bound || bindRequest`. The two flags
   are group settings.
 - Group denials are silent; DM denials say how to bind, throttled per sender.
@@ -264,11 +269,14 @@ conversation id is the adapter's business.
 - **Every chat carries its owner.** Discovery stamps the row with the bot
   running now (`ChatConfig.botId`) and restamps it on every message, so traffic
   is the proof the chat is reachable; `""` is a row discovered before the stamp
-  existed. The Console names the current bot, marks a row whose owner differs
-  (`other bot` / `no bot`) and removes it —
-  `DELETE /api/channels/:platform/chats/:id` drops the chat and its
-  conversation rows, and a chat still alive is re-discovered by its next
-  message. That is the only way out for a stale DM the first claim kept.
+  existed. A row whose stamp differs from the platform's `botId` is stale — a
+  swapped bot's groups, and once an identity is recorded every `""` row —
+  and stays until traffic restamps it or the operator removes it. The Console
+  names the current bot and marks a stale row (`other bot` / `no bot`);
+  `DELETE /api/channels/:platform/chats/:id` drops one chat and its
+  conversation rows, `POST /api/channels/:platform/clear-stale` (`{cleared}`)
+  every stale one but the home DM. A chat still alive is re-discovered by its
+  next message.
 - **Bind**: a Console-issued single-use code with a TTL, redeemed by `/bind
   <code>` in a DM; bind requests pass the bind gate. Five wrong tries void the
   code, and the fifth reply says so.

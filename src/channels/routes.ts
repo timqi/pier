@@ -128,6 +128,14 @@ export function registerChannelRoutes(
     return c.json({ ok: true });
   });
 
+  app.post("/api/channels/:platform/clear-stale", (c) => {
+    const platform = c.req.param("platform");
+    if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
+    const cleared = store.clearStale(platform);
+    for (const chatId of cleared) conversations.forgetChat(platform, chatId);
+    return c.json({ cleared });
+  });
+
   app.delete("/api/channels/:platform/users/:id", (c) => {
     const platform = c.req.param("platform");
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);

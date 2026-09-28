@@ -203,31 +203,43 @@ export interface LaunchChoice {
   thinking: ThinkingLevel | null;
 }
 
+const describe = ({ model, thinking }: LaunchChoice): string =>
+  model
+    ? `${model.id}${thinking ? ` · ${thinkingLabel(thinking)}` : ""}`
+    : thinking
+    ? `Pi default · ${thinkingLabel(thinking)}`
+    : "Pi default";
+
 /** "Pi default" means passing neither, so a new session starts on whatever
- *  the project and Pi would have chosen. */
+ *  the project and Pi would have chosen. With `inherited`, an unset field
+ *  follows that choice instead, and the trigger names what it resolves to. */
 export function launchField(
   label: string,
   choice: LaunchChoice,
   models: ModelRef[],
   onChange: (next: LaunchChoice) => void,
+  inherited?: LaunchChoice,
 ): HTMLElement {
-  const summary = choice.model
-    ? `${choice.model.id}${choice.thinking ? ` · ${thinkingLabel(choice.thinking)}` : ""}`
-    : choice.thinking
-    ? `Pi default · ${thinkingLabel(choice.thinking)}`
-    : "Pi default";
+  const follows = !choice.model && !choice.thinking;
+  const summary = !inherited
+    ? describe(choice)
+    : follows
+    ? `Default (${describe(inherited)})`
+    : describe({ model: choice.model ?? inherited.model, thinking: choice.thinking ?? inherited.thinking });
   const open = btn(
     summary,
     `${CONTROL_TRIGGER} flex items-center gap-1.5 ${choice.model ? "text-neutral-700" : "text-neutral-400"}`,
   );
-  open.title = choice.model ? modelKey(choice.model) : "Whatever the project and Pi pick";
+  open.title = choice.model
+    ? modelKey(choice.model)
+    : inherited ? "Follows the default at every launch" : "Whatever the project and Pi pick";
   open.onclick = () => {
     const panel = modelPicker({
       models,
       current: choice.model,
       // Unset reads as Medium in the selector; it is only written once the
       // user actually picks one, so "Pi default" survives choosing a model.
-      thinkingLevel: choice.thinking ?? "medium",
+      thinkingLevel: choice.thinking ?? inherited?.thinking ?? "medium",
       // No session to ask for a model's supported subset — this configures a
       // launch, not a live turn — and Pi clamps a level a model cannot do.
       thinkingLevels: [...THINKING_LEVELS],
@@ -241,7 +253,7 @@ export function launchField(
         onChange(choice);
       },
     });
-    const clear = btn("Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
+    const clear = btn(inherited ? "Default" : "Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
     clear.onclick = () => {
       closeMenu();
       onChange({ model: null, thinking: null });
