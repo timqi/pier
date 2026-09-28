@@ -19,6 +19,8 @@ interface ExecutionHost {
   cancel(id: string): void;
   settled(run: TaskRun, unasked: boolean): void;
   changed(run: TaskRun): void;
+  /** The process is exiting: a run that ends now is the next boot's to resume or write off. */
+  stopping(): boolean;
 }
 
 export class TaskExecution {
@@ -74,6 +76,7 @@ export class TaskExecution {
         else if (run.probe.exitCode !== 0) throw new Error(`watch probe exited ${String(run.probe.exitCode)}`);
       }
       if (run.matched !== false) run.result = await this.executeAction(run, controller.signal, start, restart);
+      await this.holdIfStopping();
       controller.signal.throwIfAborted();
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
@@ -82,6 +85,7 @@ export class TaskExecution {
         this.definitions.setEnabled(definition.id, false, definition.creator);
       }
     } catch (error) {
+      await this.holdIfStopping();
       // A killed child reports `exited null`; report why we aborted instead.
       const aborted = controller.signal.aborted;
       run.state = aborted && !timedOut ? "cancelled" : "failed";
@@ -118,6 +122,13 @@ export class TaskExecution {
       this.host.settled(run, run.state === "cancelled" && controller.signal.reason === UNASKED);
       if (run.callbackState === "pending") void this.callbacks.deliver(run);
     }
+  }
+
+  /** The stop cut this run — its aborted turn, its bash child dying with the
+   *  process group: the row stays `running` for the next boot, and the process
+   *  exits before this would settle. */
+  private async holdIfStopping(): Promise<void> {
+    if (this.host.stopping()) await new Promise<never>(() => {});
   }
 
   private async executeAction(run: TaskRun, signal: AbortSignal, start: () => void, restart?: Restart): Promise<TaskResult> {

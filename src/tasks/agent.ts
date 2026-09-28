@@ -121,13 +121,7 @@ export class AgentTaskRunner {
           );
           await Promise.resolve();
           this.messages.deliverPendingControls(run);
-          try {
-            await this.untilAborted(turn, signal);
-          } finally {
-            // The stop aborted this turn: the row stays `running` for the next
-            // boot to resume, and the process exits before this would settle.
-            if (this.router.isStopping()) await new Promise<never>(() => {});
-          }
+          await this.untilAborted(turn, signal);
           if (signal.aborted) throw new Error("cancelled");
           // Before the fallback: on a reused session it would read the previous
           // turn's answer back as this run's result.

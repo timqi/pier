@@ -114,6 +114,7 @@ export class TaskService {
       cancel: (id) => { this.cancel(id); },
       settled: (run, unasked) => this.settled(run, unasked),
       changed: (run) => this.changed(run),
+      stopping: () => router.isStopping(),
     });
     this.runs = new TaskRunQueue(
       store,
