@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import { ChannelStore } from "./config.js";
 import { registerChannelRoutes } from "./routes.js";
 import type { ChannelRuntime } from "./runtime.js";
-import type { ChannelConfig } from "./types.js";
+import type { ChannelView } from "./types.js";
 
 let store: ChannelStore;
 let app: Hono;
@@ -26,10 +27,10 @@ beforeEach(() => {
   registerChannelRoutes(app, store, runtime, { forgetChat: (channelId, chatId) => void forgotten.push(`${channelId}:${chatId}`) });
 });
 
-const get = async (path = "/api/channels/slack"): Promise<ChannelConfig & { supported: boolean }> => {
+const get = async (path = "/api/channels/slack"): Promise<ChannelView> => {
   const res = await app.request(path);
   expect(res.status).toBe(200);
-  return (await res.json()) as ChannelConfig & { supported: boolean };
+  return (await res.json()) as ChannelView;
 };
 
 const put = async (body: unknown, path = "/api/channels/slack"): Promise<Response> =>
@@ -45,6 +46,13 @@ describe("channel config routes", () => {
     // Every known platform has an adapter now; there is no `supported` flag.
     expect((await app.request("/api/channels/lark")).status).toBe(200);
     expect((await app.request("/api/channels/slack")).status).toBe(200);
+  });
+
+  it("names the workspace an empty directory resolves to, and a save does not store it", async () => {
+    const view = await get();
+    expect(view.workspace).toBe(PIER_WORKSPACE);
+    await put(view);
+    expect(store.get("slack")).not.toHaveProperty("workspace");
   });
 
   it("never returns the token, and keeps it when the mask comes back", async () => {

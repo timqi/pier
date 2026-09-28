@@ -2,6 +2,7 @@
 // evicted one, refuse when there is none — never confirm a no-op. Real Router
 // and store, fake Pi.
 
+import { existsSync, rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
@@ -16,6 +17,7 @@ import type {
 } from "../core/types.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import { openDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import { ChannelStore } from "./config.js";
 import { ConversationStore, resolveConversation } from "./conversations.js";
 import { type ChannelControl, createControl, HAS_SESSION, NO_SESSION } from "./control.js";
@@ -194,6 +196,16 @@ describe("the launch record", () => {
     expect(factory.created).toEqual([{ cwd: "/srv/platform", model: SONNET }]);
   });
 
+  it("with no directory anywhere, a thread starts in the workspace, created if missing", async () => {
+    rmSync(PIER_WORKSPACE, { recursive: true, force: true });
+    await control.newSession(KEY);
+    expect(factory.created).toEqual([{ cwd: PIER_WORKSPACE }]);
+    expect(existsSync(PIER_WORKSPACE)).toBe(true);
+    // A message in a thread without a session takes the same path.
+    await router.ensure({ channelId: "slack", conversationId: "C100/2.0" });
+    expect(factory.created[1]).toEqual({ cwd: PIER_WORKSPACE });
+  });
+
   it("setModel and setThinking amend the record", async () => {
     await control.newSession(KEY, { cwd: "/srv/pier" });
     await control.setModel(KEY, SONNET);
@@ -219,12 +231,13 @@ describe("the launch record", () => {
 });
 
 describe("recentDirs", () => {
-  it("dedupes, newest first, chat cwd first", async () => {
+  it("dedupes, newest first, the launch directory first", async () => {
     const at = (id: string, cwd: string, createdAt: number): SessionSummary => ({ id, cwd, createdAt });
     // Listed in none of the orders asserted below: only the sort can produce them.
     factory.listed = [at("d", "/srv/older", 1), at("b", "/srv/old", 3), at("c", "/srv/new", 2), at("a", "/srv/new", 4)];
-    expect(await control.recentDirs(KEY)).toEqual(["/srv/new", "/srv/old", "/srv/older"]);
-    expect(await control.recentDirs(KEY, 2)).toEqual(["/srv/new", "/srv/old"]);
+    // Nothing configured: the workspace is where Start goes, so it leads.
+    expect(await control.recentDirs(KEY)).toEqual([PIER_WORKSPACE, "/srv/new", "/srv/old", "/srv/older"]);
+    expect(await control.recentDirs(KEY, 2)).toEqual([PIER_WORKSPACE, "/srv/new"]);
   });
 
   it("puts the chat's own directory first when the Console set one", async () => {

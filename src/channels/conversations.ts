@@ -5,6 +5,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentLaunchOptions, ConversationKey } from "../core/types.js";
 import { pierDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 
 export class ConversationStore {
   private readonly db: DatabaseSync;
@@ -110,7 +111,7 @@ export function resolveConversation<S extends { id: string }>(
       }
     }
     const defaults = launchFor(key);
-    const launch = recorded ?? { ...defaults, cwd: defaults.cwd ?? process.cwd() };
+    const launch = recorded ?? { ...defaults, cwd: defaults.cwd ?? PIER_WORKSPACE };
     const session = await factory.create(launch);
     store.set(key, session.id, recorded);
     if (stale) {

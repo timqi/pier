@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import { Secrets } from "../secrets.js";
 import { Vault } from "../vault.js";
 import { ChannelStore, gate } from "./config.js";
@@ -140,6 +141,10 @@ describe("channel config store", () => {
     // The platform has no model: null is the Settings default, which Pi applies.
     expect(store.launch("slack", "follow")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
     expect(store.launch("slack", "unknown")).toEqual({ cwd: "/srv/work", model: null, thinking: "low" });
+    // No directory anywhere: the workspace, never the process cwd nor the main session's home.
+    config.cwd = "";
+    store.save("slack", config);
+    expect(store.launch("slack", "follow").cwd).toBe(PIER_WORKSPACE);
   });
 
   it("clears the rows no message restamped under the current bot, the home DM aside", () => {

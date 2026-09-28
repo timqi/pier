@@ -325,14 +325,21 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 Settings is an overlay route: it opens over its origin, and ✕ or Esc returns to it. It is a full-column view whose header carries `#version` and `#theme-toggle`; `views.ts` owns the route. Files is a modal `<dialog>`, not a route: it stacks over the chat or Settings, and ✕ or Esc leaves what is under it as it was.
 
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
-  switch, sticky in the topic's scroller; the chats card names the current bot,
-  and a row whose owner differs wears an amber badge and a one-line stale
-  reason; every row has Remove (confirms), and while any row but the home DM
-  is stale the card ends in `Clear stale (N)` (confirms). A chat's directory
-  and model left empty read `Default (<resolved value>)`; the platform's model
-  resolves to Settings → Models' default. A DM row carries "This DM is the conversation"
-  ([11](11-im-conversation.md)); on, the row's directory and model give way to
-  one line pointing at the conversation's ⋯ menu. Vault (`#/settings/vault`): the
+  switch, sticky in the topic's scroller; the chats card names the current bot
+  and lists one row per chat under a first row for the platform default. A row
+  folds to one line — chevron, name, kind badge, `<cwd> · <model> <thinking>`
+  resolved (a value followed from the default grey, one set on the row ink),
+  and a chat's enable switch; on a phone the summary takes a second line. The
+  chevron opens it in place to its switches (the default's are the seeds),
+  directory, model & reasoning, `Reset to default` while anything is set, and a
+  chat's id and Remove (confirms); folding it shows the result. A field left
+  empty reads `Default (<resolved value>)`: the platform's directory resolves
+  to `workspace` from the GET, its model to Settings → Models' default, read on
+  every load. A row whose owner differs wears an amber badge and, open, a
+  one-line stale reason; while any row but the home DM is stale the card ends
+  in `Clear stale (N)` (confirms). A DM row carries "This DM is the conversation"
+  ([11](11-im-conversation.md)); on, the row's summary, directory and model
+  give way to one line pointing at the conversation's ⋯ menu. Vault (`#/settings/vault`): the
   rows `name · level · updated` with Remove (confirms), and the add row —
   name, `auto|approve` segmented with its one-line note, a password field;
   no reveal, filing an existing name replaces it. `?name=X` opens with the

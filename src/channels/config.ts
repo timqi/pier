@@ -2,7 +2,9 @@
 // JSON document per platform, so a surface configuring one reads and writes one row.
 
 import { randomInt } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { PIER_WORKSPACE } from "../paths.js";
 import type { Vault } from "../vault.js";
 import {
   type BindCode,
@@ -199,13 +201,16 @@ export class ChannelStore {
   }
 
   /** What a session launched in this chat starts with: the chat's own value,
-   *  else the platform's; still empty is the Settings default, which is Pi's
-   *  to apply, read at the launch and not here. */
+   *  else the platform's, else the workspace directory (created here, so a
+   *  launch never meets it missing). An empty model or thinking is the Settings
+   *  default, which is Pi's to apply, read at the launch and not here. */
   launch(platform: ChannelPlatform, chatId: string): Pick<ChatPolicy, "cwd" | "model" | "thinking"> {
     const config = this.cached(platform);
     const chat = this.policy(platform, chatId);
+    const cwd = chat.cwd || config.cwd;
+    if (!cwd) mkdirSync(PIER_WORKSPACE, { recursive: true });
     return {
-      cwd: chat.cwd || config.cwd,
+      cwd: cwd || PIER_WORKSPACE,
       model: chat.model ?? config.model,
       thinking: chat.thinking ?? config.thinking,
     };

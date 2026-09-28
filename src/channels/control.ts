@@ -5,6 +5,7 @@
 
 import { projectCwds } from "../core/identity.js";
 import type { Router } from "../core/router.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import type {
   AgentFactory,
   AgentLaunchOptions,
@@ -60,8 +61,8 @@ export interface ChannelControl {
    *  The launch is recorded beside the row: Pi writes nothing until the first
    *  reply, so until then the record is the session. */
   newSession(key: ConversationKey, over?: Partial<AgentLaunchOptions>): Promise<string>;
-  /** Distinct cwds of the backend's session listing, newest first; the chat's
-   *  own default first when set. */
+  /** Distinct cwds of the backend's session listing, newest first, after the
+   *  directory the chat launches in. */
   recentDirs(key: ConversationKey, limit?: number): Promise<string[]>;
   /** Any key in the home chat, top-level or in a thread: all of it is the head's. */
   isHome(key: ConversationKey): boolean;
@@ -146,7 +147,7 @@ export function createControl({ router, factory, conversations, store, modelMenu
 
     async newSession(key, over = {}) {
       const defaults = launchFor(key);
-      const launch: AgentLaunchOptions = { ...defaults, ...over, cwd: over.cwd || defaults.cwd || process.cwd() };
+      const launch: AgentLaunchOptions = { ...defaults, ...over, cwd: over.cwd || defaults.cwd || PIER_WORKSPACE };
       const session = await factory.create(launch);
       // A message already inside the router's resolve can write the row while Pi
       // was opening: the first row wins, and the session nobody routes to goes.

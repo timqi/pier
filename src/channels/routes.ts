@@ -2,11 +2,13 @@
 
 import type { Hono } from "hono";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import type { ChannelRuntime } from "./runtime.js";
 import {
   type ChannelConfig,
+  type ChannelView,
   type ChatConfig,
   defaultChannelConfig,
   isChannelPlatform,
@@ -66,11 +68,13 @@ export function registerChannelRoutes(
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
     const config = store.get(platform);
     // Never hand a token back: the client only needs to know one is set.
-    return c.json({
+    const view: ChannelView = {
       ...config,
       token: maskToken(config.token),
       appToken: maskToken(config.appToken),
-    });
+      workspace: PIER_WORKSPACE,
+    };
+    return c.json(view);
   });
 
   app.put("/api/channels/:platform", async (c) => {

@@ -5,7 +5,8 @@ import { Check, LoaderCircle, TriangleAlert } from "lucide";
 import { icon } from "./icons.js";
 import type { ModelRef } from "../../core/types.js";
 import type { AgentDefaults } from "../../agent/types.js";
-import type { ChannelConfig, ChannelPlatform, ChatConfig, ChatKind } from "../../channels/types.js";
+import type { ChannelConfig, ChannelPlatform, ChannelView, ChatConfig, ChatKind } from "../../channels/types.js";
+import { thinkingLabel } from "../../core/reply.js";
 import { getJson, sendJson } from "./api.js";
 import {
   larkThreadHelp,
@@ -14,7 +15,7 @@ import {
   slackTokenHelp,
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
-import { consoleView, h, type ConsoleView } from "./dom.js";
+import { chevron, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, btn, button, card, empty, field, rowActionClass, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField, type LaunchChoice } from "./model-picker.js";
 
@@ -29,7 +30,8 @@ const CHATS_NOTE = "Discovered from inbound traffic — no platform reliably lis
 
 /** A row no message has restamped under the current bot. */
 const isStale = (cfg: ChannelConfig, chat: ChatConfig): boolean => chat.botId !== cfg.botId;
-const followsCwd = (cfg: ChannelConfig): string => `Default (${cfg.cwd || "pier process cwd"})`;
+/** What a session launches with; a chat's row resolves each empty field one level up. */
+type Launch = LaunchChoice & { cwd: string };
 
 // --- view ---------------------------------------------------------------------
 
@@ -41,6 +43,11 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     ? (stored as ChannelPlatform)
     : "slack";
   let config: ChannelConfig | null = null;
+  /** The directory an empty platform cwd resolves to, as the server names it. */
+  let workspace = "";
+  /** Rows open for editing, "" the platform default's; kept across re-renders. */
+  const expanded = new Set<string>();
+  const followsCwd = (cfg: ChannelConfig): string => `Default (${cfg.cwd || workspace})`;
   let models: ModelRef[] = [];
   /** Settings → Models' default, what a platform left on Default resolves to. */
   let settingsDefault: LaunchChoice = { model: null, thinking: null };
@@ -141,22 +148,26 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   }
 
   async function load(): Promise<void> {
-    // Catalogue once per view visit; it does not change while the page is open.
-    if (!models.length) {
-      const list = await getJson<ModelRef[]>("/api/models", "Could not load the model catalog");
-      if (list.ok) models = list.value;
-      const defaults = await getJson<AgentDefaults>("/api/config/defaults", "Could not read the Settings default model");
-      if (defaults.ok) settingsDefault = { model: defaults.value.defaultModel, thinking: defaults.value.defaultThinkingLevel };
-    }
-    const got = await getJson<ChannelConfig>(`/api/channels/${platform}`, "Failed to load");
+    // The catalogue once per view visit; the Settings default on every load,
+    // since Settings → Models may have moved it while this page was open.
+    const [list, defaults, got] = await Promise.all([
+      models.length ? null : getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
+      getJson<AgentDefaults>("/api/config/defaults", "Could not read the Settings default model"),
+      getJson<ChannelView>(`/api/channels/${platform}`, "Failed to load"),
+    ]);
+    if (list?.ok) models = list.value;
+    if (defaults.ok) settingsDefault = { model: defaults.value.defaultModel, thinking: defaults.value.defaultThinkingLevel };
+    else showStatus("failed");
     if (!got.ok) {
       config = null;
       renderTabs();
       pane.replaceChildren(empty(got.error));
       return;
     }
-    config = got.value;
-    showStatus("clean");
+    const { workspace: dir, ...rest } = got.value;
+    workspace = dir;
+    config = rest;
+    if (defaults.ok) showStatus("clean");
     render();
   }
 
@@ -169,10 +180,6 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     // signs everything with an App ID + App Secret pair. Either way the
     // adapter needs both credentials before it can start.
     const appToken = textInput(cfg.appToken, lark ? "" : "xapp-…", set((v) => (cfg.appToken = v)), true);
-    const cwd = dirInput(cfg.cwd, "(pier process cwd)", set((v) => {
-      cfg.cwd = v;
-      for (const input of cwdFollowers) input.placeholder = followsCwd(cfg);
-    }));
     return card(
       "Connection",
       lark
@@ -189,7 +196,6 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       lark
         ? field("App Secret", appToken, { hint: "From Credentials & Basic Info, beside the App ID." })
         : field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." }),
-      field("Default working directory", cwd.el, { hint: "Where sessions start in every chat left on Default." }),
       // Threads are the whole design on both platforms, so the explanation is a
       // fact on the card, not a setting.
       h(
@@ -198,20 +204,6 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         h("span", "", lark ? "Every topic is its own session." : "Every thread is its own session."),
         lark ? larkThreadHelp() : slackThreadHelp(),
       ),
-    );
-  }
-
-  function defaults(cfg: ChannelConfig): HTMLElement {
-    return card(
-      "Defaults",
-      "The two switches are copied into a group the first time the bot sees it and never touch one that exists. Model and reasoning are read at every launch by each chat left on Default. DMs are always bound-users-only.",
-      toggle("Require mention in groups", "Ignore group messages that do not @mention or reply to the bot.", cfg.requireMention, set((v) => (cfg.requireMention = v))),
-      toggle("Require bound user", "Only users bound with a code below can drive the agent.", cfg.requireBind, set((v) => (cfg.requireBind = v))),
-      launchField("Model & reasoning", cfg, models, set((next) => {
-        cfg.model = next.model;
-        cfg.thinking = next.thinking;
-        render();
-      }), settingsDefault),
     );
   }
 
@@ -257,37 +249,153 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     );
   }
 
-  function chatRow(cfg: ChannelConfig, chat: ChatConfig): HTMLElement {
-    const box = h("div", `group rounded-xl border px-3.5 py-3 transition-colors ${chat.enabled ? "border-neutral-200 bg-white" : "border-neutral-200 bg-neutral-50/60"}`);
+  /** One collapsible row, the platform default and every chat alike: the
+   *  head names it and what it launches with, the body edits it. */
+  function launchRow(
+    key: string,
+    parts: { name: string; dim: boolean; badges: HTMLElement[]; summary: () => HTMLElement; trailing?: HTMLElement },
+    body: () => HTMLElement[],
+  ): { el: HTMLElement; repaint: () => void } {
+    const isOpen = expanded.has(key);
+    const box = h("div", `group rounded-xl border border-neutral-200 transition-colors ${parts.dim ? "bg-neutral-50/60" : "bg-white"}`);
+    // On a phone the summary takes its own line, aligned under the name past the chevron.
+    const summary = h("span", "flex min-w-0 basis-full pl-5 sm:basis-0 sm:flex-1 sm:pl-0");
+    const repaint = (): void => summary.replaceChildren(parts.summary());
+    repaint();
+    const toggleOpen = h(
+      "button",
+      `flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 rounded-xl px-3.5 py-2.5 text-left pointer-coarse:min-h-11 ${isOpen ? "chev-open" : ""}`,
+      chevron(),
+      h("span", `min-w-0 truncate text-[13px] font-medium ${parts.dim ? "text-neutral-400" : "text-neutral-800"}`, parts.name),
+      ...parts.badges,
+      summary,
+    );
+    toggleOpen.setAttribute("type", "button");
+    toggleOpen.setAttribute("aria-expanded", String(isOpen));
+    toggleOpen.onclick = () => {
+      if (isOpen) expanded.delete(key);
+      else expanded.add(key);
+      render();
+    };
+    const head = h("div", "flex items-center gap-2 pr-3.5", toggleOpen);
+    if (parts.trailing) head.append(parts.trailing);
+    box.append(head);
+    if (isOpen) box.append(h("div", "flex flex-col gap-3 border-t border-neutral-100 px-3.5 pb-3.5 pt-3", ...body()));
+    return { el: box, repaint };
+  }
+
+  /** `<cwd> · <model> <thinking>`: a value followed from the default is grey,
+   *  one set here is ink. */
+  function launchSummary(own: Launch, parent: Launch): HTMLElement {
+    const part = (text: string, follows: boolean): HTMLElement =>
+      h("span", follows ? "text-neutral-400" : "text-neutral-700", text);
+    const cwd = own.cwd || parent.cwd;
+    const model = own.model ?? parent.model;
+    const thinking = own.thinking ?? parent.thinking;
+    const line = h(
+      "span",
+      "min-w-0 truncate text-[12px]",
+      part(cwd, !own.cwd),
+      h("span", "text-neutral-300", " · "),
+      part(model?.id ?? "Pi default", !own.model),
+    );
+    if (thinking) line.append(" ", part(thinkingLabel(thinking), !own.thinking));
+    line.title = "Grey follows the default; dark is set here.";
+    return line;
+  }
+
+  /** The row's footer: its reset, when anything is set, and its one destructive action. */
+  function rowActions(onReset: (() => void) | null, remove?: HTMLElement, id?: string): HTMLElement {
+    const bar = h("div", "flex flex-wrap items-center gap-3");
+    if (id) bar.append(h("span", "font-mono text-[11px] text-neutral-400", id));
+    bar.append(h("span", "flex-1"));
+    if (onReset) {
+      const reset = btn("Reset to default", "cursor-pointer text-[12px] text-neutral-500 hover:text-neutral-800 pointer-coarse:min-h-11");
+      reset.onclick = onReset;
+      bar.append(reset);
+    }
+    if (remove) bar.append(remove);
+    return bar;
+  }
+
+  function platformRow(cfg: ChannelConfig, parent: Launch): HTMLElement {
+    const row = launchRow("", {
+      name: "Default",
+      dim: false,
+      badges: [badge("every chat", "bg-indigo-50 text-indigo-700 ring-indigo-200")],
+      summary: () => launchSummary(cfg, parent),
+    }, () => {
+      const cwd = dirInput(cfg.cwd, `Default (${parent.cwd})`, set((v) => {
+        cfg.cwd = v;
+        for (const input of cwdFollowers) input.placeholder = followsCwd(cfg);
+        row.repaint();
+      }));
+      return [
+        h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. Directory, model and reasoning are read at every launch by each chat left on Default. DMs are always bound-users-only."),
+        h(
+          "div",
+          "flex flex-wrap items-center gap-x-6 gap-y-2",
+          toggle("Require mention in groups", "", cfg.requireMention, set((v) => (cfg.requireMention = v))),
+          toggle("Require bound user", "", cfg.requireBind, set((v) => (cfg.requireBind = v))),
+        ),
+        h(
+          "div",
+          "grid grid-cols-1 gap-3 sm:grid-cols-2",
+          field("Working directory", cwd.el),
+          launchField("Model & reasoning", cfg, models, set((next) => {
+            cfg.model = next.model;
+            cfg.thinking = next.thinking;
+            render();
+          }), settingsDefault),
+        ),
+        rowActions(cfg.cwd || cfg.model || cfg.thinking ? () => {
+          cfg.cwd = "";
+          cfg.model = null;
+          cfg.thinking = null;
+          queueSave();
+          render();
+        } : null),
+      ];
+    });
+    return row.el;
+  }
+
+  function chatRow(cfg: ChannelConfig, chat: ChatConfig, parent: Launch): HTMLElement {
     // A DM's id belongs to the bot that opened it, and two DMs with the same
     // person read identically: the row says whose it is, or nobody's.
     const stale = isStale(cfg, chat);
-    const remove = btn("Remove", rowActionClass());
-    remove.onclick = async () => {
-      const name = chat.name || chat.id;
-      if (!window.confirm(`Remove ${name}? Threads in it lose their sessions; a chat the bot can still reach comes back on its next message.`)) return;
-      await fetch(`/api/channels/${platform}/chats/${encodeURIComponent(chat.id)}`, { method: "DELETE" });
-      await load();
-    };
-    // The phone gives the name its own line: badges, id and the two actions
-    // together leave it nothing to truncate into.
-    const head = h(
-      "div",
-      "flex flex-wrap items-center gap-2",
-      h("span", `min-w-0 flex-1 basis-full truncate text-[13px] font-medium sm:basis-0 ${chat.enabled ? "text-neutral-800" : "text-neutral-400"}`, chat.name || chat.id),
-      badge(chat.kind, KIND_STYLE[chat.kind]),
-      ...(stale ? [badge(chat.botId ? "other bot" : "no bot", "bg-amber-50 text-amber-700 ring-amber-200")] : []),
-      h("span", "flex-none font-mono text-[11px] text-neutral-400", chat.id),
-      remove,
-    );
     const enabled = toggle("", "", chat.enabled, set((v) => {
       chat.enabled = v;
       render();
     }));
-    enabled.classList.add("flex-none", "items-center");
-    head.append(enabled);
+    enabled.classList.add("flex-none", "pointer-coarse:min-h-11");
+    enabled.title = chat.enabled ? "Enabled" : "Disabled";
+    const row = launchRow(`chat:${chat.id}`, {
+      name: chat.name || chat.id,
+      dim: !chat.enabled,
+      badges: [
+        badge(chat.kind, KIND_STYLE[chat.kind]),
+        ...(stale ? [badge(chat.botId ? "other bot" : "no bot", "bg-amber-50 text-amber-700 ring-amber-200")] : []),
+      ],
+      summary: () => chat.home
+        ? h("span", "min-w-0 truncate text-[12px] text-neutral-400", "The conversation · model and reasoning from its ⋯ menu")
+        : launchSummary(chat, parent),
+      trailing: enabled,
+    }, () => chatBody(cfg, chat, stale, parent, () => row.repaint()));
+    return row.el;
+  }
 
-    const switches = h("div", "mt-3 flex flex-wrap items-center gap-x-6 gap-y-2");
+  function chatBody(cfg: ChannelConfig, chat: ChatConfig, stale: boolean, parent: Launch, repaint: () => void): HTMLElement[] {
+    const remove = btn("Remove", "cursor-pointer text-[12px] text-neutral-500 hover:text-red-600 pointer-coarse:min-h-11");
+    remove.onclick = async () => {
+      const name = chat.name || chat.id;
+      if (!window.confirm(`Remove ${name}? Threads in it lose their sessions; a chat the bot can still reach comes back on its next message.`)) return;
+      await fetch(`/api/channels/${platform}/chats/${encodeURIComponent(chat.id)}`, { method: "DELETE" });
+      expanded.delete(`chat:${chat.id}`);
+      await load();
+    };
+    const out: HTMLElement[] = [];
+    const switches = h("div", "flex flex-wrap items-center gap-x-6 gap-y-2");
     if (chat.kind === "dm") {
       // A DM has two parties: mention is meaningless and bind is not optional.
       // Two switches that cannot move are worse than a sentence saying so.
@@ -306,40 +414,58 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         toggle("Require bind", "", chat.requireBind, set((v) => (chat.requireBind = v))),
       );
     }
+    out.push(switches);
     if (stale) {
-      switches.append(h(
+      out.push(h(
         "span",
-        "w-full text-[12.5px] text-amber-700",
+        "text-[12.5px] text-amber-700",
         chat.botId
           ? `Stale: last seen under bot ${chat.botId}${cfg.botId ? `, not the current ${cfg.botId}` : ""} — a message here makes it current again.`
           : "Stale: no message since Pier started recording bot identities — a message here makes it current again.",
       ));
     }
-
     if (chat.home) {
-      box.append(head, switches, h("p", "mt-3 text-[13px] text-neutral-400", "The conversation's model and reasoning are set from its ⋯ menu."));
-      return box;
+      out.push(rowActions(null, remove, chat.id));
+      return out;
     }
     // Empty follows the platform's, so clearing the field is the reset.
-    const cwd = dirInput(chat.cwd, followsCwd(cfg), set((v) => (chat.cwd = v)));
+    const cwd = dirInput(chat.cwd, followsCwd(cfg), set((v) => {
+      chat.cwd = v;
+      repaint();
+    }));
     cwdFollowers.push(cwd.input);
-    const grid = h(
-      "div",
-      "mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2",
-      field("Working directory", cwd.el),
-      launchField("Model & reasoning", chat, models, set((next) => {
-        chat.model = next.model;
-        chat.thinking = next.thinking;
+    out.push(
+      h(
+        "div",
+        "grid grid-cols-1 gap-3 sm:grid-cols-2",
+        field("Working directory", cwd.el),
+        launchField("Model & reasoning", chat, models, set((next) => {
+          chat.model = next.model;
+          chat.thinking = next.thinking;
+          render();
+        }), { model: parent.model, thinking: parent.thinking }),
+      ),
+      rowActions(chat.cwd || chat.model || chat.thinking ? () => {
+        chat.cwd = "";
+        chat.model = null;
+        chat.thinking = null;
+        queueSave();
         render();
-      }), { model: cfg.model ?? settingsDefault.model, thinking: cfg.thinking ?? settingsDefault.thinking }),
+      } : null, remove, chat.id),
     );
-    box.append(head, switches, grid);
-    return box;
+    return out;
   }
 
   function chats(cfg: ChannelConfig): HTMLElement {
-    const list = h("div", "flex flex-col gap-2.5");
-    if (cfg.chats.length) list.append(...cfg.chats.map((chat) => chatRow(cfg, chat)));
+    // What a field left on Default resolves to, one level up.
+    const settings: Launch = { cwd: workspace, ...settingsDefault };
+    const platformLaunch: Launch = {
+      cwd: cfg.cwd || settings.cwd,
+      model: cfg.model ?? settings.model,
+      thinking: cfg.thinking ?? settings.thinking,
+    };
+    const list = h("div", "flex flex-col gap-2", platformRow(cfg, settings));
+    if (cfg.chats.length) list.append(...cfg.chats.map((chat) => chatRow(cfg, chat, platformLaunch)));
     else list.append(empty("None yet. Chats appear here after the bot sees a message in them."));
     const stale = cfg.chats.filter((chat) => isStale(cfg, chat) && !chat.home).length;
     const clear = button(`Clear stale (${String(stale)})`);
@@ -362,7 +488,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     renderTabs();
     cwdFollowers = [];
     const column = h("div", "mx-auto flex max-w-3xl flex-col gap-4");
-    column.append(connection(config), defaults(config), users(config), chats(config));
+    column.append(connection(config), users(config), chats(config));
     pane.replaceChildren(column);
   }
 

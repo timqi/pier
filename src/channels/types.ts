@@ -79,7 +79,7 @@ export interface ChannelConfig {
   appToken: string;
   requireMention: boolean;
   requireBind: boolean;
-  /** "" → the pier process cwd. */
+  /** "" → `$PIER_HOME/workspace`. */
   cwd: string;
   /** null → the Settings default. */
   model: ModelRef | null;
@@ -90,6 +90,12 @@ export interface ChannelConfig {
   /** The bot identity `chats` were discovered under — Slack's bot user id,
    *  Lark's bot open_id. "" until the first start that learns it. */
   botId: string;
+}
+
+/** `GET /api/channels/:platform`: the config, tokens masked, plus the
+ *  directory an empty platform `cwd` resolves to, so the Console names it. */
+export interface ChannelView extends ChannelConfig {
+  workspace: string;
 }
 
 /** What the runtime asks about one chat. */

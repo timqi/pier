@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ConversationKey } from "../core/types.js";
 import { openDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import { ConversationStore, resolveConversation } from "./conversations.js";
 
 const CHAT: ConversationKey = { channelId: "lark", conversationId: "oc_1/om_7" };
@@ -122,11 +123,11 @@ describe("IM session resolution", () => {
     expect(factory.created).toEqual([{ cwd: "/srv/ops", model, thinking: "high" }]);
   });
 
-  it("falls back to the process cwd when the chat configures none", async () => {
+  it("falls back to the workspace, never the process cwd, when nothing names one", async () => {
     const store = new ConversationStore(db);
     const factory = fakeFactory();
     await resolveConversation(store, factory, () => ({}))(CHAT);
-    expect(factory.created).toEqual([{ cwd: process.cwd() }]);
+    expect(factory.created).toEqual([{ cwd: PIER_WORKSPACE }]);
   });
 
   it("resumes across a restart instead of re-routing the chat", async () => {

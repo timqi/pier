@@ -14,6 +14,10 @@ export const pierPath = (...parts: string[]): string => join(PIER_HOME, ...parts
 
 /** In its own directory so db.ts can lock it down to 0700 without touching
  *  the boards PIER_HOME also holds. */
+/** Where an IM session starts when neither its chat nor its platform names a
+ *  directory; `home` is the main session's memory, never a chat's scratch. */
+export const PIER_WORKSPACE = pierPath("workspace");
+
 export const PIER_DB = pierPath("db", "pier.db");
 
 /** At the root of PIER_HOME: the claim is the whole instance directory, not the

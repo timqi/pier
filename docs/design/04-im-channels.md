@@ -165,8 +165,8 @@ with the buttons.
   chat's.
 - "Directory…" (`cfg:cwd`) lists up to six recent directories — the directory
   picker (`core/identity.ts` `projectCwds`: distinct cwds
-  newest first, worktrees folded into their project), the chat's own default
-  first (`ChannelControl.recentDirs`) — as numbered full paths with one button each (`cfg:cwd:<i>`, label the last two segments),
+  newest first, worktrees folded into their project), the directory the chat
+  launches in first (`ChannelControl.recentDirs`) — as numbered full paths with one button each (`cfg:cwd:<i>`, label the last two segments),
   then "Type a path…" (`cfg:cwdtype`) and Back. A tap sets the draft's
   directory; a thread that has a session is refused with the sentence Start
   uses. The typed answer rejects a relative path. Slack: a modal. Prefer a
@@ -251,7 +251,9 @@ conversation id is the adapter's business.
   touch an existing one. A chat's `cwd` / `model` / `thinking` left empty
   (`""` / `null`) follows the default, resolved at every session launch
   (`ChannelStore.launch`): chat value > platform default > Settings default
-  (Pi's, applied when Pier passes none); the Console shows such a field as
+  (Pi's, applied when Pier passes none); a directory set nowhere is
+  `$PIER_HOME/workspace`, created at launch — never the process cwd, and never
+  `home`, which is the main session's (the home DM keeps it). The Console shows such a field as
   `Default (<resolved value>)`, and clearing it is the reset. Migration 35
   turned every chat value then equal to its platform's into a follow.
 - **DMs are bind-only**: `if (isDm) return bound || bindRequest`. The two flags
@@ -332,7 +334,7 @@ channel row holds no credential.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/channels/:platform` | config with the token **masked** |
+| `GET /api/channels/:platform` | config with the token **masked**, plus `workspace` (`ChannelView`) |
 | `PUT /api/channels/:platform` | full document; masked token = unchanged token; a `home` DM row clears every other ([11](11-im-conversation.md)) |
 | `POST /api/channels/:platform/bind-code` | issue a single-use code |
 | `DELETE /api/channels/:platform/users/:id` | unbind |
