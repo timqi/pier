@@ -93,25 +93,26 @@ export function runHead(o: RunHead): HTMLElement {
   lead.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
   // subagent's name is its whole prompt line. A collapsed line is one line.
-  if (o.taskName) lead.append(h("span", o.expands ? "min-w-0 truncate text-[12.5px] font-medium text-neutral-800" : "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
+  if (o.taskName) lead.append(h("span", o.expands ? "run-name min-w-0 truncate text-[12.5px] font-medium text-neutral-800" : "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
   if (o.failure) {
-    const failure = h("span", `min-w-0 truncate text-[12.5px] ${o.labelCls}`, o.failure);
+    const failure = h("span", `run-failure min-w-0 truncate text-[12.5px] ${o.labelCls}`, o.failure);
     failure.title = o.failure;
     lead.append(failure);
   }
-  if (lead !== head) head.append(lead);
-  const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
-  if (o.note) meta.append(h("span", "run-note flex-none", o.note));
   const { tier, model, thinking } = o.model ?? {};
   if (tier || model || thinking) {
-    // Separators are the stylesheet's, so a part it hides takes its dot along.
-    const badge = h("span", "run-model flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200");
+    // Text inside the toggle, not a control: below md it is the line under
+    // the name (style.css), so the name keeps the first line's room.
+    const badge = h("span", "run-model font-mono text-neutral-500");
     if (tier) badge.append(h("span", "run-tier", tier));
     if (model) badge.append(h("span", "run-model-id", model.id));
     if (thinking) badge.append(h("span", "run-thinking", thinking));
     badge.title = [tier && `Tier ${tier}`, model && `${model.provider} / ${model.id}`, thinking && `Reasoning ${thinking}`].filter(Boolean).join(" · ");
-    meta.append(badge);
+    lead.append(h("span", "run-model-line flex-none", badge));
   }
+  if (lead !== head) head.append(lead);
+  const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
+  if (o.note) meta.append(h("span", "run-note flex-none", o.note));
   // The run id is text; the indigo session chip is the link. What each is
   // stays in its tooltip.
   if (o.runId) {

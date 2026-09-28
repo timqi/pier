@@ -337,13 +337,13 @@ describe("originLabel", () => {
     expect(originLabel({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe("↩ task callback");
   });
 
-  it("names a run's tier, model and level beside a callback or a delegation, each part only when recorded", () => {
+  it("names a run's tier, model and level apart from the label, each part only when recorded", () => {
     const model = { provider: "openai", id: "gpt-5" };
-    const origin = (source: object) => ({ kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: null, source: { taskName: "x", ...source } });
-    expect(originLabel(origin({ tier: "balanced", model, thinking: "medium" }))).toBe("↩ task callback · balanced · gpt-5 · medium");
-    expect(originLabel(origin({ model, thinking: "high" }))).toBe("↩ task callback · gpt-5 · high");
-    expect(originLabel(origin({}))).toBe("↩ task callback");
-    expect(originLabel({ kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null, source: { taskName: "x", model } })).toBe("▶ delegated task · gpt-5");
+    const origin = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: null, source: { taskName: "x", tier: "balanced" as const, model } };
+    expect(originLabel(origin)).toBe("↩ task callback");
+    expect(runModelLabel({ tier: "balanced", model, thinking: "medium" })).toBe("balanced · gpt-5 · medium");
+    expect(runModelLabel({ model, thinking: "high" })).toBe("gpt-5 · high");
+    expect(runModelLabel({})).toBe("");
     expect(runModelLabel({ thinking: "low" })).toBe("low");
   });
 });

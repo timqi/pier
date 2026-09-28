@@ -74,10 +74,11 @@ it("folds a callback to state, name, model and run id, and opens and closes on i
     kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run",
     source: { taskName: "fix it", tier: "balanced", model, thinking: "high" }, state: "succeeded",
   });
-  expect(line()).toBe("callback · succeededfix it");
+  // The model is quiet text after the name, inside the toggle (below md, its own line under the label).
+  expect(line()).toBe("callback · succeededfix itbalancedclaude-xhigh");
   expect(card().querySelector(".run-id")!.textContent).toBe("run45678");
   // One badge, `tier · id · level`: the stylesheet draws the dots between its parts.
-  const badge = card().querySelector(".run-model")!;
+  const badge = toggle().querySelector(".run-model")!;
   expect([...badge.children].map((part) => [part.className, part.textContent]))
     .toEqual([["run-tier", "balanced"], ["run-model-id", "claude-x"], ["run-thinking", "high"]]);
   expect(badge.getAttribute("title")).toBe("Tier balanced · anthropic / claude-x · Reasoning high");
@@ -135,13 +136,13 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   const runCard = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
   const runToggle = () => runCard().querySelector("button[aria-expanded]")!;
   expect(runCard().classList.contains("system-row")).toBe(true);
-  expect(runToggle().textContent).toBe("run · runningIM conversation");
+  expect(runToggle().textContent).toBe("run · runningIM conversationclaude-xmedium");
   expect(runCard().querySelector(".run-model")!.textContent).toBe("claude-xmedium");
   expect(runCard().children.at(-1)!.hidden).toBe(true);
   runToggle().onclick?.();
   expect(runCard().hasAttribute("data-expanded")).toBe(true);
   renderBackgroundRun({ ...run, state: "succeeded", finishedAt: 142_001 });
-  expect(runToggle().textContent).toBe("run · succeededIM conversation");
+  expect(runToggle().textContent).toBe("run · succeededIM conversationclaude-xmedium");
   expect(runToggle().getAttribute("aria-expanded")).toBe("true");
   expect(runCard().children.at(-1)!.hidden).toBe(false);
   expect(runCard().children.at(-1)!.textContent).toBe("Build per the design doc.");

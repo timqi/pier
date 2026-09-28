@@ -2,7 +2,7 @@
 // only legitimate variations are platform spellings (the bind command, a label's
 // emphasis), so they are the parameters.
 
-import { originLabel } from "../core/reply.js";
+import { originLabel, runModelLabel } from "../core/reply.js";
 import type { NoteOrigin } from "../core/types.js";
 import type { BindOutcome } from "./types.js";
 
@@ -56,5 +56,8 @@ export function noteBody(note: { text: string; origin: NoteOrigin }, emphasis: s
   const whole = note.origin.kind === "error" || note.origin.kind === "chat-command";
   const text = whole ? note.text : digest(note.text);
   const body = text.split("\n").map((line) => `> ${line}`).join("\n");
-  return `${emphasis}${originLabel(note.origin)}${emphasis}\n${body}`;
+  // The run's model is a detail of the label, so it sits outside the emphasis.
+  const source = note.origin.kind === "task-callback" || note.origin.kind === "task-delegation" ? note.origin.source : undefined;
+  const model = source ? runModelLabel(source) : "";
+  return `${emphasis}${originLabel(note.origin)}${emphasis}${model ? ` ${model}` : ""}\n${body}`;
 }

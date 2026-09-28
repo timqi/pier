@@ -129,7 +129,7 @@ thread half only for the home chat; any other is refused.
 | --- | --- |
 | the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, 👀 on the echo, the row retired (Lark: button value `root: ""` names the home) |
-| a task callback / delegation | the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
+| a task callback / delegation | the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | a failure | `⚠ failed` note |

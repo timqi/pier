@@ -611,14 +611,30 @@ main {
 .system-row:not([data-expanded])::before { display: none; }
 .system-row:not([data-expanded]) .run-id:has(~ .run-session) { display: none; }
 .run-model > * + *::before { content: "\00b7"; margin-inline: 0.3em; opacity: 0.6; }
-/* Its ids never wrap under the name. Below md a run's mode · duration and a
-   tiered model's id give way, and the ids take a second line rather than the
-   name's room. */
+/* The line stays one line: its ids never wrap under the name, and below md a
+   run's mode · duration gives way to them. */
 .system-row:not([data-expanded]) .run-meta { flex-wrap: nowrap; }
+/* Below md: label and ids on the first line, the ids pinned right so the
+   second has the width; there, the name, then the model in quiet text. A
+   grid, since a wrapping row breaks before it shrinks. The model keeps its
+   width, a tiered one without its id (the tooltip has it), and the name
+   takes what is left. */
 @media (width < 48rem) {
-  .system-row:not([data-expanded]) > .run-head { flex-wrap: wrap; }
-  .system-row:not([data-expanded]) .run-meta { flex-shrink: 0; }
-  .system-row:not([data-expanded]) :is(.run-note, .run-model:has(.run-tier) .run-model-id) { display: none; }
+  .system-row:not([data-expanded]) .run-note { display: none; }
+  .run-head:has(.run-model-line) { position: relative; }
+  .run-head:has(.run-model-line) > .run-meta { position: absolute; inset-block-start: 0; inset-inline-end: 0; block-size: 1.4375rem; }
+  .run-head > button:has(> .run-model-line) {
+    display: grid; grid-template-columns: auto auto minmax(0, max-content) auto;
+    justify-content: start; align-content: center; align-items: center; column-gap: 0.5rem; row-gap: 0.125rem;
+  }
+  .run-head > button:has(> .run-model-line) > :is(:nth-child(1), :nth-child(2)) { grid-row: 1; }
+  .run-head > button:has(> .run-model-line) > .run-label { grid-row: 1; grid-column: 3 / -1; justify-self: start; white-space: nowrap; }
+  .run-head > button:has(> .run-model-line) > .run-name { grid-row: 2; grid-column: 3; }
+  .run-head > button > .run-model-line { grid-row: 2; grid-column: 4; }
+  .run-head > button:has(> .run-model-line) > .run-failure { grid-row: 3; grid-column: 3 / -1; }
+  .run-model-line > .run-model { display: flex; white-space: nowrap; }
+  .run-model-line .run-model-id { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
+  .run-model-line .run-model:has(.run-tier) .run-model-id { display: none; }
 }
 /* --- end system rows --- */
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }

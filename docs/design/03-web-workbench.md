@@ -211,9 +211,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `↺ session seed · <reason> · <previous id8>`, `↩ callback · <state> · <run
   name> · <badge> · <id8>`, `↗ delegation · <run name> · <badge> · <id8>`
   (the glyphs are `ui/icons.ts` icons), where `<badge>` is the run's recorded
-  `tier · model id · reasoning`, each part only when recorded — below md a
-  tiered badge drops the id, and the ids wrap to a second line rather than
-  squeeze the name — and `<id8>`
+  `tier · model id · reasoning` in quiet mono text, each part only when
+  recorded — below md the label and ids take the first line and the name and
+  badge the second, a tiered badge without its id (its tooltip has it) — and
+  `<id8>`
   is the other session's id, a link to it, else the run id as text. A
   click or ↵ expands in place; expansion is per row, in memory. A
   `/status` answer, `Stayed silent — <reason>` and chat command answers stay

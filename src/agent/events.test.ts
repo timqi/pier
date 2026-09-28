@@ -507,7 +507,7 @@ describe("toChatTurns", () => {
 
   it("carries a system input's provenance back out of the transcript, checked", () => {
     const origin = { kind: "task-callback" as const, taskId: "t1", runId: "r1", sourceSessionId: "s2" };
-    const source = { taskName: "review-web", model: { provider: "anthropic", id: "claude-opus-5" }, thinking: "high" };
+    const source = { taskName: "review-web", tier: "hardest", model: { provider: "anthropic", id: "claude-opus-5" }, thinking: "high" };
     expect(toChatTurns([
       { role: "custom", customType: "pier.system-input", content: "done", details: { ...origin, source }, timestamp: 1 },
     ])).toEqual([{ role: "system", text: "done", origin: { ...origin, source }, at: 1 }]);
@@ -518,7 +518,7 @@ describe("toChatTurns", () => {
       role: "custom",
       customType: "pier.system-input",
       content: "done",
-      details: { ...origin, source: { taskName: "review-web", model: "claude-opus-5", thinking: "very" } },
+      details: { ...origin, source: { taskName: "review-web", tier: "hardish", model: "claude-opus-5", thinking: "very" } },
     }])).toEqual([{ role: "system", text: "done", origin: { ...origin, source: { taskName: "review-web" } } }]);
     // Nameless, or not an object at all: no card caption rather than an empty one.
     for (const bad of [{ model: { provider: "a", id: "b" } }, "review-web", null]) {

@@ -2,7 +2,7 @@
 // imports, so it is unit-testable without Pi and Pi types never leak past the
 // seam. The golden table in events.test.ts is the mapping's spec.
 
-import { isChatCommand, isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
+import { isChatCommand, isModelTier, isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
   ActivityStep,
   ChatTurn,
@@ -116,7 +116,7 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
 
 function inputSource(value: unknown): SystemInputSource | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const { taskName, model, thinking } = value as Record<string, unknown>;
+  const { taskName, model, thinking, tier } = value as Record<string, unknown>;
   if (typeof taskName !== "string") return undefined;
   const ref = (model ?? {}) as Record<string, unknown>;
   return {
@@ -125,6 +125,7 @@ function inputSource(value: unknown): SystemInputSource | undefined {
       ? { model: { provider: ref.provider, id: ref.id } }
       : {}),
     ...(isThinkingLevel(thinking) ? { thinking } : {}),
+    ...(isModelTier(tier) ? { tier } : {}),
   };
 }
 
