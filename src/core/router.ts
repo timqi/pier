@@ -137,7 +137,7 @@ export class Router {
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
    *  turn is not one. Registered by the task service (tasks/service.ts) and the
-   *  chain (core/chain.ts); a listener must not throw. */
+   *  chain (core/chain.ts); a listener's throw is reported, never fatal to the others. */
   onTurnEnd(listener: (sessionId: string, text: string) => void): void {
     this.turnEnded.push(listener);
   }
@@ -334,7 +334,16 @@ export class Router {
             `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
           );
           if (this.stopped) return;
-          if (!payload.error) for (const ended of this.turnEnded) ended(session.id, payload.text);
+          if (!payload.error) {
+            // One listener's throw may not cost the rest, or the chat its reply.
+            for (const ended of this.turnEnded) {
+              try {
+                ended(session.id, payload.text);
+              } catch (err) {
+                this.report(session.id, key, `turn-end listener failed: ${String(err)}`);
+              }
+            }
+          }
           const channel = this.channels.get(key.channelId);
           if (channel) {
             const reply = splitReply(payload.text, payload.meta);

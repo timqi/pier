@@ -196,6 +196,23 @@ describe("channel fan-out", () => {
     ]);
   });
 
+  it("reports a throwing turn-end listener and still runs the rest and sends", async () => {
+    const errors: string[] = [];
+    hub.subscribe("s1", (e) => {
+      if (e.type === "error") errors.push(e.message);
+    });
+    const heard: string[] = [];
+    router.onTurnEnd(() => { throw new Error("boom"); });
+    router.onTurnEnd((id, text) => heard.push(`${id}:${text}`));
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "done" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heard).toEqual(["s1:done"]);
+    expect(errors).toEqual(["turn-end listener failed: Error: boom"]);
+    expect(im.notes).toEqual([["C100/1717.7", { text: "turn-end listener failed: Error: boom", origin: { kind: "error" } }]]);
+    expect(im.sent).toHaveLength(1);
+  });
+
   it("re-lists every surface when the session names itself", async () => {
     await router.ensure(KEY);
     const workspace: string[] = [];
