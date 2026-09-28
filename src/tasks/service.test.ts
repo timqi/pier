@@ -2200,6 +2200,16 @@ describe("resume after a restart", () => {
     expect(parent.systemInputs).toEqual([expect.objectContaining({ origin: expect.objectContaining({ kind: "task-callback", runId: "cut" }) })]);
   });
 
+  it("opens the restart input with the session's users' language", async () => {
+    const child = fakeSession("child", { history: [{ role: "user", text: "[Ada<U1> 12:00 lang=zh]\n跑一下" }] });
+    const { cut } = await rig({ child, parent: fakeSession("parent") });
+    const service = cut(true);
+    const at = Date.now();
+    service.resumeAfterRestart({ at, downMs: 7_000, queuedFor: () => [] });
+    expect(await service.waitForRun("cut")).toMatchObject({ state: "succeeded", context: { renderedPrompt: "the prompt" } });
+    expect(child.systemInputs.map((input) => input.text)).toEqual([`[lang=zh]\n${restartInput(at, 7_000, [])}`]);
+  });
+
   it("gives a run whose session was never prompted its prompt, not the restart text", async () => {
     const child = fakeSession("child");
     const { cut } = await rig({ child, parent: fakeSession("parent") });

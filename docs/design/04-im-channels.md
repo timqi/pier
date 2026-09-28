@@ -209,10 +209,11 @@ a different speaker, a 10-minute gap, a new day or a different conversation;
 against Latin words, code and paths excluded) or, on too little to tell, the
 session's last one, so the most recent stamp is always the sender's language
 and the reply follows it instead of an English-heavy context.
-A system input the outbox delivers (a callback, a run message) opens with
-`[lang=<code>]`, the users' last language read off the transcript — or the
-seed's stamp on a head nobody has spoken to yet — so an English result does
-not move the reply; the chat and the web strip it.
+Every system input that starts a turn in a session (a callback, a run
+message, a lead's milestone, a restart's resume) opens with `[lang=<code>]`,
+the users' last language read off the transcript — or the seed's stamp on
+a head nobody has spoken to yet — so an English result does not move the
+reply; the chat and the web strip it.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`),
 said once per session and again only after `forgetSender`;
 alias keys (`web:`, `task:`) name no place. A channel that declares

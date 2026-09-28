@@ -3,6 +3,7 @@
 // resumes each turn in its session or tells its chat why it could not (§5).
 
 import type { DatabaseSync } from "node:sqlite";
+import { userLanguage, withLanguage } from "./core/identity.js";
 import { restartInput, restartQueued } from "./core/reply.js";
 import type { AgentSession, ConversationKey, SystemInputOrigin, WorkspaceEvent } from "./core/types.js";
 import { logger } from "./log.js";
@@ -201,8 +202,10 @@ export async function resumeTurns(deps: ResumeDeps, now = Date.now()): Promise<v
     const downMs = now - row.at;
     const origin: SystemInputOrigin = { kind: "restart", at: now, downMs };
     let session: AgentSession;
+    let lang: string | undefined;
     try {
       session = await deps.router.ensure({ channelId: "web", conversationId: row.sessionId });
+      lang = userLanguage(await session.history());
     } catch (err) {
       deps.turns.clear(row.sessionId);
       unresumed(deps.ledger, row, err instanceof Error ? err.message : String(err));
@@ -212,10 +215,10 @@ export async function resumeTurns(deps: ResumeDeps, now = Date.now()): Promise<v
       deps.router.reportTo(row.sessionId, `could not resume the turn the restart cut: ${String(err)}`);
     // A user got there first: the running turn has the transcript, and its end retires the row.
     if (session.state === "streaming") {
-      if (row.queued.length) session.systemInput(restartQueued(row.queued), origin, "followUp").catch(failed);
+      if (row.queued.length) session.systemInput(withLanguage(lang, restartQueued(row.queued)), origin, "followUp").catch(failed);
       continue;
     }
-    session.systemInput(restartInput(now, downMs, row.queued), origin, "prompt").catch(failed);
+    session.systemInput(withLanguage(lang, restartInput(now, downMs, row.queued)), origin, "prompt").catch(failed);
   }
 }
 
