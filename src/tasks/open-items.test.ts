@@ -1,7 +1,7 @@
 // The open items: main's markers, written only from the head's turn ends, and
-// joined to the run ledger into the one text `/status` and the seed show.
+// joined to the stored runs into the one text `/status` and the seed show.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { agoLabel } from "../core/reply.js";
@@ -11,54 +11,68 @@ import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type
 import { openItems, openItemsStatus, openStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { OpenRun, TaskRun } from "./types.js";
+import type { OpenRun, TaskDefinition, TaskRun } from "./types.js";
 
 const MIN = 60_000;
+const DAY = 86_400_000;
 const run = (runId: string, over: Partial<LedgerRun> = {}): LedgerRun =>
   ({ runId, name: runId, state: "running", targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null, ...over });
 
-function rig({
-  runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
-  leads = [] as string[],
-  workers = [] as { invokedBySessionId: string; state: TaskRunState }[],
-  runSessions = {} as Record<string, string>,
-} = {}) {
+const definition = (name: string, lead: boolean): TaskDefinition => ({
+  id: "t1", kind: "subagent", name, description: "", enabled: true, archived: false, revision: 1,
+  trigger: { type: "manual" }, callback: { type: "origin" }, timeoutSeconds: 900, nextRunAt: null,
+  action: { type: "agent", session: { mode: "reuse", sessionId: "h1" }, prompt: "go", ...(lead ? { launch: { role: "lead" as const } } : {}) },
+  creator: "session:h1", createdBySessionId: "h1", createdAt: 0, updatedAt: 0,
+});
+
+/** A saved run launched by the head `h1` unless `over` says otherwise; `lead` makes it its session's creating lead run. */
+const saved = (id: string, over: Partial<TaskRun> & { name?: string; lead?: boolean } = {}): TaskRun => {
+  const { name = id, lead = false, ...rest } = over;
+  return {
+    id, taskId: "t1", taskRevision: 1, parentRunId: null, groupId: null, resumedFromRunId: null,
+    triggerSource: "agent", invokedBySessionId: "h1", sourceSessionId: "h1", targetSessionId: null,
+    sessionMode: lead ? "fresh" : "reuse", callbackSessionId: "h1", background: true,
+    callbackState: null, callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+    state: "running", input: null, context: { definition: definition(name, lead) }, probe: null, matched: null,
+    result: null, error: null, skipReason: null, queuedAt: 0, startedAt: null, finishedAt: null, ...rest,
+  };
+};
+
+function rig() {
   const db = openDb(":memory:");
+  onTestFinished(() => db.close());
   const store = new TaskStore(db);
   const now = Date.now();
-  const ledger: { ids: string[]; since: number }[] = [];
   const workerReads: string[][] = [];
   const reads: OpenItemReads = {
-    ledger: (ids, since) => {
-      ledger.push({ ids, since });
-      return typeof runs === "function" ? runs(ids, since) : runs;
-    },
-    store: {
-      openItems: () => store.openItems(),
-      getRun: (id) => (runSessions[id] ? { targetSessionId: runSessions[id] } as TaskRun : undefined),
-      leads: () => new Map(leads.map((id) => [id, { phase: "build" as const, runId: `c-${id}`, runLive: false, designOpen: false }])),
-      ledgerRuns: (ids) => {
-        workerReads.push(ids);
-        return workers.filter((w) => ids.includes(w.invokedBySessionId)) as TaskRun[];
-      },
+    getRun: (id) => store.getRun(id),
+    latestRunForTarget: (id) => store.latestRunForTarget(id),
+    inFlightRuns: () => store.inFlightRuns(),
+    leads: () => store.leads(),
+    openItems: () => store.openItems(),
+    workerCounts: (ids) => {
+      workerReads.push(ids);
+      return store.workerCounts(ids);
     },
   };
+  const save = (...runs: TaskRun[]) => runs.forEach((r) => store.saveRun(r));
+  /** `n` workers of `lead` in `state`, finished `ago` before now when not in flight. */
+  const workers = (lead: string, state: TaskRunState, n = 1, ago = MIN) => save(...Array.from({ length: n }, (_, i) =>
+    saved(`w-${lead}-${state}-${i}`, { invokedBySessionId: lead, state, finishedAt: state === "queued" || state === "running" ? null : now - ago })));
   const router = new Router(new EventHub(), () => Promise.reject(new Error("no session")));
   const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
     db.prepare("INSERT INTO open_items VALUES (?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
-  const list = (members = ["h1"], designs: LedgerRun[] = []) => openItems(reads, router, members, designs, now);
-  return { now, ledger, workerReads, router, item, list };
+  const list = (members = ["h1"], designs: LedgerRun[] = []) => openItems(reads, router, members, designs);
+  return { now, save, workers, workerReads, router, item, list };
 }
 
 describe("the open items", () => {
-  it("joins each run token through the ledger: found, gone, and a lead with its workers", () => {
-    let now = 0;
-    const r = rig({
-      leads: ["lead1"],
-      workers: [{ invokedBySessionId: "lead1", state: "running" }, { invokedBySessionId: "lead1", state: "succeeded" }],
-      runs: () => [run("1prwmabcdef", { name: "lead open items", targetSessionId: "lead1", queuedAt: now - 23 * MIN })],
-    });
-    now = r.now;
+  it("joins each run token through the store: found, gone, and a lead with its workers", () => {
+    const r = rig();
+    const now = r.now;
+    r.save(saved("1prwmabcdef", { name: "lead open items", lead: true, targetSessionId: "lead1", queuedAt: now - 23 * MIN }));
+    r.workers("lead1", "running");
+    r.workers("lead1", "succeeded");
     r.item("open items 视图", "lead designing", ["1prwmabcdef"], 2);
     r.item("model menu 重选", "merged, restart pending", ["gone1"], 1);
     const open = r.list();
@@ -66,7 +80,6 @@ describe("the open items", () => {
     expect(open.items[0]!.runs).toEqual([{ runId: "gone1", name: "gone1", state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null }]);
     expect(open.items[1]!.runs[0]!.workers).toEqual({ queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 });
     expect(open.unlisted).toEqual([]);
-    expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }]);
     expect(r.workerReads).toEqual([["lead1"]]);
     expect(openItemsStatus(open, now).text).toBe([
       "In progress",
@@ -75,22 +88,21 @@ describe("the open items", () => {
     ].join("\n"));
   });
 
-  it("lists only the in-flight chain runs no item's session holds, never a finished one", () => {
-    let now = 0;
-    const r = rig({ runs: () => [
-      run("r-live", { name: "Build it", queuedAt: now - 5 * MIN }),
-      run("r-queued", { name: "Next", state: "queued", queuedAt: now - MIN }),
-      run("r-failed", { name: "Review src/auth", state: "failed", finishedAt: now - 2 * 60 * MIN }),
-      run("r-cancelled", { name: "Dropped", state: "cancelled", finishedAt: now - MIN }),
-      run("r-ok", { name: "Done thing", state: "succeeded", finishedAt: now - MIN }),
-      run("r-named", { name: "Named", state: "failed", finishedAt: now }),
-    ] });
-    now = r.now;
+  it("lists only the in-flight chain runs no item's session holds, never a finished one or another session's", () => {
+    const r = rig();
+    const now = r.now;
+    r.save(
+      saved("r-live", { name: "Build it", queuedAt: now - 5 * MIN }),
+      saved("r-queued", { name: "Next", state: "queued", queuedAt: now - MIN }),
+      saved("r-failed", { name: "Review src/auth", state: "failed", finishedAt: now - 2 * 60 * MIN }),
+      saved("r-cancelled", { name: "Dropped", state: "cancelled", finishedAt: now - MIN }),
+      saved("r-ok", { name: "Done thing", state: "succeeded", finishedAt: now - MIN }),
+      saved("r-named", { name: "Named", state: "failed", finishedAt: now }),
+      saved("r-elsewhere", { invokedBySessionId: "other" }),
+    );
     r.item("the problem", "", ["r-named"], 1);
     const open = r.list();
     expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-queued"]);
-    // The window is the ledger's: `pier task runs`' last 24h.
-    expect(r.ledger[0]!.since).toBe(now - 86_400_000);
     expect(openItemsStatus(open, now).text).toBe([
       "In progress",
       "- the problem (stopped) · run r-named failed just now",
@@ -100,13 +112,13 @@ describe("the open items", () => {
   });
 
   // A lead woken again (a callback turn, a follow-up run) is the same item: the item follows its session.
-  it("follows an item's session to its newest run, even when the named run has left the ledger", () => {
-    let now = 0;
-    const r = rig({
-      runSessions: { vdmj112x: "lead1" },
-      runs: () => [run("k4k3jz55", { name: "lead again", targetSessionId: "lead1", queuedAt: now - 2 * MIN })],
-    });
-    now = r.now;
+  it("follows an item's session to its newest run, however old the named run is", () => {
+    const r = rig();
+    const now = r.now;
+    r.save(
+      saved("vdmj112x", { targetSessionId: "lead1", state: "succeeded", queuedAt: now - 3 * DAY, finishedAt: now - 3 * DAY }),
+      saved("k4k3jz55", { name: "lead again", targetSessionId: "lead1", queuedAt: now - 2 * MIN }),
+    );
     r.item("status 归并", "lead building", ["vdmj112x"], 1);
     const open = r.list();
     expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
@@ -114,11 +126,38 @@ describe("the open items", () => {
     expect(openItemsStatus(open, now).text).toBe("In progress\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
   });
 
+  it("follows a session of 250 runs to its newest, past any listing's cap", () => {
+    const r = rig();
+    const now = r.now;
+    r.save(...Array.from({ length: 250 }, (_, i) => saved(`s${i}`, {
+      targetSessionId: "lead1", state: i === 249 ? "succeeded" : "failed", queuedAt: now - (250 - i) * MIN, finishedAt: now - (250 - i) * MIN + 1,
+    })));
+    r.item("long lead", "merged", ["s0"], 1);
+    const [item] = r.list().items;
+    expect(item!.runs.map((x) => [x.runId, x.state])).toEqual([["s249", "succeeded"]]);
+    expect(item!.status).toBe("pending release");
+  });
+
+  // A listing's window is not the work's end: age alone never stops an item.
+  it("reads an item whose run succeeded 3 days ago as pending release", () => {
+    const r = rig();
+    r.save(saved("old", { targetSessionId: "s-old", state: "succeeded", queuedAt: r.now - 3 * DAY, finishedAt: r.now - 3 * DAY }));
+    r.item("shipped", "merged, restart pending", ["old"], 1);
+    expect(r.list().items.map((i) => [i.runs[0]!.runId, i.status])).toEqual([["old", "pending release"]]);
+  });
+
+  it("reads a token that names no run as not in the ledger, and so stopped", () => {
+    const r = rig();
+    r.item("typo", "", ["nosuchrun"], 1);
+    const [item] = r.list().items;
+    expect(item!.runs.map((x) => x.state)).toEqual([NOT_IN_LEDGER]);
+    expect(item!.status).toBe("stopped");
+  });
+
   // The status is the runs' and sessions', whatever the stage text says.
   it("reads an item running while its session streams, though its run has finished, and pending release once idle", () => {
-    let now = 0;
-    const r = rig({ runs: () => [run("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN })] });
-    now = r.now;
+    const r = rig();
+    r.save(saved("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: r.now - MIN }));
     r.item("fix", "lead building (running)", ["r1"], 1);
     expect(r.list().items[0]!.status).toBe("pending release");
     const lead = fakeSession("lead1");
@@ -144,14 +183,14 @@ describe("the open items", () => {
 
   // One session is one row: an item or an in-flight run holding a design's session stands for it.
   it("never lists a session twice: a design under its item, or under its live run", () => {
-    let now = 0;
+    const r = rig();
+    const now = r.now;
     const d1 = run("d1", { name: "多入口统一对话", state: "succeeded", targetSessionId: "s-d1", finishedAt: 0 });
     const d2 = run("d2", { name: "Rail", state: "succeeded", targetSessionId: "s-d2", finishedAt: 0 });
-    const r = rig({ runs: () => [
-      run("t1", { name: "子任务 thread", state: "succeeded", targetSessionId: "s-d1", finishedAt: now - 11 * MIN }),
-      run("t2", { name: "Rail again", targetSessionId: "s-d2", queuedAt: now - MIN }),
-    ] });
-    now = r.now;
+    r.save(
+      saved("t1", { name: "子任务 thread", state: "succeeded", targetSessionId: "s-d1", finishedAt: now - 11 * MIN }),
+      saved("t2", { name: "Rail again", targetSessionId: "s-d2", queuedAt: now - MIN }),
+    );
     r.item("子任务 thread", "design lead narrowing scope (running)", ["t1"], 1);
     const open = r.list(["h1"], [d1, d2]);
     expect(open.items.map((i) => [i.problem, i.status])).toEqual([["子任务 thread", "waiting on you"]]);
@@ -191,17 +230,14 @@ describe("the open items", () => {
   });
 
   it("groups a lead whose turn ended under In progress while its workers run, and a succeeded item under Waiting on you only by its stage", () => {
-    let now = 0;
-    const r = rig({
-      leads: ["lead1"],
-      workers: [1, 2, 3].map(() => ({ invokedBySessionId: "lead1", state: "running" as const })),
-      runs: () => [
-        run("mmk4jv4p", { targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN }),
-        run("4dyem4jc", { targetSessionId: "w1", state: "succeeded", finishedAt: now - MIN }),
-        run("donedone", { targetSessionId: "w2", state: "succeeded", finishedAt: now - MIN }),
-      ],
-    });
-    now = r.now;
+    const r = rig();
+    const now = r.now;
+    r.save(
+      saved("mmk4jv4p", { lead: true, targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN }),
+      saved("4dyem4jc", { targetSessionId: "w1", state: "succeeded", finishedAt: now - MIN }),
+      saved("donedone", { targetSessionId: "w2", state: "succeeded", finishedAt: now - MIN }),
+    );
+    r.workers("lead1", "running", 3);
     r.item("回调后回复语言跑偏", "waiting on you: 手动重启还是派 worker", ["4dyem4jc"], 1);
     r.item("重启卡住原因", "lead 实现中", ["mmk4jv4p"], 2);
     r.item("已合并", "merged, restart pending", ["donedone"], 3);
@@ -220,22 +256,18 @@ describe("the open items", () => {
     ]);
   });
 
-  it("reads every shown lead's workers in one ledger read, three leads or one", () => {
-    const r = rig({
-      leads: ["l1", "l2", "l3"],
-      workers: [
-        { invokedBySessionId: "l1", state: "running" },
-        { invokedBySessionId: "l2", state: "failed" },
-        { invokedBySessionId: "l3", state: "queued" },
-        { invokedBySessionId: "l3", state: "succeeded" },
-      ],
-      runs: () => [
-        run("a", { targetSessionId: "l1" }),
-        run("b", { targetSessionId: "l2" }),
-        run("c", { targetSessionId: "l3", state: "queued" }),
-        run("d", { targetSessionId: "not-a-lead" }),
-      ],
-    });
+  it("reads every shown lead's workers in one read, three leads or one", () => {
+    const r = rig();
+    r.save(
+      saved("a", { lead: true, targetSessionId: "l1", queuedAt: 1 }),
+      saved("b", { lead: true, targetSessionId: "l2", queuedAt: 2 }),
+      saved("c", { lead: true, targetSessionId: "l3", state: "queued", queuedAt: 3 }),
+      saved("d", { targetSessionId: "not-a-lead", queuedAt: 4 }),
+    );
+    r.workers("l1", "running");
+    r.workers("l2", "failed");
+    r.workers("l3", "queued");
+    r.workers("l3", "succeeded");
     r.item("first", "", ["a"], 2);
     r.item("second", "", ["b"], 1);
     const open = r.list();
@@ -250,14 +282,27 @@ describe("the open items", () => {
     ]);
   });
 
-  it("says nothing is open when nothing is, and asks no ledger before the first head", () => {
+  // A lead's session is one feature's: all its launches count, a probe that found nothing does not.
+  it("counts a lead's workers that finished days ago", () => {
+    const r = rig();
+    r.save(saved("lead-run", { lead: true, targetSessionId: "lead1", state: "succeeded", finishedAt: r.now - 2 * DAY }));
+    r.workers("lead1", "succeeded", 2, 2 * DAY);
+    r.workers("lead1", "failed", 1, 2 * DAY);
+    r.save(saved("probe", { invokedBySessionId: "lead1", state: "succeeded", matched: false, finishedAt: r.now - MIN }));
+    r.item("old feature", "", ["lead-run"], 1);
+    expect(r.list().items[0]!.runs[0]!.workers)
+      .toEqual({ queued: 0, running: 0, succeeded: 2, failed: 1, cancelled: 0, interrupted: 0, skipped: 0 });
+  });
+
+  it("says nothing is open when nothing is, and counts no workers when no lead is shown", () => {
     const r = rig();
     expect(openItemsStatus(r.list([]), r.now).text).toBe("Nothing open.");
-    expect(r.ledger).toEqual([]);
+    expect(r.workerReads).toEqual([]);
   });
 
   it("carries each named run's session with `/status`, for the card to link", () => {
-    const r = rig({ runs: () => [run("r-sess", { targetSessionId: "s-r" }), run("r-none")] });
+    const r = rig();
+    r.save(saved("r-sess", { targetSessionId: "s-r" }), saved("r-none"));
     r.item("with a session", "running", ["r-sess", "r-none", "r-gone"], 1);
     expect(openItemsStatus(r.list(), r.now).sessions).toEqual({ "r-sess": "s-r" });
   });

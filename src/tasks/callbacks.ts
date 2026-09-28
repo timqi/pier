@@ -1,7 +1,7 @@
 // What a finished run says to the session that delegated it. Delivery itself
 // belongs to outbox.ts; this file owns the run vocabulary and the batching.
 
-import { modelKey, type RunModel, type SystemInputSource } from "../core/types.js";
+import { modelKey, type LedgerRun, type RunModel, type SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
@@ -38,6 +38,9 @@ export const runCwd = (run: TaskRun): string | null => {
   return run.context.cwd ??
     (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
 };
+
+/** A run as `pier task runs` prints it. */
+export const ledgerRun = (run: TaskRun): LedgerRun => ({ runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt });
 
 /** What a callback's card says about the one run it carries. */
 const oneRun = (run: TaskRun): { source: SystemInputSource; state: TaskRun["state"]; cwd?: string } => {
