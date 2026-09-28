@@ -466,6 +466,24 @@ export interface AgentLaunchOptions {
   phase?: LeadPhase;
 }
 
+/** A session's system prompt as its transcript replays it — the text Pi puts
+ *  on the request, not a fresh render from today's files. */
+export interface SystemPrompt {
+  text: string;
+  /** Pi's own estimate: characters / 4. */
+  tokens: number;
+  /** `text` in order, by where each part came from; section wrappers dropped. */
+  blocks: SystemPromptBlock[];
+}
+
+export interface SystemPromptBlock {
+  /** "Pier baseline", "SYSTEM.md", "Role prompt", a context file's name, "Skills", "Working directory", or Pi's section name. */
+  label: string;
+  /** The file a context block was read from; `<pier>/…` for Pier's own. */
+  path?: string;
+  text: string;
+}
+
 export interface SessionSummary {
   id: string;
   cwd: string;
@@ -506,6 +524,9 @@ export interface AgentFactory {
   /** A session's `history()` read off disk without opening it
    *  live; undefined for a session that does not exist. */
   readHistory(sessionId: string): Promise<ChatTurn[] | undefined>;
+  /** The system prompt the model has, read off the transcript: undefined for
+   *  a session that does not exist, null before any request carried one. */
+  readSystemPrompt(sessionId: string): Promise<SystemPrompt | null | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
    *  steps — at most one hit per session, best first. How the text is indexed
    *  is the backend's business; core sees the hits. `limit` caps the hits;

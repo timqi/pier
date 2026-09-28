@@ -50,6 +50,7 @@ function rig({
     find: async (id: string) => (onDisk.has(id) ? { id, cwd: home, createdAt: 0 } : undefined),
     search: async () => [],
     readHistory: async () => undefined,
+    readSystemPrompt: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
   const hub = new EventHub();

@@ -41,7 +41,7 @@ updates this document.
 - **One column**: the conversation fills the width without a permanent rail.
 - **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's Waiting on you rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
 - **Status panel**: Waiting on you over In progress, one row per session — name and who, a second line for where it stands, one worded status tag — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
-- **Settings and Files**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files is a modal dialog over whatever is open; ✕ or Esc leaves that as it was.
+- **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.
 - **Palette**: solid panel with floating-chrome edge and raised shadow; flat
   rows; keyboard selection a tinted pill, medium weight, no edge bar;

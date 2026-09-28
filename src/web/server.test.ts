@@ -41,6 +41,7 @@ import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
+import { AuthStore, requireAuth } from "./auth.js";
 import { MAX_FILE_BYTES } from "./fs.js";
 import { createServer, instanceManifest, tabPrefix, withAccent, withAccentIcon, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
@@ -241,6 +242,7 @@ function setup(
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
     search: vi.fn(async () => []),
     readHistory: vi.fn(async () => undefined),
+    readSystemPrompt: vi.fn(async () => undefined),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
@@ -804,6 +806,31 @@ describe("workbench server", () => {
       headers: { "Accept-Encoding": "gzip" },
     });
     expect(stream.headers.get("content-encoding")).toBeNull();
+  });
+
+  it("serves the system prompt the transcript holds, without opening the session", async () => {
+    const { app, factory } = setup();
+    const prompt = { text: "base\n\n<cwd>\n/tmp\n</cwd>", tokens: 6, blocks: [{ label: "Pier baseline", text: "base" }, { label: "Working directory", text: "/tmp" }] };
+    vi.mocked(factory.readSystemPrompt).mockImplementation(async (id) => (id === "s1" ? prompt : id === "fresh" ? null : undefined));
+    const res = await app.request("/api/sessions/s1/system-prompt");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(prompt);
+    expect(factory.resume).not.toHaveBeenCalled();
+    const fresh = await app.request("/api/sessions/fresh/system-prompt");
+    expect(fresh.status).toBe(404);
+    expect(await fresh.json()).toEqual({ error: "No request has carried a system prompt yet" });
+    expect((await app.request("/api/sessions/nope/system-prompt")).status).toBe(404);
+  });
+
+  // The route sits behind the one boundary every session route does, wired as main.ts wires it.
+  it("refuses the system prompt to a caller without the operator's cookie", async () => {
+    const { app, factory } = setup();
+    const outer = new Hono();
+    outer.use("*", requireAuth(new AuthStore(openDb(":memory:"), () => {})));
+    outer.route("/", app);
+    const res = await outer.request("/api/sessions/s1/system-prompt");
+    expect(res.status).toBe(401);
+    expect(factory.readSystemPrompt).not.toHaveBeenCalled();
   });
 
   it("answers the version badge with a real first check, not 'no idea yet'", async () => {
@@ -2358,6 +2385,7 @@ describe("the continuous conversation's routes", () => {
       search: vi.fn(async () => []),
       readHistory: vi.fn(async (id: string): Promise<ChatTurn[] | undefined> =>
         sessions.has(id) ? [{ role: "user", text: `on disk: ${id}` }, { role: "assistant", text: "ok" }] : undefined),
+      readSystemPrompt: vi.fn(async () => undefined),
     } satisfies AgentFactory;
     const hub = new EventHub();
     const router = new Router(hub, (key) => factory.resume(key.conversationId));

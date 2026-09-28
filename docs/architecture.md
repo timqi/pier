@@ -34,7 +34,9 @@ src/
                pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
-               (Pi → Pier event translation), listing.ts (on-disk sessions,
+               (Pi → Pier event translation), system-prompt.ts (the
+               transcript's system messages replayed, split by source),
+               listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, config-sync.ts (the credential-blind
                configuration projection), credentials.ts (sealed store +
                auth.json import), models.ts, roles.ts (the dispatcher's,

@@ -333,9 +333,10 @@ export function createServer(
     return c.json({ ok: true });
   });
 
-  // Only these two: compressing the SSE streams would sit on events until the
+  // Only these reads: compressing the SSE streams would sit on events until the
   // encoder's buffer filled.
   app.use("/api/sessions/:id/history", compress());
+  app.use("/api/sessions/:id/system-prompt", compress());
   app.use("/api/sessions/:id/turns/:index/steps", compress());
 
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
@@ -375,6 +376,16 @@ export function createServer(
     const turn = (await turnsOf(c.req.param("id")))[index];
     if (!turn) return c.json({ error: `no turn at index ${index}` }, 404);
     return c.json({ steps: turn.steps ?? [] });
+  });
+
+  // Off the transcript, so an earlier member of the conversation answers too
+  // and nothing is opened to answer it.
+  guarded(app, "GET", "/api/sessions/:id/system-prompt", 404, async (c) => {
+    const id = c.req.param("id");
+    const prompt = await factory.readSystemPrompt(id);
+    if (prompt === undefined) return c.json({ error: `no session ${id}` }, 404);
+    if (prompt === null) return c.json({ error: "No request has carried a system prompt yet" }, 404);
+    return c.json(prompt);
   });
 
   // Any readable file: the boundary is the Console password (web/fs.ts), not

@@ -46,6 +46,7 @@ function setup(session = fakeSession(), instance: ConstructorParameters<typeof T
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
     search: vi.fn(async () => []),
     readHistory: vi.fn(async () => undefined),
+    readSystemPrompt: vi.fn(async () => undefined),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
@@ -170,6 +171,7 @@ describe("callback recovery across database connections", () => {
         find: async (id) => id === parent.id ? { id, cwd: home, createdAt: 1 } : undefined,
         search: async () => [],
         readHistory: async () => undefined,
+        readSystemPrompt: async () => undefined,
       };
       const hub = new EventHub();
       const router = new Router(hub, (key) => factory.resume(key.conversationId));

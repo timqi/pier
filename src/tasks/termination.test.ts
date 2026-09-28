@@ -25,6 +25,7 @@ const factory: AgentFactory = {
   find: () => Promise.resolve(undefined),
   search: () => Promise.resolve([]),
   readHistory: () => Promise.resolve(undefined),
+  readSystemPrompt: () => Promise.resolve(undefined),
 };
 
 function setup() {

@@ -28,6 +28,7 @@ import type {
   SessionState,
   SessionSummary,
   SystemInputOrigin,
+  SystemPrompt,
   ThinkingLevel,
   TurnMeta,
 } from "../core/types.js";
@@ -58,6 +59,7 @@ import { defaultAgentDir, PiConfigStore } from "./config.js";
 import { IndexedListing, type SessionListing, type SessionRecord } from "./listing.js";
 import type { CredentialStore, ProviderCredential } from "./credentials.js";
 import { curateModels, pinFirst } from "./models.js";
+import { replaySystemPrompt, type PiSystemMessage } from "./system-prompt.js";
 
 const log = logger("agent");
 
@@ -831,6 +833,15 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   async readHistory(sessionId: string): Promise<ChatTurn[] | undefined> {
     const info = await this.locate(sessionId);
     return info && toChatTurns(branchMessages(SessionManager.open(info.path)));
+  }
+
+  /** Off disk for a live session too: Pier is the one writer and Pi appends
+   *  each entry as it lands, so the file is the transcript. */
+  async readSystemPrompt(sessionId: string): Promise<SystemPrompt | null | undefined> {
+    const info = await this.locate(sessionId);
+    if (!info) return undefined;
+    const { messages } = SessionManager.open(info.path).buildSessionContext();
+    return replaySystemPrompt(messages as PiSystemMessage[], PIER_SYSTEM_PROMPT);
   }
 
   async find(sessionId: string): Promise<SessionSummary | undefined> {

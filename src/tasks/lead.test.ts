@@ -39,6 +39,7 @@ function rig() {
     find: async (id) => (sessions.has(id) ? { id, cwd, createdAt: 1 } : undefined),
     search: async () => [],
     readHistory: async () => undefined,
+    readSystemPrompt: async () => undefined,
   };
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));

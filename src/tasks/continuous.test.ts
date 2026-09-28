@@ -28,6 +28,7 @@ function rig() {
     find: async (id) => ({ id, cwd, createdAt: 1 }),
     search: async () => [],
     readHistory: async () => undefined,
+    readSystemPrompt: async () => undefined,
   };
   const members = ["h1", "h0"];
   const chain: TaskChain = {

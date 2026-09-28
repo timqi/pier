@@ -27,6 +27,8 @@ vi.mock("./drawer.js", () => ({
 }));
 const palette = vi.hoisted(() => ({ togglePalette: vi.fn() }));
 vi.mock("./palette.js", () => palette);
+const systemPrompt = vi.hoisted(() => ({ openSystemPrompt: vi.fn() }));
+vi.mock("./system-prompt.js", () => systemPrompt);
 
 const model: ModelRef = { provider: "test", id: "test-model" };
 const levels: ThinkingLevel[] = ["low", "high"];
@@ -149,16 +151,18 @@ it("offers Search first on the conversation, and the rest without it on a child"
   current = session(0);
   header.renderHeader();
   const items = await menuItems();
-  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "System prompt", "Browse files", "Model & reasoning…", "Settings"]);
   expect(items[0]!.hint).toBe("⌘K");
   items[0]!.onSelect();
   expect(palette.togglePalette).toHaveBeenCalledOnce();
-  items[4]!.onSelect();
+  items[2]!.onSelect();
+  expect(systemPrompt.openSystemPrompt).toHaveBeenCalledWith(current);
+  items[5]!.onSelect();
   expect(openSettings).toHaveBeenCalledOnce();
 
   conversation = false;
   header.renderHeader();
-  expect((await menuItems()).map((i) => i.label)).toEqual(["Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect((await menuItems()).map((i) => i.label)).toEqual(["Session info", "System prompt", "Browse files", "Model & reasoning…", "Settings"]);
 });
 
 // Before the conversation's first reply there is no session to describe or
@@ -171,6 +175,7 @@ it("keeps ⋯ on a conversation with no session yet, its session actions disable
   const items = await menuItems();
   const byLabel = (label: string) => items.find((i) => i.label === label)!;
   expect(byLabel("Session info")).toMatchObject({ disabled: true, hint: "after the first reply" });
+  expect(byLabel("System prompt")).toMatchObject({ disabled: true, hint: "after the first reply" });
   expect(byLabel("Model & reasoning…")).toMatchObject({ disabled: true, hint: "after the first reply" });
   expect(byLabel("Search").disabled).toBeUndefined();
 });
