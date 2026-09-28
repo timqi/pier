@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 — 2026-09-28
+
+### Changed
+
+- A task run takes reversible choices itself and stops only for a destructive or irreversible step — deleting what it did not create, force push, a migration, a deploy, a restart — or a question only its caller can answer; its result is the conclusion, then `Needs your decision` when something does.
+- The head's seed lists only the previous head's runs that still need it — not succeeded or skipped ones, which `pier task runs` lists — under a heading that names what it shows and hides.
+
+### Fixed
+
+- `npm test` passes on a tree vite has not built: the shell cache test writes its own `index.html` when none exists.
+
 ## 0.3.0 — 2026-09-27
 
 ### Upgrade notes
