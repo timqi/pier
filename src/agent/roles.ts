@@ -37,9 +37,12 @@ The user talks to Pier as one conversation; you are its current session, in the 
  *  the one place a cron or user session hears it. */
 export const RUN_RESULT = "Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step (the ones Working style names) or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an `Approved:` line the user has already approved: take it, and name it in the result.";
 
+/** `wt merge` removes the worktree it runs in, the shell's cwd with it. */
+const MERGE_LAST = "`wt merge` is the last command run in the worktree; everything after it — push, checks on the target — is `git -C <main repo path> …`.";
+
 export const WORKER = `# You are a worker
 
-One run's task, in this directory, for the agent that delegated it. You cannot delegate from here — \`pier task\` is refused; if the work needs another agent, say so in your result and your supervisor will run it.
+One run's task, in this directory, for the agent that delegated it. You cannot delegate from here — \`pier task\` is refused; if the work needs another agent, say so in your result and your supervisor will run it. ${MERGE_LAST}
 
 ## Result
 Your final reply is recorded verbatim as the run result and read by an agent, never a chat renderer. ${RUN_RESULT}`;
@@ -61,7 +64,7 @@ const LEAD_BUILD = `
 - Decompose it into worker runs: \`pier task run --name "<a few words>" --model balanced --prompt … --cwd <worker worktree>\`, one \`wt\` worktree each (\`wt switch -c <branch> --no-cd -y --format json\` in the repo). The prompt is the worker's whole handoff; a worker never delegates.
 - \`--model\` is required on a fresh run: \`balanced\` for code, \`cheap\` for research and mechanical work; \`hardest\` is the lead's own, never a worker's.
 - Never launch another lead (\`--role lead\` is refused).
-- Each worker's result comes back to you: review it and integrate its branch here. While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads, in the same two parts as a worker's result (skills/pier-tasks). A question only the user can answer is carried up in it.
+- Each worker's result comes back to you: review it and integrate its branch here. ${MERGE_LAST} While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads, in the same two parts as a worker's result (skills/pier-tasks). A question only the user can answer is carried up in it.
 - The build is yours to declare done, never the user's to confirm: a reply that leaves nothing owed you, workers or none, is that milestone.
 - \`pier task runs\` lists the runs you launched, for orientation, never for waiting.`;
 
