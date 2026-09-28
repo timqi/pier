@@ -86,7 +86,7 @@ it("counts running and needs-you on the chip, omitting a zero half, and is absen
 
   sessions = [row("run", { state: "streaming" }), row("q", { phase: "design", runLive: true }), row("idle")];
   drawer.renderDrawer();
-  expect(chip().textContent).toBe("2 running");
+  expect(chip().textContent).toBe("1 running");
   expect(chip().classList.contains("hidden")).toBe(false);
 
   sessions = [row("done", { unread: true }), row("design", { phase: "design", designOpen: true })];
@@ -197,7 +197,7 @@ it("groups the rows waiting on you over in progress, each session once, an item 
     ["Queued one", "", "run q1 queued 1m", "queued"],
     ["queued lead", "lead · build", "run queued · active 10m ago", "queued"],
   ]);
-  expect(chip().textContent).toBe("5 running · 2 needs you");
+  expect(chip().textContent).toBe("1 running · 2 needs you");
   // The lead's session is the item's row, not a row of its own.
   expect(labels()).not.toContain("多入口统一对话");
   panelRows()[0]!.onclick?.();

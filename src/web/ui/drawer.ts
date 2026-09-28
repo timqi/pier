@@ -228,7 +228,7 @@ const unlistedRow = (r: OpenRun, now: number): PanelRow => ({
 
 /** The open items, then the unlisted runs, then the live sessions none of them
  *  holds: one row per session, split by who acts next. */
-function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; sessions: SessionInfo[] } {
+function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; runningCount: number; sessions: SessionInfo[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain());
@@ -241,7 +241,7 @@ function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; 
     }),
   ];
   const waits = (r: PanelRow): boolean => waitsOnYou(r.status);
-  return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), sessions };
+  return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), runningCount: all.filter((r) => r.status === "running").length, sessions };
 }
 
 // --- the chip and the panel -------------------------------------------------------------
@@ -263,12 +263,12 @@ export function renderDrawer(): void {
   const key = renderKey();
   if (key === drawn) return;
   drawn = key;
-  const { waiting, running, sessions } = groups(Date.now());
+  const { waiting, running, runningCount, sessions } = groups(Date.now());
   rows = [waiting, running];
   // The app icon counts a turn to look at — unread, or a design to finalize —
   // plus the conversation's own unread reply, which the bar stands for instead of a row.
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
-  const counts = [...(running.length ? [`${running.length} running`] : []), ...(waiting.length ? [`${waiting.length} needs you`] : [])];
+  const counts = [...(runningCount ? [`${runningCount} running`] : []), ...(waiting.length ? [`${waiting.length} needs you`] : [])];
   const text = counts.join(" · ");
   shown = !!text;
   chip.textContent = text;
