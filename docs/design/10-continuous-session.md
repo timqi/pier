@@ -112,12 +112,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   listener, when the session is `members()[0]`) and broadcasts
   `open-items-changed` when a row changed; a marker with no problem is logged
   and dropped.
-- `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session (the ledger,
-  else `TaskStore.getRun`) and shows that session's newest run in the ledger's
-  last 24h, so a lead woken again stays the same item (none there reads `run <id>
-  — not in the ledger`, `NOT_IN_LEDGER`), a lead run's with its workers counted
-  by state; `unlisted` is the chain's queued and running runs in no item's
-  session; `renderOpenItems` is the one text.
+- `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session
+  (`TaskStore.getRun`) and shows that session's newest run (`latestRunForTarget`),
+  however old, so a lead woken again stays the same item; a token naming no run
+  reads `run <id> — not in the ledger` (`NOT_IN_LEDGER`); a lead run's carries all
+  its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
+  and running runs in no item's session; no listing window or cap applies;
+  `renderOpenItems` is the one text.
 - Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading
   of its run tree — each run, its session, a lead's workers (workers never
   delegate, so that is the whole tree) — and its stage; first match wins:
@@ -127,7 +128,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | `running` | a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
   | `waiting on you` | the stage says `waiting on you`, or its session's design awaits Finalize |
   | `pending release` | every run `succeeded` (or it names none) |
-  | `stopped` | a run `failed`, `cancelled`, `interrupted`, `skipped` or `not in the ledger` |
+  | `stopped` | a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
 
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
   `core/reply.ts`): `/status`'s first group, the status panel's, its chip's

@@ -193,7 +193,7 @@ export type ChainReason = "first" | "idle" | "lost" | "full" | "new";
  *  interactive sessions request, past which the cache is cold anyway. */
 export const CHAIN_IDLE_MS = 60 * 60_000;
 
-/** The run ledger's recent window: what `pier task runs` lists and the open items join against. */
+/** The run ledger's recent window: what `pier task runs` lists by default. */
 export const LEDGER_WINDOW_MS = 24 * 60 * 60_000;
 
 /** How large the continuous conversation's head's context may grow before the
@@ -225,7 +225,7 @@ export interface LedgerRun {
   finishedAt: number | null;
 }
 
-/** The `state` of a run an open item names that the ledger no longer holds; its `name` is the id. */
+/** The `state` of an open item's run token that names no stored run; its `name` is the id. */
 export const NOT_IN_LEDGER = "not in the ledger";
 
 export interface BackgroundRun extends RunModel {

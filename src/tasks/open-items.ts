@@ -1,19 +1,19 @@
 // The continuous conversation's open items in task-run words: main's markers
-// joined to the run ledger by session, a lead's workers counted by state, and
+// joined to the task runs by session, a lead's workers counted by state, and
 // the one text every surface shows (docs/design/10-continuous-session.md#open-items).
 
 import { openItemMarkers, openRunText, waitsOnYou } from "../core/reply.js";
 import type { Router } from "../core/router.js";
-import { LEDGER_WINDOW_MS, NOT_IN_LEDGER, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
+import { NOT_IN_LEDGER, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
-import type { TaskService } from "./service.js";
+import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
 import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "./types.js";
 
 const log = logger("tasks");
 
-/** What one run says about its item, for every state a ledger row holds;
- *  a run gone from the ledger (`NOT_IN_LEDGER`) or any other state is `ended`. */
+/** What one run says about its item, for every state a run holds;
+ *  a token naming no run (`NOT_IN_LEDGER`) or any other state is `ended`. */
 const RUN_PHASE: Record<TaskRunState, "live" | "succeeded" | "ended"> = {
   queued: "live",
   running: "live",
@@ -46,40 +46,35 @@ export function openStatus(
   return runs.every((r) => phaseOf(r.state) === "succeeded") ? "pending release" : "stopped";
 }
 
-/** The task service's own reads the list is joined against. */
-export type OpenItemReads = Pick<TaskService, "ledger"> & { store: Pick<TaskStore, "getRun" | "leads" | "ledgerRuns" | "openItems"> };
+/** The store reads the list is joined against. */
+export type OpenItemReads = Pick<TaskStore, "getRun" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
 /** `members`: the chain, newest first; `designs`: the open designs of sessions not closed. */
-export function openItems(tasks: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], designs: LedgerRun[], now: number): OpenItems {
-  const since = now - LEDGER_WINDOW_MS;
-  const runs = members.length ? tasks.ledger(members, since) : [];
+export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], designs: LedgerRun[]): OpenItems {
   const awaiting = new Set(designs.flatMap((d) => (d.targetSessionId ? [d.targetSessionId] : [])));
-  // An item names a session through any of its runs: the session's newest run stands for it.
+  // A session's newest run stands for it, so a lead woken again stays the same item.
+  const newest = (sessionId: string | null) => (sessionId ? store.latestRunForTarget(sessionId) : undefined);
   const tracked = new Set<string>();
-  const items = tasks.store.openItems().map((row): Unrated => {
+  const items = store.openItems().map((row): Unrated => {
     const named = row.runIds.map((id): OpenRun => {
-      const session = runs.find((r) => r.runId === id)?.targetSessionId ?? tasks.store.getRun(id)?.targetSessionId ?? null;
-      tracked.add(session ?? id);
-      const run = runs.find((r) => (session ? r.targetSessionId === session : r.runId === id));
-      return run ?? { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: session, cwd: null, queuedAt: 0, finishedAt: null };
+      const own = store.getRun(id);
+      tracked.add(own?.targetSessionId ?? id);
+      return own ? ledgerRun(newest(own.targetSessionId) ?? own) : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
     }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
     return { problem: row.problem, stage: row.stage, runs: named };
   });
-  const unlisted = runs.filter((r) => phaseOf(r.state) === "live" && !tracked.has(r.targetSessionId ?? r.runId));
+  const unlisted = store.inFlightRuns().filter((r) => members.includes(r.invokedBySessionId ?? "") && !tracked.has(r.targetSessionId ?? r.id)).map(ledgerRun);
   for (const r of unlisted) tracked.add(r.targetSessionId ?? r.runId);
-  const unheld = designs.filter((d) => !tracked.has(d.targetSessionId ?? d.runId)).map((d): Unrated => ({
-    problem: d.name, stage: "", runs: [runs.find((r) => d.targetSessionId && r.targetSessionId === d.targetSessionId) ?? d],
-  }));
+  const unheld = designs.filter((d) => !tracked.has(d.targetSessionId ?? d.runId)).map((d): Unrated => {
+    const run = newest(d.targetSessionId);
+    return { problem: d.name, stage: "", runs: [run ? ledgerRun(run) : d] };
+  });
   const all = [...items, ...unheld];
-  // Every shown lead's workers in one read: a ledger call per lead grows with the list.
-  const leads = tasks.store.leads();
+  // Every shown lead's workers in one read: a read per lead grows with the list.
+  const leads = store.leads();
   const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
   const shown = new Set([...all.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
-  const counts = new Map([...shown].map((id) => [id, Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>]));
-  for (const w of shown.size ? tasks.store.ledgerRuns([...shown], since) : []) {
-    const c = w.invokedBySessionId ? counts.get(w.invokedBySessionId) : undefined;
-    if (c) c[w.state] += 1;
-  }
+  const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
   const withWorkers = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
     return workers ? { ...r, workers: { ...workers } } : r;

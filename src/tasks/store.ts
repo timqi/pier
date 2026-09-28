@@ -126,6 +126,18 @@ export class TaskStore {
     `, JSON.stringify(sessionIds), since, JSON.stringify(states ?? TASK_RUN_STATES));
   }
 
+  /** Each lead's launches by state over its whole life, in one statement: a
+   *  lead's session is one feature's, so no window or cap applies. */
+  workerCounts(leadSessionIds: string[]): Map<string, Record<TaskRunState, number>> {
+    const counts = new Map(leadSessionIds.map((id) => [id, Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>]));
+    for (const r of this.sql(`
+      SELECT json_extract(json, '$.invokedBySessionId') AS lead, state, COUNT(*) AS n FROM task_runs
+      WHERE lead IN (SELECT value FROM json_each(?)) AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
+      GROUP BY lead, state
+    `).all(JSON.stringify(leadSessionIds)) as unknown as { lead: string; state: TaskRunState; n: number }[]) counts.get(r.lead)![r.state] = r.n;
+    return counts;
+  }
+
   /** Opened agent runs a session or the user fired that settled at or after
    *  `since`, newest first; skipped runs never ran. */
   finishedAgentRuns(since: number): TaskRun[] {

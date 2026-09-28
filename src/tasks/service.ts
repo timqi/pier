@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner, type Restart } from "./agent.js";
-import { DESIGN_FINAL, LEAD_TURN, MILESTONE, runCwd, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -359,8 +359,8 @@ export class TaskService {
     });
   }
 
-  openItems(now = Date.now()): OpenItems {
-    return openItems(this, this.router, this.instance.continuous.members().map((m) => m.sessionId), this.openDesigns(), now);
+  openItems(): OpenItems {
+    return openItems(this.store, this.router, this.instance.continuous.members().map((m) => m.sessionId), this.openDesigns());
   }
 
   activeBackgroundRunCounts(): Map<string, number> {
@@ -644,8 +644,4 @@ export function owesNotice(run: TaskRun, unasked: boolean, resultToHead: boolean
   if (run.state === "interrupted") return true;
   if (resultToHead) return false;
   return run.state === "failed" || (run.state === "cancelled" && unasked);
-}
-
-function ledgerRun(run: TaskRun): LedgerRun {
-  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt };
 }
