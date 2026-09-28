@@ -125,7 +125,8 @@ the caller launched — every chain member's, for a member of the head — in
 flight plus finished within `--since` (default 24h), only the `--state`s given,
 in flight first then newest first, at most `--limit` (default 20, max 200); a
 full page adds a `task:` line on stderr that there may be more.
-Socket params: `states`, `since_ms`, `limit`.
+Socket params: `states`, `since_ms`, `limit`. A restart resumes an agent run
+on the same id; a non-agent run cut by the restart ends `interrupted`.
 
 ## `stats`
 

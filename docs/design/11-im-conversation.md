@@ -133,8 +133,12 @@ thread half only for the home chat; any other is refused.
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | a failure | `⚠ failed` note |
-| a restart note (`drain.ts`) | the same `notify`, main flow |
-| a child run's abnormal end | `⚠ failed` note, `"<name>" ended <state> — <error>` over the run ref; through the restart ledger, so an interruption recorded before the chats connect still arrives |
+| a turn or agent run resumed | restart system input in the transcript and the note the chat gets before the reply |
+| a turn that could not resume | ledger note to its chat; log for web/task keys |
+| an agent run that could not resume | run `failed`, callback carries the reason; home chat via `owesNotice` |
+| a non-agent run the stop cut | `interrupted`, callback, home chat via `owesNotice` |
+| a cut send | ledger note, as today |
+| the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
   comes off with the head's turn-end, as any conversation's. A chat command
@@ -222,8 +226,7 @@ through what the head launches (`pier task`), never by a group's message.
   by a session other than the head — not the head's, a cascade's or a
   first-wins join's), only when its result goes to a lead or nobody, since the
   head's callback note already carries it. A run that calls `pier restart`
-  finishes before the drain exits, so it is not interrupted and needs no
-  exemption.
+  resumes after it; it is not interrupted and needs no exemption.
 
 ## Storage
 

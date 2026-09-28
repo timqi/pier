@@ -65,7 +65,7 @@ journalctl --user -u pier | grep 'client:'              # browser-side errors
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`,
-`lark`, `channels`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
+`lark`, `channels`, `auth`, `boards`, `client`, `db`, `stop`, `secrets`,
 `vault`, `socket`, `settings`, `credentials`, `packages`, `passkeys`, `config-sync`,
 `update`, `tools`, `push`, `web`, `web.providers`, `pier`. Level: a syslog priority prefix under
 `$JOURNAL_STREAM`, a level word in a terminal. `client:` is posted back by
@@ -118,17 +118,14 @@ sqlite3 ~/.pier/db/pier.db 'DELETE FROM passkeys'
 ## Restarting and reloading
 
 ```sh
-pier restart          # finish active work, then restart the service
+pier restart          # restart the service; running turns and runs resume after a few seconds
 pier reload           # apply channel config and recycle idle sessions in place
 pier tools sync       # install/update the managed CLI tools
 ```
 
 All three signal the installed service.
 
-- `pier restart`: refuses new messages and root Task runs, waits up to five
-  minutes, exits for `Restart=always`; aborted IM turns at the deadline are
-  recorded and posted by the next process; post-deadline cleanup has one shared
-  10-second bound.
+- `pier restart`: `systemctl --user restart --no-block pier`; running turns and agent runs resume after a few seconds.
 - `pier reload`: reloads channel adapters, evicts idle unwatched sessions;
   streaming or watched sessions, and sessions still holding queued messages,
   stay until normal eviction. Console → Settings → Instance → **Reload** is
@@ -151,7 +148,7 @@ All three signal the installed service.
   - The default model trio is left to Settings → Models; compaction and every
     other key stay at Pi's defaults by omission, on purpose.
   An existing file is never touched, whatever it holds.
-- `systemctl --user restart pier` and `pier update` are hard stops.
+- `systemctl --user restart pier` and `pier update` stop the service; running turns and agent runs resume after it starts.
 - One Pier per `$PIER_HOME` (the pid in `~/.pier/pier.lock`): a start whose
   directory another live Pier holds logs `another Pier (pid N) owns …` and
   exits before opening the database. Kept
@@ -162,7 +159,7 @@ All three signal the installed service.
 ## Updating
 
 ```sh
-pier update           # installs the latest release, then hard-stops/restarts Pier
+pier update           # installs the latest release, then stops and restarts Pier
 pier update --check   # only says whether one exists
 ```
 
@@ -181,12 +178,10 @@ npm ci && npm run build
 systemctl --user start pier
 ```
 
-`pier update` hard-stops; the Console's **Update now** and the automatic path
-drain first (new work refused, running turns finished, the rest ledgered for
-the next boot). Either way the updater snapshots
-`~/.pier/db/backups/pier.db.release-<version>.bak` (`<version>` = the Pier being
-replaced) before npm runs, every release. Only stop and start are downtime; a
-failed backup or install stops nothing (`journalctl --user -u pier-update`).
+`pier update` stops and restarts Pier after installing the new package. The
+updater snapshots `~/.pier/db/backups/pier.db.release-<version>.bak`
+(`<version>` = the Pier being replaced) before npm runs, every release. A failed
+backup or install stops nothing (`journalctl --user -u pier-update`).
 
 **Automatic updates**: off by default; switched on from the version panel;
 checks every 15 minutes; hands over only when the switch is on, a newer release
@@ -219,7 +214,7 @@ version replaces it. They protect against a bad upgrade, not a lost disk.
 `ExecStopPost` start) runs outside `pier.service`'s cgroup, which a restart
 kills. `pier update` records the service's effective `PIER_HOME` in a runtime
 drop-in, then starts it; starting the unit directly is unsupported. No
-`systemd.timer`: only Pier starts an update, so it can drain first.
+`systemd.timer` is not used.
 
 ## Secrets for commands
 

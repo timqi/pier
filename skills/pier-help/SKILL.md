@@ -19,8 +19,8 @@ truth.
   mapping survives restarts — the next message
   lands in the same transcript with its context intact.
 - Idle sessions leave memory but keep their transcript; they resume
-  transparently on the next message. Never promise that a restart or a pause
-  wipes context.
+  transparently on the next message. A stop resumes turns and agent runs
+  after a few seconds; nothing waits for them to finish.
 - A fresh start is explicit: a new thread (its panel drafts the session) or
   `/new` in Pier's conversation (web or the home chat). The old transcript
   remains readable from the web workbench.
@@ -149,18 +149,17 @@ truth.
 
 ## Service restart, reload and update
 
-- `pier restart`: refuses new work, waits up to five minutes for active turns
-  and Task runs, then restarts. If the deadline aborts an IM turn, the next
-  process tells that conversation.
+- `pier restart`: uses `systemctl --user restart --no-block pier`; running
+  turns and agent runs resume after a few seconds. There is nothing to wait
+  for.
 - `pier reload`: channel adapters re-read configuration and idle, unwatched
   sessions reopen with current agent files on their next message. Streaming or
   watched sessions are not interrupted.
 - `pier update`: a separate updater backs up the database and installs the new
-  package while Pier is still up, then hard-stops and starts the service. From
-  the shell it does not drain, so it can interrupt active work; the Console's
-  Update and auto-update drain first. All three are the operator's, for an
-  installed Linux systemd service: `pier` on your PATH runs them too, so never
-  type one yourself — point the user at them.
+  package, then stops and starts the service. Running turns and agent runs
+  resume after it comes back. All three are the operator's, for an installed
+  Linux systemd service: `pier` on your PATH runs them too, so never type one
+  yourself — point the user at them.
 
 ## Only the Console can change
 

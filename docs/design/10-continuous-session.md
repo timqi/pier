@@ -51,7 +51,7 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
   `[Pier: the last result you were waiting on follows; …]`, and that run's
   callback reaches the head once; the resume and the `delivered` marks commit in
   one transaction;
-- the lead's last run still running, or a drain: pending, asked again in 10 s;
+- the lead's last run still running: pending, asked again in 10 s;
 - nobody waiting on that run, or a resume that cannot be filed (logged): plain.
 
 A lead's own run owes the head a callback only when it was a milestone resume,

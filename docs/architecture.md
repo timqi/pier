@@ -88,8 +88,8 @@ src/
                package's resources are on, tools, custom tools, accent)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
-  drain.ts     graceful restart: finish running turns and outbound sends,
-               ledger what the deadline cut off for the next boot to deliver
+  stop.ts      stop sequence and in-flight ledger (`turns_in_flight`,
+               `restart_ledger`)
   cli.ts       what `pier` does when typed; service.ts is the unit it writes;
                `pier slack` is dispatched to channels/slack-cli.ts with the
                token resolved here (env, or the CLI socket), `pier task` to
@@ -277,7 +277,8 @@ One line each; the reasoning is in the commit that made it.
 - Pi session files own transcripts; one SQLite database owns everything else.
   One connection opened by `db.ts`; append-only migrations in one transaction,
   upgrades only, a newer database is refused. A store owns its queries, never
-  its tables or its handle. Nothing restart-relevant lives in a JSON file.
+  its tables or its handle. `turns_in_flight` records running turns for restart
+  resumption; `task_runs` records running runs.
 - IM chats are discovered from traffic, not registered; new chats arrive
   enabled behind the mention and bind gates.
 - Vite + Tailwind, static CSS, zero runtime, no UI framework.

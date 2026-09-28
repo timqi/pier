@@ -145,6 +145,5 @@ fails the run. The action does not see the script's output. Without
   run created (a lead's aside), in its run and after it, and in any run someone
   waits on — say what needs another agent; the supervisor runs it.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
-  those slots; the rest queue until cancelled or a restart marks them
-  `interrupted` (callbacks still fire).
-- During a restart drain new runs are refused: retry after.
+  those slots; the rest queue until cancelled. A restart resumes agent runs on
+  the same id; a bash run is marked `interrupted` (callbacks still fire).
