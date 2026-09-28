@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { surfacePrompt } from "./roles.js";
+import { openItemMarkers } from "../core/reply.js";
+import { DISPATCHER, surfacePrompt } from "./roles.js";
+
+describe("the dispatcher contract", () => {
+  it("shows the goal in a marker the parser reads back, the goal in the stage", () => {
+    const example = /`(<open>[^`]*until[^`]*<\/open>)`/.exec(DISPATCHER)?.[1];
+    expect(example).toBeDefined();
+    expect(openItemMarkers(example!).markers).toEqual([
+      { op: "open", problem: "CI \u4fee\u590d", stage: expect.stringMatching(/^worker running \u00b7 until /), runIds: ["<id>"] },
+    ]);
+    // The cap is a number the head counts against; the contract names it once.
+    expect(DISPATCHER).toMatch(/auto 1\/3/);
+  });
+
+  it("names the three tiers once, in one line, and leaves the skill's prose to the skill", () => {
+    // The skill is read on demand only, so the table the head fills every dispatch is here.
+    const line = DISPATCHER.split("\n").filter((l) => l.includes("`hardest`") && l.includes("`cheap`"));
+    expect(line).toHaveLength(1);
+    for (const owned of ["follows the change's difficulty", "for orientation, never for waiting", "substring of provider"]) {
+      expect(DISPATCHER).not.toContain(owned);
+    }
+  });
+});
 
 describe("the instance facts in the surface prompt", () => {
   it("names the real boards folder and both board routes", () => {

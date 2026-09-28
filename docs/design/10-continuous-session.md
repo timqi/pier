@@ -126,6 +126,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
   backlog in MEMORY.md.
+- A goal is text in the stage, `DISPATCHER`'s convention and nothing the
+  parser or a surface reads: `· until <condition>` names the checkable end the
+  head rewrites into every stage, `· auto <n>/<cap>` how many times it has
+  continued the child (`--run <id> --prompt`) past a result short of it that
+  stopped on nothing needing the user; the cap is 3 unless the user set one,
+  and a result still short at the cap turns the stage into `waiting on you:
+  <blocker>`. No goal, and the head reports and waits.
 - Every design lead not closed whose runs have not reported `Design final:`
   (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
   named by its creating run, unless an item or an unlisted run already holds

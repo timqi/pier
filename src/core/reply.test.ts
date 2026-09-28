@@ -282,6 +282,12 @@ describe("open-item markers", () => {
     });
   });
 
+  it("a goal and its auto-continue count ride in the stage, text to the parser", () => {
+    expect(openItemMarkers("<open>CI 修复 — worker running · until CI 绿并已合并 · auto 1/3 (run r2)</open>").markers).toEqual([
+      { op: "open", problem: "CI 修复", stage: "worker running · until CI 绿并已合并 · auto 1/3", runIds: ["r2"] },
+    ]);
+  });
+
   it("keeps a parenthetical that is not a run token in the stage, and a stageless item", () => {
     expect(openItemMarkers("<open>review\n src/auth — proposed (not applied)</open><open>just a problem</open>").markers).toEqual([
       { op: "open", problem: "review src/auth", stage: "proposed (not applied)", runIds: [] },
