@@ -429,8 +429,17 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
     `enabled`; no sync at boot.
   - The source is the authority. Every sync downloads the whole document and
     replaces every field it carries — the three files, the defaults, the
-    menu — inside one transaction, rolled back together; a local edit made
-    between two syncs is put back. While `enabled`, the Console shows those
+    menu; a local edit made between two syncs is put back. Each file is
+    replaced atomically (temp file, rename); the files are replaced one by one,
+    then the menu and the sync record commit in one database transaction. A
+    failure the process catches rolls the files already replaced back to their
+    previous content (a rollback that itself fails refuses every further write
+    until the operator repairs the files and restarts). A process that dies
+    between two renames, or after the last one and before the commit, is not
+    rolled back: the files it replaced are new, the rest and the menu are old,
+    and `lastApplied` does not move. Nothing detects that at boot (no sync at
+    boot); the next hourly sync, or Sync now, re-applies the whole document,
+    which is the repair. While `enabled`, the Console shows those
     fields as stored and takes no edit: `PUT /api/settings {modelMenu}`,
     `PUT /api/config/defaults` and `PUT /api/config/files/<synced>` (global
     scope) answer 409 `Managed by the configuration subscription…`; the
