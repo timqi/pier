@@ -16,7 +16,9 @@ type Runtime = { providers: Set<string>; registerProvider(name: string): void; s
 const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
-const opened: { agent: { followUpMode: string }; overrides: unknown[] }[] = [];
+const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string } }[] = [];
+/** Whether the mocked Pi still has the privates the prompt loadout shim uses. */
+let shim = true;
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
 type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
@@ -47,15 +49,17 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
     constructor(options: unknown) { loaders.push(options as LoaderOptions); }
     async reload(): Promise<void> {}
   },
-  createAgentSession: async ({ cwd, modelRuntime }: { cwd: string; modelRuntime: Runtime }) => {
+  createAgentSession: async ({ cwd, modelRuntime, settingsManager }: { cwd: string; modelRuntime: Runtime; settingsManager: { getFollowUpMode(): string } }) => {
     // Pi extensions register providers onto the runtime handed to this session.
     modelRuntime.registerProvider(cwd);
     const session = {
       sessionId: cwd,
       isStreaming: false,
       messages: [],
-      // Pi's default: one queued follow-up per turn boundary.
-      agent: { followUpMode: "one-at-a-time" },
+      // Pi reads the queue modes off the settings manager it was handed.
+      agent: { followUpMode: settingsManager.getFollowUpMode() },
+      settings: settingsManager,
+      ...(shim ? { _baseSystemPromptOptions: {}, _preparePromptAndToolLoadout() {} } : {}),
       model: { provider: "p", id: "m", contextWindow: 400_000 },
       overrides: [] as unknown[],
       settingsManager: {
@@ -112,9 +116,11 @@ function fakePi() {
         appendMessage(message: PiMessage) {
           transcript.push(message);
         },
-        buildSessionProjection: () => ({ messages: transcript.slice() }),
       },
       agent: { state },
+      refreshContext() {
+        state.messages = transcript.slice();
+      },
       getActiveToolNames: () => ["bash"],
       _baseSystemPromptOptions: { cwd: "/tmp/wt", customPrompt: "be brief" },
       _preparePromptAndToolLoadout(options: { cwd: string; customPrompt: string; selectedTools: string[] }): PiMessage | undefined {
@@ -181,8 +187,21 @@ describe("session model runtimes", () => {
     const session = await factory.create({ cwd: "/tmp/queue" });
     // Pi's default drains one queued follow-up per boundary, so N progress
     // reports cost N model turns and a message behind them waits them all out.
+    // Set on the session's own settings manager, where Pi reads it from.
+    expect(opened.at(-1)?.settings.getFollowUpMode()).toBe("all");
     expect(opened.at(-1)?.agent.followUpMode).toBe("all");
     await session.dispose();
+  });
+
+  it("refuses to open on a Pi without the prompt loadout privates", async () => {
+    shim = false;
+    try {
+      // Failing at open names the cause; failing at the first system input
+      // would run that turn with no system prompt.
+      await expect(new PiAgentFactory().create({ cwd: "/tmp/shim" })).rejects.toThrow("prompt loadout shim no longer applies (pi#5581)");
+    } finally {
+      shim = true;
+    }
   });
 });
 

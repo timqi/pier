@@ -12,6 +12,8 @@ import {
   ModelRuntime,
   SessionManager,
   sessionEntryToContextMessages,
+  SettingsManager,
+  VERSION,
   type AgentSession as PiAgentSession,
   type BuildSystemPromptOptions,
   type ExtensionAPI,
@@ -200,13 +202,22 @@ const CHILD_COMPACTION_CAP = 150_000;
 type CacheRetentionBox = { value: "short" | "long" };
 
 /** Pi builds the system prompt only on `prompt()` and between turns;
- *  `sendCustomMessage({ triggerTurn })` skips it, so a session whose first
- *  turn is a system input would run it with no prompt at all. The privates
- *  that `prompt()` uses (Pi 0.87). */
+ *  `sendCustomMessage({ triggerTurn })` skips it (pi#5581), so a session whose
+ *  first turn is a system input would run it with no prompt at all. The
+ *  privates that `prompt()` uses (Pi 0.87); gone once Pi prepares a
+ *  custom-triggered turn itself. */
 type PromptLoadout = {
   _baseSystemPromptOptions: BuildSystemPromptOptions;
   _preparePromptAndToolLoadout(options: BuildSystemPromptOptions): Parameters<SessionManager["appendMessage"]>[0] | undefined;
 };
+
+/** At open, not at the first system input: a Pi that dropped the privates
+ *  would otherwise run turns with no system prompt (principle 5). */
+function assertPromptLoadout(pi: unknown): void {
+  const live = pi as Partial<PromptLoadout>;
+  if (typeof live._preparePromptAndToolLoadout === "function" && typeof live._baseSystemPromptOptions === "object" && live._baseSystemPromptOptions) return;
+  throw new Error(`pi ${VERSION}: prompt loadout shim no longer applies (pi#5581)`);
+}
 
 export class PiSession implements AgentSession {
   constructor(
@@ -397,7 +408,7 @@ export class PiSession implements AgentSession {
       errorMessage: error instanceof Error ? error.message : String(error),
       timestamp: now,
     });
-    this.pi.agent.state.messages = manager.buildSessionProjection().messages;
+    this.pi.refreshContext();
   }
 
   async steer(text: string): Promise<void> {
@@ -440,9 +451,8 @@ export class PiSession implements AgentSession {
     const pi = this.pi as unknown as PromptLoadout;
     const update = pi._preparePromptAndToolLoadout({ ...pi._baseSystemPromptOptions, selectedTools: this.pi.getActiveToolNames() });
     if (!update) return;
-    const manager = this.pi.sessionManager;
-    manager.appendMessage(update);
-    this.pi.agent.state.messages = manager.buildSessionProjection().messages;
+    this.pi.sessionManager.appendMessage(update);
+    this.pi.refreshContext();
   }
 
   abort(): Promise<void> {
@@ -803,17 +813,25 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const stream = runtime.streamSimple.bind(runtime);
     runtime.streamSimple = ((model, context, options) =>
       stream(model, context, { cacheRetention: retention.value, ...options })) as typeof runtime.streamSimple;
+    // Pi defaults to one follow-up per turn boundary, so N queued messages cost
+    // N turns. An in-memory override on this session's own manager; Pi reads
+    // it at creation, and `setFollowUpMode` would write settings.json.
+    const settingsManager = SettingsManager.create(cwd, defaultAgentDir());
+    settingsManager.applyOverrides({ followUpMode: "all" });
     const created = await createAgentSession({
       cwd,
       sessionManager,
+      settingsManager,
       modelRuntime: runtime,
       resourceLoader: await this.resourceLoader(cwd, { role, phase }, main),
     });
     const live = created.session;
-    // Pi defaults to one follow-up per turn boundary, so N queued messages cost
-    // N turns. The agent's setter flips only the in-memory queue;
-    // `session.setFollowUpMode` would persist it to Pi's settings.json.
-    live.agent.followUpMode = "all";
+    try {
+      assertPromptLoadout(live);
+    } catch (error) {
+      live.dispose();
+      throw error;
+    }
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
     }, retention, () => {
