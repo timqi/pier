@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectLanguage, projectCwds, readableTitle, SenderPrefix, sessionLabel, splitSpeaker, userLanguage, withLanguage,
-  withoutLanguage, withPrefix,
+  withoutHeaderLanguage, withoutLanguage, withPrefix,
 } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
@@ -131,15 +131,22 @@ describe("the language tag", () => {
     expect(detectLanguage("[需求文档.md](file:///tmp/需求文档.md)\nplease read this file")).toBe("en");
   });
 
-  it("rides the header only when the language changes, the first message included", () => {
+  it("rides every message's header, not only a change of language", () => {
     const p = new SenderPrefix();
     expect(p.next("s1", ada, noon, undefined, false, "帮我看看")).toBe("[Ada<U1> 2024-06-01 12:00 lang=zh]");
-    expect(p.next("s1", ada, noon + 1000, undefined, false, "再看看这个")).toBe("");
-    // Too short to tell keeps the language, and says nothing.
-    expect(p.next("s1", ada, noon + 2000, undefined, false, "ok")).toBe("");
+    expect(p.next("s1", ada, noon + 1000, undefined, false, "再看看这个")).toBe("[lang=zh]");
+    // Too short to tell keeps the last language.
+    for (const text of ["ok", "👍", "https://example.com/a/b"]) {
+      expect(p.next("s1", ada, noon + 2000, undefined, false, text)).toBe("[lang=zh]");
+    }
     expect(p.next("s1", ada, noon + 3000, undefined, false, "now in English please")).toBe("[lang=en]");
-    expect(p.next("s1", bob, noon + 4000, undefined, false, "me too, in English")).toBe("[Bob<U2>]");
+    expect(p.next("s1", bob, noon + 4000, undefined, false, "me too, in English")).toBe("[Bob<U2> lang=en]");
     expect(p.next("s1", bob, noon + 5000, undefined, false, "好的")).toBe("[lang=zh]");
+    // Nothing to tell and nothing before it: no stamp, and no header at all.
+    expect(new SenderPrefix().next("s3", ada, noon, undefined, false, "ok")).toBe("[Ada<U1> 2024-06-01 12:00]");
+    const quiet = new SenderPrefix();
+    quiet.next("s4", ada, noon, undefined, false, "👍");
+    expect(quiet.next("s4", ada, noon + 1000, undefined, false, "ok")).toBe("");
     // The opaque-ids shape carries it after the platform.
     expect(new SenderPrefix().next("s2", ada, noon, "lark:oc_1/om_2", true, "你好"))
       .toBe("[Ada 2024-06-01 12:00 lark lang=zh]");
@@ -152,6 +159,13 @@ describe("the language tag", () => {
     expect(splitSpeaker("[Ada 2024-06-01 12:00 lark lang=zh]\n你好"))
       .toEqual({ name: "Ada", when: "2024-06-01 12:00", where: "lark", lang: "zh", text: "你好" });
     expect(splitSpeaker("[lang=zh] not a header")).toEqual({ text: "[lang=zh] not a header" });
+  });
+
+  it("is dropped from a message to resend, the rest of the header kept", () => {
+    expect(withoutHeaderLanguage("[lang=zh]\n好的")).toBe("好的");
+    expect(withoutHeaderLanguage("[Ada<U1> 12:00 lang=en]\nhi")).toBe("[Ada<U1> 12:00]\nhi");
+    expect(withoutHeaderLanguage("[Ada<U1> 12:00]\nhi")).toBe("[Ada<U1> 12:00]\nhi");
+    expect(withoutHeaderLanguage("[lang=zh] not a header")).toBe("[lang=zh] not a header");
   });
 });
 

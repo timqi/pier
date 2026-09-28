@@ -7,7 +7,7 @@ import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
-import { openRunText } from "../../core/reply.js";
+import { openRunText, waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "../../tasks/types.js";
 
@@ -79,9 +79,6 @@ function markOf(s: SessionInfo): Mark | null {
   return s.designOpen ? "design" : null;
 }
 
-/** Amber rows and designs waiting on Finalize; every other row is running. */
-const needsYou = (m: Mark | null): boolean => m === "unread" || m === "design";
-
 /** Green = running, amber = waiting for a look, sky = subagents in flight,
  *  grey = a lead's run queued or its design waiting on you. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
@@ -147,6 +144,7 @@ const STATUS_TONE: Record<RowStatus, string> = {
   running: "bg-green-50 text-green-700",
   queued: "bg-neutral-100 text-neutral-600",
   "pending release": "bg-neutral-100 text-neutral-600",
+  stopped: "bg-neutral-100 text-neutral-600",
 };
 
 /** Every panel row reads the same: what it is, who works it, and — as the
@@ -191,6 +189,9 @@ const MARK_ROW: Record<Mark, [RowStatus, (s: SessionInfo) => string]> = {
   queued: ["queued", () => "run queued"],
   design: ["waiting on you", () => "design — finalize when it is ready"],
 };
+
+/** A session's mark read as a row status, so a session and an item wait on you by one rule. */
+const needsYou = (m: Mark | null): boolean => !!m && waitsOnYou(MARK_ROW[m][0]);
 
 // The facts the row has no room for, on the native tooltip: where it runs,
 // when it was created, and — for an IM session — who it answers.
@@ -239,7 +240,7 @@ function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; 
       return mark && !held.has(s.id) ? [sessionRow(s, mark)] : [];
     }),
   ];
-  const waits = (r: PanelRow): boolean => r.status === "waiting on you" || r.status === "pending release";
+  const waits = (r: PanelRow): boolean => waitsOnYou(r.status);
   return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), sessions };
 }
 

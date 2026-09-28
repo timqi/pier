@@ -176,7 +176,8 @@ it("groups the rows waiting on you over in progress, each session once, an item 
     items: [
       { problem: "子任务 thread", stage: "design lead narrowing scope (running)", status: "waiting on you",
         runs: [run("lead1abcdef", { state: "succeeded", finishedAt: 0 })] },
-      { problem: "0.2.1 清理上线", stage: "merged", status: "waiting on you", runs: [] },
+      { problem: "0.2.1 清理上线", stage: "merged", status: "pending release", runs: [] },
+      { problem: "gone", stage: "", status: "stopped", runs: [] },
       { problem: "auth review", stage: "worker running", status: "running", runs: [run("w1", { queuedAt: 5 * 60_000 })] },
     ],
     unlisted: [run("q1", { name: "Queued one", state: "queued", targetSessionId: null, queuedAt: 9 * 60_000 })],
@@ -186,15 +187,17 @@ it("groups the rows waiting on you over in progress, each session once, an item 
   const group = (name: string) => doc.querySelector(`[data-list='${name}']`)!.querySelectorAll(".session-open").map(cells);
   expect(group("waiting")).toEqual([
     ["子任务 thread", "lead · design", "run lead1abc… succeeded 10m ago · design lead narrowing scope (running)", "waiting on you"],
-    ["0.2.1 清理上线", "", "merged", "waiting on you"],
     ["free", "", "turn finished — not viewed yet · active 10m ago", "waiting on you"],
   ]);
+  // Done or stopped asks nothing of the user: it waits on nobody, so it is in progress.
   expect(group("running")).toEqual([
+    ["0.2.1 清理上线", "", "merged", "pending release"],
+    ["gone", "", "", "stopped"],
     ["auth review", "worker", "run w1 running 5m · worker running", "running"],
     ["Queued one", "", "run q1 queued 1m", "queued"],
     ["queued lead", "lead · build", "run queued · active 10m ago", "queued"],
   ]);
-  expect(chip().textContent).toBe("3 running · 3 needs you");
+  expect(chip().textContent).toBe("5 running · 2 needs you");
   // The lead's session is the item's row, not a row of its own.
   expect(labels()).not.toContain("多入口统一对话");
   panelRows()[0]!.onclick?.();

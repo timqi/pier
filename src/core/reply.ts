@@ -122,6 +122,10 @@ export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, numb
     ? `run ${r.runId} — ${NOT_IN_LEDGER}`
     : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}`;
 
+/** The one open-item status (tasks/types.ts `OpenStatus`) that asks anything of the user:
+ *  what `/status`, the status panel, its chip's `needs you` and the app badge group by. */
+export const waitsOnYou = (status: string): boolean => status === "waiting on you";
+
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {
   if (n < 1000) return String(n);
