@@ -222,7 +222,7 @@ function setup(
   update: {
     latest?: string;
     updater?: {
-      apply: () => Promise<"started" | "busy" | "not-installed" | "failed">;
+      apply: () => Promise<"started" | "not-installed" | "failed">;
       problem?: () => string | null;
     } | null;
   } = {},
@@ -846,35 +846,7 @@ describe("workbench server", () => {
     expect(await failed.json()).toEqual({ error: expect.stringContaining("pier service install") });
   });
 
-  it("answers busy as 409 when another handover or restart owns the gate", async () => {
-    const { app } = setup("/tmp", fakeSecrets(), {
-      latest: "0.9.0",
-      updater: { apply: () => Promise.resolve("busy" as const) },
-    });
-    const res = await app.request("/api/update", { method: "POST" });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: expect.stringContaining("already in progress") });
-  });
-
-  it("answers 202 rather than holding the response through a long drain", async () => {
-    // The handover drains first, which can take minutes on a busy Pier; a
-    // response held open that long dies at every proxy on the way.
-    vi.useFakeTimers();
-    try {
-      const apply = vi.fn(() => new Promise<never>(() => {}));
-      const { app } = setup("/tmp", fakeSecrets(), { latest: "0.9.0", updater: { apply } });
-      const pending = app.request("/api/update", { method: "POST" });
-      await vi.advanceTimersByTimeAsync(10_000);
-      const res = await pending;
-      expect(res.status).toBe(202);
-      expect(await res.json()).toEqual({ started: true, draining: true, latest: "0.9.0" });
-      expect(apply).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("reports a stale updater instead of draining for a handover that cannot happen", async () => {
+  it("reports a stale updater instead of attempting a handover that cannot happen", async () => {
     // The fnm case: the recorded Node is gone, so the unit would fail to run.
     // Reported whether or not an update is pending, and never attempted.
     const apply = vi.fn(() => Promise.resolve("started" as const));
@@ -2011,19 +1983,13 @@ describe("workbench server", () => {
     expect((await post("retry")).status).toBe(404);
   });
 
-  it.each(["drain", "abort"])("reports the originals after a post-clear %s failure", async (failure) => {
-    const { app, router, session, hub } = setup();
-    const clear = session.clearQueue;
-    session.clearQueue = async () => {
-      const queue = await clear();
-      if (failure === "drain") router.beginDrain();
-      return queue;
-    };
+  it("reports the originals after a post-clear abort failure", async () => {
+    const { app, session, hub } = setup();
     session.abort = async () => { throw new Error("abort failed"); };
     const res = await app.request("/api/sessions/s1/queue/deliver", {
       method: "POST", body: JSON.stringify({ mode: "restart" }),
     });
-    expect(res.status).toBe(failure === "drain" ? 503 : 404);
+    expect(res.status).toBe(404);
     const errors = hub.replay("s1", 0).filter((e) => e.type === "error");
     expect(errors).toEqual([expect.objectContaining({ message: expect.stringContaining("s-msg\nf-msg") })]);
     expect(session.calls).toEqual(["clearQueue"]);

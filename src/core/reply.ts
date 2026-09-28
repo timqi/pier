@@ -27,14 +27,17 @@ export function originLabel(origin: NoteOrigin): string {
  *  §Boot); `queued` are the texts Pi's queue held, which died with the process. */
 export function restartInput(at: number, downMs: number, queued: string[] = []): string {
   const time = new Date(at).toISOString().replace("T", " ").slice(0, 19);
-  const lines = [
+  return [
     `[Pier restarted at ${time} (down ${String(Math.round(downMs / 1000))}s) while this turn was running. ` +
     "Continue where you left off: the transcript above is complete up to the interruption; " +
     "a tool that was executing then was cut short — check its outcome before relying on it.]",
-  ];
-  if (queued.length) lines.push("Messages the user sent before the restart that you had not yet seen:", ...queued.map((text) => `> ${text}`));
-  return lines.join("\n");
+    ...(queued.length ? [restartQueued(queued)] : []),
+  ].join("\n");
 }
+
+/** The queued half alone, for a session a user reached first: its running turn has the transcript. */
+export const restartQueued = (queued: string[]): string =>
+  ["Messages the user sent before the restart that you had not yet seen:", ...queued.map((text) => `> ${text}`)].join("\n");
 
 /** A run's model as every surface names it: `tier · model id · level`, each part only when recorded. */
 export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>

@@ -24,7 +24,7 @@ Usage
   pier update                 install the latest release and restart the service
   pier update --check         only say whether one exists
   pier tools sync             install/update the managed CLI tools (rtk, …)
-  pier restart                finish running turns first, then restart the service
+  pier restart                restart the service; running turns resume after it
   pier reload                 re-read channel config and recycle idle sessions
   pier backup                 snapshot pier.db before a manual update
   pier login                  print a one-time sign-in link for the workbench (2 minutes)
@@ -204,15 +204,18 @@ async function tools(action = ""): Promise<void> {
 
 async function signalService(command: "restart" | "reload"): Promise<void> {
   if (process.platform !== "linux") {
-    return fail(`only under the systemd service — send ${command === "restart" ? "SIGUSR2" : "SIGHUP"} to the pier process yourself`);
+    return fail(`only under the systemd service — ${command === "restart" ? "stop and start" : "send SIGHUP to"} the pier process yourself`);
   }
   const { UNIT_NAME } = await import("./service.js");
-  const signal = command === "restart" ? "SIGUSR2" : "SIGHUP";
-  try {
+  // `--no-block`: the turn that ran this is cut by the stop, not by its own wait on it.
+  const args = command === "restart"
+    ? ["--user", "restart", "--no-block", UNIT_NAME]
     // `--kill-who`, not `--kill-whom`: the spelling every systemd parses (systemd/systemd#29793).
-    execFileSync("systemctl", ["--user", "kill", "-s", signal, "--kill-who=main", UNIT_NAME], { stdio: "inherit" });
+    : ["--user", "kill", "-s", "SIGHUP", "--kill-who=main", UNIT_NAME];
+  try {
+    execFileSync("systemctl", args, { stdio: "inherit" });
   } catch (err) {
-    // A failed kill already printed why; a missing systemctl printed nothing.
+    // A failed systemctl already printed why; a missing one printed nothing.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       process.stderr.write(`pier: systemctl is not on PATH — no systemd here.\n`);
     }
@@ -220,7 +223,7 @@ async function signalService(command: "restart" | "reload"): Promise<void> {
     return;
   }
   say(command === "restart"
-    ? "draining — running turns finish first (up to 5 minutes), then Pier restarts."
+    ? "restarting — Pier is back in a few seconds and resumes this turn."
     : "reloading — adapters re-read their config; idle sessions re-open with the current one.");
 }
 

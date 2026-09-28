@@ -497,32 +497,7 @@ describe("opening a session", () => {
   });
 });
 
-describe("drain", () => {
-  it("refuses a dispatch, telling both the chat and the caller (§5)", async () => {
-    router.beginDrain();
-    await expect(
-      router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" }),
-    ).rejects.toThrow(/restarting/);
-    expect(im.notes[0]?.[1].text).toContain("restarting");
-    expect(im.notes[0]?.[1].origin).toEqual({ kind: "error" });
-    // Gated before ensure: a drain must not be what opens a session.
-    expect(router.sessionOf(KEY)).toBeUndefined();
-  });
-
-  it("refuses a dispatch that was inside a slow ensure when the gate closed", async () => {
-    let release = (): void => {};
-    router = new Router(hub, () => new Promise((resolve) => {
-      release = () => resolve(fake);
-    }));
-    router.registerChannel(im.channel);
-    const dispatched = router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" });
-    dispatched.catch(() => {}); // asserted below; unhandled until then
-    router.beginDrain();
-    release();
-    await expect(dispatched).rejects.toThrow(/restarting/);
-    expect(im.notes[0]?.[1].text).toContain("restarting");
-  });
-
+describe("busy", () => {
   it("busy() lists only mid-turn sessions", async () => {
     await router.ensure(KEY);
     expect(router.busy()).toEqual([]);
@@ -620,18 +595,6 @@ describe("a queue with no turn left to drain it", () => {
     expect(fake.prompts).toEqual([]);
   });
 
-  it("tells the conversation when a drain refuses the promotion (§5)", async () => {
-    await router.ensure(KEY);
-    router.beginDrain();
-    fake.setQueue({ steering: ["the thing I typed"] });
-    fake.emit({ type: "queue-state", steering: ["the thing I typed"], followUp: [] });
-    await settle();
-    expect(fake.prompts).toEqual([]);
-    expect(await fake.pendingQueue()).toEqual({ steering: ["the thing I typed"], followUp: [] });
-    expect(im.notes.at(-1)?.[1].text).toContain("restarting");
-    expect(im.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
-  });
-
   it("reports a promotion that failed instead of losing it quietly", async () => {
     await router.ensure(KEY);
     fake.failPrompts(new Error("session gone"));
@@ -672,28 +635,15 @@ describe("a failed promotion", () => {
     fake.setQueue(structuredClone(originals));
   });
 
-  it.each(["steer", "restart", "auto"] as const)("reports the originals when drain begins during %s clear", async (mode) => {
-    const clear = fake.clearQueue;
-    fake.clearQueue = async () => {
-      const queue = await clear();
-      router.beginDrain();
-      return queue;
-    };
-    await expect(router.deliverQueue("s1", mode)).rejects.toThrow("restarting");
-    expect(fake.prompts).toEqual([]);
-    reported("restarting");
-  });
-
-  it.each(["reject", "drain"])("reports the originals after abort %s and does not touch new arrivals", async (outcome) => {
+  it("reports the originals after a failed abort and does not touch new arrivals", async () => {
     const abort = deferred();
     fake.abort = () => abort.promise;
     const deliver = router.deliverQueue("s1", "restart");
     await settle();
     fake.setQueue({ followUp: ["new arrival"] });
-    if (outcome === "reject") abort.reject(new Error("abort failed"));
-    else { router.beginDrain(); abort.resolve(); }
-    await expect(deliver).rejects.toThrow(outcome === "reject" ? "abort failed" : "restarting");
-    reported(outcome === "reject" ? "abort failed" : "restarting");
+    abort.reject(new Error("abort failed"));
+    await expect(deliver).rejects.toThrow("abort failed");
+    reported("abort failed");
     expect(await fake.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
     expect(fake.prompts).toEqual([]);
   });
@@ -834,15 +784,11 @@ describe("the speaker a session has been told about", () => {
     await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "queued", mode: "auto" });
     expect((await fake.pendingQueue()).followUp[0]).toContain("Ada<U1>");
     fake.setState("idle");
-    const clear = fake.clearQueue;
     if (failure === "before submission") {
-      fake.clearQueue = async () => {
-        const queue = await clear();
-        router.beginDrain();
-        return queue;
-      };
-      await expect(router.deliverQueue("s1", "steer")).rejects.toThrow("restarting");
-      router.endDrain();
+      const abort = fake.abort;
+      fake.abort = () => Promise.reject(new Error("abort failed"));
+      await expect(router.deliverQueue("s1", "restart")).rejects.toThrow("abort failed");
+      fake.abort = abort;
     } else {
       fake.failPrompts(new Error("uncertain submission"));
       await router.deliverQueue("s1", "steer");

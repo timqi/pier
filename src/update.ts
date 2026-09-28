@@ -88,16 +88,14 @@ export class UpdateCheck {
   }
 }
 
-/** `busy`: another handover or a restart already owns the gate. */
-export type UpdateStart = "started" | "busy" | "not-installed" | "failed";
+export type UpdateStart = "started" | "not-installed" | "failed";
 
 /** How this instance replaces itself, and when it is allowed to. */
 interface AutoUpdate {
   enabled: () => boolean;
   /** The updater stops the service, so anything running when it fires is thrown away. */
   idle: () => boolean;
-  /** Drains first: `idle()` is a snapshot, and a message that arrived just
-   *  after it must be refused, not killed mid-turn by the updater's SIGTERM. */
+  /** A turn that started after `idle()` is cut by the updater's stop and resumes at boot. */
   apply: () => Promise<UpdateStart>;
 }
 
@@ -111,7 +109,7 @@ export function startAutoUpdate(
   auto: AutoUpdate,
   pollMs = AUTO_POLL_MS,
 ): () => void {
-  // A drain can outlast a poll interval.
+  // An apply in flight must not be started twice by the next poll.
   let handingOver = false;
   const tick = async (): Promise<void> => {
     if (handingOver || !auto.enabled()) return;
@@ -122,8 +120,7 @@ export function startAutoUpdate(
     try {
       const started = await auto.apply();
       // §5: an update that never happens must not look like one never wanted.
-      if (started === "busy") log.info("auto-update: a handover or restart is already in progress");
-      else if (started !== "started") log.error(`auto-update could not start: ${started}`);
+      if (started !== "started") log.error(`auto-update could not start: ${started}`);
     } catch (err) {
       log.error("auto-update failed", err);
     } finally {
