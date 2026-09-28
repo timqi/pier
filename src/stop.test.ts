@@ -212,6 +212,19 @@ describe("resumeTurns", () => {
     }]);
   });
 
+  it("opens the resume and the queued-only follow-up with the session's users' language", async () => {
+    const zh = [{ role: "user" as const, text: "[Ada<U1> 12:00 lang=zh]\n继续" }];
+    const idle = fakeSession("s1", { scripted: true, history: zh });
+    const busy = fakeSession("s2", { scripted: true, history: zh });
+    busy.setState("streaming");
+    const { turns, deps } = resumeRig([idle, busy]);
+    turns.record("s1", KEY, ["first"], 1_000);
+    turns.record("s2", { ...KEY, conversationId: "C1/2" }, ["later"], 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(idle.systemInputs.map((input) => input.text)).toEqual([`[lang=zh]\n${restartInput(2_000, 1_000, ["first"])}`]);
+    expect(busy.systemInputs.map((input) => input.text)).toEqual([`[lang=zh]\n${restartQueued(["later"])}`]);
+  });
+
   it("says nothing to a streaming session with nothing queued, leaving its row to its turn", async () => {
     const session = fakeSession("s1", { scripted: true });
     session.setState("streaming");

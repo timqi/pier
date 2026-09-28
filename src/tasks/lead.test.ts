@@ -180,6 +180,20 @@ describe("a feature lead", () => {
     service.stop();
   });
 
+  it("opens a milestone with the lead's users' language, keeping the stored prompt as written", async () => {
+    const { service, sessions, store, bash, leadRan } = rig();
+    sessions.set("lead", fakeSession("lead", { reply: "lead says done", history: [{ role: "user", text: "[Ada<U1> 12:00 lang=zh]\n继续做" }] }));
+    await leadRan();
+    const task = await bash("echo member");
+    service.runGroup([task, task], "all", "lead", "lead", "followUp");
+    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
+    expect(sessions.get("lead")!.systemInputs.at(-1)!.text.startsWith(`[lang=zh]\n${MILESTONE}`)).toBe(true);
+    const resumed = store.latestRunForTarget("lead")!;
+    expect(resumed.context.resumePrompt!.startsWith(MILESTONE)).toBe(true);
+    expect(resumed.context.renderedPrompt!.startsWith(MILESTONE)).toBe(true);
+    service.stop();
+  });
+
   it("leaves a result as a plain callback when nobody waits on the lead", async () => {
     const { service, sessions, store, bash, leadRan } = rig();
     await leadRan();

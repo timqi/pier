@@ -4,6 +4,7 @@
 
 import type { AgentFactory, AgentRole, AgentSession } from "../core/types.js";
 import { quietLabel, restartInput, splitReply } from "../core/reply.js";
+import { userLanguage, withLanguage } from "../core/identity.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
@@ -73,6 +74,8 @@ export class AgentTaskRunner {
         const session = reused ?? await this.resolveSession(run, action, signal);
         // A reused session may have become busy while we waited for a slot.
         await this.waitUntilIdle(session, signal);
+        // Settles in a microtask: no user input lands between this read and the send.
+        const turns = await this.untilAborted(session.history(), signal);
         signal.throwIfAborted();
         // Task requests come seconds apart, so the 1h cache-write premium never
         // earns back; after idle, so a reused session's in-flight turn keeps its 1h.
@@ -117,7 +120,7 @@ export class AgentTaskRunner {
           signal.throwIfAborted();
           const fields = { taskId: run.taskId, runId: run.id, sourceSessionId: run.sourceSessionId, source: runSource(run) };
           const turn = session.systemInput(
-            prompt,
+            withLanguage(userLanguage(turns), prompt),
             resumed ? { kind: "restart", at: resumed.at, downMs: resumed.downMs, ...fields } : { kind: "task-delegation", ...fields },
             "prompt",
           );

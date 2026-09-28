@@ -104,7 +104,8 @@ agent run (those resume through the run):
   by the chat key: a chat's lookup creates a session for a chat that maps to
   none, and the home chat maps to none) — the router hands it its chat as the
   delivery key while the adapter is up, its own stream otherwise — then a
-  system input, mode `prompt`, origin `{ kind: "restart", at, downMs }`, text:
+  system input, mode `prompt`, origin `{ kind: "restart", at, downMs }`, text
+  (behind the users' `[lang=<code>]` stamp, [04 §Who is speaking](04-im-channels.md#who-is-speaking)):
 
   > `[Pier restarted at <time> (down <n>s) while this turn was running. Continue where you left off: the transcript above is complete up to the interruption; a tool that was executing then was cut short — check its outcome before relying on it.]`
   > followed, when `queued` is non-empty, by
