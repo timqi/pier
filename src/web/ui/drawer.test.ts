@@ -109,6 +109,27 @@ it("counts running and needs-you on the chip, omitting a zero half, and is absen
   drawer.renderDrawer();
   expect(chip().textContent).toBe("1 running");
   expect(chip().classList.contains("text-neutral-600")).toBe(true);
+
+  // The counts are copy, not the gate: a row neither counts leaves them as they are.
+  open = { items: [{ problem: "b", stage: "", runs: [], status: "running" }, { problem: "c", stage: "merged", runs: [], status: "pending release" }], unlisted: [] };
+  drawer.renderDrawer();
+  expect(chip().textContent).toBe("1 running");
+});
+
+// A row neither group counts still opens the panel: the chip is its entrance.
+it.each([
+  ["pending release", { items: [{ problem: "a", stage: "merged", runs: [], status: "pending release" as const }], unlisted: [] }],
+  ["stopped", { items: [{ problem: "a", stage: "", runs: [], status: "stopped" as const }], unlisted: [] }],
+  ["an unlisted queued run", { items: [], unlisted: [{ runId: "q1", name: "q", state: "queued" as const, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null }] }],
+])("reads `1 open` and opens with only %s", (_, items) => {
+  open = items;
+  drawer.renderDrawer();
+  expect(chip().textContent).toBe("1 open");
+  expect(chip().classList.contains("hidden")).toBe(false);
+  expect(chip().classList.contains("text-neutral-600")).toBe(true);
+  drawer.openDrawer();
+  expect(menu.openPanel).toHaveBeenCalledOnce();
+  expect(panelRows()).toHaveLength(1);
 });
 
 // The head is the bar, not a row: it never counts on the chip, but its unread
@@ -151,6 +172,14 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
 it("does not open with nothing to show, and closes when it runs out", () => {
   drawer.renderDrawer();
   drawer.openDrawer();
+  expect(menu.openPanel).not.toHaveBeenCalled();
+  // An answer with no rows is still nothing to show.
+  open = { items: [], unlisted: [] };
+  sessions = [row("idle")];
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  expect(chip().classList.contains("hidden")).toBe(true);
+  expect(chip().textContent).toBe("");
   expect(menu.openPanel).not.toHaveBeenCalled();
 
   sessions = [row("a", { state: "streaming" })];

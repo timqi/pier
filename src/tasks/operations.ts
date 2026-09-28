@@ -6,6 +6,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, TASK_RUN_STATES, type LedgerRun, type ModelRef, type ModelTier, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
+import { clipResult } from "./callbacks.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
@@ -148,16 +149,8 @@ const callbackTarget = async (
 
 /** A group echoes many results at once, so each is capped; a single-run
  * `recover` stays whole — it is the escape hatch every truncation note points at. */
-const trimResult = (summary: RunSummary): RunSummary => {
-  if (summary.result?.type !== "agent" || summary.result.text.length <= 2000) return summary;
-  return {
-    ...summary,
-    result: {
-      ...summary.result,
-      text: `${summary.result.text.slice(0, 2000)}\n[truncated — pier task recover --run ${summary.runId} --reason … for the full text]`,
-    },
-  };
-};
+const trimResult = (summary: RunSummary): RunSummary =>
+  summary.result?.type !== "agent" ? summary : { ...summary, result: { ...summary.result, text: clipResult(summary.result.text, 2000, summary.runId) } };
 
 /** Delivered, given up on and reported, or never owed (`callback:"none"`).
  *  Anything else is still on its way, and reading it here would be reading it twice. */

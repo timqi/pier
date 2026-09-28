@@ -268,12 +268,13 @@ export function renderDrawer(): void {
   // The app icon counts a turn to look at — unread, or a design to finalize —
   // plus the conversation's own unread reply, which the bar stands for instead of a row.
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
+  // The rows open the panel; the counts are only its copy, and a row neither counts is still an entrance.
+  const total = waiting.length + running.length;
   const counts = [...(runningCount ? [`${runningCount} running`] : []), ...(waiting.length ? [`${waiting.length} needs you`] : [])];
-  const text = counts.join(" · ");
-  shown = !!text;
-  chip.textContent = text;
-  chip.classList.toggle("hidden", !text);
-  chip.classList.toggle("block", !!text);
+  shown = total > 0;
+  chip.textContent = counts.join(" · ") || (shown ? `${total} open` : "");
+  chip.classList.toggle("hidden", !shown);
+  chip.classList.toggle("block", shown);
   chip.classList.toggle("text-amber-700", waiting.length > 0);
   chip.classList.toggle("text-neutral-600", waiting.length === 0);
   if (lists?.[0].isConnected && !lists[0].closest("[inert]")) {

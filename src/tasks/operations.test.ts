@@ -163,10 +163,16 @@ describe("task operations", () => {
     expect((await losing({ operation: "recover", run_id: "w", reason: "winner callback was truncated" }) as RunSummary).runId).toBe("w");
     await expect(losing({ operation: "recover", run_id: "l", reason: "x" })).rejects.toThrow(/cannot wait for this member/);
 
-    const done = rig([member("a"), member("b")], [group("g", ["a", "b"])]);
+    // Each member is capped at 2000 by its head and its tail, where the contract puts the decision.
+    const tail = "Needs your decision: merge or hold?";
+    const at = (id: string, text: string) => member(id, { result: { type: "agent", text, sessionId: `session-${id}` } });
+    const done = rig([at("a", `${"x".repeat(2500)}\n${tail}`), at("b", "y".repeat(2000))], [group("g", ["a", "b"])]);
     const got = await done({ operation: "recover", group_id: "g", reason: "x" }) as GroupSummary;
     expect(got.members.map((m) => m.runId)).toEqual(["a", "b"]);
-    expect(got.members[0]!.result?.type === "agent" && got.members[0]!.result.text).toContain("pier task recover --run a --reason");
+    const text = (i: number) => (got.members[i]!.result as { text: string }).text;
+    expect(text(0)).toMatch(/^x{1500}\n\[… 536 chars omitted — pier task recover --run a --reason … returns the full text\]\nx+\nNeeds your decision: merge or hold\?$/);
+    expect(text(0).length).toBeLessThan(2100);
+    expect(text(1)).toBe("y".repeat(2000));
     expect(((await done({ operation: "recover", run_id: "a", reason: "x" })) as RunSummary).result?.type === "agent").toBe(true);
   });
 
