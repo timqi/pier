@@ -17,7 +17,7 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
  *  surface lists of a probe that found nothing. */
 const KEPT_PROBES = 50;
 
-/** The error of a run a restart or shutdown stopped: not a result, not a cancel. */
+/** The error of a run that cannot continue after a restart: not a result, not a cancel. */
 export const INTERRUPTED = "Pier restarted while the run was active";
 
 export class TaskStore {
@@ -392,17 +392,9 @@ export class TaskStore {
     `, now);
   }
 
-  interruptRunning(now = Date.now()): TaskRun[] {
-    return this.#many<TaskRun>(
-      "SELECT json FROM task_runs WHERE state IN ('queued', 'running')",
-    ).map((run) => {
-      run.state = "interrupted";
-      run.error = INTERRUPTED;
-      run.finishedAt = now;
-      if (run.callbackSessionId) run.callbackState = "pending";
-      this.saveRun(run);
-      return run;
-    });
+  /** In queue order, so a resumed boot takes slots in the order they were asked for. */
+  inFlightRuns(): TaskRun[] {
+    return this.#many<TaskRun>("SELECT json FROM task_runs WHERE state IN ('queued', 'running') ORDER BY queued_at");
   }
 
   /** The continuous conversation's open items, oldest first; `runIds` as main wrote them. */
