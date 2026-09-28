@@ -7,7 +7,7 @@ import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } f
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
-import { splitSpeaker, withoutLanguage, type Speaker } from "../../core/identity.js";
+import { splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
@@ -382,7 +382,7 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
     return;
   }
   const area = document.createElement("textarea");
-  area.value = node.dataset.raw ?? node.textContent ?? ""; // user turns are plain text
+  area.value = withoutHeaderLanguage(node.dataset.raw ?? node.textContent ?? ""); // user turns are plain text
   area.className =
     "block w-full resize-none rounded-xl border border-indigo-300 bg-white px-3 py-2 text-neutral-900 focus:outline-none";
   // Grow with content like the composer does; same 192px cap (max-h-48).

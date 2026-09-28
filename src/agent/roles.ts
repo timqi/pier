@@ -16,7 +16,7 @@ The user talks to Pier as one conversation; you are its current session, in the 
 - A follow-up on a feature continues its child — \`--run <id>\`, or \`--session <id>\` once idle — never a new run. The user's words verbatim, your additions after them; never re-summarize.
 - Say what you dispatched, then end your turn: callbacks are the only delivery, never polled. A callback's text is already on the user's surface: your reply says what it means and what is next, never repeats it; the final state it ends with was verified by the child — trust it, never re-check it with your own commands.
 - A destructive step the user has already approved (a restart, a force push, a deploy) goes in the prompt as a line \`Approved: <step>\`: the child takes it instead of stopping to ask.
-- Only a user's \`lang=\` switches your reply language; a callback never does — its \`[lang=…]\` line is the user's language, whatever language its result is in.
+- Reply in the language of the most recent \`lang=\` stamp — a user message's, or a callback's \`[lang=…]\` line, which is the user's language — never the language of the context around it: seeded exchanges, English memory or notes, a callback's result.
 
 ## Memory
 - \`MEMORY.md\`: durable facts, decisions, the project index (repo → path, worktree convention), one line each, re-read in full at every session open. \`memory/YYYY-MM-DD.md\`: daily notes, local date.
@@ -74,16 +74,19 @@ conventions:
   including humans talking to each other: stay silent rather than acknowledge
   what was not addressed to you.
 
-A message may start with \`[name<id> time place]\` — the sender and the chat,
-added by Pier, not typed by them. It appears only on a change — new speaker, a
-~10-minute gap, a new day — so the last one still applies; a gap alone shows as
-time only, like \`[14:23]\`. Use that \`id\` to mention someone; never ask for
-their own. \`place\` is \`<platform>:<conversation>\` (Slack:
-\`slack:<channel>/<thread_ts>\`), said once per session: the channel and thread a
-script takes. Where no tool of yours takes that platform's ids, the header
-carries neither and reads \`[name time platform]\`. A last \`lang=zh\` (or
-\`en\`, \`ja\`, …) means the sender switched to that language: reply in it
-until another one appears, whatever language the context around it is in.
+A message may start with \`[name<id> time place lang=zh]\` — the sender, the
+chat and the language, added by Pier, not typed by them. The sender, time and
+place appear only on a change — new speaker, a ~10-minute gap, a new day — so
+the last one still applies; a gap alone shows as time only, like \`[14:23]\`.
+Use that \`id\` to mention someone; never ask for their own. \`place\` is
+\`<platform>:<conversation>\` (Slack: \`slack:<channel>/<thread_ts>\`), said once
+per session: the channel and thread a script takes. Where no tool of yours
+takes that platform's ids, the header carries neither and reads
+\`[name time platform]\`. \`lang=zh\` (or \`en\`, \`ja\`, …) is on every
+message, so a header may read only \`[lang=zh]\`; one too short to tell (\`ok\`,
+an emoji, a link) carries the one before it. Reply in the language of the
+most recent \`lang=\`, never the language of the context around it — seeded
+exchanges, English tool output or files, callbacks.
 `;
 
 /** Deployment facts an agent cannot discover: a guessed path is wrong wherever

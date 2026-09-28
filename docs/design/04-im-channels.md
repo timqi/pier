@@ -204,10 +204,11 @@ speaker header.
 
 `InboundMessage.sender` carries `{id, name}`: the adapter resolves the display
 name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
-a different speaker, a 10-minute gap, a new day, a different conversation, or
-a different language — `lang=zh` last, from `detectLanguage` (CJK characters
-against Latin words, code and paths excluded), so the reply follows the
-sender instead of an English-heavy context.
+a different speaker, a 10-minute gap, a new day or a different conversation;
+`lang=zh` rides every message, last, from `detectLanguage` (CJK characters
+against Latin words, code and paths excluded) or, on too little to tell, the
+session's last one, so the most recent stamp is always the sender's language
+and the reply follows it instead of an English-heavy context.
 A system input the outbox delivers (a callback, a run message) opens with
 `[lang=<code>]`, the users' last language read off the transcript — or the
 seed's stamp on a head nobody has spoken to yet — so an English result does

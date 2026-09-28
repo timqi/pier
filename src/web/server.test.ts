@@ -1859,7 +1859,7 @@ describe("workbench server", () => {
     let res = await post({ text: "hello from the web" });
     expect(res.status).toBe(202);
     // The first web message carries the operator header (core/identity.ts);
-    // the follow-ups below are the same speaker, minute and language, so none.
+    // the follow-ups below are the same speaker and minute, so only the language.
     expect(session.calls).toHaveLength(1);
     expect(session.calls[0]).toMatch(
       /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2} lang=en\]\nhello from the web$/,
@@ -1870,9 +1870,9 @@ describe("workbench server", () => {
     await post({ text: "!change course" });
     await post({ text: "explicit", mode: "steer" });
     expect(session.calls.slice(1)).toEqual([
-      "followUp:wait for it",
-      "steer:change course",
-      "steer:explicit",
+      "followUp:[lang=en]\nwait for it",
+      "steer:[lang=en]\nchange course",
+      "steer:[lang=en]\nexplicit",
     ]);
   });
 

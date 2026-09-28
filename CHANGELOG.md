@@ -16,7 +16,7 @@
 
 ### Fixed
 
-- The head no longer drifts into English after an English callback: every callback and run message it receives opens with `[lang=<code>]`, the language its user last wrote in, read off the transcript so it survives a restart and carried on the seed across a rotation, and the dispatcher contract says only a user's `lang=` switches the reply language. The chat and the web do not show the stamp.
+- The head no longer drifts into English after an English callback: every callback and run message it receives opens with `[lang=<code>]`, the language its user last wrote in, read off the transcript so it survives a restart and carried on the seed across a rotation, and the contracts say the reply language is the most recent `lang=`, never the surrounding context's. Every user message carries `lang=<code>` in its header, not only a change of language, so a stamp said once is not outvoted by English context; `ok`, an emoji or a link carries the last one. The chat and the web do not show the stamp.
 
 ## 0.3.1 — 2026-09-28
 

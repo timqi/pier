@@ -1,8 +1,9 @@
 // Who is talking, when, and where — prefixed onto an inbound prompt so a
 // group-chat session can tell speakers apart, mention them back, and name its
 // own conversation to a script. Per turn, never in the session's instructions
-// (a thread is shared), and emitted only on news: a header costs ~15 tokens,
-// wasted in a DM where the counterpart never changes.
+// (a thread is shared); who, when and where only on news — a header costs ~15
+// tokens, wasted in a DM where the counterpart never changes — the language on
+// every message, since the most recent stamp is what the reply follows.
 
 import type { ChatTurn } from "./types.js";
 
@@ -60,7 +61,8 @@ interface Seen {
 }
 
 /** What each session has already been told. In memory: after a restart one
- *  redundant header is a rounding error. */
+ *  redundant header is a rounding error, and a first message too short to tell
+ *  goes unstamped, leaving the transcript's last stamp the most recent. */
 export class SenderPrefix {
   private readonly seen = new Map<string, Seen>();
 
@@ -68,8 +70,10 @@ export class SenderPrefix {
    *  knows. `conversation` is the chat's `<channelId>:<conversationId>`, told
    *  once: a session never moves, but the rule stays the same as the rest.
    *  `opaqueIds` is the platform's (`core/types.ts`): its ids buy nothing.
-   *  `text` is the message, for its language: `lang=zh` tells the model which
-   *  language to answer in, since an English-heavy context drags replies there. */
+   *  `text` is the message, for its language: `lang=zh` rides every message
+   *  that has one, since an English-heavy context drags replies there and a
+   *  stamp said once is outvoted by what follows it. Too little to tell keeps
+   *  the last one. */
   next(
     sessionId: string,
     sender: Sender | undefined,
@@ -88,8 +92,7 @@ export class SenderPrefix {
     const gap = !last || at - last.at >= GAP_MS;
     const newDay = !last || day(new Date(last.at)) !== day(now);
     const newPlace = !!conversation && last?.conversation !== conversation;
-    const newLang = !!lang && last?.lang !== lang;
-    if (!newSpeaker && !gap && !newDay && !newPlace && !newLang) return "";
+    if (!newSpeaker && !gap && !newDay && !newPlace && !lang) return "";
 
     // The id is the only thing a mention can be built from; an unresolved name
     // is the id, and `U123<U123>` would read as a broken record.
@@ -103,7 +106,7 @@ export class SenderPrefix {
     const when = clock ? `${newDay ? `${day(now)} ` : ""}${hhmm(now)}` : "";
     const place = opaqueIds ? conversation?.split(":")[0] : conversation;
     const where = newPlace && place ? sanitizePlace(place) : "";
-    return `[${[who, when, where, newLang ? `lang=${lang}` : ""].filter(Boolean).join(" ")}]`;
+    return `[${[who, when, where, lang ? `lang=${lang}` : ""].filter(Boolean).join(" ")}]`;
   }
 
   forget(sessionId: string): void {
@@ -138,6 +141,13 @@ export const withLanguage = (lang: string | undefined, text: string): string =>
 /** The input as a surface shows it: the stamp is for the model. */
 export const withoutLanguage = (text: string): string => text.replace(LANG_STAMP, "");
 
+const HEADER_LANG = /^(\[[^\n[\]]*?) ?lang=[a-z]{2}\]\n/;
+
+/** A stored user message to resend: the router stamps it afresh, and the old
+ *  stamp left in the body would be the most recent one the model reads. */
+export const withoutHeaderLanguage = (text: string): string =>
+  text.replace(HEADER_LANG, (_, head: string) => (head === "[" ? "" : `${head}]\n`));
+
 /** What a header line said, once read back off a stored message. */
 export interface Speaker {
   /** Absent when the platform only ever knew the id. */
@@ -148,7 +158,8 @@ export interface Speaker {
   /** `slack:C0123/1712.345600` — platform, then the adapter's conversation id,
    *  which is absent on a platform whose ids the agent cannot use. */
   where?: string;
-  /** `zh`, `en`: the language the message switched to. */
+  /** `zh`, `en`: the language the message is in, or the last one when it is
+   *  too short to tell. */
   lang?: string;
   /** The message with its header line removed. */
   text: string;
