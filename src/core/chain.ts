@@ -2,7 +2,7 @@
 // `$PIER_HOME/home`, whose newest — the head — takes every one, rotated lazily
 // once idle past an hour or full (docs/design/10-continuous-session.md).
 
-import { mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -10,7 +10,7 @@ import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
 import { day, userLanguage, withLanguage } from "./identity.js";
-import { cut } from "./reply.js";
+import { cut, openItemMarkers } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
 import type {
@@ -99,7 +99,27 @@ export class MainChain {
    *  it before anything is appended, so the seed reaches the chat too. */
   private chat?: ConversationKey;
 
-  constructor(private readonly db: DatabaseSync, private readonly deps: ChainDeps) {}
+  constructor(private readonly db: DatabaseSync, private readonly deps: ChainDeps) {
+    deps.router.onTurnEnd((sessionId, text) => {
+      if (this.members()[0]?.sessionId === sessionId) this.note(sessionId, text);
+    });
+  }
+
+  /** The head's `<note>` lines, appended to today's daily note: a note costs the head no tool call. */
+  private note(sessionId: string, text: string): void {
+    const { notes } = openItemMarkers(text);
+    if (!notes.length) return;
+    const file = join("memory", `${day(new Date(this.now()))}.md`);
+    const path = join(this.deps.home, file);
+    try {
+      mkdirSync(join(this.deps.home, "memory"), { recursive: true });
+      // A file the head edited may end mid-line; a note never joins that line.
+      const midLine = /[^\n]$/.test(readFileSync(path, { encoding: "utf8", flag: "a+" }));
+      appendFileSync(path, (midLine ? "\n" : "") + notes.map((n) => `- ${n}\n`).join(""));
+    } catch (err) {
+      this.deps.router.reportTo(sessionId, `notes: could not append to ${file} (${String(err)}): ${notes.join(" | ")}`);
+    }
+  }
 
   /** Newest first. */
   members(): ChainMember[] {

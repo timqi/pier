@@ -160,15 +160,15 @@ const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
 const tag = (literal: string): string => literal.split("").join(ZW);
 const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");
 /** A tag that hides what it wraps: a streaming renderer never cuts inside one. */
-const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done"].map(tag).join("|")})${ZW}>`, "gi");
+const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done", "note"].map(tag).join("|")})${ZW}>`, "gi");
 const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 
-/** Main's open-item markers (docs/design/10-continuous-session.md): stripped like
- *  `<silent>`, and read back by core/chain.ts on the head's turn end. Code is
- *  content, so a marker inside a fence or a code span is neither. Group 1 is an
- *  `<open>` body, group 2 a `<done>` body. */
+/** Main's markers (docs/design/10-continuous-session.md): stripped like
+ *  `<silent>`, and read back on the head's turn end. Code is content, so a
+ *  marker inside a fence or a code span is neither. Group 1 is an `<open>`
+ *  body, group 2 a `<done>` body, group 3 a `<note>` body. */
 const MARKER = new RegExp(
-  `${tag("<open>")}([\\s\\S]*?)${tag("</open>")}[ \\t]*\\n?|${tag("<done>")}([\\s\\S]*?)${tag("</done>")}[ \\t]*\\n?`,
+  ["open", "done", "note"].map((t) => `${tag(`<${t}>`)}([\\s\\S]*?)${tag(`</${t}>`)}[ \\t]*\\n?`).join("|"),
   "gi",
 );
 const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
@@ -180,16 +180,18 @@ export type OpenItemMarker =
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
-/** The markers in reply order; `dropped` holds the ones with no problem text,
- *  for the caller to log. */
-export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; dropped: string[] } {
+/** The markers in reply order, `notes` the daily-note lines; `dropped` holds
+ *  the ones with no text, for the caller to log. */
+export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; notes: string[]; dropped: string[] } {
   const markers: OpenItemMarker[] = [];
+  const notes: string[] = [];
   const dropped: string[] = [];
   replaceOutsideCode(markdown, MARKER, (m) => {
     if (m[1] === undefined) {
-      const problem = oneLine(m[2] ?? "");
-      if (problem) markers.push({ op: "done", problem });
-      else dropped.push(m[0].trim());
+      const body = oneLine(m[2] ?? m[3] ?? "");
+      if (!body) dropped.push(m[0].trim());
+      else if (m[2] === undefined) notes.push(body);
+      else markers.push({ op: "done", problem: body });
       return "";
     }
     let rest = oneLine(m[1]);
@@ -205,7 +207,7 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
     else dropped.push(m[0].trim());
     return "";
   });
-  return { markers, dropped };
+  return { markers, notes, dropped };
 }
 
 /** Why the agent stayed quiet; hidden from the chat, shown on the workbench,

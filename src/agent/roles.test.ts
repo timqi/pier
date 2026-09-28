@@ -13,6 +13,12 @@ describe("the dispatcher contract", () => {
     expect(DISPATCHER).toMatch(/auto 1\/3/);
   });
 
+  it("shows a note in the marker the chain appends, and the default goal of a code worker", () => {
+    const example = /`(<note>[^`]*<\/note>)`/.exec(DISPATCHER)?.[1];
+    expect(openItemMarkers(example!).notes).toEqual(["line"]);
+    expect(DISPATCHER).toContain("`\u00b7 until \u5ba1\u67e5\u901a\u8fc7\u5e76\u5408\u5e76`");
+  });
+
   it("names the three tiers once, in one line, and leaves the skill's prose to the skill", () => {
     // The skill is read on demand only, so the table the head fills every dispatch is here.
     const line = DISPATCHER.split("\n").filter((l) => l.includes("`hardest`") && l.includes("`cheap`"));

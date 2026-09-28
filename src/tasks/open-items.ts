@@ -92,7 +92,7 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
 /** The head's reply's markers, written; answers whether a row changed. */
 export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): boolean {
   const { markers, dropped } = openItemMarkers(text);
-  for (const marker of dropped) log.warn(`open items: dropped a marker with no problem text: ${marker}`);
+  for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
   return markers.length > 0 && store.markOpenItems(markers, now) > 0;
 }
 

@@ -19,7 +19,10 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
 Every command returns at once and prints the receipt as compact JSON on
-stdout, exit 0. A refusal is one `task: <reason>` line on stderr, exit 1;
+stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
+`<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
+a resume `resumed: …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
+and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
 argv errors are the usage line, exit 2, before the socket is touched.
 `--prompt -` reads stdin, and an empty one is an argv error; nothing else
 reads it.

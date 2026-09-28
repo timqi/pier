@@ -86,7 +86,7 @@ export class Router {
    *  here on — the boot's resume owns every turn that was running. */
   private stopped = false;
   private turnStarted?: (sessionId: string, key: ConversationKey) => void;
-  private turnEnded?: (sessionId: string, text: string) => void;
+  private readonly turnEnded: ((sessionId: string, text: string) => void)[] = [];
 
   constructor(
     private readonly hub: EventHub,
@@ -136,9 +136,10 @@ export class Router {
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
-   *  turn is not one. Registered by the task service (tasks/service.ts). */
+   *  turn is not one. Registered by the task service (tasks/service.ts) and the
+   *  chain (core/chain.ts); a listener must not throw. */
   onTurnEnd(listener: (sessionId: string, text: string) => void): void {
-    this.turnEnded = listener;
+    this.turnEnded.push(listener);
   }
 
   /** Every attached session's turn as it begins, with the key it will answer
@@ -333,7 +334,7 @@ export class Router {
             `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
           );
           if (this.stopped) return;
-          if (!payload.error) this.turnEnded?.(session.id, payload.text);
+          if (!payload.error) for (const ended of this.turnEnded) ended(session.id, payload.text);
           const channel = this.channels.get(key.channelId);
           if (channel) {
             const reply = splitReply(payload.text, payload.meta);

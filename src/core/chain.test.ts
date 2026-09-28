@@ -1,10 +1,10 @@
 // The continuous conversation's chain: which session a user message lands on,
 // when a new one starts, and what the new one is told.
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentDefaults } from "../agent/types.js";
 import { openDb } from "../db.js";
 import { MainChain } from "./chain.js";
@@ -207,6 +207,32 @@ describe("the continuous conversation's chain", () => {
     // Nothing on disk to page back to: a member left behind would be an unknown session forever.
     expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
     expect(r.chain.chainOf("gone")).toBeUndefined();
+  });
+
+  it("appends the head's <note> lines to today's daily note, on its own line, and nobody else's", async () => {
+    const r = rig();
+    const head = r.existing("h1", r.clock.now - 60_000);
+    const older = r.existing("h0", r.clock.now - 120_000);
+    await r.router.ensure({ channelId: "web", conversationId: "h1" });
+    await r.router.ensure({ channelId: "web", conversationId: "h0" });
+    const file = join(r.home, "memory", `${day(new Date(r.clock.now))}.md`);
+    head.emit({ type: "turn-end", text: "Merged.\n<note>决定：审查默认 balanced</note>" });
+    expect(readFileSync(file, "utf8")).toBe("- 决定：审查默认 balanced\n");
+    writeFileSync(file, "- edited by hand");
+    older.emit({ type: "turn-end", text: "<note>not the head</note>" });
+    head.emit({ type: "turn-end", text: "<note>one</note>\n<note>two</note>" });
+    expect(readFileSync(file, "utf8")).toBe("- edited by hand\n- one\n- two\n");
+  });
+
+  it("tells the head's conversation when a note could not be written", async () => {
+    const r = rig();
+    const head = r.existing("h1", r.clock.now - 60_000);
+    await r.router.ensure({ channelId: "web", conversationId: "h1" });
+    mkdirSync(r.home, { recursive: true });
+    writeFileSync(join(r.home, "memory"), "a file, not the directory");
+    const told = vi.spyOn(r.router, "reportTo");
+    head.emit({ type: "turn-end", text: "<note>kept anyway</note>" });
+    expect(told).toHaveBeenCalledWith("h1", expect.stringMatching(/^notes: could not append to memory\/.*: kept anyway$/));
   });
 
   it("never rotates a head mid-turn", async () => {

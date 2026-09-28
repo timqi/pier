@@ -5,8 +5,9 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 
 # Pier tasks
 
-`pier task --help` lists the ten commands and their flags. Each prints one
-JSON receipt, exit 0; a refusal is a `task:` line, exit 1; a bad flag is
+`pier task --help` lists the ten commands and their flags. `run` prints one
+line, `<state> <runId> · <where the result goes>` (`--json`: the whole
+receipt); the others one line of JSON; exit 0; a refusal is a `task:` line, exit 1; a bad flag is
 `task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
 ## Delegate, then end your turn
@@ -29,7 +30,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | --- | --- |
 | `--task-id <id>` | a saved definition, as is (run now) |
 | `--session <id> --prompt …` | continue an idle session (it keeps its cwd and model) |
-| `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt's `delivery` says which |
+| `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
 | `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--role`/`--design`/`--session` beside it are refused |
 

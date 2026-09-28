@@ -66,6 +66,10 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - `$PIER_HOME/home` (`pierPath("home")`) holds memory only: `MEMORY.md`
   (one-line facts), `memory/YYYY-MM-DD.md` (daily notes, local date), an
   optional `AGENTS.md` Pi loads as the cwd's own.
+- A head reply's `<note>line</note>` is stripped like the open-item markers
+  and appended as `- line` to today's `memory/YYYY-MM-DD.md` on its `turn-end`
+  (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a failed write
+  is reported to the head's conversation with the lost lines.
 - `<pier>/dispatcher.md` is injected beside `<pier>/AGENTS.md`
   (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
   the home.
@@ -146,6 +150,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   stopped on nothing needing the user; the cap is 3 unless the user set one,
   and a result still short at the cap turns the stage into `waiting on you:
   <blocker>`. No goal, and the head reports and waits.
+- A code worker's default goal is `· until 审查通过并合并`: on its success the
+  head dispatches a review, then continues the worker to merge, asking the
+  user first only for a seam, a design, or the restart after.
 - Every design lead not closed whose runs have not reported `Design final:`
   (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
   named by its creating run, unless an item or an unlisted run already holds

@@ -278,6 +278,7 @@ describe("open-item markers", () => {
         { op: "done", problem: "60K rotation" },
         { op: "open", problem: "open items 视图", stage: "worker running", runIds: [] },
       ],
+      notes: [],
       dropped: [],
     });
   });
@@ -288,6 +289,12 @@ describe("open-item markers", () => {
     ]);
   });
 
+  it("reads a note as one line beside the items, stripped like them", () => {
+    const raw = "Merged.\n<note>决定：审查默认用 balanced\n 不用 cheap</note>\n<done>CI 修复</done>";
+    expect(openItemMarkers(raw)).toEqual({ markers: [{ op: "done", problem: "CI 修复" }], notes: ["决定：审查默认用 balanced 不用 cheap"], dropped: [] });
+    expect(streamBody(raw)).toBe("Merged.");
+  });
+
   it("keeps a parenthetical that is not a run token in the stage, and a stageless item", () => {
     expect(openItemMarkers("<open>review\n src/auth — proposed (not applied)</open><open>just a problem</open>").markers).toEqual([
       { op: "open", problem: "review src/auth", stage: "proposed (not applied)", runIds: [] },
@@ -296,8 +303,8 @@ describe("open-item markers", () => {
   });
 
   it("drops a marker with no problem text and leaves the reply otherwise untouched", () => {
-    const raw = "Hi.\n<open> — stage (run r1)</open><done> </done>";
-    expect(openItemMarkers(raw)).toEqual({ markers: [], dropped: ["<open> — stage (run r1)</open>", "<done> </done>"] });
+    const raw = "Hi.\n<open> — stage (run r1)</open><done> </done><note> </note>";
+    expect(openItemMarkers(raw)).toEqual({ markers: [], notes: [], dropped: ["<open> — stage (run r1)</open>", "<done> </done>", "<note> </note>"] });
     expect(streamBody(raw)).toBe("Hi.");
   });
 

@@ -34,7 +34,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
     usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
       "        [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
-      "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…",
+      "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
   },
   save: {
@@ -59,7 +59,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
 const USAGE = [
   "usage: pier task <command> … — subagents and scheduled tasks (skills/pier-tasks)",
   ...Object.values(COMMANDS).map(({ usage, help }) => `  ${usage}\n      ${help}`),
-  "`--prompt -` reads stdin. The receipt is one line of JSON (`--model ?` one pin per line), exit 0; a refusal is one `task:` line, exit 1.",
+  "`--prompt -` reads stdin. A run's receipt is one line, `<state> <runId> · <where the result goes>` (its JSON with --json), any other answer one line of JSON (`--model ?` one pin per line), exit 0; a refusal is one `task:` line, exit 1.",
 ].join("\n");
 
 /** Flags that belong to the batch, never to one member. */
@@ -104,8 +104,22 @@ function segments(argv: string[]): string[][] {
   return out;
 }
 
+type Receipt = { runId?: string; groupId?: string; state?: string; next?: string; members?: { runId: string }[]; delivery?: string; run?: Receipt; message?: { runId: string; state: string; error: string | null } };
+
+/** A run's receipt in one line: the ids and where the result goes are all a model keeps of it. */
+function receiptLine(result: unknown): string | undefined {
+  const r = result as Receipt | null;
+  if (r?.run) return `resumed: ${receiptLine(r.run) ?? JSON.stringify(r.run)}`;
+  if (r?.message) return `${r.delivery ?? "message"} → run ${r.message.runId} · ${r.message.state}${r.message.error ? `: ${r.message.error}` : ""}`;
+  if (r?.groupId && r.members) return `${r.state} group ${r.groupId}: ${r.members.map((m) => m.runId).join(", ")} · ${r.next}`;
+  return r?.runId ? `${r.state} ${r.runId} · ${r.next}` : undefined;
+}
+
 export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo = processIo): Promise<number> {
-  const [name, ...rest] = argv;
+  const [name, ...all] = argv;
+  // `--json` shapes the output, never the request: it is taken off before argv is read.
+  const json = name === "run" && all.includes("--json");
+  const rest = json ? all.filter((arg) => arg !== "--json") : all;
   if (!name || name === "--help" || name === "-h") {
     io.stdout(USAGE);
     return name ? 0 : 2;
@@ -136,7 +150,7 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
   if (status === 200) {
     // Compact: the reader is a model, and the ids are what it keeps; an answer
     // the server already wrote in lines (`--model ?`) is printed as it came.
-    io.stdout(typeof body.result === "string" ? body.result : JSON.stringify(body.result));
+    io.stdout(typeof body.result === "string" ? body.result : (name === "run" && !json && receiptLine(body.result)) || JSON.stringify(body.result));
     // A full page looks the same as "that is all" unless it says otherwise.
     if (params.operation === "runs" && Array.isArray(body.result) && body.result.length === params.limit) {
       io.stderr(`task: ${String(params.limit)} shown, the --limit; there may be more (--state, --since, --limit)`);

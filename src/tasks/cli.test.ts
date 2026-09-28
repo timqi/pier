@@ -75,6 +75,26 @@ describe("pier task", () => {
     expect(running.err).toEqual(["task: run r1 is running: callback options apply to a resumed run only; drop them to steer or follow up"]);
   });
 
+  it("prints a run's receipt as one line, and the whole answer with --json", async () => {
+    const next = "the result arrives as a callback message once your turn ends; nothing to query";
+    const receipts: [unknown, string][] = [
+      [{ runId: "r1", taskId: "t1", state: "queued", callbackSessionId: "s1", next }, `queued r1 · ${next}`],
+      [{ groupId: "g1", state: "running", members: [{ runId: "a" }, { runId: "b" }], next }, `running group g1: a, b · ${next}`],
+      [{ delivery: "resume", run: { runId: "r2", state: "queued", next } }, `resumed: queued r2 · ${next}`],
+      [{ delivery: "steer", message: { id: "m1", runId: "r1", state: "delivered", error: null } }, "steer → run r1 · delivered"],
+    ];
+    for (const [result, line] of receipts) {
+      const { run, out, posted } = rig({ status: 200, body: { result } });
+      expect(await run("run", "--prompt", "go", "--model", "balanced")).toBe(0);
+      expect(await run("run", "--prompt", "go", "--json", "--model", "balanced")).toBe(0);
+      expect(out).toEqual([line, JSON.stringify(result)]);
+      expect(posted[1]).toEqual(posted[0]);
+    }
+    const other = rig();
+    expect(await other.run("list", "--json")).toBe(2);
+    expect(other.posted).toEqual([]);
+  });
+
   it("turns --member into tasks[]: flags before the first are every member's defaults, each member overrides them", async () => {
     const { run, posted } = rig();
     expect(await run("run", "--cwd", "/repo", "--model", "gpt", "--join", "first", "--callback", "steer",
