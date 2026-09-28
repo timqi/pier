@@ -23,14 +23,16 @@ describe("the dispatcher contract", () => {
   });
 
   it("hands an approval down as the run contract's Approved: line and trusts the child's final state", () => {
-    // The run contract honors exactly this line, so the lead that writes it names it the same;
-    // the head reads it in skills/pier-tasks, which the dispatch bullet points at.
-    expect(lead("build")).toContain("`Approved: <step>`");
+    // The run contract honors exactly this line; the skill both the head and a
+    // lead read names it the same, and neither contract repeats the contract.
     expect(RUN_RESULT).toContain("`Approved:` line");
     expect(DISPATCHER).toContain("skills/pier-tasks: flags, callbacks, approvals");
-    expect(DISPATCHER).not.toContain("Approved:");
+    expect(lead("build")).toContain("in the same two parts as a worker's result (skills/pier-tasks)");
+    for (const contract of [DISPATCHER, lead("build")]) {
+      expect(contract).not.toContain("Approved:");
+      expect(contract).not.toContain("Needs your decision");
+    }
     expect(DISPATCHER).toContain("never re-check it with your own commands");
-    expect(lead("build")).toContain("ending with the final state as verified");
   });
 
   it("leaves the language rule to the surface prompt every session gets", () => {

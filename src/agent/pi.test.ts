@@ -79,9 +79,14 @@ function fakePi() {
   /** What each prompt was queued as, kept apart from `calls` so the ordering
    *  assertions elsewhere stay about ordering. */
   const promptOptions: unknown[] = [];
+  /** The transcript, as far as the system prompt is concerned: what Pi
+   *  would build for the next request, diffed against what is recorded. */
+  const transcript: PiMessage[] = [];
+  const state = { messages: [] as PiMessage[] };
   return {
     calls,
     promptOptions,
+    transcript,
     emit: (event: PiEvent) => {
       for (const fn of listeners) fn(event);
     },
@@ -104,6 +109,19 @@ function fakePi() {
         getSessionName() {
           return this.name;
         },
+        appendMessage(message: PiMessage) {
+          transcript.push(message);
+        },
+        buildSessionProjection: () => ({ messages: transcript.slice() }),
+      },
+      agent: { state },
+      getActiveToolNames: () => ["bash"],
+      _baseSystemPromptOptions: { cwd: "/tmp/wt", customPrompt: "be brief" },
+      _preparePromptAndToolLoadout(options: { cwd: string; customPrompt: string; selectedTools: string[] }): PiMessage | undefined {
+        calls.push("loadout");
+        const sections = { preamble: options.customPrompt, cwd: options.cwd, tools: options.selectedTools.join(",") };
+        const has = state.messages.some((m) => m.role === "system");
+        return has ? undefined : { role: "system", content: "", sections, timestamp: 1 } as PiMessage;
       },
       prompt: (_text: string, options?: unknown) => {
         calls.push("prompt");
@@ -237,7 +255,40 @@ describe("a disposed session", () => {
       { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null },
       "followUp",
     );
-    expect(fake.calls).toEqual(["prompt", "sendCustomMessage"]);
+    expect(fake.calls).toEqual(["prompt", "loadout", "sendCustomMessage"]);
+  });
+});
+
+describe("a session whose first turn is a system input", () => {
+  const origin = { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null } as const;
+
+  it("runs it with the system prompt, recorded ahead of the input", async () => {
+    const { fake, session: s } = session();
+    // Pi builds the prompt in `prompt()` and between turns only; a custom
+    // message that opens the turn would reach the model with none — no
+    // cwd, no context files, no skills.
+    await s.systemInput("do the task", origin, "prompt");
+    expect(fake.calls).toEqual(["loadout", "sendCustomMessage"]);
+    const first = fake.transcript[0] as PiMessage & { sections?: Record<string, string> };
+    expect(first.role).toBe("system");
+    expect(first.sections).toEqual({ preamble: "be brief", cwd: "/tmp/wt", tools: "bash" });
+    expect(fake.pi.agent.state.messages).toEqual(fake.transcript);
+  });
+
+  it("records nothing when the model already has the prompt", async () => {
+    const { fake, session: s } = session();
+    await s.systemInput("do the task", origin, "prompt");
+    await s.systemInput("and this", origin, "prompt");
+    expect(fake.transcript.filter((m) => m.role === "system")).toHaveLength(1);
+  });
+
+  it("leaves a queued input to the turn that drains it", async () => {
+    const { fake, session: s } = session();
+    fake.pi.isStreaming = true;
+    await s.systemInput("guidance", origin, "followUp");
+    // Between turns Pi refreshes the prompt itself; loading it here would
+    // put a system message between a tool call and its result.
+    expect(fake.calls).toEqual(["sendCustomMessage"]);
   });
 });
 

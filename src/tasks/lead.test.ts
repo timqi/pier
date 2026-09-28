@@ -91,7 +91,7 @@ describe("a feature lead", () => {
     const run = await service.waitForRun(receipt.runId);
     expect(created.at(-1)).toMatchObject({ role: "lead", phase: "design" });
     // The contract is the session's (agent/roles.ts); the message names the run and its reader.
-    expect(run.context.renderedPrompt).toBe(`[Pier task run ${run.id} — "design the thing"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\ndesign the thing`);
+    expect(run.context.renderedPrompt).toBe(`[Pier task run ${run.id} — "design the thing"]\n\ndesign the thing`);
     expect(store.roleOf(run.targetSessionId!)).toBe("lead");
     expect(store.roleOf("main")).toBeUndefined();
     expect(store.leadPhaseOf(run.targetSessionId!)).toBe("design");

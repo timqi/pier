@@ -13,6 +13,7 @@ import {
   SessionManager,
   sessionEntryToContextMessages,
   type AgentSession as PiAgentSession,
+  type BuildSystemPromptOptions,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type {
@@ -142,31 +143,38 @@ export function titleFromAnswer(text: string): string {
   return line.replace(/^["'“‘「]+|["'”’」.。]+$/g, "").trim().slice(0, SESSION_TITLE_MAX);
 }
 
-/** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows it. */
-const PIER_SYSTEM_PROMPT = `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
+/** The two Communication rules that hold for a reply an agent reads. */
+const VERBATIM_RULES = `- Reply in the language of the request; paths, identifiers and quoted output stay verbatim.
+- \`path:line\` when you're pointing at one line; the bare path otherwise.`;
 
-# Communication
-These rules govern conversational replies. A human reads them on a phone-sized screen, so the cap is about their attention, not about tokens. When the reply is the deliverable — the request names an artifact (report, review, digest, plan) or another agent reads the result (task runs) — the length rules don't apply; the style rules still do.
+const CHAT_RULES = `These rules govern conversational replies. A human reads them on a phone-sized screen, so the cap is about their attention, not about tokens. When the reply is the deliverable — the request names an artifact (report, review, digest, plan) or another agent reads the result (task runs) — the length rules don't apply; the style rules still do.
 - Answer with the conclusion. Add the one fact that changes what the user does next — a failure and its cause, an assumption you made, a risk. Trade-offs, process, alternatives: only when asked.
 - Cap per reply: 60 words (90 Chinese chars), max 3 bullets; 120 words (180 Chinese chars) when the question asks for reasoning, comparison or options. A command the user is meant to run counts as one line. Don't paste code or diffs to explain — name the file.
 - Past the cap by a lot? Conclusion plus one short "want the details?" — don't dump it. Past it by a sentence? Finish the sentence.
-- Reply in the language of the request; paths, identifiers and quoted output stay verbatim.
+${VERBATIM_RULES}
 - Never: preamble, restating the question, closing summaries, "I'm going to..." narration, narrating each edit.
-- After edits, say only: file(s) touched + one line on the result.
+- After edits: the files touched and one line on the result; a non-trivial code change adds at most two one-line items — a breakage risk, a test to run.
 - Don't quote code to explain it — no snippets, no walkthroughs. Code the user asked for (a command, a one-liner, a value) is the answer: one block, nothing around it.
-- \`path:line\` when you're pointing at one line; the bare path otherwise.
-- Blocked on a decision only the requester can make? Ask them, one short question. Otherwise pick the sensible default and note it.
+- Blocked on a decision only the requester can make? Ask them, one short question. Otherwise pick the sensible default and note it.`;
 
-# Working style — holds on any machine; a user's SYSTEM.md adds the local facts (tools, hosts, paths)
+/** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows
+ *  it. A worker's replies are read by an agent (roles.ts), so its
+ *  Communication holds only the rules that are not about a human's screen. */
+const pierBaseline = (role: AgentRole | undefined): string => `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
+
+# Communication
+${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
+
+# Working style
 - Before touching files: list and search first. Never guess a path or a line number.
 - Read before you edit. Match the surrounding code's style, naming, and comment density.
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.
-- Each bash call is a fresh shell in the working directory; chain what must share state. Don't prefix commands with \`cd\` to that same directory — use relative paths; \`cd\` only to go elsewhere.
+- Each bash call is a fresh shell in the working directory — the \`<cwd>\` at the end of this prompt, never \`~\`; chain what must share state; never \`cd\` into that directory, use relative paths, \`cd\` only to go elsewhere.
 - Destructive or irreversible actions on things you didn't create — deleting user files, force push, migrations, deploys, service restarts: ask first; unattended, don't do them and report what you would have done. The one exception: a step your prompt names on an \`Approved: <step>\` line was asked and answered — take that step, and only that one.
 - Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.`;
 
-export const pierSystemPrompt = (userPrompt?: string): string =>
-  userPrompt ? `${PIER_SYSTEM_PROMPT}\n\n${userPrompt}` : PIER_SYSTEM_PROMPT;
+export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole): string =>
+  userPrompt ? `${pierBaseline(role)}\n\n${userPrompt}` : pierBaseline(role);
 
 /** Patching the call keeps the built-in's shell settings. */
 const bashTimeoutDefault = (pi: ExtensionAPI) => {
@@ -190,6 +198,15 @@ const CHILD_COMPACTION_CAP = 150_000;
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
 type CacheRetentionBox = { value: "short" | "long" };
+
+/** Pi builds the system prompt only on `prompt()` and between turns;
+ *  `sendCustomMessage({ triggerTurn })` skips it, so a session whose first
+ *  turn is a system input would run it with no prompt at all. The privates
+ *  that `prompt()` uses (Pi 0.87). */
+type PromptLoadout = {
+  _baseSystemPromptOptions: BuildSystemPromptOptions;
+  _preparePromptAndToolLoadout(options: BuildSystemPromptOptions): Parameters<SessionManager["appendMessage"]>[0] | undefined;
+};
 
 export class PiSession implements AgentSession {
   constructor(
@@ -402,6 +419,7 @@ export class PiSession implements AgentSession {
     // A running turn means the call below queues.
     const queued = this.pi.isStreaming && mode !== "append";
     if (queued) this.queuedInputs.push(origin);
+    else if (mode !== "append") this.loadSystemPrompt();
     try {
       // Without a turn Pi appends it now, or after a running turn's tool results.
       return await this.pi.sendCustomMessage(
@@ -414,6 +432,17 @@ export class PiSession implements AgentSession {
       if (at >= 0) this.queuedInputs.splice(at, 1);
       throw error;
     }
+  }
+
+  /** What `prompt()` does before a turn: the prompt sections the model does
+   *  not have yet, recorded ahead of the turn's own messages. */
+  private loadSystemPrompt(): void {
+    const pi = this.pi as unknown as PromptLoadout;
+    const update = pi._preparePromptAndToolLoadout({ ...pi._baseSystemPromptOptions, selectedTools: this.pi.getActiveToolNames() });
+    if (!update) return;
+    const manager = this.pi.sessionManager;
+    manager.appendMessage(update);
+    this.pi.agent.state.messages = manager.buildSessionProjection().messages;
   }
 
   abort(): Promise<void> {
@@ -724,7 +753,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       cwd,
       agentDir: defaultAgentDir(),
       // The user's SYSTEM.md is appended after Pier's baseline, so it still wins.
-      systemPromptOverride: pierSystemPrompt,
+      systemPromptOverride: (user) => pierSystemPrompt(user, role),
       additionalSkillPaths: this.skillPaths,
       // Only Pier's own skills answer to the off-list; a user's skill of the
       // same name is Pi's to switch (settings.json).
@@ -841,7 +870,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const info = await this.locate(sessionId);
     if (!info) return undefined;
     const { messages } = SessionManager.open(info.path).buildSessionContext();
-    return replaySystemPrompt(messages as PiSystemMessage[], PIER_SYSTEM_PROMPT);
+    return replaySystemPrompt(messages as PiSystemMessage[], [pierBaseline("worker"), pierBaseline(undefined)]);
   }
 
   async find(sessionId: string): Promise<SessionSummary | undefined> {

@@ -34,8 +34,9 @@ function contextFiles(section: string): SystemPromptBlock[] {
   }));
 }
 
-/** `baseline` is the preamble Pier opens with; what follows it is the user's SYSTEM.md. */
-export function replaySystemPrompt(messages: readonly PiSystemMessage[], baseline: string): SystemPrompt | null {
+/** `baselines` are the preambles Pier opens with, one per role; what follows
+ *  the one found is the user's SYSTEM.md. */
+export function replaySystemPrompt(messages: readonly PiSystemMessage[], baselines: readonly string[]): SystemPrompt | null {
   const system = messages.filter((m) => m.role === "system");
   if (system.length === 0) return null;
   const content: string[] = [];
@@ -51,9 +52,13 @@ export function replaySystemPrompt(messages: readonly PiSystemMessage[], baselin
   const blocks: SystemPromptBlock[] = content.map((text) => ({ label: "System message", text }));
   for (const [name, section] of sections) {
     if (name === "preamble") {
-      const own = section.startsWith(baseline) ? section.slice(baseline.length).replace(/^\n\n/, "") : null;
-      if (own === null) blocks.push({ label: "Preamble", text: section });
-      else blocks.push({ label: "Pier baseline", text: baseline }, ...(own ? [{ label: "SYSTEM.md", text: own }] : []));
+      const baseline = baselines.find((b) => section.startsWith(b));
+      if (baseline === undefined) {
+        blocks.push({ label: "Preamble", text: section });
+        continue;
+      }
+      const own = section.slice(baseline.length).replace(/^\n\n/, "");
+      blocks.push({ label: "Pier baseline", text: baseline }, ...(own ? [{ label: "SYSTEM.md", text: own }] : []));
     } else if (name === "project_context") {
       blocks.push(...contextFiles(unwrap(name, section)));
     } else {

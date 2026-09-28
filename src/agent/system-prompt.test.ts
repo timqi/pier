@@ -77,18 +77,35 @@ describe("a session's system prompt", () => {
   it("is unknown for a session that does not exist", async () => {
     expect(await factory.readSystemPrompt("no-such-session")).toBeUndefined();
   });
+
+  it("reaches the first request of a session a system input opens \u2014 every task run", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pier-system-prompt-run-"));
+    const model = { provider: "anthropic", id: "claude-sonnet-4-5" };
+    const session = await factory.create({ cwd, role: "worker", model });
+    const before = sent.length;
+    // Pi builds the prompt in `prompt()` only; the custom message a run opens
+    // with would otherwise reach the model with no cwd, files or skills.
+    await session.systemInput("do the task", { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null }, "prompt").catch(() => {});
+    expect(sent).toHaveLength(before + 1);
+    expect(sent[before]).toContain(`<cwd>\n${cwd}\n</cwd>`);
+    expect(sent[before]).toContain("<pier>/worker.md");
+    expect((await factory.readSystemPrompt(session.id))?.text).toBe(sent[before]);
+    // The timeline row the run's input renders as is still the custom message.
+    expect((await session.history())[0]).toMatchObject({ role: "system", text: "do the task", origin: { kind: "task-delegation", runId: "r" } });
+    await session.dispose();
+  });
 });
 
 describe("replaySystemPrompt", () => {
   it("is null before any request carried one", () => {
-    expect(replaySystemPrompt([{ role: "user", content: "hi" }], "base")).toBeNull();
+    expect(replaySystemPrompt([{ role: "user", content: "hi" }], ["base"])).toBeNull();
   });
 
   it("drops a removed section, and names a preamble that is not Pier's", () => {
     const prompt = replaySystemPrompt([
       { role: "system", content: "", sections: { preamble: "custom", skills: "<skills>\nlist\n</skills>", cwd: "<cwd>\n/w\n</cwd>" } },
       { role: "system", content: "", sections: { skills: null } },
-    ], "base");
+    ], ["base"]);
     expect(prompt).toEqual({
       text: "custom\n\n<cwd>\n/w\n</cwd>",
       tokens: 6,
@@ -97,7 +114,7 @@ describe("replaySystemPrompt", () => {
   });
 
   it("splits Pier's baseline from the user's SYSTEM.md", () => {
-    const prompt = replaySystemPrompt([{ role: "system", content: "", sections: { preamble: "base\n\nmine" } }], "base");
+    const prompt = replaySystemPrompt([{ role: "system", content: "", sections: { preamble: "base\n\nmine" } }], ["base"]);
     expect(prompt?.blocks).toEqual([{ label: "Pier baseline", text: "base" }, { label: "SYSTEM.md", text: "mine" }]);
   });
 });

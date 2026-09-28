@@ -23,21 +23,21 @@ const log = logger("tasks");
  *  other resume. */
 export interface Restart { at: number; downMs: number; queued: string[] }
 
-/** What each run's message says before the prompt: the run and who reads its
- *  result. A worker's or lead's session carries the result contract in its role
- *  prompt (agent/roles.ts); a role-less one hears it here, with the chat-surface
- *  conventions that do not apply, since a cron or user session has no other place. Skipped on resume. */
+/** What each run's message says before the prompt: the run, and for a
+ *  role-less session who reads its result and the result contract, since a
+ *  cron or user session has no other place to hear them; a worker's or lead's
+ *  role prompt (agent/roles.ts) already says both. Skipped on resume. */
 const preamble = (run: TaskRun, role: AgentRole | undefined): string => {
+  const tag = `[Pier task run ${run.id} — "${run.context.definition.name}"]`;
+  if (role) return `${tag}\n\n`;
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
     ? "read by the agent that delegated this run"
     : run.callbackSessionId
       ? "read by the agent session it is delivered to"
       : "read by the operator";
-  return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
-    `Your final reply is recorded verbatim as the run result, ${audience}` +
-    (role ? "." : `; next-step buttons and file:// attachments do not render there. ${RUN_RESULT}`) +
-    "\n\n";
+  return `${tag} Your final reply is recorded verbatim as the run result, ${audience}; ` +
+    `next-step buttons and file:// attachments do not render there. ${RUN_RESULT}\n\n`;
 };
 
 export class AgentTaskRunner {

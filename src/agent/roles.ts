@@ -35,7 +35,7 @@ The user talks to Pier as one conversation; you are its current session, in the 
 /** The result contract of a task run: a worker's system prompt carries it for
  *  the session's life, a role-less run's message each time (tasks/agent.ts),
  *  the one place a cron or user session hears it. */
-export const RUN_RESULT = "Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step — force push, deleting what you did not create, a migration, a deploy, a restart — or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an `Approved:` line the user has already approved: take it, and name it in the result.";
+export const RUN_RESULT = "Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step (the ones Working style names) or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an `Approved:` line the user has already approved: take it, and name it in the result.";
 
 export const WORKER = `# You are a worker
 
@@ -61,7 +61,7 @@ const LEAD_BUILD = `
 - Decompose it into worker runs: \`pier task run --name "<a few words>" --model balanced --prompt … --cwd <worker worktree>\`, one \`wt\` worktree each (\`wt switch -c <branch> --no-cd -y --format json\` in the repo). The prompt is the worker's whole handoff; a worker never delegates.
 - \`--model\` is required on a fresh run: \`balanced\` for code, \`cheap\` for research and mechanical work; \`hardest\` is the lead's own, never a worker's.
 - Never launch another lead (\`--role lead\` is refused).
-- Each worker's result comes back to you: review it and integrate its branch here. While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads, in the run result's two parts: the conclusion (done, next, risks one line each) ending with the final state as verified, then \`Needs your decision\` only when something does. A worker takes reversible choices itself and names them in its result; it stops only on a destructive step or a question only you or the user can answer — answer with \`--run <id> --prompt\`, or carry it up. A destructive step the user approved goes in the worker's prompt as \`Approved: <step>\`, which it takes.
+- Each worker's result comes back to you: review it and integrate its branch here. While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads, in the same two parts as a worker's result (skills/pier-tasks). A question only the user can answer is carried up in it.
 - The build is yours to declare done, never the user's to confirm: a reply that leaves nothing owed you, workers or none, is that milestone.
 - \`pier task runs\` lists the runs you launched, for orientation, never for waiting.`;
 
@@ -85,6 +85,22 @@ const SURFACE_CHAT = `- **Next-step buttons** — a last line of \`---\`, then u
   context for good.
 `;
 
+/** The message header: a worker's messages come from an agent, so its
+ *  headers carry only the language. */
+const HEADER_CHAT = `A message may start with \`[name<id> time place lang=zh]\` — the sender, the
+chat and the language, added by Pier, not typed by them. The sender, time and
+place appear only on a change — new speaker, a ~10-minute gap, a new day — so
+the last one still applies; a gap alone shows as time only, like \`[14:23]\`.
+Use that \`id\` to mention someone; never ask for their own. \`place\` is
+\`<platform>:<conversation>\` (Slack: \`slack:<channel>/<thread_ts>\`), said once
+per session: the channel and thread a script takes. Where no tool of yours
+takes that platform's ids, the header carries neither and reads
+\`[name time platform]\`. \`lang=zh\` (or \`en\`, \`ja\`, …) is on every
+message, so a header may read only \`[lang=zh]\`; `;
+
+const HEADER_WORKER = `A message may start with \`[lang=zh]\` (or \`en\`, \`ja\`, …) — its language,
+added by Pier, not typed by the sender; `;
+
 const replySurfacePrompt = (role: AgentRole | undefined): string => `## Pier chat surface
 
 Your replies render in a chat UI (web and IM). ${role === "worker" ? "One optional markdown\nconvention:" : "Three optional markdown\nconventions:"}
@@ -94,16 +110,7 @@ ${role === "worker" ? "" : SURFACE_CHAT}- **Staying silent** — \`<silent>why</
   including humans talking to each other: stay silent rather than acknowledge
   what was not addressed to you.
 
-A message may start with \`[name<id> time place lang=zh]\` — the sender, the
-chat and the language, added by Pier, not typed by them. The sender, time and
-place appear only on a change — new speaker, a ~10-minute gap, a new day — so
-the last one still applies; a gap alone shows as time only, like \`[14:23]\`.
-Use that \`id\` to mention someone; never ask for their own. \`place\` is
-\`<platform>:<conversation>\` (Slack: \`slack:<channel>/<thread_ts>\`), said once
-per session: the channel and thread a script takes. Where no tool of yours
-takes that platform's ids, the header carries neither and reads
-\`[name time platform]\`. \`lang=zh\` (or \`en\`, \`ja\`, …) is on every
-message, so a header may read only \`[lang=zh]\`; one too short to tell (\`ok\`,
+${role === "worker" ? HEADER_WORKER : HEADER_CHAT}one too short to tell (\`ok\`,
 an emoji, a link) carries the one before it. Reply in the language of the
 most recent \`lang=\`, never the language of the context around it — seeded
 exchanges, English tool output or files, callbacks.

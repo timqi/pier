@@ -473,14 +473,14 @@ describe("task service", () => {
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
     expect(store.roleOf(done.targetSessionId!)).toBe("worker");
-    expect(done.context.renderedPrompt).toBe(`[Pier task run ${done.id} — "child"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nReview the PR`);
+    expect(done.context.renderedPrompt).toBe(`[Pier task run ${done.id} — "child"]\n\nReview the PR`);
     // A --session continuation of the worker is the worker's session still: the same short head each time.
     const again = await service.handle({
       operation: "run",
       task: { name: "again", action: { type: "agent", session: { mode: "reuse", sessionId: done.targetSessionId! }, prompt: "And the tests" } },
     }, "s9") as RunSummary;
     const continued = await service.waitForRun(again.runId);
-    expect(continued.context.renderedPrompt).toBe(`[Pier task run ${continued.id} — "again"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nAnd the tests`);
+    expect(continued.context.renderedPrompt).toBe(`[Pier task run ${continued.id} — "again"]\n\nAnd the tests`);
     // A --run continuation carries the message as is: the session heard the head on its first run.
     const followUp = await service.handle({ operation: "message", run_id: done.id, message: "And the docs" }, "s9") as { run: RunSummary };
     const resumed = await service.waitForRun(followUp.run.runId);
@@ -2238,7 +2238,7 @@ describe("resume after a restart", () => {
     expect(child.systemInputs).toHaveLength(1);
     expect(child.systemInputs[0]).toMatchObject({ origin: { kind: "task-delegation", runId: "cut" }, mode: "prompt" });
     // Its session is the worker the row made, so the head is the worker's short one.
-    expect(child.systemInputs[0]!.text).toBe('[Pier task run cut — "worker"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nWork');
+    expect(child.systemInputs[0]!.text).toBe('[Pier task run cut — "worker"]\n\nWork');
   });
 
   it("fails a resume whose session cannot open, with why, and calls back", async () => {
