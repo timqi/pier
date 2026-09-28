@@ -3,7 +3,7 @@
 
 import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
-import { SenderPrefix, withPrefix } from "./identity.js";
+import { SenderPrefix, withoutLanguage, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
 import { cut, splitReply } from "./reply.js";
 import { isChatCommand } from "./types.js";
@@ -292,7 +292,7 @@ export class Router {
         if (payload.type === "system-input") {
           const channel = this.channels.get(key.channelId);
           channel?.notify(key.conversationId, {
-            text: payload.text,
+            text: withoutLanguage(payload.text),
             origin: payload.origin,
             at: payload.at,
           })

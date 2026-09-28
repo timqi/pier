@@ -14,6 +14,10 @@
 - `pier task runs --state <state>[,…] --since <n>m|h|d --limit <n>`: the ledger answers in-flight runs first, then the newest finished, at most 20 by default (was up to 200) within the last 24h unless `--since` says otherwise; a full page says so on stderr.
 - `pier task stats [--days <n>]`: finished agent runs by launch tier, role and model, with each row's recent task names, so the operator can read whether dispatch follows the tier rule ([12-model-tiers.md](docs/design/12-model-tiers.md)).
 
+### Fixed
+
+- The head no longer drifts into English after an English callback: every callback and run message it receives opens with `[lang=<code>]`, the language its user last wrote in, read off the transcript so it survives a restart and carried on the seed across a rotation, and the dispatcher contract says only a user's `lang=` switches the reply language. The chat and the web do not show the stamp.
+
 ## 0.3.1 — 2026-09-28
 
 ### Changed

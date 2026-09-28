@@ -69,6 +69,15 @@ it("folds a session seed to its reason and the previous session's id", () => {
   expect(body().hidden).toBe(true);
 });
 
+it("shows a callback without the language stamp the model reads", () => {
+  chat.appendSystemInput('[lang=zh]\nTask "fix it" finished with state: succeeded\nrun r1\n\nAll green.', {
+    kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run", state: "succeeded",
+  });
+  // No source of its own: the caption is the first line, which the stamp must not be.
+  expect(line()).toBe('callback · succeededTask "fix it" finished with state: succeeded');
+  expect(card().textContent).not.toContain("lang=zh");
+});
+
 it("folds a callback to state, name, model and run id, and opens and closes on its button", () => {
   chat.appendSystemInput('Task "fix it" finished with state: succeeded\nrun r1\n\nAll green.', {
     kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run",

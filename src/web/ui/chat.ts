@@ -7,7 +7,7 @@ import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } f
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
-import { splitSpeaker, type Speaker } from "../../core/identity.js";
+import { splitSpeaker, withoutLanguage, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
@@ -318,7 +318,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   row.classList.add(FOLD_ROW);
   row.dataset.kind = "system";
-  const [meta, body] = splitMetaBlock(text);
+  const [meta, body] = splitMetaBlock(withoutLanguage(text));
   const content = runBody(body);
   if (origin.kind !== "chat-command") row.classList.add("system-row");
   const head = origin.kind === "session-seed"

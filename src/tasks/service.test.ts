@@ -532,6 +532,14 @@ describe("task service", () => {
     expect(run.result).toEqual({ type: "agent", text: "stayed silent — humans talking", sessionId: "s1" });
   });
 
+  it("stamps a callback with the language its users last wrote in", async () => {
+    const { cwd, service, session } = setup(fakeSession("s1", { history: [{ role: "user", text: "[Ada<U1> 12:00 lang=zh]\n跑一下这个命令" }] }));
+    const task = await service.handle({ operation: "save", task: bashDraft(cwd, "echo all tests passed in English") }, "s1") as TaskDefinition;
+    const queued = await service.handle({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    await vi.waitFor(() => expect(service.getRun(queued.runId).callbackState).toBe("delivered"));
+    expect(session.systemInputs.at(-1)!.text).toMatch(/^\[lang=zh\]\nTask "command" finished/);
+  });
+
   it("tracks the invoking session and durably calls back for background work", async () => {
     const { cwd, service, session, hub, store, factory, router } = setup();
     const task = await service.handle({ operation: "save", task: bashDraft(cwd, "echo delegated") }, "s1") as TaskDefinition;

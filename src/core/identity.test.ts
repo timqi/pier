@@ -2,7 +2,10 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { detectLanguage, projectCwds, readableTitle, SenderPrefix, sessionLabel, splitSpeaker, withPrefix } from "./identity.js";
+import {
+  detectLanguage, projectCwds, readableTitle, SenderPrefix, sessionLabel, splitSpeaker, userLanguage, withLanguage,
+  withoutLanguage, withPrefix,
+} from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -149,6 +152,37 @@ describe("the language tag", () => {
     expect(splitSpeaker("[Ada 2024-06-01 12:00 lark lang=zh]\n你好"))
       .toEqual({ name: "Ada", when: "2024-06-01 12:00", where: "lark", lang: "zh", text: "你好" });
     expect(splitSpeaker("[lang=zh] not a header")).toEqual({ text: "[lang=zh] not a header" });
+  });
+});
+
+describe("the users' language on a system input", () => {
+  it("is the last language a user wrote in, never a callback's", () => {
+    expect(userLanguage([
+      { role: "user", text: "[Ada<U1> 2024-06-01 12:00 lang=en]\nplease look at this" },
+      { role: "user", text: "帮我看看这个问题" },
+      { role: "assistant", text: "Sure, looking at it now in English" },
+      { role: "system", text: "Task \"fix\" finished with state: succeeded, all green", origin: { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null } },
+      // Too short to tell: the one before it still applies.
+      { role: "user", text: "ok" },
+    ])).toBe("zh");
+    expect(userLanguage([{ role: "user", text: "[lang=zh]\nnow in English please" }])).toBe("en");
+    expect(userLanguage([{ role: "system", text: "seeded context in English words", origin: { kind: "session-seed", reason: "new", previousSessionId: null } }])).toBeUndefined();
+  });
+
+  it("is the seed's stamp on a head nobody has spoken to yet", () => {
+    const seed = { role: "system" as const, text: "[lang=zh]\n[Pier: a new session]", origin: { kind: "session-seed" as const, reason: "idle" as const, previousSessionId: "h1" } };
+    expect(userLanguage([seed])).toBe("zh");
+    expect(userLanguage([seed, { role: "user", text: "switching to English now" }])).toBe("en");
+    // A callback's stamp is derived, not spoken: it never counts.
+    expect(userLanguage([{ role: "system", text: "[lang=zh]\nTask done", origin: { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null } }])).toBeUndefined();
+  });
+
+  it("stamps the input and comes off it again for the surfaces", () => {
+    expect(withLanguage("zh", "Task done")).toBe("[lang=zh]\nTask done");
+    expect(withLanguage(undefined, "Task done")).toBe("Task done");
+    expect(withoutLanguage("[lang=zh]\nTask done")).toBe("Task done");
+    // Only the stamp's own shape: a result that opens with a bracket stays whole.
+    expect(withoutLanguage("[Ada 12:00]\nTask done")).toBe("[Ada 12:00]\nTask done");
   });
 });
 

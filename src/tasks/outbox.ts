@@ -1,8 +1,9 @@
 // One delivery engine for everything that reaches a session as a system input:
 // run callbacks, group callbacks and run messages.
 
-import type { AgentSession, SystemInputOrigin } from "../core/types.js";
+import type { AgentSession, ChatTurn, SystemInputOrigin } from "../core/types.js";
 import type { Router } from "../core/router.js";
+import { userLanguage, withLanguage } from "../core/identity.js";
 import { logger } from "../log.js";
 import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
 
@@ -67,7 +68,8 @@ export class Outbox<T extends CallbackFields> {
     try {
       const session = await this.router.ensure({ channelId: "task", conversationId: sessionId });
       // The transcript read is both the crash-window dedupe and the proof.
-      const unproven = await this.settle(mine, session);
+      const turns = await session.history();
+      const unproven = this.settle(mine, turns);
       // Checked after the proof: a record whose input did land must not be
       // given up on for having spent its last attempt landing it.
       const live = unproven.filter((record) => !this.spent(record, sessionId));
@@ -92,10 +94,10 @@ export class Outbox<T extends CallbackFields> {
       const mode = sending.every((record) => record.callbackMode === "steer") ? "steer" : "followUp";
       log.debug(`callback for ${sending.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
       // Not awaited: `systemInput` settles with the recipient's whole turn.
-      session.systemInput(text, origin, mode)
+      session.systemInput(withLanguage(userLanguage(turns), text), origin, mode)
         .catch((error: unknown) => this.retry(sessionId, sending, error, counted));
       // Pi records the input as it starts the turn; the tick sweep is the backstop.
-      await this.settle(sending, session);
+      this.settle(sending, await session.history());
     } catch (error) {
       this.retry(sessionId, mine, error, counted);
     } finally {
@@ -111,9 +113,9 @@ export class Outbox<T extends CallbackFields> {
   }
 
   /** Marks every record the transcript proves; returns the ones it does not. */
-  private async settle(records: T[], session: AgentSession): Promise<T[]> {
+  private settle(records: T[], turns: ChatTurn[]): T[] {
     const seen = new Set<string>();
-    for (const turn of await session.history()) {
+    for (const turn of turns) {
       if (turn.role !== "system") continue;
       for (const id of recordIds(turn.origin)) seen.add(id);
     }

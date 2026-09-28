@@ -9,7 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
-import { day } from "./identity.js";
+import { day, userLanguage, withLanguage } from "./identity.js";
 import { cut } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
@@ -227,14 +227,16 @@ export class MainChain {
     const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now())
       .filter((r) => !SEED_RUNS_HIDDEN.has(r.state));
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
-    return [
+    const spoken = open ? await open.history() : [];
+    // The user's language rides the seed: a callback landing before they speak here must not answer in its own.
+    return withLanguage(userLanguage(spoken), [
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).text),
       section("Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
       ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS, `memory/${date}.md`))))),
-      section("The previous session's last exchanges", open ? tail(lastExchanges(await open.history(), EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
-    ].filter(Boolean).join("\n\n");
+      section("The previous session's last exchanges", open ? tail(lastExchanges(spoken, EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
+    ].filter(Boolean).join("\n\n"));
   }
 
   private async read(name: string): Promise<string> {

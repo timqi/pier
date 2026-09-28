@@ -208,6 +208,10 @@ a different speaker, a 10-minute gap, a new day, a different conversation, or
 a different language — `lang=zh` last, from `detectLanguage` (CJK characters
 against Latin words, code and paths excluded), so the reply follows the
 sender instead of an English-heavy context.
+A system input the outbox delivers (a callback, a run message) opens with
+`[lang=<code>]`, the users' last language read off the transcript — or the
+seed's stamp on a head nobody has spoken to yet — so an English result does
+not move the reply; the chat and the web strip it.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`),
 said once per session and again only after `forgetSender`;
 alias keys (`web:`, `task:`) name no place. A channel that declares

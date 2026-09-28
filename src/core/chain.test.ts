@@ -177,6 +177,17 @@ describe("the continuous conversation's chain", () => {
     expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "minimal" });
   });
 
+  it("stamps the seed with the language the previous head's user wrote in", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now - 3 * IDLE_MS, { history: [{ role: "user", text: "[Ada<U1> 12:00 lang=zh]\n帮我看看这个问题" }, { role: "assistant", text: "Looking at it now" }] });
+    expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(r.sessions.get("m1")!.systemInputs[0]!.text).toMatch(/^\[lang=zh\]\n\[Pier: a new session/);
+    // Nothing to carry from a head that was never spoken to.
+    const r2 = rig();
+    await r2.say("hello");
+    expect(r2.sessions.get("m1")!.systemInputs[0]!.text).toMatch(/^\[Pier: a new session/);
+  });
+
   it("keeps the previous head's model and effort when Settings cannot be read", async () => {
     const r = rig();
     r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: { provider: "p", id: "strong" }, thinkingLevel: "high" });

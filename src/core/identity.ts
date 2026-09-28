@@ -4,6 +4,8 @@
 // (a thread is shared), and emitted only on news: a header costs ~15 tokens,
 // wasted in a DM where the counterpart never changes.
 
+import type { ChatTurn } from "./types.js";
+
 /** A gap this long makes the timestamp worth its tokens. */
 const GAP_MS = 10 * 60_000;
 
@@ -111,6 +113,30 @@ export class SenderPrefix {
 
 export const withPrefix = (prefix: string, text: string): string =>
   prefix ? `${prefix}\n${text}` : text;
+
+const LANG_STAMP = /^\[lang=([a-z]{2})\]\n/;
+
+/** The language the session's users last wrote in, read off its transcript so
+ *  it survives a restart. A callback never counts; a seed's stamp does, so a
+ *  fresh head keeps the previous one's language until its user speaks. */
+export function userLanguage(turns: readonly ChatTurn[]): string | undefined {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]!;
+    const lang = turn.role === "user"
+      ? detectLanguage(splitSpeaker(turn.text).text)
+      : turn.role === "system" && turn.origin?.kind === "session-seed" ? LANG_STAMP.exec(turn.text)?.[1] : undefined;
+    if (lang) return lang;
+  }
+  return undefined;
+}
+
+/** Heads a system input with the users' language: an English callback must
+ *  not pull the reply out of the language the user writes in. */
+export const withLanguage = (lang: string | undefined, text: string): string =>
+  lang ? `[lang=${lang}]\n${text}` : text;
+
+/** The input as a surface shows it: the stamp is for the model. */
+export const withoutLanguage = (text: string): string => text.replace(LANG_STAMP, "");
 
 /** What a header line said, once read back off a stored message. */
 export interface Speaker {

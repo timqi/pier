@@ -85,7 +85,8 @@ describe("channel fan-out", () => {
 
   it("forwards a system input as a note, before the turn it triggers", async () => {
     await router.ensure(KEY);
-    fake.emit({ type: "system-input", text: "task finished", origin: ORIGIN });
+    // The language stamp is for the model; the chat reads the input itself.
+    fake.emit({ type: "system-input", text: "[lang=zh]\ntask finished", origin: ORIGIN });
     fake.emit({ type: "turn-end", text: "acknowledged" });
     expect(im.notes).toEqual([["C100/1717.7", { text: "task finished", origin: ORIGIN }]]);
     expect(im.sent).toHaveLength(1);
