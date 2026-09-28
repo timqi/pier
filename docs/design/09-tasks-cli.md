@@ -1,6 +1,6 @@
 # `pier task` (design)
 
-The whole agent-collaboration surface: nine shell commands over the CLI
+The whole agent-collaboration surface: ten shell commands over the CLI
 socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 (`tasks/operations.ts`). Scheduling, delivery, limits and callbacks are
 `tasks/`'s and unchanged by this surface.
@@ -14,6 +14,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `list` | stored definitions, as JSON, each with `nextRun` and `lastRun` (§`list`) |
 | `pause` · `resume` · `archive` | `--task-id <id>`: a definition's schedule off, on, or retired (§Schedule verbs) |
 | `runs` | the run ledger, as JSON (§`runs`) |
+| `stats` | dispatched runs by launch tier, role and model, as JSON (§`stats`) |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
@@ -29,13 +30,13 @@ the one validator of the params object.
 ## `run`
 
 ```
-pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
-        [--model <name|?>] [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
+        [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
-  caller's), or `--bash` (a one-shot script action in the same `--cwd`, no
+  caller's; `--model` required — §Models), or `--bash` (a one-shot script action in the same `--cwd`, no
   session and no model — `--prompt`, `--model`, `--thinking`, `--role`, `--design` and
   `--session` beside it are refused), or `--task-id` (a saved definition, as
   is), or `--session <id>` with `--prompt` (continue an idle session; `--cwd`
@@ -71,9 +72,9 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
 ## `save`
 
 ```
-pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)
+pier task save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)
         [--cron "<expr>" --tz <zone> | --watch <script> --every <seconds> [--repeat]]
-        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id|none>]
+        [--cwd <dir>] [--timeout <seconds>] [--thinking <level>] [--callback-session <id|none>]
 ```
 
 `--task-id` updates, otherwise creates; an archived task or a one-shot's
@@ -123,11 +124,36 @@ No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`),
 the runs the caller launched — every chain member's, for a member of the
 head — in flight plus finished in the last 24h, at most 200.
 
+## `stats`
+
+```
+pier task stats [--days <n>]
+```
+
+Any session. Receipt: `{ days, rows }`, `days` a positive whole number
+(default 30; else an argv error, and the server refuses it again). One row
+per (tier, role, provider, id, thinking) over the agent-action runs a
+session or the user fired (`triggerSource` agent/manual) that opened a
+session and finished in the window: `tier` is `launch.tier` or `named` for a
+launch with no tier (a model the caller named, or a run from before
+`launch.tier` existed); `role` is lead or worker, a run with no role being
+the head's own; `runs` counts succeeded + failed, `cancelled` cancelled +
+interrupted; `names` the five most recently finished distinct task names.
+Rows in tier order then lead before worker then `runs` descending. A row is
+a question for the reader (five reviews under `hardest`), never a verdict;
+the verb prints no duration, tokens or cost.
+
 ## Models
 
 `--model <name>` rides as `launch.model`, a string, matched in `expandDraft`
 against the operator's menu (`settings.modelMenu`; the live catalog when
-none is pinned):
+none is pinned). A fresh agent session — `run --prompt`, each `--member`,
+`save` with a prompt — refuses without it: `task: --model is required — a
+tier (hardest | balanced | cheap) or a model on the operator's menu:` then
+the menu, exit 1; `--session`, `--run` and `--bash` have their model
+settled already; `run --task-id` takes the definition's own, the instance
+default where it names none (the Console's task form is not on this path).
+Nothing inherits the caller's model.
 
 - a tier (`hardest`, `balanced`, `cheap`) is the first pin on it in menu
   order, `--thinking` defaulting to the pin's, never a substring match; an
@@ -199,6 +225,8 @@ running run (server answer), `--prompt -` once, usage exit 2 without the
 socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
 many, full id, `?`), the schedule verbs, `list`'s two fields.
+`tasks/service.test.ts`: the `--model` refusal on every fresh shape, `stats`
+over a seeded ledger.
 `tasks/continuous.test.ts`: the chain's callbacks, a saved definition's
 default reaching the current head, `none` and a head-less conversation silent, ownership,
 `runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,

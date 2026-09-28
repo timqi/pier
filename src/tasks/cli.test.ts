@@ -34,6 +34,8 @@ describe("pier task", () => {
       [["resume", "--task-id", "t1"], { operation: "resume", task_id: "t1" }],
       [["archive", "--task-id", "t1"], { operation: "archive", task_id: "t1" }],
       [["runs"], { operation: "runs" }],
+      [["stats"], { operation: "stats", days: 30 }],
+      [["stats", "--days", "7"], { operation: "stats", days: 7 }],
       [["run", "--prompt", "design it", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", launch: { model: "opus", role: "lead" } }],
       [["run", "--prompt", "design it", "--role", "lead", "--design"], { operation: "run", prompt: "design it", launch: { role: "lead", design: true } }],
       [["cancel", "--run", "r1"], { operation: "cancel", run_id: "r1" }],
@@ -159,6 +161,8 @@ describe("pier task", () => {
       [["frobnicate"], 'task: unknown command "frobnicate"'],
       [["list", "--run", "r1"], "task: --run is not an option of list"],
       [["pause"], "task: pause needs --task-id"],
+      [["stats", "--days", "0"], "task: --days must be a positive whole number"],
+      [["stats", "--days", "1.5"], "task: --days must be a positive whole number"],
       [["archive", "--task-id", "t1", "--name", "x"], "task: --name is not an option of archive"],
       [["cancel", "--porrt", "1"], expect.stringMatching(/^task: Unknown option '--porrt'/)],
       [["cancel", "r1"], expect.stringMatching(/^task: Unexpected argument 'r1'/)],
@@ -198,7 +202,7 @@ describe("pier task", () => {
     expect(err[1]).toContain("\npier task list");
     expect(await run("--help")).toBe(0);
     expect(await run("save", "-h")).toBe(0);
-    expect(out.at(-1)).toContain("pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)");
+    expect(out.at(-1)).toContain("pier task save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)");
   });
 
   it("prints the server's refusal as one task: line, exit 1", async () => {

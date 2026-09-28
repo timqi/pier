@@ -86,18 +86,18 @@ async function laterBy(ms: number, then: () => Promise<unknown>): Promise<void> 
 describe("a feature lead", () => {
   it("is launched with --role lead, opened with its role, and told it may delegate", async () => {
     const { service, created, store } = rig();
-    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { role: "lead", design: true } }, "main") as { runId: string };
+    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { model: "test/model", role: "lead", design: true } }, "main") as { runId: string };
     const run = await service.waitForRun(receipt.runId);
     expect(created.at(-1)).toMatchObject({ role: "lead" });
     expect(run.context.renderedPrompt).toContain("You are a feature lead: you may delegate to workers");
     expect(store.roleOf(run.targetSessionId!)).toBe("lead");
     expect(store.roleOf("main")).toBeUndefined();
     expect(store.leadPhaseOf(run.targetSessionId!)).toBe("design");
-    const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { role: "lead" } }, "main") as { runId: string }).runId);
+    const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { model: "test/model", role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
     expect(store.leadPhaseOf("main")).toBeUndefined();
     // A lead that plans and builds itself is not a design, whatever its prompt says.
-    const direct = await service.waitForRun((await service.handle({ operation: "run", prompt: "review and simplify it", launch: { role: "lead" } }, "main") as { runId: string }).runId);
+    const direct = await service.waitForRun((await service.handle({ operation: "run", prompt: "review and simplify it", launch: { model: "test/model", role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leads()).toEqual(new Map([
       [run.targetSessionId!, { phase: "design", runId: run.id, runLive: false, designOpen: true }],
       [build.targetSessionId!, { phase: "build", runId: build.id, runLive: false, designOpen: false }],
@@ -110,18 +110,18 @@ describe("a feature lead", () => {
     store.saveRun({ ...run, id: "final", queuedAt: run.queuedAt + 2, sessionMode: "reuse", result: { type: "agent", text: "Agreed.\nDesign final: /repo/design.md", sessionId: run.targetSessionId! } });
     expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(false);
     expect(service.openDesigns()).toEqual([]);
-    await expect(service.handle({ operation: "run", prompt: "x", launch: { role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
-    await expect(service.handle({ operation: "run", prompt: "x", launch: { design: true } }, "main")).rejects.toThrow(/design must be true, on a lead/);
+    await expect(service.handle({ operation: "run", prompt: "x", launch: { model: "test/model", role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
+    await expect(service.handle({ operation: "run", prompt: "x", launch: { model: "test/model", design: true } }, "main")).rejects.toThrow(/design must be true, on a lead/);
   });
 
   it("may delegate from its running run, never to a lead; a worker still may not delegate", async () => {
     const { service, store, leadRan, agent } = rig();
     await leadRan("running");
-    await expect(service.handle({ operation: "run", bash: undefined, prompt: "a worker" }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });
-    await expect(service.handle({ operation: "run", prompt: "another lead", launch: { role: "lead" } }, "lead")).rejects.toThrow(/cannot launch a lead/);
+    await expect(service.handle({ operation: "run", bash: undefined, prompt: "a worker", launch: { model: "test/model" } }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });
+    await expect(service.handle({ operation: "run", prompt: "another lead", launch: { model: "test/model", role: "lead" } }, "lead")).rejects.toThrow(/cannot launch a lead/);
     const saved = await agent("sub-lead", "lead");
     await expect(service.handle({ operation: "run", task_id: saved.id }, "lead")).rejects.toThrow(/cannot launch a lead/);
-    await expect(service.handle({ operation: "run", tasks: [{ prompt: "w" }, { prompt: "l", launch: { role: "lead" } }] }, "lead")).rejects.toThrow(/cannot launch a lead/);
+    await expect(service.handle({ operation: "run", tasks: [{ prompt: "w", launch: { model: "test/model" } }, { prompt: "l", launch: { model: "test/model", role: "lead" } }] }, "lead")).rejects.toThrow(/cannot launch a lead/);
 
     const worker = await agent("worker");
     store.saveRun({ ...store.getRun("lead-run")!, id: "worker-run", taskId: worker.id, targetSessionId: "worker", invokedBySessionId: "lead", callbackSessionId: "lead", context: { definition: worker } });
@@ -428,7 +428,7 @@ describe("a feature lead", () => {
 describe("a session's role, kept for its life", () => {
   it("makes a session a delegated run created a worker: refused in its run and reopened after it, told so, opened as one", async () => {
     const { service, store, created } = rig();
-    const receipt = await service.handle({ operation: "run", prompt: "fix it" }, "main") as { runId: string };
+    const receipt = await service.handle({ operation: "run", prompt: "fix it", launch: { model: "test/model" } }, "main") as { runId: string };
     const run = await service.waitForRun(receipt.runId);
     const worker = run.targetSessionId!;
     expect(created.at(-1)).toMatchObject({ role: "worker" });
@@ -445,9 +445,9 @@ describe("a session's role, kept for its life", () => {
     const cron = await service.waitForRun(service.run(nightly.id, null, "cron").id);
     expect(store.roleOf(cron.targetSessionId!)).toBeUndefined();
     expect(cron.context.renderedPrompt).not.toContain("`pier task` is refused");
-    await expect(service.handle({ operation: "run", prompt: "follow up" }, cron.targetSessionId!)).resolves.toMatchObject({ runId: expect.any(String) });
+    await expect(service.handle({ operation: "run", prompt: "follow up", launch: { model: "test/model" } }, cron.targetSessionId!)).resolves.toMatchObject({ runId: expect.any(String) });
     await leadRan();
-    await expect(service.handle({ operation: "run", prompt: "a worker" }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });
+    await expect(service.handle({ operation: "run", prompt: "a worker", launch: { model: "test/model" } }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });
     service.stop();
   });
 });

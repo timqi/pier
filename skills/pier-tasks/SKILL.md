@@ -5,14 +5,14 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 
 # Pier tasks
 
-`pier task --help` lists the nine commands and their flags. Each prints one
+`pier task --help` lists the ten commands and their flags. Each prints one
 JSON receipt, exit 0; a refusal is a `task:` line, exit 1; a bad flag is
 `task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
 ## Delegate, then end your turn
 
 ```sh
-pier task run --prompt "Review src/auth/*.ts. Return file:line, issue, fix."
+pier task run --model balanced --prompt "Review src/auth/*.ts. Return file:line, issue, fix."
 ```
 
 The prompt is the whole handoff (goal, constraints, absolute paths, output
@@ -49,7 +49,8 @@ only you can answer, ending its turn with that as its result; answer it with
 
 ## Model choice
 
-Default: your model. `--model hardest | balanced | cheap` are tiers the
+`--model` is required on a fresh run: a tier, or a model the user named.
+`--model hardest | balanced | cheap` are tiers the
 operator pinned on the menu; thinking follows the pin, `--thinking`
 overrides (`off/minimal/low/medium/high/xhigh/max`).
 
@@ -83,6 +84,12 @@ caps each member at 2 000, so a long member is recovered with `--run`.
 `pier task runs` — the runs you launched, in flight and finished in the last
 24h. For orientation, never to wait on a result.
 
+`pier task stats [--days 30]` — finished agent runs by launch tier, role and
+model, with each row's recent task names: `named` is a run launched by model
+name (or from before tiers were recorded). A row is a question, not a fault:
+a lead off `hardest`, or names under a tier that read like another tier's
+work, is what to read back to the user.
+
 `--role lead` on a fresh `--prompt` run launches a feature lead: a long-lived
 child in the feature's worktree that builds with workers; `--design` beside it
 makes it a design lead, which designs with the user until they finalize. It is
@@ -101,7 +108,7 @@ every flag. Results reach Pier;
 `pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
 
 ```sh
-pier task save --name deploy-done --watch "test -f /repo/DONE" --every 60 --prompt "Summarize /repo/DONE."
+pier task save --name deploy-done --watch "test -f /repo/DONE" --every 60 --model cheap --prompt "Summarize /repo/DONE."
 ```
 
 `--watch <script> --every <s>` (≥ 5, in `--cwd`) runs the script each interval:

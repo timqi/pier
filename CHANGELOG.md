@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `pier task run --prompt`, each `--member` and `pier task save` with a prompt require `--model` — a tier (`hardest | balanced | cheap`) or a model on the operator's menu; the refusal prints the menu. A child no longer inherits the caller's live model. `--session`, `--run`, `--bash` and `--task-id` are unchanged.
+
+### Added
+
+- `pier task stats [--days <n>]`: finished agent runs by launch tier, role and model, with each row's recent task names, so the operator can read whether dispatch follows the tier rule ([12-model-tiers.md](docs/design/12-model-tiers.md)).
+
 ## 0.3.1 — 2026-09-28
 
 ### Changed

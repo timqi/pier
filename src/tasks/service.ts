@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, BackgroundRun, LedgerRun, ModelTier } from "../core/types.js";
+import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -19,7 +19,7 @@ import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import type { TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
 import type { CallbackMode, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
-import { isTerminal } from "./types.js";
+import { createdRole, isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
@@ -37,6 +37,19 @@ type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSess
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
 export type TaskChain = Pick<MainChain, "chainOf" | "members">;
 type Waiter = (run: TaskRun) => void;
+
+/** One row of `pier task stats`: `named` is a launch with no tier. */
+interface StatsRow {
+  tier: ModelTier | "named";
+  role: AgentRole;
+  provider: string;
+  id: string;
+  thinking?: string;
+  runs: number;
+  cancelled: number;
+  names: string[];
+}
+const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
 
 export class TaskService {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -300,6 +313,27 @@ export class TaskService {
   /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
   ledger(sessionIds: string[], since: number): LedgerRun[] {
     return this.store.ledgerRuns(sessionIds, since).map(ledgerRun);
+  }
+
+  /** Dispatched runs of the last `days` by launch tier, role and the model the
+   *  session settled on; a run with no role is the head's own, not dispatch. */
+  stats(days: number): { days: number; rows: StatsRow[] } {
+    const rows = new Map<string, StatsRow>();
+    for (const run of this.store.finishedAgentRuns(Date.now() - days * 86_400_000)) {
+      const role = createdRole(run);
+      const { definition: { action, name }, model, thinking } = run.context;
+      if (!role || !model || action.type !== "agent") continue;
+      const tier = action.launch?.tier ?? "named";
+      const key = JSON.stringify([tier, role, model.provider, model.id, thinking]);
+      const row = rows.get(key) ?? { tier, role, provider: model.provider, id: model.id, ...(thinking ? { thinking } : {}), runs: 0, cancelled: 0, names: [] };
+      rows.set(key, row);
+      if (run.state === "succeeded" || run.state === "failed") row.runs++;
+      else row.cancelled++;
+      if (row.names.length < 5 && !row.names.includes(name)) row.names.push(name);
+    }
+    const sorted = [...rows.values()].sort((a, b) =>
+      TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.role.localeCompare(b.role) || b.runs - a.runs);
+    return { days, rows: sorted };
   }
 
   /** Design leads no run of which has reported `Design final:`, by their creating run: the user's to finalize. */

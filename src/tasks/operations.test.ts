@@ -188,7 +188,7 @@ describe("task operations", () => {
       .rejects.toThrow("callback_session_id applies to a single run only");
     await expect(top({ operation: "run", task_id: task.id, callback: "none", callback_session_id: "other" }))
       .rejects.toThrow(/callback none and callback_session_id conflict/);
-    await expect(top({ operation: "run", task: { action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "Work" }, callback: { type: "session", sessionId: "other" } } }))
+    await expect(top({ operation: "run", task: { action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "Work", launch: { model: "test/model" } }, callback: { type: "session", sessionId: "other" } } }))
       .rejects.toThrow(/inline task draft cannot set callback/);
     // A misspelt mode is refused, never read as its default.
     await expect(top({ operation: "run", task_id: task.id, callback: "later" })).rejects.toThrow("callback must be one of origin, none, steer");
@@ -234,7 +234,7 @@ describe("task operations", () => {
   it("a run nobody waits on may delegate, and a top-level session always may", async () => {
     const scheduled = rig([live("cron", { triggerSource: "cron", invokedBySessionId: null, callbackSessionId: null })]);
     expect(await scheduled({ operation: "list" })).toEqual([]);
-    expect((await scheduled({ operation: "run", prompt: "Work" }) as RunSummary).runId).toBe("new");
+    expect((await scheduled({ operation: "run", prompt: "Work", launch: { model: "test/model" } }) as RunSummary).runId).toBe("new");
     const detached = rig([live("m", { groupId: "g", callbackSessionId: null })], [group("g", ["m"], { callbackSessionId: null, callbackState: null })]);
     expect(await detached({ operation: "list" })).toEqual([]);
     // A finished run's session is nobody's turn any more; a queued one has not taken it yet.
@@ -313,6 +313,10 @@ describe("task operations", () => {
     expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toBe(
       "the operator's menu — --model takes a tier, a provider/id or a unique substring of one:\n"
       + "anthropic/claude-opus-4 · high\nbalanced · openai/gpt-5 · medium\nopenai/gpt-5-mini · low\nbalanced · xai/grok-4 · high",
+    );
+    // No model at all is refused with the same lines, whatever else the launch says.
+    await expect(launchOf({ thinking: "low" })).rejects.toThrow(
+      /^--model is required — a tier \(hardest \| balanced \| cheap\) or a model on the operator's menu:\nanthropic\/claude-opus-4 · high\nbalanced · openai/,
     );
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });

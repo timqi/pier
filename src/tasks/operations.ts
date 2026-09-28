@@ -4,7 +4,7 @@
 // service; this file decides who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
-import { isModelTier, LEDGER_WINDOW_MS, type ModelRef, type ModelTier } from "../core/types.js";
+import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, type ModelRef, type ModelTier } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -216,6 +216,10 @@ export async function handleTask(
     });
   }
   if (input.operation === "runs") return host.ledger(launchers(), Date.now() - LEDGER_WINDOW_MS);
+  if (input.operation === "stats") {
+    if (typeof input.days !== "number" || !Number.isInteger(input.days) || input.days < 1) throw new Error("days must be a positive whole number");
+    return host.stats(input.days);
+  }
   // A one-shot's hidden definition is a run's record, not a task anyone filed.
   const filed = (): string => {
     const id = requiredString(input.task_id, "task_id");
@@ -401,6 +405,10 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
     return resolve(base, typeof cwd === "string" ? cwd : ".");
   };
   const relative = (cwd: unknown): boolean => cwd === undefined || (typeof cwd === "string" && !isAbsolute(cwd));
+  // A fresh session is the one launch whose model nothing else has settled.
+  if (action?.type === "agent" && session?.mode === "fresh" && record(action.launch)?.model === undefined) {
+    throw new Error(`--model is required — a tier (${MODEL_TIERS.join(" | ")}) or a model on the operator's menu:\n${menuLines(await menu())}`);
+  }
   if (action?.type === "agent" && session?.mode === "fresh" && relative(session.cwd)) {
     draft = { ...draft, action: { ...action, session: { ...session, cwd: await absolute(session.cwd) } } };
   }

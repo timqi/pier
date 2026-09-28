@@ -162,10 +162,7 @@ export class AgentTaskRunner {
       cwd,
       // The session list's title: the caller's `--name`, else the prompt's first line.
       name: run.context.definition.name,
-      // Unspecified model inherits the caller's live model, not the global
-      // default; falls back to the default when the caller isn't attached.
-      model: action.launch?.model ??
-        (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
+      model: action.launch?.model,
       thinking: action.launch?.thinking,
       role: createdRole(run),
     };

@@ -123,6 +123,20 @@ export class TaskStore {
     `, JSON.stringify(sessionIds), since);
   }
 
+  /** Opened agent runs a session or the user fired that settled at or after
+   *  `since`, newest first; skipped runs never ran. */
+  finishedAgentRuns(since: number): TaskRun[] {
+    return this.#many(`
+      SELECT json FROM task_runs
+      WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
+        AND json_extract(json, '$.triggerSource') IN ('agent', 'manual')
+        AND json_extract(json, '$.context.definition.action.type') = 'agent'
+        AND json_extract(json, '$.context.model') IS NOT NULL
+        AND json_extract(json, '$.finishedAt') >= ?
+      ORDER BY json_extract(json, '$.finishedAt') DESC
+    `, since);
+  }
+
   /** A `task` action's child runs; a cancel walks them. */
   listChildRuns(parentRunId: string): TaskRun[] {
     return this.#many(`

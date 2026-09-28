@@ -22,7 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
-  help: { type: "boolean", short: "h" },
+  days: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
 type Values = Partial<Record<Flag, string | boolean>>;
@@ -32,15 +32,15 @@ type Params = Record<string, unknown>;
  *  command accepts are read off it, so the two cannot drift. */
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
-    usage: "run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
-      "        [--model <name|?>] [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
+    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
+      "        [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
   },
   save: {
-    usage: "save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)\n" +
+    usage: "save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)\n" +
       "        [--cron \"<expr>\" --tz <zone> | --watch <script> --every <seconds> [--repeat]]\n" +
-      "        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id|none>]",
+      "        [--cwd <dir>] [--timeout <seconds>] [--thinking <level>] [--callback-session <id|none>]",
     help: "file a definition the operator sees, or update one by --task-id; no trigger means manual; results reach the continuous conversation unless --callback-session",
   },
   list: { usage: "list", help: "stored definitions with nextRun and lastRun, as JSON" },
@@ -48,6 +48,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
   resume: { usage: "resume --task-id <id>", help: "restart a paused definition's schedule" },
   archive: { usage: "archive --task-id <id>", help: "retire a definition for good" },
   runs: { usage: "runs", help: "the runs you launched (in the continuous conversation, any of its sessions), in flight and finished in the last 24h, as JSON" },
+  stats: { usage: "stats [--days <n>]", help: "finished agent runs of the last n days (30) by launch tier, role and model, with recent task names, as JSON" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
 };
@@ -151,6 +152,10 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   if (parsed.some((v) => v.model === "?")) return { operation: "run", launch: { model: "?" } };
   const [values, ...members] = parsed as [Values, ...Values[]];
   if (name === "list" || name === "runs") return { operation: name };
+  if (name === "stats") {
+    const days = Number(values.days ?? 30);
+    return Number.isInteger(days) && days > 0 ? { operation: "stats", days } : refuse("--days must be a positive whole number");
+  }
   if (name === "cancel" || name === "recover") {
     if ((values.run === undefined) === (values.group === undefined)) refuse(`${name} takes exactly one of --run or --group`);
     if (name === "recover" && values.reason === undefined) refuse("recover needs --reason");

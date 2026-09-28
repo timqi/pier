@@ -9,6 +9,8 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
+  ModelRef,
+  ThinkingLevel,
 } from "../core/types.js";
 import { runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
@@ -20,6 +22,7 @@ import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import {
   MAX_DELIVERY_ATTEMPTS,
   retryDelay,
+  type AgentLaunchPolicy,
   type TaskDefinition,
   type TaskRun,
 } from "./types.js";
@@ -468,7 +471,7 @@ describe("task service", () => {
 
     const delegated = await service.handle({
       operation: "run",
-      task: { name: "child", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review the PR" } },
+      task: { name: "child", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review the PR", launch: { model: "test/model" } } },
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
     expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
@@ -1310,7 +1313,7 @@ describe("task service", () => {
       operation: "run",
       task: {
         name: "inline reviewer",
-        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review" },
+        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review", launch: { model: "test/model" } },
       },
     }, "s1") as RunSummary;
     await service.waitForRun(queued.runId);
@@ -1343,6 +1346,7 @@ describe("task service", () => {
     const summary = await service.handle({
       operation: "run",
       prompt: "## Review the **auth** module\nLook at src/auth for injection risks.",
+      launch: { model: "test/model" },
     }, "s1") as RunSummary;
     expect(summary.taskName).toBe("Review the auth module");
     expect(service.get(summary.taskId)).toMatchObject({
@@ -1352,7 +1356,7 @@ describe("task service", () => {
 
     // Relative cwd resolves against the caller; a long first line is cut, not dropped.
     const long = `${"word ".repeat(20).trim()}`;
-    const nested = await service.handle({ operation: "run", prompt: long, cwd: "sub" }, "s1") as RunSummary;
+    const nested = await service.handle({ operation: "run", prompt: long, cwd: "sub", launch: { model: "test/model" } }, "s1") as RunSummary;
     expect(service.get(nested.taskId).action).toMatchObject({ session: { cwd: join(cwd, "sub") } });
     expect(nested.taskName.length).toBe(60);
     expect(nested.taskName.endsWith("…")).toBe(true);
@@ -1360,12 +1364,13 @@ describe("task service", () => {
     // The same defaults inside a full draft: no cwd means the caller's.
     const full = await service.handle({
       operation: "run",
-      task: { action: { type: "agent", session: { mode: "fresh" }, prompt: "Plain" } },
+      task: { action: { type: "agent", session: { mode: "fresh" }, prompt: "Plain", launch: { model: "test/model" } } },
     }, "s1") as RunSummary;
     expect(service.get(full.taskId)).toMatchObject({ name: "Plain", action: { session: { cwd } } });
 
-    // Fan-out members may be bare prompts.
-    const group = await service.handle({ operation: "run", tasks: ["angle a", { prompt: "angle b", cwd: "./sub" }] }, "s1") as GroupSummary;
+    // Fan-out members are shorthand drafts; a bare prompt names no model and is refused.
+    await expect(service.handle({ operation: "run", tasks: ["angle a", "angle b"] }, "s1")).rejects.toThrow("--model is required");
+    const group = await service.handle({ operation: "run", tasks: [{ prompt: "angle a", launch: { model: "test/model" } }, { prompt: "angle b", cwd: "./sub", launch: { model: "test/model" } }] }, "s1") as GroupSummary;
     expect(group.members.map((m) => m.taskName)).toEqual(["angle a", "angle b"]);
     // The fake factory hands every fresh run the session "s1": while one of
     // them still runs, "s1" is a supervised run and refused as one.
@@ -1373,21 +1378,21 @@ describe("task service", () => {
 
     await expect(service.handle({ operation: "run", prompt: "x", task: { name: "y", action: { type: "bash", cwd, script: "true" } } }, "s1"))
       .rejects.toThrow("either prompt or task");
-    await expect(service.handle({ operation: "run", prompt: "x", cwd: "missing" }, "s1"))
+    await expect(service.handle({ operation: "run", prompt: "x", cwd: "missing", launch: { model: "test/model" } }, "s1"))
       .rejects.toThrow("working directory does not exist");
     // A caller Pier cannot place has no directory to resolve against.
-    await expect(service.handle({ operation: "run", prompt: "x" }, "nobody"))
+    await expect(service.handle({ operation: "run", prompt: "x", launch: { model: "test/model" } }, "nobody"))
       .rejects.toThrow("no working directory");
   });
 
   it("takes timeoutSeconds from the prompt shorthand, defaulting to an hour", async () => {
     const { service } = callerAndChild();
-    const long = await service.handle({ operation: "run", prompt: "Slow work", timeoutSeconds: 7200 }, "s1") as RunSummary;
+    const long = await service.handle({ operation: "run", prompt: "Slow work", timeoutSeconds: 7200, launch: { model: "test/model" } }, "s1") as RunSummary;
     expect(service.get(long.taskId).timeoutSeconds).toBe(7200);
-    const plain = await service.handle({ operation: "run", prompt: "Ordinary work" }, "s1") as RunSummary;
+    const plain = await service.handle({ operation: "run", prompt: "Ordinary work", launch: { model: "test/model" } }, "s1") as RunSummary;
     expect(service.get(plain.taskId).timeoutSeconds).toBe(3600);
     // Same boundary as the draft form, not a second range.
-    await expect(service.handle({ operation: "run", prompt: "x", timeoutSeconds: 86_401 }, "s1"))
+    await expect(service.handle({ operation: "run", prompt: "x", timeoutSeconds: 86_401, launch: { model: "test/model" } }, "s1"))
       .rejects.toThrow("timeoutSeconds must be between 1 and 86400");
   });
 
@@ -1395,12 +1400,12 @@ describe("task service", () => {
     const { service } = setup();
     const group = await service.handle({
       operation: "run",
-      tasks: [{ prompt: "patient member", timeoutSeconds: 7200 }, "default member"],
+      tasks: [{ prompt: "patient member", timeoutSeconds: 7200, launch: { model: "test/model" } }, { prompt: "default member", launch: { model: "test/model" } }],
     }, "s1") as GroupSummary;
     expect(group.members.map((m) => service.get(m.taskId).timeoutSeconds)).toEqual([7200, 3600]);
     await expect(service.handle({
       operation: "run",
-      tasks: [{ prompt: "x", timeoutSeconds: 0 }, "y"],
+      tasks: [{ prompt: "x", timeoutSeconds: 0, launch: { model: "test/model" } }, { prompt: "y", launch: { model: "test/model" } }],
     }, "s1")).rejects.toThrow("timeoutSeconds must be between 1 and 86400");
   });
 
@@ -1414,13 +1419,27 @@ describe("task service", () => {
       .rejects.toThrow("trigger required");
   });
 
-  it("inherits the caller's live model for fresh children", async () => {
-    const { cwd, service, session, factory, router } = setup();
-    router.attach({ channelId: "web", conversationId: session.id }, session);
-    vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("fresh-inherit"));
+  it("refuses a fresh agent draft without launch.model, naming the menu", async () => {
+    const menu = [{ provider: "anthropic", id: "claude-opus-4", thinking: "high", tier: "hardest" as const }, { provider: "openai", id: "gpt-5-mini" }];
+    const { cwd, service, factory } = setup(fakeSession(), { ...BARE, modelMenu: () => menu });
+    const refusal = "--model is required — a tier (hardest | balanced | cheap) or a model on the operator's menu:\n"
+      + "hardest · anthropic/claude-opus-4 · high\nopenai/gpt-5-mini";
+    const fresh = { name: "unnamed", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go", launch: { thinking: "low" } } };
+    await expect(service.handle({ operation: "run", task: fresh }, "s1")).rejects.toThrow(refusal);
+    await expect(service.handle({ operation: "run", prompt: "go", cwd }, "s1")).rejects.toThrow(refusal);
+    await expect(service.handle({ operation: "run", tasks: [{ prompt: "a" }, { prompt: "b", launch: { model: "test/model" } }] }, "s1")).rejects.toThrow(refusal);
+    await expect(service.handle({ operation: "save", task: { ...fresh, trigger: { type: "manual" } } }, "s1")).rejects.toThrow(refusal);
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(service.list()).toEqual([]);
+  });
+
+  it("opens a fresh child on the model its launch names", async () => {
+    // No caller attached: the model can only have come from the launch.
+    const { cwd, service, session, factory } = setup();
+    vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("fresh-named"));
     const queued = await service.handle({
       operation: "run",
-      task: { name: "inherit", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } },
+      task: { name: "named", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go", launch: { model: "test/model" } } },
     }, session.id) as RunSummary;
     expect((await service.waitForRun(queued.runId)).state).toBe("succeeded");
     expect(factory.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -1614,7 +1633,7 @@ describe("task service", () => {
     vi.mocked(factory.create)
       .mockResolvedValueOnce(fakeSession("member-a"))
       .mockResolvedValueOnce(fakeSession("member-b"));
-    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
+    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch: { model: "test/model" } } });
     const group = await service.handle({ operation: "run", tasks: [draft("angle-a"), draft("angle-b")] }, "s1") as GroupSummary;
     expect(group).toMatchObject({ join: "all", state: "running" });
     // No per-member callback — the group delivers one. Absent rather than
@@ -1639,7 +1658,7 @@ describe("task service", () => {
     vi.mocked(factory.create)
       .mockResolvedValueOnce(fakeSession("fast-member"))
       .mockResolvedValueOnce(fakeSession("slow-member", { hold: true }));
-    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
+    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch: { model: "test/model" } } });
     const group = await service.handle({ operation: "run", tasks: [draft("fast"), draft("slow")], join: "first" }, "s1") as GroupSummary;
     await vi.waitFor(() => expect(service.getGroup(group.groupId).group.callbackState).toBe("delivered"));
     const { group: finished, members } = service.getGroup(group.groupId);
@@ -1664,7 +1683,7 @@ describe("task service", () => {
     vi.mocked(factory.create)
       .mockResolvedValueOnce(fakeSession("hang-a", { hold: true }))
       .mockResolvedValueOnce(fakeSession("hang-b", { hold: true }));
-    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
+    const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch: { model: "test/model" } } });
     const group = await service.handle({ operation: "run", tasks: [draft("one"), draft("two")] }, "s1") as GroupSummary;
     await service.handle({ operation: "cancel", group_id: group.groupId }, "s1");
     for (const member of group.members) {
@@ -1677,7 +1696,7 @@ describe("task service", () => {
     vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("worker-1"));
     const task = await service.handle({
       operation: "run",
-      task: { name: "review", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review" } },
+      task: { name: "review", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review", launch: { model: "test/model" } } },
     }, "s1") as RunSummary;
     const run = await service.waitForRun(task.runId);
     await vi.waitFor(() => expect(service.getRun(run.id).callbackState).toBe("delivered"));
@@ -1783,7 +1802,7 @@ describe("task admission and delivery regressions", () => {
     });
     const saves = vi.spyOn(store, "saveGroup");
     await expect(service.handle({ operation: "run", join: joinMode, tasks: [
-      { prompt: "work", cwd }, { task_id: good.id }, { task_id: archived.id },
+      { prompt: "work", cwd, launch: { model: "test/model" } }, { task_id: good.id }, { task_id: archived.id },
     ] }, "s1")).rejects.toThrow("archived tasks cannot run");
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(factory.create).not.toHaveBeenCalled();
@@ -2086,5 +2105,47 @@ describe("a definition Pier's own code created", () => {
     expect(run.state).toBe("succeeded");
     expect(run.error).toBeNull();
     expect(service.get(once.id).enabled).toBe(false);
+  });
+});
+
+describe("pier task stats", () => {
+  it("groups dispatched agent runs in the window by tier, role and model, cancelled apart", async () => {
+    const { cwd, service, store } = setup();
+    const base = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    const day = 86_400_000;
+    const opus = { provider: "anthropic", id: "opus" };
+    let n = 0;
+    const seed = (name: string, launch: AgentLaunchPolicy, over: Partial<TaskRun> = {}, model: ModelRef | null = opus, thinking?: ThinkingLevel) => {
+      const task: TaskDefinition = { ...base, name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch } };
+      store.saveRun(storedRun(`r${String(++n)}`, task, now, { invokedBySessionId: "head", context: { definition: task, model: model ?? undefined, thinking }, finishedAt: now - n * 1000, ...over }));
+    };
+    for (let i = 0; i < 7; i++) seed(`review-${String(i)}`, { tier: "hardest" }, {}, opus, "high");
+    seed("review-0", { tier: "hardest" }, { state: "failed" }, opus, "high");
+    seed("stopped", { tier: "hardest" }, { state: "cancelled" }, opus, "high");
+    seed("restarted", { tier: "hardest" }, { state: "interrupted" }, opus, "high");
+    seed("plan", { tier: "hardest", role: "lead" }, { invokedBySessionId: null, triggerSource: "manual" });
+    seed("named-a", {});
+    seed("named-b", {}, {}, { provider: "openai", id: "gpt" });
+    seed("cheap", { tier: "cheap" });
+    // Each of these is outside the measurement.
+    seed("old", { tier: "cheap" }, { finishedAt: now - 31 * day });
+    seed("head", { tier: "cheap" }, { invokedBySessionId: null });
+    seed("cron", { tier: "cheap" }, { triggerSource: "cron" });
+    seed("skipped", { tier: "cheap" }, { state: "skipped" });
+    seed("live", { tier: "cheap" }, { state: "running", finishedAt: null });
+    seed("unopened", { tier: "cheap" }, {}, null);
+
+    expect(service.stats(30)).toEqual({ days: 30, rows: [
+      { tier: "hardest", role: "lead", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["plan"] },
+      { tier: "hardest", role: "worker", provider: "anthropic", id: "opus", thinking: "high", runs: 8, cancelled: 2,
+        names: ["review-0", "review-1", "review-2", "review-3", "review-4"] },
+      { tier: "cheap", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["cheap"] },
+      { tier: "named", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["named-a"] },
+      { tier: "named", role: "worker", provider: "openai", id: "gpt", runs: 1, cancelled: 0, names: ["named-b"] },
+    ] });
+    expect(service.stats(40).rows.find((row) => row.tier === "cheap")?.names).toEqual(["cheap", "old"]);
+    await expect(service.handle({ operation: "stats", days: 0 }, "head")).rejects.toThrow("days must be a positive whole number");
+    await expect(service.handle({ operation: "stats", days: 1 }, "head")).resolves.toMatchObject({ days: 1 });
   });
 });
