@@ -4,8 +4,9 @@
 
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { CatalogBinary, CatalogEntry } from "./agent/types.js";
@@ -43,7 +44,8 @@ export const MANAGED: readonly ManagedTool[] = [
     summary:
       "Compresses long bash output before it reaches the model. Its install hook " +
       "writes its own Pi extension (extensions/rtk.ts), and this switch is that " +
-      "extension's too — refreshed on every update.",
+      "extension's too — refreshed on every update. Each sync adds `npm run lint` and " +
+      "`pnpm [run] lint` to exclude_commands in rtk's config.toml: rtk would run them as ESLint.",
   },
   {
     name: "rg",
@@ -69,6 +71,65 @@ export const MANAGED: readonly ManagedTool[] = [
     summary: "Slices, filters and reshapes JSON on the command line.",
   },
 ];
+
+/** Script invocations rtk rewrites to `rtk lint`, which runs ESLint whatever
+ *  the script runs (rtk-ai/rtk#1489). rtk matches each as a word prefix, so
+ *  `npm run lint -- --fix` is excluded too and `npm run lint:fix` is not. */
+export const RTK_EXCLUDES: readonly string[] = ["npm run lint", "pnpm run lint", "pnpm lint"];
+
+/** Where rtk reads its config: Rust's `dirs::config_dir()`. */
+const rtkConfigPath = (): string =>
+  join(
+    process.platform === "darwin"
+      ? join(homedir(), "Library", "Application Support")
+      : process.env.XDG_CONFIG_HOME?.startsWith("/") ? process.env.XDG_CONFIG_HOME : join(homedir(), ".config"),
+    "rtk",
+    "config.toml",
+  );
+
+const TOML_TOKEN = /\s+|#[^\n]*|"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|,|\[|\]/y;
+
+/** Adds what `[hooks] exclude_commands` lacks and changes no other byte: the
+ *  file is the operator's. Throws on a shape a text edit cannot be sure of. */
+export function mergeRtkExcludes(toml: string, wanted: readonly string[]): string {
+  const list = (items: readonly string[]): string => items.map((item) => JSON.stringify(item)).join(", ");
+  if (/^\s*(hooks\s*[.=]|\[\s*hooks\s*\.|\[\[\s*hooks\s*\]\])/m.test(toml)) {
+    throw new Error("its hooks table is written in a form Pier does not edit");
+  }
+  const header = /^[ \t]*\[[ \t]*hooks[ \t]*\][ \t]*(#.*)?$/m.exec(toml);
+  if (!header) {
+    const sep = !toml ? "" : toml.endsWith("\n") ? "\n" : "\n\n";
+    return `${toml}${sep}[hooks]\nexclude_commands = [${list(wanted)}]\n`;
+  }
+  const bodyAt = header.index + header[0].length;
+  const next = /^[ \t]*\[/m.exec(toml.slice(bodyAt));
+  const body = toml.slice(bodyAt, next ? bodyAt + next.index : toml.length);
+  const key = /^[ \t]*exclude_commands[ \t]*=/m.exec(body);
+  if (!key) {
+    return `${toml.slice(0, bodyAt)}\nexclude_commands = [${list(wanted)}]${toml.slice(bodyAt)}`;
+  }
+  TOML_TOKEN.lastIndex = bodyAt + key.index + key[0].length;
+  const have: string[] = [];
+  let last = "";
+  for (;;) {
+    const at = TOML_TOKEN.lastIndex;
+    const token = TOML_TOKEN.exec(toml)?.[0];
+    if (token === undefined || (last === "" && token.trim() && !token.startsWith("#") && token !== "[")) {
+      throw new Error("its exclude_commands is not an array of strings");
+    }
+    if (!token.trim() || token.startsWith("#")) continue;
+    if (token === "]" && last) {
+      const missing = wanted.filter((item) => !have.includes(item));
+      if (!missing.length) return toml;
+      const add = last === "[" || last === "," ? list(missing) : `, ${list(missing)}`;
+      return `${toml.slice(0, at)}${add}${toml.slice(at)}`;
+    }
+    if (token === "[" && last) throw new Error("its exclude_commands is not an array of strings");
+    if (token.startsWith('"')) have.push(JSON.parse(token) as string);
+    else if (token.startsWith("'")) have.push(token.slice(1, -1));
+    last = token;
+  }
+}
 
 /** A tool the operator added by writing a block of their own. */
 export interface CustomTool {
@@ -513,9 +574,13 @@ export class ManagedTools {
   /** Why a tool is absent lives only here: `ubix list` never names one that failed to install. */
   #lastSync: ToolSyncReport | undefined;
   readonly #db: () => DatabaseSync;
+  readonly #rtkConfig: string;
 
-  constructor(options: { exec?: Exec; fetch?: typeof fetch; root?: string; db?: () => DatabaseSync } = {}) {
+  constructor(
+    options: { exec?: Exec; fetch?: typeof fetch; root?: string; db?: () => DatabaseSync; rtkConfig?: string } = {},
+  ) {
     this.#exec = options.exec ?? spawnExec;
+    this.#rtkConfig = options.rtkConfig ?? rtkConfigPath();
     this.#fetch = options.fetch ?? ((...args) => fetch(...args));
     this.#root = options.root ?? toolsDir();
     // Opened on the first sync: `status()` and the catalog need no database.
@@ -627,6 +692,11 @@ export class ManagedTools {
         error: state?.error ?? (state ? null : "ubix reported nothing about it"),
       });
     }
+    const rtk = entries.find((entry) => entry.name === "rtk" && entry.error === null);
+    if (rtk && existsSync(join(this.bin, "rtk"))) {
+      fence();
+      rtk.error = await this.#excludeFromRtk(env);
+    }
     const failed = entries.some((entry) => entry.error !== null);
     return { entries, failed, summary: summarize(entries) };
   }
@@ -723,6 +793,32 @@ export class ManagedTools {
     const path = join(this.#configDir, "config.toml");
     writeFileSync(`${path}.writing`, ubixConfigToml(tools, this.bin));
     renameSync(`${path}.writing`, path);
+  }
+
+  /** Every sync, not only on install: an upgrade or a hand edit may drop the
+   *  entries. Proven by asking rtk, since it reads a config it cannot parse as
+   *  none at all. */
+  async #excludeFromRtk(env: NodeJS.ProcessEnv): Promise<string | null> {
+    // Through a symlink, not over it: a dotfiles checkout keeps its link.
+    let path = this.#rtkConfig;
+    try {
+      if (existsSync(path)) path = realpathSync(path);
+      const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+      const after = mergeRtkExcludes(before, RTK_EXCLUDES);
+      if (after !== before) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(`${path}.writing`, after);
+        renameSync(`${path}.writing`, path);
+        log.info(`added ${RTK_EXCLUDES.join(", ")} to rtk's exclude_commands in ${path}`);
+      }
+    } catch (err) {
+      return `could not add ${RTK_EXCLUDES.join(", ")} to exclude_commands in ${path}: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    const probe = await this.#exec(join(this.bin, "rtk"), ["rewrite", RTK_EXCLUDES[0] ?? ""], env);
+    // Exit 1 is rtk's "no rewrite".
+    if (probe.code === 1) return null;
+    return `rtk still rewrites \`${RTK_EXCLUDES[0] ?? ""}\` (to \`${probe.stdout.trim()}\`, exit ${String(probe.code)})` +
+      ` — the exclude_commands in ${path} did not take`;
   }
 
   /** A non-zero exit still parses: under `--json` a failed tool is in the

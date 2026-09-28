@@ -101,6 +101,9 @@ src/
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
+               with rtk on, each sync adds `RTK_EXCLUDES` to `[hooks]
+               exclude_commands` in rtk's own config.toml — the one file
+               outside `$PIER_HOME` a sync edits, and only by appending;
                a custom tool is the body of its ubix block. `~/.pier/tools/bin`
                goes first on the PATH everything Pier spawns inherits; at start
                Pier writes a `pier` shim there that execs its own cli (same

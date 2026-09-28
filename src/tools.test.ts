@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,12 +12,14 @@ import {
   type ExecResult,
   MANAGED,
   ManagedTools,
+  mergeRtkExcludes,
   normalizeCustomTools,
   parseUbixJson,
   specOf,
   type SyncAttempt,
   SyncLock,
   ubixAsset,
+  RTK_EXCLUDES,
   ubixConfigToml,
   writePierShim,
 } from "./tools.js";
@@ -257,6 +259,41 @@ describe("a tool the operator declares", () => {
   });
 });
 
+describe("rtk's exclude_commands", () => {
+  const want = ["npm run lint", "pnpm lint"];
+
+  it("adds a hooks table, or the key to one, and leaves the rest as written", () => {
+    expect(mergeRtkExcludes("", want)).toBe(`[hooks]\nexclude_commands = ["npm run lint", "pnpm lint"]\n`);
+    expect(mergeRtkExcludes("[a]\nx = 1", want)).toBe(`[a]\nx = 1\n\n[hooks]\nexclude_commands = ["npm run lint", "pnpm lint"]\n`);
+    expect(mergeRtkExcludes("[hooks] # mine\ntransparent_prefixes = []\n[tee]\n", want)).toBe(
+      `[hooks] # mine\nexclude_commands = ["npm run lint", "pnpm lint"]\ntransparent_prefixes = []\n[tee]\n`,
+    );
+  });
+
+  it("appends only what is missing, inside the operator's own array", () => {
+    expect(mergeRtkExcludes(`[hooks]\nexclude_commands = []\n`, want)).toBe(`[hooks]\nexclude_commands = ["npm run lint", "pnpm lint"]\n`);
+    expect(mergeRtkExcludes(`[hooks]\nexclude_commands = ["curl", 'pnpm lint'] # keep\n[tee]\n`, want)).toBe(
+      `[hooks]\nexclude_commands = ["curl", 'pnpm lint', "npm run lint"] # keep\n[tee]\n`,
+    );
+    const multiline = `[hooks]\nexclude_commands = [\n  "curl", # why [not]\n  "gh",\n]\n`;
+    expect(mergeRtkExcludes(multiline, want)).toBe(`[hooks]\nexclude_commands = [\n  "curl", # why [not]\n  "gh",\n"npm run lint", "pnpm lint"]\n`);
+    const done = `[hooks]\nexclude_commands = ["pnpm lint", "npm run lint"]\n`;
+    expect(mergeRtkExcludes(done, want)).toBe(done);
+  });
+
+  it("refuses a shape it cannot edit rather than guessing", () => {
+    for (const toml of [
+      `[hooks]\nexclude_commands = "curl"\n`,
+      `[hooks]\nexclude_commands = [["curl"]]\n`,
+      `[hooks]\nexclude_commands = ["curl"\n`,
+      `hooks.exclude_commands = ["curl"]\n`,
+      `hooks = { exclude_commands = [] }\n`,
+    ]) {
+      expect(() => mergeRtkExcludes(toml, want)).toThrow();
+    }
+  });
+});
+
 describe("the release asset for this machine", () => {
   it("maps platform and arch onto ubix's asset names", () => {
     expect(ubixAsset("v20260819-8b7fb71", "linux", "x64")).toBe("ubix-linux-amd64-v20260819-8b7fb71.tar.gz");
@@ -333,18 +370,25 @@ function rig(
     const call = { file, args: [...args], env };
     calls.push(call);
     if (args[0] === "--version") return Promise.resolve(ok(`${options.version ?? "ubix v20260910-61f07ae"}\n`));
-    return Promise.resolve(options.answer?.(call) ?? ok(upgradeJson()));
+    const answer = options.answer?.(call);
+    if (answer) return Promise.resolve(answer);
+    // rtk's "no rewrite": the exclusions took.
+    if (args[0] === "rewrite") return Promise.resolve({ code: 1, stdout: "", stderr: "" });
+    return Promise.resolve(ok(upgradeJson()));
   };
   // Its own database, like its own directory: one lock per machine, and a test
   // is a machine of its own.
   const db = openDb(":memory:");
+  const rtkConfig = join(root, "rtk-home", "rtk", "config.toml");
   return {
     root,
     calls,
     db,
+    rtkConfig,
     tools: new ManagedTools({
       root,
       exec,
+      rtkConfig,
       db: () => db,
       fetch: options.fetch ?? (() => Promise.reject(new Error("the network is not open in tests"))),
     }),
@@ -352,6 +396,10 @@ function rig(
     lines: () => calls.map((c) => `${c.file.split("/").pop() ?? ""} ${c.args.join(" ")}`),
   };
 }
+
+/** ubix upgrading rtk; everything else is the rig's default. */
+const upgradesRtk = (call: Call): ExecResult | undefined =>
+  call.args[0] === "upgrade" ? ok(upgradeJson(upgraded)) : undefined;
 
 /** The switched-on set a sync reads when its turn comes. */
 const on = (...tools: string[]) => () => ({ tools, customTools: [] });
@@ -369,13 +417,13 @@ describe("ManagedTools.sync", () => {
   });
 
   it("writes the config, with rtk's hooks in it, and upgrades once", async () => {
-    const r = rig({ installed: ["rtk"], answer: () => ok(upgradeJson(upgraded)) });
+    const r = rig({ installed: ["rtk"], answer: upgradesRtk });
     const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(false);
     expect(report.entries).toEqual([{ name: "rtk", action: "upgraded", version: "v0.23.5", error: null }]);
     expect(report.summary).toBe("rtk: upgraded v0.23.5");
     // No `rtk init` of Pier's own: the hooks in the TOML are ubix's to run.
-    expect(r.lines()).toEqual(["ubix --version", "ubix upgrade --all --prune --wait --json"]);
+    expect(r.lines()).toEqual(["ubix --version", "ubix upgrade --all --prune --wait --json", "rtk rewrite npm run lint"]);
     // Pier's own config, never the operator's ~/.config/ubix.
     const config = readFileSync(join(r.root, "config", "config.toml"), "utf8");
     expect(config).toContain("[tools.rtk]");
@@ -389,6 +437,51 @@ describe("ManagedTools.sync", () => {
     // The hooks inherit ubix's env: rtk writes its Pi extension under this
     // directory, and inheriting nothing would send it to ~/.pi.
     expect(upgrade?.env.PI_CODING_AGENT_DIR).toBe(resolveAgentDir(process.env));
+  });
+
+  it("adds rtk's exclusions to the operator's rtk config, once, and proves them with rtk", async () => {
+    const r = rig({ installed: ["rtk"], answer: upgradesRtk });
+    mkdirSync(join(r.rtkConfig, ".."), { recursive: true });
+    writeFileSync(r.rtkConfig, "# mine\n[display]\ncolors = true\n");
+    expect((await r.tools.sync(on("rtk"))).failed).toBe(false);
+    const merged = readFileSync(r.rtkConfig, "utf8");
+    expect(merged).toBe(`# mine\n[display]\ncolors = true\n\n[hooks]\nexclude_commands = [${RTK_EXCLUDES.map((c) => JSON.stringify(c)).join(", ")}]\n`);
+    const mtime = statSync(r.rtkConfig).mtimeMs;
+    await r.tools.sync(on("rtk"));
+    expect(readFileSync(r.rtkConfig, "utf8")).toBe(merged);
+    expect(statSync(r.rtkConfig).mtimeMs).toBe(mtime);
+    // Probed against Pier's own rtk, with the env ubix ran under.
+    const probe = r.calls.find((c) => c.args[0] === "rewrite");
+    expect(probe?.file).toBe(join(r.root, "bin", "rtk"));
+  });
+
+  it("edits the file an rtk config symlink points at, and keeps the link", async () => {
+    const r = rig({ installed: ["rtk"], answer: upgradesRtk });
+    const target = join(r.root, "dotfiles-rtk.toml");
+    writeFileSync(target, "");
+    mkdirSync(join(r.rtkConfig, ".."), { recursive: true });
+    symlinkSync(target, r.rtkConfig);
+    expect((await r.tools.sync(on("rtk"))).failed).toBe(false);
+    expect(lstatSync(r.rtkConfig).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toContain(`exclude_commands = ["npm run lint"`);
+  });
+
+  it("fails rtk's row when rtk still rewrites the lint script, or its config cannot be edited", async () => {
+    const still = rig({
+      installed: ["rtk"],
+      answer: (call) => (call.args[0] === "rewrite" ? { code: 3, stdout: "rtk lint\n", stderr: "" } : upgradesRtk(call)),
+    });
+    const report = await still.tools.sync(on("rtk"));
+    expect(report.failed).toBe(true);
+    expect(report.summary).toMatch(/^rtk: FAILED — rtk still rewrites `npm run lint` \(to `rtk lint`, exit 3\)/);
+
+    const odd = rig({ installed: ["rtk"], answer: upgradesRtk });
+    mkdirSync(join(odd.rtkConfig, ".."), { recursive: true });
+    writeFileSync(odd.rtkConfig, "[hooks]\nexclude_commands = \"curl\"\n");
+    const refused = await odd.tools.sync(on("rtk"));
+    expect(refused.summary).toMatch(/could not add .* not an array of strings/);
+    expect(readFileSync(odd.rtkConfig, "utf8")).toBe("[hooks]\nexclude_commands = \"curl\"\n");
+    expect(odd.lines()).not.toContain("rtk rewrite npm run lint");
   });
 
   it("reports a tool ubix failed on, and still parses the report on a non-zero exit", async () => {
