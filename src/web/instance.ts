@@ -1,7 +1,7 @@
 // Routes about the Pier instance itself: settings, updates, secrets control,
 // the browser's error reports. Nothing here touches a session.
 
-import type { Hono } from "hono";
+import type { Hono, MiddlewareHandler } from "hono";
 import type { CatalogBinary, CatalogEntry } from "../agent/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
@@ -39,6 +39,15 @@ export interface SecretsControl {
   /** vt's own read-only report, no values. */
   doctor(): Promise<string>;
 }
+
+/** Ahead of every route: a request that lands while the boot's unlock is in
+ *  flight waits for it instead of failing on a store about to be readable. A
+ *  refused unlock lets it through, to the Console that repairs it. */
+export const untilUnlockSettled = (secrets: { settled(): Promise<void> }): MiddlewareHandler =>
+  async (_c, next) => {
+    await secrets.settled();
+    await next();
+  };
 
 /** A rule that failed inside the transaction, distinct from a real fault: 400
  *  for a name this Pier does not have, 409 for a collision with current state. */

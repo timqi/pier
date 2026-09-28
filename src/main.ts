@@ -51,6 +51,7 @@ import { PasskeyStore, registerPasskeyRoutes } from "./web/passkeys.js";
 import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
+import { untilUnlockSettled } from "./web/instance.js";
 import { createServer } from "./web/server.js";
 import { registerVaultRoutes } from "./web/vault.js";
 
@@ -197,7 +198,8 @@ const channels = new ChannelRuntime(channelStore, router, chain, control, conver
  *  the web with Web Push; an older member gets no home key, or an adapter's start
  *  would re-key it over the head. Any other session: its conversations row. */
 function chatKeyOf(sessionId: string): ConversationKey | undefined {
-  const home = channelStore.home();
+  // home() reads the vault; locked, no adapter can be live anyway.
+  const home = secrets.state === "unlocked" ? channelStore.home() : undefined;
   if (home && channels.live(home.platform) && chain.chainOf(sessionId)?.[0] === sessionId) {
     return { channelId: home.platform, conversationId: home.chatId };
   }
@@ -320,6 +322,9 @@ const auth = new AuthStore(db);
 // A board page carries no cookie, so the signing key is what a sign-out revokes.
 auth.onRevoke(rotateBoardViews);
 const passkeys = new PasskeyStore(db);
+// First: the listener opens while vt may still be reading the KEK, and routes
+// on every surface read the vault.
+app.use("*", untilUnlockSettled(secrets));
 registerConfigShareRoute(app, configSync);
 app.use("*", requireAuth(auth));
 registerAuthRoutes(app, auth, () => passkeys.any());

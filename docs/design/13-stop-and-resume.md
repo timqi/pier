@@ -76,6 +76,10 @@ Resumption runs once secrets are unlocked and adapters have started — the
 moment `tellChats` runs today — so a resumed reply has a route, a failed
 resume has a chat to tell, and a run's model has its credentials.
 
+The HTTP listener opens before the unlock settles (a vt approval can take a
+human); a request arriving in that window waits for it, and a refused unlock
+lets it through to the Console that repairs the key.
+
 ### Turns
 
 For every `turns_in_flight` row whose session is not the target of a running
