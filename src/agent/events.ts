@@ -90,6 +90,16 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
       : {};
     return { kind: "chat-command", command, ...links };
   }
+  if (origin.kind === "restart") {
+    const { at, downMs, taskId, runId, sourceSessionId } = origin;
+    if (typeof at !== "number" || typeof downMs !== "number") return null;
+    const source = inputSource(raw);
+    // The run fields only as a set: a card that links half a run links nothing.
+    const run = typeof taskId === "string" && typeof runId === "string" && (sourceSessionId === null || typeof sourceSessionId === "string")
+      ? { taskId, runId, sourceSessionId, ...(source ? { source } : {}) }
+      : {};
+    return { kind: "restart", at, downMs, ...run };
+  }
   if (
     typeof origin.taskId !== "string" ||
     typeof origin.runId !== "string" ||

@@ -1,7 +1,7 @@
 // The turns pane: chat rows, markdown, streaming text, system-input rows and
 // inline user-message edit. Renders into #turns only.
 
-import { ArrowUpRight, CornerDownLeft, History, Pencil, SquareSlash, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
@@ -294,6 +294,7 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
   "session-seed": [History, "session seed", "text-cyan-700"],
   "chat-command": [SquareSlash, "command", "text-cyan-700"],
+  restart: [RefreshCcw, "restarted \u00b7 continuing", "text-cyan-700"],
 };
 
 /** Every task text opens with `Key: value` lines naming the run, which the
@@ -767,7 +768,8 @@ export function renderSnapshot(
       }
       if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
-        if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        if (t.origin.kind === "restart") { if (t.origin.runId) placeRuns([t.origin.runId]); }
+        else if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
         appendSystemInput(t.text, t.origin);
         continue;
       }

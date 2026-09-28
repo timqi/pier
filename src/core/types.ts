@@ -149,6 +149,16 @@ export type SystemInputOrigin = {
   reason: ChainReason;
   previousSessionId: string | null;
 } | {
+  /** A turn the stop cut, picked back up at boot (src/stop.ts); the run fields
+   *  when the turn was an agent run's, so the card links the run it continues. */
+  kind: "restart";
+  at: number;
+  downMs: number;
+  taskId?: string;
+  runId?: string;
+  sourceSessionId?: string | null;
+  source?: SystemInputSource;
+} | {
   /** The answer to a chat command the conversation took instead of the model
    *  (core/chain.ts), appended without a turn so the model sees what the user saw. */
   kind: "chat-command";

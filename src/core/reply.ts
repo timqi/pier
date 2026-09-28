@@ -16,10 +16,24 @@ export function originLabel(origin: NoteOrigin): string {
     case "task-delegation": return "\u25b6 delegated task";
     case "task-callback": return "\u21a9 task callback";
     case "session-seed": return `\u21ba new session \u00b7 ${origin.reason}`;
+    case "restart": return "\u21bb restarted \u00b7 continuing";
     case "chat-command": return `/${origin.command}`;
     case "task-message":
       return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
   }
+}
+
+/** The system input a turn the stop cut is resumed with (docs/design/13-stop-and-resume.md
+ *  §Boot); `queued` are the texts Pi's queue held, which died with the process. */
+export function restartInput(at: number, downMs: number, queued: string[] = []): string {
+  const time = new Date(at).toISOString().replace("T", " ").slice(0, 19);
+  const lines = [
+    `[Pier restarted at ${time} (down ${String(Math.round(downMs / 1000))}s) while this turn was running. ` +
+    "Continue where you left off: the transcript above is complete up to the interruption; " +
+    "a tool that was executing then was cut short — check its outcome before relying on it.]",
+  ];
+  if (queued.length) lines.push("Messages the user sent before the restart that you had not yet seen:", ...queued.map((text) => `> ${text}`));
+  return lines.join("\n");
 }
 
 /** A run's model as every surface names it: `tier · model id · level`, each part only when recorded. */

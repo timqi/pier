@@ -57,7 +57,7 @@ export function noteBody(note: { text: string; origin: NoteOrigin }, emphasis: s
   const text = whole ? note.text : digest(note.text);
   const body = text.split("\n").map((line) => `> ${line}`).join("\n");
   // The run's model is a detail of the label, so it sits outside the emphasis.
-  const source = note.origin.kind === "task-callback" || note.origin.kind === "task-delegation" ? note.origin.source : undefined;
+  const source = note.origin.kind === "task-callback" || note.origin.kind === "task-delegation" || note.origin.kind === "restart" ? note.origin.source : undefined;
   const model = source ? runModelLabel(source) : "";
   return `${emphasis}${originLabel(note.origin)}${emphasis}${model ? ` ${model}` : ""}\n${body}`;
 }
