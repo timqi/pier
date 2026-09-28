@@ -143,6 +143,9 @@ none is pinned):
   one; the hits when several, the whole menu
   when none), exit 1.
 
+A resolved pin's tier is stored as `launch.tier`, never taken from a caller;
+the run's cards show it while the session runs that pin's model.
+
 `--model ?` prints the menu instead of running, exit 0: a line naming its
 source (the operator's menu, or the live catalog when none is pinned) then
 the same one-line-per-pin shape. It is the one answer that is text, not JSON;

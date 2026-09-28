@@ -907,9 +907,13 @@ describe("outbound", () => {
     const noteTs = `${client.nextTs}.000100`;
     await channel.notify("C100/1705.000100", {
       text: "subagent says hi",
-      origin: { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null },
+      origin: {
+        kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null,
+        source: { taskName: "hi", tier: "cheap", model: { provider: "openai", id: "gpt-5-mini" }, thinking: "low" },
+      },
     });
-    expect(client.sent.at(-1)!.text).toContain("> subagent says hi");
+    // The run's model rides on the label, the one line a folded note keeps.
+    expect(client.sent.at(-1)!.text).toBe("_\u25b6 delegated task \u00b7 cheap \u00b7 gpt-5-mini \u00b7 low_\n> subagent says hi");
     expect(client.reactions).toEqual([{ channel: CHANNEL, ts: noteTs, name: "eyes", add: true }]);
     // Cleared by the turn-end, like a receipt on a message someone typed.
     await channel.send("C100/1705.000100", { text: "answered", suggestions: [] });

@@ -426,6 +426,31 @@ describe("task service", () => {
     });
   });
 
+  it("names a run's tier, model and level on its cards while the model is the tier's pin", async () => {
+    const { cwd, service, session } = setup();
+    const launched = async (model: { provider: string; id: string }) => {
+      const task = await service.create({
+        name: "tiered",
+        trigger: { type: "manual" },
+        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work", launch: { model, tier: "balanced" } },
+      });
+      const run = await service.waitForRun(service.run(task.id, null, "agent", null, { invokedBySessionId: "owner", sourceSessionId: "owner", background: true }).id);
+      return { run, input: session.systemInputs.at(-1)!, card: service.backgroundRuns("owner").find((r) => r.runId === run.id)! };
+    };
+    const pinned = await launched({ provider: "test", id: "model" });
+    expect(pinned.input.origin).toMatchObject({ source: { taskName: "tiered", tier: "balanced", model: { provider: "test", id: "model" }, thinking: "off" } });
+    expect(pinned.card).toMatchObject({ tier: "balanced", model: { provider: "test", id: "model" }, thinking: "off" });
+    // The session opened on another model: the tier named the pin, not this one.
+    const other = await launched({ provider: "test", id: "retired" });
+    expect(other.card).toMatchObject({ model: { provider: "test", id: "model" }, thinking: "off" });
+    expect(other.card.tier).toBeUndefined();
+    expect((other.input.origin as { source?: object }).source).not.toHaveProperty("tier");
+    await expect(service.create({
+      name: "bare tier", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work", launch: { tier: "balanced" } },
+    })).rejects.toThrow("agent tier must be a model tier, beside a model");
+  });
+
   it("prefixes every agent run with the run contract and its audience", async () => {
     const { cwd, service, session } = setup();
     const task = await service.create({

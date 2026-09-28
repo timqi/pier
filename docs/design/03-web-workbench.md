@@ -209,8 +209,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   leave no empty log; interrupted work stays visible. System inputs
   (seed, callback, delegation) are one line, opening to the card:
   `↺ session seed · <reason> · <previous id8>`, `↩ callback · <state> · <run
-  name> · <model> · <id8>`, `↗ delegation · <run name> · <id8>` (the glyphs
-  are `ui/icons.ts` icons), where `<id8>`
+  name> · <badge> · <id8>`, `↗ delegation · <run name> · <badge> · <id8>`
+  (the glyphs are `ui/icons.ts` icons), where `<badge>` is the run's recorded
+  `tier · model id · reasoning`, each part only when recorded — below md a
+  tiered badge drops the id, and the ids wrap to a second line rather than
+  squeeze the name — and `<id8>`
   is the other session's id, a link to it, else the run id as text. A
   click or ↵ expands in place; expansion is per row, in memory. A
   `/status` answer, `Stayed silent — <reason>` and chat command answers stay
@@ -218,7 +221,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events and folded like a callback —
-  `✓ run · <state> · <run name> · <mode> · <duration> · <id8>`, opening
+  `✓ run · <state> · <run name> · <mode> · <duration> · <badge> · <id8>`, opening
   to the prompt, kept open across updates; the status panel's In progress lists the
   runs still in flight. A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the

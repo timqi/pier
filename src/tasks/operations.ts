@@ -4,7 +4,7 @@
 // service; this file decides who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
-import { isModelTier, LEDGER_WINDOW_MS, type ModelRef } from "../core/types.js";
+import { isModelTier, LEDGER_WINDOW_MS, type ModelRef, type ModelTier } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -360,10 +360,10 @@ function nameFrom(text: string): string {
  *  `provider/id` is refused with the lines to pick from, so the agent never
  *  guesses an id. A tier is never a substring: "cheap" matching an id would
  *  pick a pin the operator did not assign. */
-function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
+function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string; tier?: ModelTier } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
-  const pick = (pin: MenuEntry) => ({ model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking });
+  const pick = (pin: MenuEntry) => ({ model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking, tier: pin.tier });
   if (isModelTier(needle)) {
     const pin = menu.find((p) => p.tier === needle);
     if (pin) return pick(pin);
@@ -410,10 +410,15 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
   const label = action?.prompt ?? action?.script;
   if (draft.name === undefined && typeof label === "string") draft = { ...draft, name: nameFrom(label) };
   const launch = record(action?.launch);
-  if (typeof launch?.model === "string") {
-    const { model, thinking } = resolveModel(launch.model, await menu());
-    // A pin's level only where the caller named none.
-    const resolved = { ...launch, model, ...(launch.thinking === undefined && thinking ? { thinking } : {}) };
+  if (launch) {
+    // The tier is what the menu resolved, never a caller's word for it.
+    const { tier: _, ...rest } = launch;
+    let resolved: Record<string, unknown> = rest;
+    if (typeof rest.model === "string") {
+      const { model, thinking, tier } = resolveModel(rest.model, await menu());
+      // A pin's level only where the caller named none.
+      resolved = { ...rest, model, ...(rest.thinking === undefined && thinking ? { thinking } : {}), ...(tier ? { tier } : {}) };
+    }
     draft = { ...draft, action: { ...record(draft.action), launch: resolved } };
   }
   return draft;

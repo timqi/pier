@@ -1,7 +1,7 @@
 // What a finished run says to the session that delegated it. Delivery itself
 // belongs to outbox.ts; this file owns the run vocabulary and the batching.
 
-import type { SystemInputSource } from "../core/types.js";
+import { modelKey, type RunModel, type SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
@@ -12,12 +12,19 @@ import type { TaskCallback, TaskRun } from "./types.js";
 export const runRef = (run: TaskRun): string =>
   `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
 
+/** What a run worked on: the session's record once it opened, the launch's
+ *  before; the tier only while the model is the pin it named. */
+export const runModel = ({ context }: TaskRun): RunModel => {
+  const action = context.definition.action;
+  const launch = action.type === "agent" ? action.launch : undefined;
+  const model = context.model ?? launch?.model;
+  const thinking = context.thinking ?? launch?.thinking;
+  const tier = launch?.tier && model && launch.model && modelKey(model) === modelKey(launch.model) ? launch.tier : undefined;
+  return { ...(tier ? { tier } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
+};
+
 /** What the card in the recipient's transcript says the input came from. */
-export const runSource = (run: TaskRun): SystemInputSource => ({
-  taskName: run.context.definition.name,
-  ...(run.context.model ? { model: run.context.model } : {}),
-  ...(run.context.thinking ? { thinking: run.context.thinking } : {}),
-});
+export const runSource = (run: TaskRun): SystemInputSource => ({ taskName: run.context.definition.name, ...runModel(run) });
 
 /** The directory a run worked in: the one its session opened on, else the one its action names. */
 export const runCwd = (run: TaskRun): string | null => {

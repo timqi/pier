@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { Cron } from "croner";
 import type { AgentFactory, ModelRef, ThinkingLevel } from "../core/types.js";
-import { isThinkingLevel } from "../core/types.js";
+import { isModelTier, isThinkingLevel } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { TaskStore } from "./store.js";
@@ -116,6 +116,10 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
   const launch: AgentLaunchPolicy = {};
   if (value.model !== undefined) launch.model = parseModel(value.model);
   if (value.thinking !== undefined) launch.thinking = parseThinking(value.thinking);
+  if (value.tier !== undefined) {
+    if (!isModelTier(value.tier) || !launch.model) throw new Error("agent tier must be a model tier, beside a model");
+    launch.tier = value.tier;
+  }
   if (value.role !== undefined) {
     if (value.role !== "lead") throw new Error("agent role must be lead");
     launch.role = "lead";

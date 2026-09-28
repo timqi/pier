@@ -609,11 +609,17 @@ main {
   box-shadow: none;
 }
 .system-row:not([data-expanded])::before { display: none; }
-.system-row:not([data-expanded]) :is(.run-thinking, .run-id:has(~ .run-session)) { display: none; }
-/* The line stays one line: its ids never wrap under the name, and below md the
-   model and a run's mode · duration give way to them. */
+.system-row:not([data-expanded]) .run-id:has(~ .run-session) { display: none; }
+.run-model > * + *::before { content: "\00b7"; margin-inline: 0.3em; opacity: 0.6; }
+/* Its ids never wrap under the name. Below md a run's mode · duration and a
+   tiered model's id give way, and the ids take a second line rather than the
+   name's room. */
 .system-row:not([data-expanded]) .run-meta { flex-wrap: nowrap; }
-@media (width < 48rem) { .system-row:not([data-expanded]) :is(.run-model, .run-note) { display: none; } }
+@media (width < 48rem) {
+  .system-row:not([data-expanded]) > .run-head { flex-wrap: wrap; }
+  .system-row:not([data-expanded]) .run-meta { flex-shrink: 0; }
+  .system-row:not([data-expanded]) :is(.run-note, .run-model:has(.run-tier) .run-model-id) { display: none; }
+}
 /* --- end system rows --- */
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */

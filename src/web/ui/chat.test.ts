@@ -72,11 +72,15 @@ it("folds a session seed to its reason and the previous session's id", () => {
 it("folds a callback to state, name, model and run id, and opens and closes on its button", () => {
   chat.appendSystemInput('Task "fix it" finished with state: succeeded\nrun r1\n\nAll green.', {
     kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run",
-    source: { taskName: "fix it", model, thinking: "high" }, state: "succeeded",
+    source: { taskName: "fix it", tier: "balanced", model, thinking: "high" }, state: "succeeded",
   });
   expect(line()).toBe("callback · succeededfix it");
   expect(card().querySelector(".run-id")!.textContent).toBe("run45678");
-  expect(card().textContent).toContain("claude-x");
+  // One badge, `tier · id · level`: the stylesheet draws the dots between its parts.
+  const badge = card().querySelector(".run-model")!;
+  expect([...badge.children].map((part) => [part.className, part.textContent]))
+    .toEqual([["run-tier", "balanced"], ["run-model-id", "claude-x"], ["run-thinking", "high"]]);
+  expect(badge.getAttribute("title")).toBe("Tier balanced · anthropic / claude-x · Reasoning high");
   expect(body().textContent).toBe("All green.");
   expect(toggle().localName).toBe("button"); // Enter and Space are the browser's
   expect(toggle().getAttribute("type")).toBe("button");
@@ -96,6 +100,7 @@ it("keeps a failed callback's reason on the line, in the state's colour", () => 
     kind: "task-callback", taskId: "t2", runId: "run2", sourceSessionId: null, source: { taskName: "deploy" }, state: "failed",
   });
   expect(line()).toBe("callback · faileddeployprovider 529: overloaded");
+  expect(card().querySelector(".run-model")).toBeNull(); // nothing recorded, no empty badge
   expect(toggle().querySelector(".run-label")!.classList.contains("text-red-600")).toBe(true);
   chat.appendSystemInput("x\n\n", {
     kind: "task-callback", taskId: "t3", runId: "run3", sourceSessionId: null, source: { taskName: "probe" }, state: "interrupted",
@@ -123,6 +128,7 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   const run = {
     runId: "qvv3qbffxyz", taskId: "t6", taskName: "IM conversation", state: "running" as const, targetSessionId: "s-run6",
     sessionMode: "fresh" as const, prompt: "Build per the design doc.", queuedAt: 1, startedAt: 1, finishedAt: null, queuedMessages: 0,
+    model, thinking: "medium" as const,
   };
   const { renderBackgroundRun } = await import("./turn-activity.js");
   renderBackgroundRun(run);
@@ -130,6 +136,7 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   const runToggle = () => runCard().querySelector("button[aria-expanded]")!;
   expect(runCard().classList.contains("system-row")).toBe(true);
   expect(runToggle().textContent).toBe("run · runningIM conversation");
+  expect(runCard().querySelector(".run-model")!.textContent).toBe("claude-xmedium");
   expect(runCard().children.at(-1)!.hidden).toBe(true);
   runToggle().onclick?.();
   expect(runCard().hasAttribute("data-expanded")).toBe(true);

@@ -581,11 +581,14 @@ describe("outbound shapes", () => {
     const started = Date.now();
     await channel.notify(`${CHAT}/om_t`, {
       text: "delegated: audit the logs",
-      origin: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: null },
+      origin: {
+        kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: null,
+        source: { taskName: "audit", tier: "balanced", model: { provider: "openai", id: "gpt-5" }, thinking: "medium" },
+      },
       at: started,
     });
     const noteId = [...client.cards.keys()].at(-1)!;
-    expect(bodyText(client.replied.at(-1)!.card)).toContain("> delegated: audit the logs");
+    expect(bodyText(client.replied.at(-1)!.card)).toBe("*\u25b6 delegated task \u00b7 balanced \u00b7 gpt-5 \u00b7 medium*\n> delegated: audit the logs");
     expect(client.reactions).toEqual([{ messageId: noteId, emoji: "OnIt", add: true }]);
     // Cleared by the turn-end, like a receipt on a message someone typed —
     // `at` is what puts the note inside the scope of that turn (receipts.ts).

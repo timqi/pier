@@ -8,7 +8,7 @@ import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { chevron, detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
-import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js";
+import type { ActivityStep, BackgroundRun, RunModel } from "../../core/types.js";
 
 /** Handed over at init rather than imported: chat.ts imports this module, and
  *  importing it back is a runtime cycle. */
@@ -40,8 +40,8 @@ interface RunHead {
   label: string;
   labelCls: string;
   taskName?: string;
-  model?: ModelRef;
-  thinking?: string;
+  /** What the run worked on, as it recorded it: one badge, `tier · id · level`. */
+  model?: RunModel;
   /** Plain facts between the name and the ids: mode, duration. */
   note?: string;
   /** Absent on a card no run produced (a session seed). */
@@ -88,7 +88,7 @@ export function linkRuns(content: HTMLElement, sessions: Record<string, string>,
 
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
-  const head = h("div", `flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);
+  const head = h("div", `run-head flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);
   const lead = o.expands ? expander(head, o.expands, o.open ?? false) : head;
   lead.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
@@ -102,15 +102,15 @@ export function runHead(o: RunHead): HTMLElement {
   if (lead !== head) head.append(lead);
   const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "run-note flex-none", o.note));
-  if (o.model) {
-    const model = h("span", "run-model flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200", o.model.id);
-    model.title = `${o.model.provider} / ${o.model.id}`;
-    meta.append(model);
-  }
-  if (o.thinking) {
-    const effort = h("span", "run-thinking flex-none", o.thinking);
-    effort.title = "Reasoning effort";
-    meta.append(effort);
+  const { tier, model, thinking } = o.model ?? {};
+  if (tier || model || thinking) {
+    // Separators are the stylesheet's, so a part it hides takes its dot along.
+    const badge = h("span", "run-model flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200");
+    if (tier) badge.append(h("span", "run-tier", tier));
+    if (model) badge.append(h("span", "run-model-id", model.id));
+    if (thinking) badge.append(h("span", "run-thinking", thinking));
+    badge.title = [tier && `Tier ${tier}`, model && `${model.provider} / ${model.id}`, thinking && `Reasoning ${thinking}`].filter(Boolean).join(" · ");
+    meta.append(badge);
   }
   // The run id is text; the indigo session chip is the link. What each is
   // stays in its tooltip.
@@ -202,6 +202,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     labelCls: STATE_STYLE[run.state].label,
     taskName: run.taskName,
     note: `${run.sessionMode ?? "task"} · ${String(seconds)}s${run.queuedMessages > 0 ? ` · ${String(run.queuedMessages)} queued` : ""}`,
+    model: run,
     runId: run.runId,
     sessionId: run.targetSessionId,
     ...(body ? { expands: body, open } : {}),

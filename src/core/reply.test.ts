@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, originLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -335,6 +335,16 @@ describe("originLabel", () => {
     expect(originLabel({ kind: "session-seed", reason: "first", previousSessionId: null })).toBe("↺ new session · first");
     expect(originLabel({ kind: "chat-command", command: "status" })).toBe("/status");
     expect(originLabel({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe("↩ task callback");
+  });
+
+  it("names a run's tier, model and level beside a callback or a delegation, each part only when recorded", () => {
+    const model = { provider: "openai", id: "gpt-5" };
+    const origin = (source: object) => ({ kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: null, source: { taskName: "x", ...source } });
+    expect(originLabel(origin({ tier: "balanced", model, thinking: "medium" }))).toBe("↩ task callback · balanced · gpt-5 · medium");
+    expect(originLabel(origin({ model, thinking: "high" }))).toBe("↩ task callback · gpt-5 · high");
+    expect(originLabel(origin({}))).toBe("↩ task callback");
+    expect(originLabel({ kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null, source: { taskName: "x", model } })).toBe("▶ delegated task · gpt-5");
+    expect(runModelLabel({ thinking: "low" })).toBe("low");
   });
 });
 

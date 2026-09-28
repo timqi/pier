@@ -105,12 +105,19 @@ export type NoteOrigin = SystemInputOrigin | { kind: "error" };
  * no requested level, and an input delivered before this shipped has none of
  * it.
  */
-export interface SystemInputSource {
+export interface SystemInputSource extends RunModel {
   /** The task's own name — what the operator called the work. Required: every
    *  run has one, so a source without it is a source with nothing to say. */
   taskName: string;
+}
+
+/** What a run worked on, as the run recorded it: the session's model and
+ *  level once it opened, the launch's before. `tier` is the menu tier the
+ *  launch resolved its model from, absent when the model is not that pin. */
+export interface RunModel {
   model?: ModelRef;
   thinking?: ThinkingLevel;
+  tier?: ModelTier;
 }
 
 export type SystemInputOrigin = {
@@ -211,7 +218,7 @@ export interface LedgerRun {
 /** The `state` of a run an open item names that the ledger no longer holds; its `name` is the id. */
 export const NOT_IN_LEDGER = "not in the ledger";
 
-export interface BackgroundRun {
+export interface BackgroundRun extends RunModel {
   runId: string;
   taskId: string;
   taskName: string;

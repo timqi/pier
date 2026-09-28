@@ -3,7 +3,7 @@
 // messenger must agree on. Owner-defined and browser-importable type-only
 // (architecture.md), so nothing here may reach for a runtime or a node builtin.
 
-import type { AgentRole, LedgerRun, ModelRef, TaskRunState, ThinkingLevel } from "../core/types.js";
+import type { AgentRole, LedgerRun, ModelRef, ModelTier, TaskRunState, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =
   | { type: "manual" }
@@ -17,6 +17,9 @@ export type AgentSessionPolicy =
 export interface AgentLaunchPolicy {
   model?: ModelRef;
   thinking?: ThinkingLevel;
+  /** The menu tier `model` was resolved from, written by Pier when it resolves
+   *  a name, never taken from a caller; the run's cards show it. */
+  tier?: ModelTier;
   /** A feature lead: may delegate to workers, opens with the lead contract. */
   role?: "lead";
   /** A lead for a product or architecture design the user finalizes with

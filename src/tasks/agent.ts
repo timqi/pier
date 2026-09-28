@@ -67,6 +67,10 @@ export class AgentTaskRunner {
         // Task requests come seconds apart, so the 1h cache-write premium never
         // earns back; after idle, so a reused session's in-flight turn keeps its 1h.
         session.setCacheRetention("short");
+        // Before start(): the running card reads its model off this record.
+        run.context.model = session.model;
+        // The level the session settled on: an unspecified effort inherits the caller's.
+        run.context.thinking = session.thinkingLevel;
         start();
         // No input is no block. `<\/` is the same JSON, so a value cannot close
         // the fence early.
@@ -76,9 +80,6 @@ export class AgentTaskRunner {
         const prompt = run.context.resumePrompt ??
           `${preamble(run, this.store.supervised(run), this.store.roleOf(session.id))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
-        run.context.model = session.model;
-        // The level the session settled on: an unspecified effort inherits the caller's.
-        run.context.thinking = session.thinkingLevel;
         run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
         let text = "";

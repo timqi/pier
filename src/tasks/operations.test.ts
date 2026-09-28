@@ -290,7 +290,8 @@ describe("task operations", () => {
     // The caller's thinking wins over the pin's.
     expect(await launchOf({ model: "mini", thinking: "off" })).toEqual({ model: { provider: "openai", id: "gpt-5-mini" }, thinking: "off" });
     // An exact provider/id is its pin even where the substring would be ambiguous.
-    expect(await launchOf({ model: "openai/gpt-5" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium" });
+    // The pin's tier is recorded for the run's cards, whatever name reached the pin.
+    expect(await launchOf({ model: "openai/gpt-5" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium", tier: "balanced" });
     // A provider/id nobody pinned is taken as written, no thinking implied.
     expect(await launchOf({ model: "openrouter/meta/llama-4" })).toEqual({ model: { provider: "openrouter", id: "meta/llama-4" } });
     // Many or none: the lines to pick from, and the run does not start.
@@ -298,8 +299,11 @@ describe("task operations", () => {
       'model "gpt" matches 2 of the menu:\nbalanced · openai/gpt-5 · medium\nopenai/gpt-5-mini · low',
     );
     // A tier is its first pin in menu order, at its level unless the caller named one.
-    expect(await launchOf({ model: "Balanced" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium" });
-    expect(await launchOf({ model: "balanced", thinking: "low" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "low" });
+    expect(await launchOf({ model: "Balanced" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium", tier: "balanced" });
+    expect(await launchOf({ model: "balanced", thinking: "low" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "low", tier: "balanced" });
+    // A tier is never the caller's to claim: only a resolved name writes one.
+    expect(await launchOf({ model: "Opus", tier: "cheap" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
+    expect(await launchOf({ model: { provider: "openai", id: "gpt-5" }, tier: "balanced" })).toEqual({ model: { provider: "openai", id: "gpt-5" } });
     // Never a substring: "cheap" names no pin here.
     await expect(launchOf({ model: "cheap" })).rejects.toThrow(
       /^model "cheap": tier cheap is unassigned — the operator's menu:\nanthropic\/claude-opus-4 · high\nbalanced · openai/,
@@ -312,14 +316,14 @@ describe("task operations", () => {
     );
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
-    expect(ask.created).toHaveLength(8);
+    expect(ask.created).toHaveLength(10);
     // One model at several levels is one model: its first row, by id or substring.
     menu.push({ provider: "anthropic", id: "claude-opus-4", thinking: "low", tier: "cheap" });
     onTestFinished(() => void menu.pop());
     expect(await launchOf({ model: "anthropic/claude-opus-4" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
     expect(await launchOf({ model: "opus" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
     // Its tier is that row's, at that row's level.
-    expect(await launchOf({ model: "cheap" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "low" });
+    expect(await launchOf({ model: "cheap" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "low", tier: "cheap" });
     await expect(ask({ operation: "models" })).rejects.toThrow("unknown task operation");
   });
 

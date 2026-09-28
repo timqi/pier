@@ -5,7 +5,7 @@
 
 import { replaceOutsideCode } from "./inbound-file.js";
 import { NOT_IN_LEDGER, TASK_RUN_STATES } from "./types.js";
-import type { AgentReply, LedgerRun, NoteOrigin, TaskRunState, ThinkingLevel, TurnMeta } from "./types.js";
+import type { AgentReply, LedgerRun, NoteOrigin, RunModel, TaskRunState, ThinkingLevel, TurnMeta } from "./types.js";
 
 // The syntax is told in agent/roles.ts; this file parses it back.
 
@@ -13,14 +13,23 @@ import type { AgentReply, LedgerRun, NoteOrigin, TaskRunState, ThinkingLevel, Tu
 export function originLabel(origin: NoteOrigin): string {
   switch (origin.kind) {
     case "error": return "\u26a0 failed";
-    case "task-delegation": return "\u25b6 delegated task";
-    case "task-callback": return "\u21a9 task callback";
+    case "task-delegation": return withModel("\u25b6 delegated task", origin.source);
+    case "task-callback": return withModel("\u21a9 task callback", origin.source);
     case "session-seed": return `\u21ba new session \u00b7 ${origin.reason}`;
     case "chat-command": return `/${origin.command}`;
     case "task-message":
       return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
   }
 }
+
+/** A run's model as every surface names it: `tier · model id · level`, each part only when recorded. */
+export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
+  [tier, model?.id, thinking].filter(Boolean).join(" \u00b7 ");
+
+const withModel = (label: string, source: RunModel | undefined): string => {
+  const model = source ? runModelLabel(source) : "";
+  return model ? `${label} \u00b7 ${model}` : label;
+};
 
 /** Is a turn coming once this note is posted? On IM the note is the only
  *  message that turn has to wear the 👀; a receipt on any other would hang

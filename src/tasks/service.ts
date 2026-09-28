@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
-import { DESIGN_FINAL, LEAD_TURN, MILESTONE, runCwd, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, LEAD_TURN, MILESTONE, runCwd, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -548,6 +548,7 @@ export class TaskService {
       finishedAt: run.finishedAt,
       // A finished run's pending messages only wait for the sweep to expire them.
       queuedMessages: isTerminal(run.state) ? 0 : this.store.countPendingFollowUps(run.id),
+      ...runModel(run),
     };
   }
 

@@ -330,7 +330,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       label: state ? `${label} \u00b7 ${state}` : label,
       labelCls: state ? STATE_STYLE[state].label : cls,
       ...(origin.source
-        ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
+        ? { taskName: origin.source.taskName, model: origin.source }
         : meta ? { taskName: meta.split("\n")[0]! } : {}),
       ...(state === "failed" || state === "interrupted"
         ? { failure: body.split("\n").find((line) => line.trim())?.trim() ?? state }
