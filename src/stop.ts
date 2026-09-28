@@ -184,25 +184,25 @@ export interface ResumeDeps {
     ensure(key: ConversationKey): Promise<AgentSession>;
     reportTo(sessionId: string, message: string): void;
   };
-  /** Whether a chat's adapter is up; a turn on one that is down resumes on its own stream. */
-  live(channelId: string): boolean;
-  /** The target of a running agent run, which resumes through the run. */
+  /** The target of a running agent run, which resumes through the run (its queue too). */
   resumedByRun(sessionId: string): boolean;
 }
 
 const isAlias = (key: ConversationKey): boolean => key.channelId === "web" || key.channelId === "task";
 
 /** Once per boot, adapters up: each recorded turn continues in its session. The
- *  row stays until the resumed turn ends, so a second crash resumes it again. */
+ *  row stays until the resumed turn ends, so a second crash resumes it again.
+ *  Opened by the recorded session id, never by the chat key: a chat's lookup
+ *  creates a session when it maps to none (the home chat maps to none), and the
+ *  router hands an opened session its live chat by itself. */
 export async function resumeTurns(deps: ResumeDeps, now = Date.now()): Promise<void> {
   for (const row of deps.turns.list()) {
     if (deps.resumedByRun(row.sessionId)) continue;
     const downMs = now - row.at;
     const origin: SystemInputOrigin = { kind: "restart", at: now, downMs };
-    const key = isAlias(row.key) || deps.live(row.key.channelId) ? row.key : { channelId: "web", conversationId: row.sessionId };
     let session: AgentSession;
     try {
-      session = await deps.router.ensure(key);
+      session = await deps.router.ensure({ channelId: "web", conversationId: row.sessionId });
     } catch (err) {
       deps.turns.clear(row.sessionId);
       unresumed(deps.ledger, row, err instanceof Error ? err.message : String(err));

@@ -14,7 +14,6 @@ import { PiPackageStore } from "./agent/packages.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes, rotateBoardViews } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
-import { isChannelPlatform } from "./channels/types.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
 import { registerChannelRoutes } from "./channels/routes.js";
@@ -245,24 +244,24 @@ const reloadInstance = async (includeWatched = false): Promise<number> => {
 // No sync at boot: a restart is not a reason to replace the configuration;
 // the owned task's next check is.
 await configurationSync.reconcile();
-tasks.start();
 readyForConfigReload = true;
 
 /** Once, with adapters up: a resumed reply needs its route, a failed resume a
  *  chat to tell. Runs first, so a run's target is still `running` when the
- *  turns are read. */
+ *  turns are read, and each session's saved queue has one owner: the run's
+ *  resume where there is one, the turn's otherwise. */
 let resumed = false;
 const resumeOnce = async (): Promise<void> => {
   if (resumed) return;
   resumed = true;
   const now = Date.now();
+  const rows = turnsInFlight.list();
   // A run's turn has no row of its own to date the outage by; the newest turn
   // row is the stop's write, and a run left running alongside none shares its era.
-  const downMs = Math.max(0, ...turnsInFlight.list().map((row) => now - row.at));
-  tasks.resumeAfterRestart(now, downMs);
+  const downMs = Math.max(0, ...rows.map((row) => now - row.at));
+  tasks.resumeAfterRestart({ at: now, downMs, queuedFor: (id) => rows.find((row) => row.sessionId === id)?.queued ?? [] });
   await resumeTurns({
     turns: turnsInFlight, ledger: restartLedger, router,
-    live: (id) => isChannelPlatform(id) && channels.live(id),
     resumedByRun: (id) => {
       const run = taskStore.findActiveRunForTarget(id);
       return run?.state === "running" && run.context.definition.action.type === "agent";
@@ -270,12 +269,16 @@ const resumeOnce = async (): Promise<void> => {
   });
   await tellChats();
 };
+// The scheduler's tick starts after the boot pass, so nothing it launches is
+// in flight when the last process's runs are resumed; a refused unlock starts
+// it at once, and the Console's later unlock runs the pass then.
 const unlocked = (): Promise<void> => startChannels().then(resumeOnce)
-  .catch((err: unknown) => log.error("resuming what the restart cut failed", err));
-void secrets.unlock().then(
-  unlocked,
-  (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
-);
+  .catch((err: unknown) => log.error("resuming what the restart cut failed", err))
+  .finally(() => tasks.start());
+void secrets.unlock().then(unlocked, (err) => {
+  log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err);
+  tasks.start();
+});
 
 // Replacing Pier is systemd's job: the oneshot unit snapshots the database,
 // installs, then stops and starts the service. Without that unit the Console

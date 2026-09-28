@@ -34,8 +34,14 @@ export class TaskExecution {
     private readonly host: ExecutionHost,
   ) {}
 
-  /** `restart`: a `running` row the last process left, continued on the same record. */
+  /** `restart`: a `running` row the last process left, continued on the same
+   *  record. A run this process is already executing is never entered twice:
+   *  the second entry would run the same row to a second result. */
   start(run: TaskRun, restart?: Restart): void {
+    if (this.controllers.has(run.id)) {
+      log.error(`run ${run.id} (${run.context.definition.name}) is already executing; not started again`);
+      return;
+    }
     void this.execute(run, restart);
   }
 

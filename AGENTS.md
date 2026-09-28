@@ -48,7 +48,7 @@ scheduled tasks, live observability, and static Show pages.
   socket is the entire agent-collaboration surface
 - `boards/` static Show pages: a filesystem scan plus a file handler
 - Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
-  ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import
+  ops (`service.ts`, `update.ts`, `stop.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`, `vault.ts`); one
   reason per file, named in docs/architecture.md
 - **One writer per instance directory.** Pier's own process is the only writer

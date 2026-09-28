@@ -7,6 +7,7 @@ import { openDb } from "./db.js";
 import { EventHub } from "./core/hub.js";
 import { restartInput, restartQueued } from "./core/reply.js";
 import { Router } from "./core/router.js";
+import { ConversationStore, resolveConversation } from "./channels/conversations.js";
 import { fakeSession, type FakeSession } from "./core/session.testkit.js";
 import type { AgentSession, Channel, ConversationKey } from "./core/types.js";
 import {
@@ -170,12 +171,11 @@ function resumeRig(sessions: AgentSession[], over: Partial<ResumeDeps> = {}) {
     router: {
       ensure: (key) => {
         opened.push(key);
-        const session = sessions.find((s) => s.id === key.conversationId) ?? (key.channelId === "slack" ? sessions[0] : undefined);
+        const session = sessions.find((s) => s.id === key.conversationId);
         return session ? Promise.resolve(session) : Promise.reject(new Error("session gone"));
       },
       reportTo: (_id, message) => reports.push(message),
     },
-    live: () => true,
     resumedByRun: () => false,
     ...over,
   };
@@ -188,7 +188,7 @@ describe("resumeTurns", () => {
     const { turns, deps, opened } = resumeRig([session]);
     turns.record("s1", KEY, ["first", "second"], 1_000);
     await resumeTurns(deps, 61_000);
-    expect(opened).toEqual([KEY]);
+    expect(opened).toEqual([{ channelId: "web", conversationId: "s1" }]);
     expect(session.systemInputs).toEqual([{
       text: restartInput(61_000, 60_000, ["first", "second"]),
       origin: { kind: "restart", at: 61_000, downMs: 60_000 },
@@ -251,13 +251,13 @@ describe("resumeTurns", () => {
     expect(turns.list()).toHaveLength(1);
   });
 
-  it("resumes a turn whose adapter is down on the session's own stream", async () => {
+  it("leaves the queue of a running agent run's target on the row for the run to take", async () => {
     const session = fakeSession("s1", { scripted: true });
-    const { turns, deps, opened } = resumeRig([session], { live: () => false });
-    turns.record("s1", KEY, null, 1_000);
+    const { turns, deps, opened } = resumeRig([session], { resumedByRun: (id) => id === "s1" });
+    turns.record("s1", KEY, ["DO NOT DEPLOY"], 1_000);
     await resumeTurns(deps, 2_000);
-    expect(opened).toEqual([{ channelId: "web", conversationId: "s1" }]);
-    expect(session.systemInputs).toHaveLength(1);
+    expect(opened).toEqual([]);
+    expect(turns.list().map((row) => row.queued)).toEqual([["DO NOT DEPLOY"]]);
   });
 
   it("reports a resume the session refused", async () => {
@@ -268,6 +268,93 @@ describe("resumeTurns", () => {
     await resumeTurns(deps, 2_000);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(reports).toEqual([expect.stringContaining("no model")]);
+  });
+});
+
+/** The router as main.ts wires it: an alias resumes by id, an IM key goes
+ *  through the durable chat map, which creates a session for a chat that has
+ *  none — the home chat never has one (channels/runtime.ts `toHead`). */
+function routedRig(onDisk: Record<string, FakeSession>, { adapterUp = true } = {}) {
+  const db = openDb(":memory:");
+  const conversations = new ConversationStore(db);
+  const created: FakeSession[] = [];
+  const factory = {
+    resume: (id: string) => {
+      const session = onDisk[id];
+      return session ? Promise.resolve(session) : Promise.reject(new Error(`unknown session ${id}`));
+    },
+    create: () => {
+      const session = fakeSession(`new-${String(created.length + 1)}`, { scripted: true });
+      created.push(session);
+      return Promise.resolve(session);
+    },
+  };
+  const resolveIm = resolveConversation(conversations, factory, () => ({ cwd: "/w" }));
+  const hub = new EventHub();
+  const router = new Router(
+    hub,
+    (key) => (key.channelId === "web" || key.channelId === "task" ? factory.resume(key.conversationId) : resolveIm(key)),
+    (key) => conversations.get(key),
+    (id) => (id === "head" ? HOME : conversations.keyOf(id)),
+  );
+  if (adapterUp) {
+    router.registerChannel({
+      id: "slack", start: () => Promise.resolve(), send: () => Promise.resolve(), notify: () => Promise.resolve(),
+      openThread: () => Promise.resolve(""), editRoot: () => Promise.resolve(), stop: () => Promise.resolve(),
+    });
+  }
+  const turns = new TurnsInFlight(db);
+  const ledger = new RestartLedger(db);
+  const deps: ResumeDeps = { turns, ledger, router, resumedByRun: () => false };
+  return { conversations, created, router, turns, ledger, deps };
+}
+const HOME = { channelId: "slack", conversationId: "D1" };
+
+describe("resumeTurns through the router", () => {
+  it("resumes the head's home-chat turn in the head, never in a session made for the chat", async () => {
+    const head = fakeSession("head", { scripted: true });
+    const { conversations, created, router, turns, deps } = routedRig({ head });
+    turns.record("head", HOME, ["DO NOT DEPLOY"], 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(created).toEqual([]);
+    expect(head.systemInputs.map((input) => input.text)).toEqual([restartInput(2_000, 1_000, ["DO NOT DEPLOY"])]);
+    // The chat stays the head's delivery surface, and the chat map stays as it was: routing is not remapped.
+    expect(router.conversationOf("head")).toEqual(HOME);
+    expect(conversations.get(HOME)).toBeUndefined();
+  });
+
+  it("resumes a thread's turn in its mapped session under the thread's key", async () => {
+    const s1 = fakeSession("s1", { scripted: true });
+    const { conversations, created, router, turns, deps } = routedRig({ s1 });
+    conversations.set(KEY, "s1");
+    turns.record("s1", KEY, null, 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(created).toEqual([]);
+    expect(s1.systemInputs).toHaveLength(1);
+    expect(router.conversationOf("s1")).toEqual(KEY);
+  });
+
+  it("resumes on the session's own stream while its adapter is down", async () => {
+    const head = fakeSession("head", { scripted: true });
+    const { created, router, turns, deps } = routedRig({ head }, { adapterUp: false });
+    turns.record("head", HOME, null, 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(created).toEqual([]);
+    expect(head.systemInputs).toHaveLength(1);
+    expect(router.conversationOf("head")).toEqual({ channelId: "web", conversationId: "head" });
+  });
+
+  it("tells the chat about a session gone from disk instead of making one for it", async () => {
+    const { conversations, created, ledger, turns, deps } = routedRig({});
+    conversations.set(KEY, "s1");
+    turns.record("s1", KEY, ["lost"], 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(created).toEqual([]);
+    expect(turns.list()).toEqual([]);
+    expect(conversations.get(KEY)).toBe("s1");
+    expect(ledger.list()).toEqual([expect.objectContaining({
+      channelId: "slack", conversationId: KEY.conversationId, note: expect.stringContaining("unknown session s1"),
+    })]);
   });
 });
 

@@ -371,17 +371,6 @@ export class TaskStore {
     }));
   }
 
-  expirePendingMessages(): TaskMessage[] {
-    return this.#many<TaskMessage>("SELECT json FROM task_messages WHERE state = 'pending'").map((message) => {
-      message.state = "expired";
-      // "Confirmed", not "completed": the proof lives in a transcript this
-      // layer cannot see.
-      message.error = "Pier restarted before delivery could be confirmed";
-      this.saveMessage(message);
-      return message;
-    });
-  }
-
   listPendingCallbacks(now = Date.now()): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs

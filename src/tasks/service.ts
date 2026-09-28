@@ -7,7 +7,7 @@ import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { AgentTaskRunner } from "./agent.js";
+import { AgentTaskRunner, type Restart } from "./agent.js";
 import { DESIGN_FINAL, LEAD_TURN, MILESTONE, runCwd, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
@@ -54,6 +54,9 @@ const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
 export class TaskService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  /** The last process's runs, read before this one can add any: a run
+   *  launched while the boot waits for its secrets is not one to resume. */
+  private leftover: TaskRun[];
   private readonly waiters = new Map<string, Set<Waiter>>();
   private readonly messages: TaskMessenger;
   private readonly definitions: TaskDefinitions;
@@ -80,6 +83,7 @@ export class TaskService {
       abnormalEnd?: (run: TaskRun) => void;
     },
   ) {
+    this.leftover = store.inFlightRuns();
     const headOf = (id: string): string => this.headOf(id);
     const conversation = (): string | null => this.head();
     const unreachable = (sessionId: string, what: string, why: string): void =>
@@ -193,10 +197,12 @@ export class TaskService {
     }
   }
 
+  /** The clock: after the boot pass, or at once when the unlock is refused
+   *  (main.ts). Pending control messages are not touched: the tick's sweep
+   *  retries the ones whose run still runs and expires the rest. */
   start(tickMs = 1000): void {
     if (this.timer) return;
     const now = Date.now();
-    this.messages.expirePending();
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
     this.groups.recover(now);
@@ -206,9 +212,12 @@ export class TaskService {
   /** The runs the last process left in flight, once, after secrets and
    *  adapters are up so a resumed model has its credentials
    *  (docs/design/13-stop-and-resume.md §Task runs). `at`/`downMs` are the
-   *  restart the resumed turn is told about. */
-  resumeAfterRestart(at: number, downMs: number): void {
-    for (const run of this.store.inFlightRuns()) {
+   *  restart the resumed turn is told about; `queuedFor` is what the stop
+   *  saved for a run's session, which the run's resume owns. */
+  resumeAfterRestart({ at, downMs, queuedFor }: Omit<Restart, "queued"> & { queuedFor(sessionId: string): string[] }): void {
+    const leftover = this.leftover;
+    this.leftover = [];
+    for (const run of leftover) {
       // A child's parent is a `task` action, which never resumes: a child must
       // not outlive the run that waits on it.
       if (run.parentRunId === null && run.state === "queued") {
@@ -219,7 +228,7 @@ export class TaskService {
       const probing = trigger.type === "watch" && run.resumedFromRunId === null && run.matched !== true;
       if (run.parentRunId === null && action.type === "agent" && !probing) {
         log.info(`run ${run.id} (${run.context.definition.name}) resumes after a restart`);
-        this.execution.start(run, { at, downMs });
+        this.execution.start(run, { at, downMs, queued: run.targetSessionId ? queuedFor(run.targetSessionId) : [] });
         continue;
       }
       // The previous boot's log is where its work stopped.

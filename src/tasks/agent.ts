@@ -16,8 +16,10 @@ import { createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from
 const MAX_ACTIVE_AGENTS = 6;
 const log = logger("tasks");
 
-/** The restart a resumed run's turn is told about (service.ts's boot pass). */
-export interface Restart { at: number; downMs: number }
+/** The restart a resumed run's turn is told about (service.ts's boot pass);
+ *  `queued` is what the stop saved for its session (src/stop.ts), owed to no
+ *  other resume. */
+export interface Restart { at: number; downMs: number; queued: string[] }
 
 /** Every session gets the chat-surface contract, task runs included, so the
  *  delegation prompt says which of it does not apply. Skipped on resume. */
@@ -88,7 +90,7 @@ export class AgentTaskRunner {
         // A session already prompted has the prompt in its transcript; one
         // that was not has heard nothing, so it gets the prompt.
         const resumed = restart && run.context.sessionId ? restart : undefined;
-        const prompt = resumed ? restartInput(resumed.at, resumed.downMs) : run.context.resumePrompt ??
+        const prompt = resumed ? restartInput(resumed.at, resumed.downMs, resumed.queued) : run.context.resumePrompt ??
           `${preamble(run, this.store.supervised(run), this.store.roleOf(session.id))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         if (!resumed) run.context.renderedPrompt = prompt;
@@ -116,7 +118,7 @@ export class AgentTaskRunner {
           const fields = { taskId: run.taskId, runId: run.id, sourceSessionId: run.sourceSessionId, source: runSource(run) };
           const turn = session.systemInput(
             prompt,
-            resumed ? { kind: "restart", ...resumed, ...fields } : { kind: "task-delegation", ...fields },
+            resumed ? { kind: "restart", at: resumed.at, downMs: resumed.downMs, ...fields } : { kind: "task-delegation", ...fields },
             "prompt",
           );
           await Promise.resolve();

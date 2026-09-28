@@ -75,10 +75,6 @@ export class TaskMessenger {
     });
   }
 
-  expirePending(): void {
-    for (const message of this.store.expirePendingMessages()) this.changed(message);
-  }
-
   async control(
     run: TaskRun,
     fromSessionId: string,
@@ -98,8 +94,10 @@ export class TaskMessenger {
     }
   }
 
-  /** Delivery is fire-and-forget, so this sweep is what closes a failed one.
-   * Controls aimed at a finished run are dead and expire here. */
+  /** Delivery is fire-and-forget, so this sweep is what closes a failed one,
+   *  and what re-sends one a restart left pending — the outbox's transcript
+   *  proof keeps a landed one from going twice. Controls aimed at a finished
+   *  run are dead and expire here. */
   retryUndelivered(now = Date.now()): void {
     for (const { message, run } of this.store.listUndeliveredMessages()) {
       if (!run) continue;
