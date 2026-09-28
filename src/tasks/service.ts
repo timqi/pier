@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier } from "../core/types.js";
+import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -315,8 +315,8 @@ export class TaskService {
   }
 
   /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
-  ledger(sessionIds: string[], since: number): LedgerRun[] {
-    return this.store.ledgerRuns(sessionIds, since).map(ledgerRun);
+  ledger(sessionIds: string[], since: number, states?: readonly TaskRunState[]): LedgerRun[] {
+    return this.store.ledgerRuns(sessionIds, since, states).map(ledgerRun);
   }
 
   /** Dispatched runs of the last `days` by launch tier, role and the model the

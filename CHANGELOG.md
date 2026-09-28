@@ -11,6 +11,7 @@
 - A run a session launched that ends interrupted, failed, or cancelled without the user asking is told in the home chat (`"<name>" ended <state> — <error>`), delivered through the restart ledger so an interruption reaches the chat once it reconnects; a failure or cancel whose result the head's callback note already shows posts nothing more ([11-im-conversation.md](docs/design/11-im-conversation.md#notifications)).
 - A delegation prompt may carry `Approved: <step>` for a destructive step the user already approved (`Approved: pier restart`); the run takes it instead of stopping to ask, and the head and leads write that line when handing an approval down.
 - A run's result ends with the final state it verified — the commit and the branch it is merged into, the ref pushed, the service's active-since — which the head trusts instead of re-checking; a lead's milestone does the same.
+- `pier task runs --state <state>[,…] --since <n>m|h|d --limit <n>`: the ledger answers in-flight runs first, then the newest finished, at most 20 by default (was up to 200) within the last 24h unless `--since` says otherwise; a full page says so on stderr.
 - `pier task stats [--days <n>]`: finished agent runs by launch tier, role and model, with each row's recent task names, so the operator can read whether dispatch follows the tier rule ([12-model-tiers.md](docs/design/12-model-tiers.md)).
 
 ## 0.3.1 — 2026-09-28

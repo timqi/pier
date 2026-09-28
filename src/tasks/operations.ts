@@ -4,7 +4,7 @@
 // service; this file decides who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
-import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, type ModelRef, type ModelTier } from "../core/types.js";
+import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, TASK_RUN_STATES, type LedgerRun, type ModelRef, type ModelTier, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -61,6 +61,23 @@ export interface GroupSummary {
   winnerRunId?: string;
   members: RunSummary[];
   next?: string;
+}
+
+/** `pier task runs` answers the newest 20 unless asked: the reader is a model's context. */
+const RUNS_LIMIT = 20;
+const RUNS_MAX = 200;
+
+const isState = (value: unknown): value is TaskRunState => (TASK_RUN_STATES as readonly unknown[]).includes(value);
+
+/** The ledger's order is in flight first, so a limit never hides a run still owed a result. */
+function runsOf(host: TaskService, launchers: string[], input: Record<string, unknown>): LedgerRun[] {
+  const { states, since_ms: sinceMs = LEDGER_WINDOW_MS, limit = RUNS_LIMIT } = input;
+  if (states !== undefined && !(Array.isArray(states) && states.length && states.every(isState))) {
+    throw new Error(`states must be some of ${TASK_RUN_STATES.join(", ")}`);
+  }
+  if (typeof sinceMs !== "number" || !Number.isInteger(sinceMs) || sinceMs < 1) throw new Error("since_ms must be a positive whole number");
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > RUNS_MAX) throw new Error(`limit must be a whole number from 1 to ${String(RUNS_MAX)}`);
+  return host.ledger(launchers, Date.now() - sinceMs, states).slice(0, limit);
 }
 
 /** Absent instead of `null`: a model reads both the same way, and on a group
@@ -215,7 +232,7 @@ export async function handleTask(
       return { ...task, nextRun: nextRunAt, lastRun: last ? defined<LastRun>({ runId: last.id, state: last.state, startedAt: last.startedAt, finishedAt: last.finishedAt }) : null };
     });
   }
-  if (input.operation === "runs") return host.ledger(launchers(), Date.now() - LEDGER_WINDOW_MS);
+  if (input.operation === "runs") return runsOf(host, launchers(), input);
   if (input.operation === "stats") {
     if (typeof input.days !== "number" || !Number.isInteger(input.days) || input.days < 1) throw new Error("days must be a positive whole number");
     return host.stats(input.days);

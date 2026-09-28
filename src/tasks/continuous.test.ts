@@ -126,4 +126,36 @@ describe("tasks under the continuous conversation", () => {
     expect((await service.handle({ operation: "runs" }, "stranger") as { runId: string }[]).map((r) => r.runId)).toEqual(["theirs"]);
     await expect(service.handle({ operation: "runs" }, "child")).resolves.toEqual([]);
   });
+
+  it("answers the newest 20 unless asked, in flight first, filtered by state and window", async () => {
+    const { service, store, bash } = rig();
+    const task = await bash();
+    const now = Date.now();
+    const day = 24 * 60 * 60_000;
+    // The oldest is still running: a limit must not hide it.
+    store.saveRun(stored("live", task, { invokedBySessionId: "h1", state: "running", finishedAt: null, queuedAt: now - 3 * day }));
+    for (let i = 0; i < 30; i++) {
+      store.saveRun(stored(`done${String(i)}`, task, { invokedBySessionId: "h1", state: i % 2 ? "failed" : "succeeded", queuedAt: now - i * 60_000, finishedAt: now - i * 60_000 }));
+    }
+    store.saveRun(stored("old", task, { invokedBySessionId: "h1", state: "failed", queuedAt: now - 3 * day, finishedAt: now - 3 * day }));
+    const ids = async (params: Record<string, unknown>) =>
+      (await service.handle({ operation: "runs", ...params }, "h1") as { runId: string }[]).map((r) => r.runId);
+    const first = await ids({});
+    expect(first).toHaveLength(20);
+    expect(first.slice(0, 3)).toEqual(["live", "done0", "done1"]);
+    expect(await ids({ limit: 200 })).toHaveLength(31);
+    expect(await ids({ states: ["failed"], limit: 3 })).toEqual(["done1", "done3", "done5"]);
+    expect(await ids({ states: ["failed"], since_ms: 4 * day, limit: 200 })).toContain("old");
+    // In flight is listed whatever the window; finished runs only inside it.
+    expect(await ids({ since_ms: 90_000 })).toEqual(["live", "done0", "done1"]);
+    expect(await ids({ states: ["queued"] })).toEqual([]);
+    await expect(service.handle({ operation: "runs", states: ["done"] }, "h1")).rejects.toThrow(/states must be some of/);
+    await expect(service.handle({ operation: "runs", limit: 201 }, "h1")).rejects.toThrow(/limit must be a whole number from 1 to 200/);
+    await expect(service.handle({ operation: "runs", since_ms: 0 }, "h1")).rejects.toThrow(/since_ms must be/);
+    // Past the store's 200-row cap the in-flight run still leads.
+    for (let i = 30; i < 230; i++) {
+      store.saveRun(stored(`done${String(i)}`, task, { invokedBySessionId: "h1", state: "succeeded", queuedAt: now - i * 1000, finishedAt: now - i * 1000 }));
+    }
+    expect((await ids({ limit: 200 }))[0]).toBe("live");
+  });
 });

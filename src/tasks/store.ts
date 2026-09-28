@@ -4,7 +4,7 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
 import type { OpenItemMarker } from "../core/reply.js";
-import type { AgentRole, LeadPhase } from "../core/types.js";
+import { TASK_RUN_STATES, type AgentRole, type LeadPhase, type TaskRunState } from "../core/types.js";
 import { createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -112,15 +112,18 @@ export class TaskStore {
     `).run(taskId, taskId, KEPT_PROBES);
   }
 
-  /** Runs launched by any of `sessionIds`: in flight, or finished at or after `since`. */
-  ledgerRuns(sessionIds: string[], since: number): TaskRun[] {
+  /** Runs launched by any of `sessionIds`: in flight, or finished at or after
+   *  `since`; only those in `states` when given. In flight first, so the cap
+   *  never drops a run still owed a result; then newest first. */
+  ledgerRuns(sessionIds: string[], since: number, states?: readonly TaskRunState[]): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs
       WHERE json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?))
         AND (state IN ('queued', 'running') OR json_extract(json, '$.finishedAt') >= ?)
+        AND state IN (SELECT value FROM json_each(?))
         AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
-      ORDER BY queued_at DESC, id DESC LIMIT 200
-    `, JSON.stringify(sessionIds), since);
+      ORDER BY state IN ('queued', 'running') DESC, queued_at DESC, id DESC LIMIT 200
+    `, JSON.stringify(sessionIds), since, JSON.stringify(states ?? TASK_RUN_STATES));
   }
 
   /** Opened agent runs a session or the user fired that settled at or after

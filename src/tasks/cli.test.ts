@@ -33,7 +33,10 @@ describe("pier task", () => {
       [["pause", "--task-id", "t1"], { operation: "pause", task_id: "t1" }],
       [["resume", "--task-id", "t1"], { operation: "resume", task_id: "t1" }],
       [["archive", "--task-id", "t1"], { operation: "archive", task_id: "t1" }],
-      [["runs"], { operation: "runs" }],
+      [["runs"], { operation: "runs", limit: 20 }],
+      [["runs", "--state", "failed,interrupted", "--since", "7d", "--limit", "50"], { operation: "runs", states: ["failed", "interrupted"], since_ms: 7 * 86_400_000, limit: 50 }],
+      [["runs", "--since", "90m"], { operation: "runs", since_ms: 90 * 60_000, limit: 20 }],
+      [["runs", "--since", "2h"], { operation: "runs", since_ms: 2 * 3_600_000, limit: 20 }],
       [["stats"], { operation: "stats", days: 30 }],
       [["stats", "--days", "7"], { operation: "stats", days: 7 }],
       [["run", "--prompt", "design it", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", launch: { model: "opus", role: "lead" } }],
@@ -163,6 +166,10 @@ describe("pier task", () => {
       [["pause"], "task: pause needs --task-id"],
       [["stats", "--days", "0"], "task: --days must be a positive whole number"],
       [["stats", "--days", "1.5"], "task: --days must be a positive whole number"],
+      [["runs", "--since", "24"], "task: --since takes <n>m, <n>h or <n>d"],
+      [["runs", "--since", "1w"], "task: --since takes <n>m, <n>h or <n>d"],
+      [["runs", "--limit", "0"], "task: --limit must be a positive whole number"],
+      [["runs", "--days", "1"], "task: --days is not an option of runs"],
       [["archive", "--task-id", "t1", "--name", "x"], "task: --name is not an option of archive"],
       [["cancel", "--porrt", "1"], expect.stringMatching(/^task: Unknown option '--porrt'/)],
       [["cancel", "r1"], expect.stringMatching(/^task: Unexpected argument 'r1'/)],
@@ -213,5 +220,15 @@ describe("pier task", () => {
     const broken = rig({ status: 500, body: {} });
     expect(await broken.run("list")).toBe(1);
     expect(broken.err).toEqual(["task: socket answered 500"]);
+  });
+
+  it("says when runs filled its --limit, since a full page reads like the whole ledger", async () => {
+    const full = rig({ status: 200, body: { result: [{ runId: "a" }, { runId: "b" }] } });
+    expect(await full.run("runs", "--limit", "2")).toBe(0);
+    expect(full.out).toEqual([JSON.stringify([{ runId: "a" }, { runId: "b" }])]);
+    expect(full.err).toEqual(["task: 2 shown, the --limit; there may be more (--state, --since, --limit)"]);
+    const short = rig({ status: 200, body: { result: [{ runId: "a" }] } });
+    expect(await short.run("runs", "--limit", "2")).toBe(0);
+    expect(short.err).toEqual([]);
   });
 });

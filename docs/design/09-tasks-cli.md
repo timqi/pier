@@ -117,12 +117,15 @@ definition still runs on demand, an archived one never.
 ## `runs`
 
 ```
-pier task runs
+pier task runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]
 ```
 
-No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`),
-the runs the caller launched — every chain member's, for a member of the
-head — in flight plus finished in the last 24h, at most 200.
+Any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`), the runs
+the caller launched — every chain member's, for a member of the head — in
+flight plus finished within `--since` (default 24h), only the `--state`s given,
+in flight first then newest first, at most `--limit` (default 20, max 200); a
+full page adds a `task:` line on stderr that there may be more.
+Socket params: `states`, `since_ms`, `limit`.
 
 ## `stats`
 

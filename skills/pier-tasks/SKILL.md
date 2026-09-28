@@ -85,8 +85,11 @@ chars per run, a group's members included) or lost to compaction. `--group`
 caps each member at 2 000, so a long member is recovered with `--run`.
 **Never to check progress**: the refusal reveals no state.
 
-`pier task runs` — the runs you launched, in flight and finished in the last
-24h. For orientation, never to wait on a result.
+`pier task runs [--state failed,interrupted] [--since 7d] [--limit 50]` — the
+runs you launched: in flight first, then finished within `--since` (24h),
+newest first, at most `--limit` (20; 200 max). A full page says so on stderr:
+narrow with `--state` or widen `--limit`. For orientation, never to wait
+on a result.
 
 `pier task stats [--days 30]` — finished agent runs by launch tier, role and
 model, with each row's recent task names: `named` is a run launched by model

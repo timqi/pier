@@ -22,7 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
-  days: { type: "string" }, help: { type: "boolean", short: "h" },
+  days: { type: "string" }, state: { type: "string" }, since: { type: "string" }, limit: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
 type Values = Partial<Record<Flag, string | boolean>>;
@@ -47,7 +47,10 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
   pause: { usage: "pause --task-id <id>", help: "stop a definition's schedule; run --task-id still runs it" },
   resume: { usage: "resume --task-id <id>", help: "restart a paused definition's schedule" },
   archive: { usage: "archive --task-id <id>", help: "retire a definition for good" },
-  runs: { usage: "runs", help: "the runs you launched (in the continuous conversation, any of its sessions), in flight and finished in the last 24h, as JSON" },
+  runs: {
+    usage: "runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]",
+    help: "the runs you launched (in the continuous conversation, any of its sessions): in flight, then finished within --since (24h), at most --limit (20, up to 200), as JSON",
+  },
   stats: { usage: "stats [--days <n>]", help: "finished agent runs of the last n days (30) by launch tier, role and model, with recent task names, as JSON" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
@@ -134,6 +137,10 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
     // Compact: the reader is a model, and the ids are what it keeps; an answer
     // the server already wrote in lines (`--model ?`) is printed as it came.
     io.stdout(typeof body.result === "string" ? body.result : JSON.stringify(body.result));
+    // A full page looks the same as "that is all" unless it says otherwise.
+    if (params.operation === "runs" && Array.isArray(body.result) && body.result.length === params.limit) {
+      io.stderr(`task: ${String(params.limit)} shown, the --limit; there may be more (--state, --since, --limit)`);
+    }
     return 0;
   }
   io.stderr(`task: ${body.error ?? `socket answered ${String(status)}`}`);
@@ -151,7 +158,18 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   };
   if (parsed.some((v) => v.model === "?")) return { operation: "run", launch: { model: "?" } };
   const [values, ...members] = parsed as [Values, ...Values[]];
-  if (name === "list" || name === "runs") return { operation: name };
+  if (name === "list") return { operation: name };
+  if (name === "runs") {
+    const since = values.since === undefined ? undefined : /^(\d+)([mhd])$/.exec(String(values.since)) ?? refuse("--since takes <n>m, <n>h or <n>d");
+    const limit = Number(values.limit ?? 20);
+    if (!(Number.isInteger(limit) && limit > 0)) refuse("--limit must be a positive whole number");
+    return compact({
+      operation: "runs",
+      states: values.state === undefined ? undefined : String(values.state).split(","),
+      since_ms: since && Number(since[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[since[2] as "m" | "h" | "d"],
+      limit,
+    });
+  }
   if (name === "stats") {
     const days = Number(values.days ?? 30);
     return Number.isInteger(days) && days > 0 ? { operation: "stats", days } : refuse("--days must be a positive whole number");
