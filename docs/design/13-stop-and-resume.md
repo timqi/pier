@@ -186,17 +186,23 @@ resumes this turn.` A run whose result is only "the service is up" reads
 - `docs/design/11-im-conversation.md`: the notices table rows; "a run that
   calls `pier restart` finishes before the drain exits" → "resumes after it".
 
-## Unverified
+## Verified
 
-- `channels.stop()` keeps outbound clients usable after disconnecting inbound
-  (Slack socket mode vs. Web API; Lark WS vs. HTTP) — the stop order depends
-  on it; if not, sends are flushed before inbound closes.
-- Pi's session load after a SIGKILL mid-tool (an assistant `toolUse` with no
-  tool result on disk): whether Pi repairs the transcript on load or the next
-  request is refused by the provider. If refused, the resume falls to the
-  "cannot open" path and the chat is told — no silent loss, but worth a test.
-- Slack redelivers unacked Socket Mode envelopes on reconnect; Lark's
-  long-connection semantics for the exit window are not confirmed.
+- `channels.stop()` closes only the inbound socket (`slack-api.ts` `connect`,
+  `lark-api.ts` `connect`); sends go over `fetch` and `Lark.Client`, which no
+  stop disposes, so a send in flight completes after the adapter stopped.
+  The adapter's own `stop()` also waits up to 5s for its inbound chains, so
+  the stop snapshots sessions beside it, not after it.
+- A `toolCall` with no result on disk: pi-ai's `transformMessages` inserts a
+  synthetic `No result provided` error result before every request and skips
+  assistant messages whose `stopReason` is `aborted`/`error`, so the resumed
+  turn is accepted by the provider. Read in the SDK, not exercised against a
+  provider.
+- Both adapters ack an envelope before the handler runs (`slack-api.ts`,
+  `lark-api.ts`), so a message that reached Pier is never redelivered; one
+  Slack had not acked is redelivered on reconnect (Slack's documented Socket
+  Mode behaviour), and Lark's is not confirmed — either way the turn it starts
+  resumes at boot.
 
 ## Build plan
 

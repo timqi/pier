@@ -198,6 +198,17 @@ export class TaskService {
     // this, the refusal would outlive the drain that justified it.
     this.paused = false;
     const now = Date.now();
+    this.resumeAfterRestart(now);
+    this.messages.expirePending();
+    this.definitions.resetNextRuns(now);
+    this.callbacks.recover(now);
+    this.groups.recover(now);
+    this.runTimer(tickMs);
+  }
+
+  /** The runs the last process left `running`: what the boot does with each
+   *  (docs/design/13-stop-and-resume.md §Task runs). */
+  resumeAfterRestart(now = Date.now()): void {
     // A run that was running when the process died: it is being written off
     // here, and the previous boot's log is where its work stopped.
     for (const run of this.store.interruptRunning(now)) {
@@ -205,11 +216,6 @@ export class TaskService {
       this.changed(run);
       this.abnormalEnd(run, false);
     }
-    this.messages.expirePending();
-    this.definitions.resetNextRuns(now);
-    this.callbacks.recover(now);
-    this.groups.recover(now);
-    this.runTimer(tickMs);
   }
 
   private runTimer(tickMs: number): void {

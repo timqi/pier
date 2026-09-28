@@ -85,6 +85,10 @@ export class Router {
   /** Set by a graceful restart (src/drain.ts); `endDrain` is for the caller
    *  that drains speculatively and may not get to exit. */
   private draining = false;
+  /** Set by the stop (src/stop.ts): no turn end is delivered or settled from
+   *  here on — the boot's resume owns every turn that was running. */
+  private stopped = false;
+  private turnStarted?: (sessionId: string, key: ConversationKey) => void;
   private turnEnded?: (sessionId: string, text: string) => void;
 
   constructor(
@@ -138,6 +142,21 @@ export class Router {
    *  turn is not one. Registered by the task service (tasks/service.ts). */
   onTurnEnd(listener: (sessionId: string, text: string) => void): void {
     this.turnEnded = listener;
+  }
+
+  /** Every attached session's turn as it begins, with the key it will answer
+   *  on: the in-flight record (src/stop.ts) is written here, not at the stop. */
+  onTurnStart(listener: (sessionId: string, key: ConversationKey) => void): void {
+    this.turnStarted = listener;
+  }
+
+  /** Delivery and settlement close for the exit; nothing reopens them. */
+  stopping(): void {
+    this.stopped = true;
+  }
+
+  isStopping(): boolean {
+    return this.stopped;
   }
 
   /** A failure reaches the chat as well as the hub (§5): on IM, silence is
@@ -275,6 +294,7 @@ export class Router {
             sessionId: session.id,
             state: payload.state,
           });
+          if (payload.state === "streaming") this.turnStarted?.(session.id, key);
         }
         if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
         // Without this a session-reported error lands only in the web timeline
@@ -315,6 +335,7 @@ export class Router {
           log.info(
             `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
           );
+          if (this.stopped) return;
           if (!payload.error) this.turnEnded?.(session.id, payload.text);
           const channel = this.channels.get(key.channelId);
           if (channel) {
