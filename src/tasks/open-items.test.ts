@@ -7,11 +7,11 @@ import { EventHub } from "../core/hub.js";
 import { agoLabel } from "../core/reply.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
-import { NOT_IN_LEDGER, type AgentFactory, type LedgerRun, type TaskRunState } from "../core/types.js";
-import { openItems, openItemsStatus, type OpenItemReads } from "./open-items.js";
+import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type TaskRunState } from "../core/types.js";
+import { openItems, openItemsStatus, openStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskRun } from "./types.js";
+import type { OpenRun, TaskRun } from "./types.js";
 
 const MIN = 60_000;
 const run = (runId: string, over: Partial<LedgerRun> = {}): LedgerRun =>
@@ -69,9 +69,8 @@ describe("the open items", () => {
     expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }]);
     expect(r.workerReads).toEqual([["lead1"]]);
     expect(openItemsStatus(open, now).text).toBe([
-      "Waiting on you",
-      "- model menu 重选 — merged, restart pending (waiting on you) · run gone1 — not in the ledger",
       "In progress",
+      "- model menu 重选 — merged, restart pending (stopped) · run gone1 — not in the ledger",
       "- open items 视图 — lead designing (running) · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
     ].join("\n"));
   });
@@ -93,9 +92,8 @@ describe("the open items", () => {
     // The window is the ledger's: `pier task runs`' last 24h.
     expect(r.ledger[0]!.since).toBe(now - 86_400_000);
     expect(openItemsStatus(open, now).text).toBe([
-      "Waiting on you",
-      "- the problem (waiting on you) · run r-named failed just now",
       "In progress",
+      "- the problem (stopped) · run r-named failed just now",
       "- Build it — not on the list (running) · run r-live running 5m",
       "- Next — not on the list (queued) · run r-queued queued 1m",
     ].join("\n"));
@@ -137,8 +135,9 @@ describe("the open items", () => {
     const status = openItemsStatus(r.list(["h1"], [design]), r.now);
     expect(status.text).toBe([
       "Waiting on you",
-      "- model menu — merged (waiting on you)",
       `- Rail redesign (waiting on you) · run d1abcdef… succeeded ${agoLabel(0, r.now)}`,
+      "In progress",
+      "- model menu — merged (pending release)",
     ].join("\n"));
     expect(status.sessions).toEqual({ d1abcdefgh: "s-d1" });
   });
@@ -163,6 +162,62 @@ describe("the open items", () => {
       "In progress",
       "- Rail again — not on the list (running) · run t2 running 1m",
     ].join("\n"));
+  });
+
+  // Every state a run can hold, through the one reading every surface groups by.
+  it("reads an item's status from its whole run tree and its stage, for every run state", () => {
+    const at = (state: string, over: Partial<OpenRun> = {}): OpenRun => ({ ...run("r", { state, targetSessionId: "s" }), ...over });
+    const none = (id: string): boolean => id === "";
+    const quiet = { streaming: none, designOpen: none };
+    const status = (runs: OpenRun[], stage = "", session = quiet) => openStatus({ problem: "p", stage, runs }, session);
+    expect(Object.fromEntries([...TASK_RUN_STATES, NOT_IN_LEDGER].map((s) => [s, status([at(s)])]))).toEqual({
+      queued: "running", running: "running", succeeded: "pending release", failed: "stopped",
+      cancelled: "stopped", interrupted: "stopped", skipped: "stopped", [NOT_IN_LEDGER]: "stopped",
+    });
+    expect(status([])).toBe("pending release");
+    expect(status([at("succeeded"), at("failed")])).toBe("stopped");
+    // The stage's marker, a design awaiting Finalize: the only two ways an item waits on the user.
+    expect(status([at("succeeded")], "waiting on you: 手动重启还是派 worker")).toBe("waiting on you");
+    expect(status([at("failed")], "Waiting on you: 60K or 80K?")).toBe("waiting on you");
+    expect(status([at("succeeded")], "", { ...quiet, designOpen: (id) => id === "s" })).toBe("waiting on you");
+    // Anything live below the item outranks the marker: a streaming session, a lead's workers in flight.
+    expect(status([at("succeeded")], "waiting on you: x", { ...quiet, streaming: (id) => id === "s" })).toBe("running");
+    const workers = (over: Partial<Record<TaskRunState, number>>) =>
+      ({ ...Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])), ...over }) as Record<TaskRunState, number>;
+    expect(status([at("succeeded", { workers: workers({ running: 3 }) })], "lead 实现中")).toBe("running");
+    expect(status([at("succeeded", { workers: workers({ queued: 1 }) })])).toBe("running");
+    // A finished worker's outcome is its lead's to read: the lead's run decides.
+    expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("pending release");
+  });
+
+  it("groups a lead whose turn ended under In progress while its workers run, and a succeeded item under Waiting on you only by its stage", () => {
+    let now = 0;
+    const r = rig({
+      leads: ["lead1"],
+      workers: [1, 2, 3].map(() => ({ invokedBySessionId: "lead1", state: "running" as const })),
+      runs: () => [
+        run("mmk4jv4p", { targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN }),
+        run("4dyem4jc", { targetSessionId: "w1", state: "succeeded", finishedAt: now - MIN }),
+        run("donedone", { targetSessionId: "w2", state: "succeeded", finishedAt: now - MIN }),
+      ],
+    });
+    now = r.now;
+    r.item("回调后回复语言跑偏", "waiting on you: 手动重启还是派 worker", ["4dyem4jc"], 1);
+    r.item("重启卡住原因", "lead 实现中", ["mmk4jv4p"], 2);
+    r.item("已合并", "merged, restart pending", ["donedone"], 3);
+    const open = r.list();
+    expect(open.items.map((i) => [i.problem, i.status])).toEqual([
+      ["回调后回复语言跑偏", "waiting on you"],
+      ["重启卡住原因", "running"],
+      ["已合并", "pending release"],
+    ]);
+    expect(openItemsStatus(open, now).text.split("\n").map((l) => l.replace(/ · run .*/, ""))).toEqual([
+      "Waiting on you",
+      "- 回调后回复语言跑偏 — waiting on you: 手动重启还是派 worker (waiting on you)",
+      "In progress",
+      "- 重启卡住原因 — lead 实现中 (running)",
+      "- 已合并 — merged, restart pending (pending release)",
+    ]);
   });
 
   it("reads every shown lead's workers in one ledger read, three leads or one", () => {

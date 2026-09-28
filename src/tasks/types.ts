@@ -237,11 +237,13 @@ export interface OpenRun extends LedgerRun {
   workers?: Record<TaskRunState, number>;
 }
 
-/** Where an open item stands, read from its runs and sessions, never from its
- *  stage text: `running` while any run is queued or running or its session
- *  streams; else `waiting on you` while its session's design awaits Finalize;
- *  else `pending release` when every run succeeded; else `waiting on you`. */
-export type OpenStatus = "running" | "waiting on you" | "pending release";
+/** Where an open item stands (`openStatus`, tasks/open-items.ts), first match:
+ *  `running` while a run is queued or running, its session streams or a lead's
+ *  workers are queued or running; `waiting on you` while its stage says so or its
+ *  session's design awaits Finalize; `pending release` when every run succeeded
+ *  (or it names none); else `stopped` — a run failed, was cancelled, interrupted,
+ *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
+export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
 
 /** `runs`: each named run's session, by its newest run. */
 export interface OpenItem {

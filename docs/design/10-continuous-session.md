@@ -118,10 +118,20 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   — not in the ledger`, `NOT_IN_LEDGER`), a lead run's with its workers counted
   by state; `unlisted` is the chain's queued and running runs in no item's
   session; `renderOpenItems` is the one text.
-- Each item's `status` is read from its runs and sessions, never its stage:
-  `running` while a run is queued or running or its session streams, else
-  `waiting on you` while its session's design awaits Finalize, else `pending
-  release` when every run succeeded, else `waiting on you`.
+- Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading
+  of its run tree — each run, its session, a lead's workers (workers never
+  delegate, so that is the whole tree) — and its stage; first match wins:
+
+  | status | when |
+  | --- | --- |
+  | `running` | a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
+  | `waiting on you` | the stage says `waiting on you`, or its session's design awaits Finalize |
+  | `pending release` | every run `succeeded` (or it names none) |
+  | `stopped` | a run `failed`, `cancelled`, `interrupted`, `skipped` or `not in the ledger` |
+
+- Only `waiting on you` asks anything of the user (`waitsOnYou`,
+  `core/reply.ts`): `/status`'s first group, the status panel's, its chip's
+  `needs you`; a finished worker's outcome is read from its lead's run, not its own.
 - An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
@@ -137,8 +147,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
   named by its creating run, unless an item or an unlisted run already holds
   its session: a session is in the list once.
-- The text: `Waiting on you`, the items not `running`, then `In progress`, the
-  `running` items and each unlisted run as `- <name> — not on the list`; a line
+- The text: `Waiting on you`, the `waiting on you` items, then `In progress`,
+  every other item and each unlisted run as `- <name> — not on the list`; a line
   is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
   it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
   `core/reply.ts`) and a lead's ` · workers: <counts>`; `Nothing open.` when
