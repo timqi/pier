@@ -253,7 +253,11 @@ let resumed = false;
 const resumeOnce = async (): Promise<void> => {
   if (resumed) return;
   resumed = true;
-  tasks.resumeAfterRestart();
+  const now = Date.now();
+  // A run's turn has no row of its own to date the outage by; the newest turn
+  // row is the stop's write, and a run left running alongside none shares its era.
+  const downMs = Math.max(0, ...turnsInFlight.list().map((row) => now - row.at));
+  tasks.resumeAfterRestart(now, downMs);
   await resumeTurns({
     turns: turnsInFlight, ledger: restartLedger, router,
     live: (id) => isChannelPlatform(id) && channels.live(id),

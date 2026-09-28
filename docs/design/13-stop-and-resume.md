@@ -112,7 +112,7 @@ For every row in `running` at boot:
 | `agent` | re-executed on the same row through `execution.start(run)`; `agent.ts` sends the restart text above as the turn's input when `context.sessionId` is set (origin `restart` carrying the `task-delegation` fields, so the card links the run), the rendered prompt when it is not — nothing had been said to it. `startedAt` is kept; the timeout counts from the resume, downtime is not the run's. Slot cap and per-session tail apply as to any run. |
 | `bash`, `system`, `task`, a `watch` probe | ended `interrupted`, `INTERRUPTED` the error, callback fired, as today — a script has no place to continue from; the owner decides to rerun. |
 
-A `queued` row stays queued and is dispatched by the tick. A resume that
+A `queued` row is started by the same pass, oldest first, on its own id. A resume that
 cannot open its session ends the run `failed` with `could not resume after a
 restart: <why>` — a failure, not an interruption, because Pier tried.
 
