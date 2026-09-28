@@ -3,7 +3,7 @@
 // messenger must agree on. Owner-defined and browser-importable type-only
 // (architecture.md), so nothing here may reach for a runtime or a node builtin.
 
-import type { AgentRole, LedgerRun, ModelRef, ModelTier, TaskRunState, ThinkingLevel } from "../core/types.js";
+import type { AgentRole, LeadPhase, LedgerRun, ModelRef, ModelTier, TaskRunState, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =
   | { type: "manual" }
@@ -231,6 +231,13 @@ export const isTerminal = (state: TaskRunState): boolean =>
  *  worker's when a session launched it; a cron or watch run's has none. */
 export const createdRole = ({ context: { definition: { action } }, invokedBySessionId }: TaskRun): AgentRole | undefined =>
   action.type === "agent" && action.launch?.role === "lead" ? "lead" : invokedBySessionId !== null ? "worker" : undefined;
+
+/** A lead's phase, fixed the same way: `design` when its run carries `launch.design`, any other lead builds. */
+export const createdPhase = (run: TaskRun): LeadPhase | undefined => {
+  const { action } = run.context.definition;
+  if (createdRole(run) !== "lead" || action.type !== "agent") return undefined;
+  return action.launch?.design ? "design" : "build";
+};
 
 /** A run behind an open item; a lead's carries its own launches, counted by state. */
 export interface OpenRun extends LedgerRun {

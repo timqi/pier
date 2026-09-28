@@ -2,6 +2,7 @@
 // before the prompt, and how many may run at once (an agent run costs a
 // model's context and someone's rate limit, so the caps are here).
 
+import { RUN_RESULT } from "../agent/roles.js";
 import type { AgentFactory, AgentRole, AgentSession } from "../core/types.js";
 import { quietLabel, restartInput, splitReply } from "../core/reply.js";
 import { userLanguage, withLanguage } from "../core/identity.js";
@@ -10,7 +11,7 @@ import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskStore } from "./store.js";
-import { createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
+import { createdPhase, createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
 
 // Agent runs are I/O-bound: the cap is there for API pressure and runaway
 // fan-out, not for this machine's CPU.
@@ -22,9 +23,11 @@ const log = logger("tasks");
  *  other resume. */
 export interface Restart { at: number; downMs: number; queued: string[] }
 
-/** Every session gets the chat-surface contract, task runs included, so the
- *  delegation prompt says which of it does not apply. Skipped on resume. */
-const preamble = (run: TaskRun, supervised: boolean, role: AgentRole | undefined): string => {
+/** What each run's message says before the prompt: the run and who reads its
+ *  result. A worker's or lead's session carries the result contract in its role
+ *  prompt (agent/roles.ts); a role-less one hears it here, with the chat-surface
+ *  conventions that do not apply, since a cron or user session has no other place. Skipped on resume. */
+const preamble = (run: TaskRun, role: AgentRole | undefined): string => {
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
     ? "read by the agent that delegated this run"
@@ -32,11 +35,8 @@ const preamble = (run: TaskRun, supervised: boolean, role: AgentRole | undefined
       ? "read by the agent session it is delivered to"
       : "read by the operator";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
-    `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there. Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, \`Needs your decision\`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step — force push, deleting what you did not create, a migration, a deploy, a restart — or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an \`Approved:\` line the user has already approved: take it, and name it in the result.` +
-    (role === "lead"
-      ? " You are a feature lead: you may delegate to workers with `pier task run` (never `--role lead`), and their results come back to you."
-      : supervised || role === "worker" ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
+    `Your final reply is recorded verbatim as the run result, ${audience}` +
+    (role ? "." : `; next-step buttons and file:// attachments do not render there. ${RUN_RESULT}`) +
     "\n\n";
 };
 
@@ -94,7 +94,7 @@ export class AgentTaskRunner {
         // that was not has heard nothing, so it gets the prompt.
         const resumed = restart && run.context.sessionId ? restart : undefined;
         const prompt = resumed ? restartInput(resumed.at, resumed.downMs, resumed.queued) : run.context.resumePrompt ??
-          `${preamble(run, this.store.supervised(run), this.store.roleOf(session.id))}${action.prompt}${input}`;
+          `${preamble(run, this.store.roleOf(session.id))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         if (!resumed) run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
@@ -176,6 +176,7 @@ export class AgentTaskRunner {
       model: action.launch?.model,
       thinking: action.launch?.thinking,
       role: createdRole(run),
+      phase: createdPhase(run),
     };
     const opening = this.factory.create(opts).then(async (session) => {
       // SDK creation cannot be cancelled; a late session still belongs to this

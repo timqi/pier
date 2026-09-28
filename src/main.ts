@@ -112,7 +112,7 @@ const taskStore = new TaskStore(db);
 const factory = new PiAgentFactory(
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
-  () => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }),
+  (role) => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }, role),
   // Documents Pier's own tools, so it loads only inside a Pier session.
   [skillsDir],
   new CredentialStore(db, secrets),
@@ -123,7 +123,7 @@ const factory = new PiAgentFactory(
   // Transcripts carry the speaker header core wrote for the model, and replies
   // the chat markup core strips before anyone sees them.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text, saidText),
-  (id) => taskStore.roleOf(id),
+  (id) => ({ role: taskStore.roleOf(id), phase: taskStore.leadPhaseOf(id) }),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

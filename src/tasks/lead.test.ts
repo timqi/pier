@@ -88,12 +88,14 @@ describe("a feature lead", () => {
     const { service, created, store } = rig();
     const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { model: "test/model", role: "lead", design: true } }, "main") as { runId: string };
     const run = await service.waitForRun(receipt.runId);
-    expect(created.at(-1)).toMatchObject({ role: "lead" });
-    expect(run.context.renderedPrompt).toContain("You are a feature lead: you may delegate to workers");
+    expect(created.at(-1)).toMatchObject({ role: "lead", phase: "design" });
+    // The contract is the session's (agent/roles.ts); the message names the run and its reader.
+    expect(run.context.renderedPrompt).toBe(`[Pier task run ${run.id} — "design the thing"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\ndesign the thing`);
     expect(store.roleOf(run.targetSessionId!)).toBe("lead");
     expect(store.roleOf("main")).toBeUndefined();
     expect(store.leadPhaseOf(run.targetSessionId!)).toBe("design");
     const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { model: "test/model", role: "lead" } }, "main") as { runId: string }).runId);
+    expect(created.at(-1)).toMatchObject({ role: "lead", phase: "build" });
     expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
     expect(store.leadPhaseOf("main")).toBeUndefined();
     // A lead that plans and builds itself is not a design, whatever its prompt says.
@@ -162,7 +164,7 @@ describe("a feature lead", () => {
     expect(resumed).toMatchObject({ resumedFromRunId: "lead-run", callbackSessionId: "main", invokedBySessionId: "main" });
     expect(lead.systemInputs.at(-1)).toMatchObject({
       origin: { kind: "task-delegation", runId: resumed.id },
-      text: expect.stringMatching(/^\[Pier: the last result you were waiting on follows[\s\S]*second/),
+      text: expect.stringMatching(/^\[Pier: the last result owed you follows[\s\S]*second/),
     });
     expect(main.systemInputs[0]!.text).toContain("lead says done");
     expect(store.getRun(a.id)!.callbackState).toBe("delivered");
@@ -431,7 +433,9 @@ describe("a session's role, kept for its life", () => {
     const run = await service.waitForRun(receipt.runId);
     const worker = run.targetSessionId!;
     expect(created.at(-1)).toMatchObject({ role: "worker" });
-    expect(run.context.renderedPrompt).toContain("`pier task` is refused");
+    // The refusal is the worker contract's (agent/roles.ts), the session's for its life, not the message's.
+    expect(created.at(-1)!.phase).toBeUndefined();
+    expect(run.context.renderedPrompt).not.toContain("`pier task`");
     expect(store.roleOf(worker)).toBe("worker");
     await expect(service.handle({ operation: "run", prompt: "deeper" }, worker)).rejects.toThrow(/worker's session never delegates, in a run or after it/);
     await expect(service.handle({ operation: "list" }, worker)).rejects.toThrow(/worker's session never delegates/);
@@ -443,7 +447,8 @@ describe("a session's role, kept for its life", () => {
     const nightly = await service.create({ name: "nightly", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "sweep" } });
     const cron = await service.waitForRun(service.run(nightly.id, null, "cron").id);
     expect(store.roleOf(cron.targetSessionId!)).toBeUndefined();
-    expect(cron.context.renderedPrompt).not.toContain("`pier task` is refused");
+    expect(store.leadPhaseOf(cron.targetSessionId!)).toBeUndefined();
+    expect(cron.context.renderedPrompt).toContain("next-step buttons and file:// attachments do not render there");
     await expect(service.handle({ operation: "run", prompt: "follow up", launch: { model: "test/model" } }, cron.targetSessionId!)).resolves.toMatchObject({ runId: expect.any(String) });
     await leadRan();
     await expect(service.handle({ operation: "run", prompt: "a worker", launch: { model: "test/model" } }, "lead")).resolves.toMatchObject({ runId: expect.any(String) });

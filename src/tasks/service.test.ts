@@ -13,6 +13,7 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { restartInput } from "../core/reply.js";
+import { RUN_RESULT } from "../agent/roles.js";
 import { abnormalNote, runRef, runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
@@ -448,28 +449,41 @@ describe("task service", () => {
     })).rejects.toThrow("agent tier must be a model tier, beside a model");
   });
 
-  it("prefixes every agent run with the run contract and its audience", async () => {
-    const { cwd, service, session } = setup();
+  it("prefixes a role-less run with the whole run contract, a worker's with the run and its reader only", async () => {
+    const { cwd, service, session, store } = setup();
     const task = await service.create({
       name: "review",
       trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Review the PR" },
     });
+    // A user's session has no role prompt, so the message carries the contract and what of the chat surface does not apply.
     const manual = await service.waitForRun(service.run(task.id).id);
-    expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
-    expect(manual.context.renderedPrompt).toContain("read by the operator");
-    expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
-    expect(manual.context.renderedPrompt).toContain("render there. Two parts: the conclusion — the paths it rests on, risks and unverified points one line each — then, only when something does, `Needs your decision`; no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. The conclusion ends with the final state as you verified it — the commit and the branch it is merged into, the ref pushed, the service's active-since — so the reader need not re-check. A reversible choice on the way (how to push, a rebase strategy) is yours: take the recommended option and name it in the result. A destructive or irreversible step — force push, deleting what you did not create, a migration, a deploy, a restart — or a question only that reader can answer stops you: state it as your result and end your turn; the answer resumes this session. A step the prompt names on an `Approved:` line the user has already approved: take it, and name it in the result.");
-    // Nobody waits on a manual run, so it may delegate and is not told otherwise.
-    expect(manual.context.renderedPrompt).not.toContain("You cannot delegate from here");
+    expect(manual.context.renderedPrompt).toBe(`[Pier task run ${manual.id} — "review"] Your final reply is recorded verbatim as the run result, read by the operator; next-step buttons and file:// attachments do not render there. ${RUN_RESULT}\n\nReview the PR`);
+    expect(RUN_RESULT).toContain("the answer resumes this session");
+    // The refusal a supervised run meets is the CLI's, not the message's.
+    const owed = await service.waitForRun(service.run(task.id, null, "agent", null, { callbackSessionId: "s9" }).id);
+    expect(owed.context.renderedPrompt).toContain("read by the agent session it is delivered to; next-step buttons");
+    expect(owed.context.renderedPrompt).not.toContain("`pier task`");
 
     const delegated = await service.handle({
       operation: "run",
       task: { name: "child", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review the PR", launch: { model: "test/model" } } },
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
-    expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
-    expect(done.context.renderedPrompt).toContain("result. You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it.\n\nReview the PR");
+    expect(store.roleOf(done.targetSessionId!)).toBe("worker");
+    expect(done.context.renderedPrompt).toBe(`[Pier task run ${done.id} — "child"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nReview the PR`);
+    // A --session continuation of the worker is the worker's session still: the same short head each time.
+    const again = await service.handle({
+      operation: "run",
+      task: { name: "again", action: { type: "agent", session: { mode: "reuse", sessionId: done.targetSessionId! }, prompt: "And the tests" } },
+    }, "s9") as RunSummary;
+    const continued = await service.waitForRun(again.runId);
+    expect(continued.context.renderedPrompt).toBe(`[Pier task run ${continued.id} — "again"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nAnd the tests`);
+    // A --run continuation carries the message as is: the session heard the head on its first run.
+    const followUp = await service.handle({ operation: "message", run_id: done.id, message: "And the docs" }, "s9") as { run: RunSummary };
+    const resumed = await service.waitForRun(followUp.run.runId);
+    expect(resumed.context.resumePrompt).toBe("And the docs");
+    expect(resumed.context.renderedPrompt).toBe("And the docs");
   });
 
   it("strips chat-only markup from a child result", async () => {
@@ -2221,7 +2235,8 @@ describe("resume after a restart", () => {
     expect(await service.waitForRun("cut")).toMatchObject({ state: "succeeded" });
     expect(child.systemInputs).toHaveLength(1);
     expect(child.systemInputs[0]).toMatchObject({ origin: { kind: "task-delegation", runId: "cut" }, mode: "prompt" });
-    expect(child.systemInputs[0]!.text).toContain("Work");
+    // Its session is the worker the row made, so the head is the worker's short one.
+    expect(child.systemInputs[0]!.text).toBe('[Pier task run cut — "worker"] Your final reply is recorded verbatim as the run result, read by the agent that delegated this run.\n\nWork');
   });
 
   it("fails a resume whose session cannot open, with why, and calls back", async () => {

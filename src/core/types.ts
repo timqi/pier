@@ -462,6 +462,8 @@ export interface AgentLaunchOptions {
   model?: ModelRef;
   thinking?: ThinkingLevel;
   role?: AgentRole;
+  /** A lead's, fixed by its creating run: it reads only the contract of that phase. */
+  phase?: LeadPhase;
 }
 
 export interface SessionSummary {

@@ -37,8 +37,9 @@ src/
                (Pi → Pier event translation), listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, config-sync.ts (the credential-blind
                configuration projection), credentials.ts (sealed store +
-               auth.json import), models.ts, roles.ts (the dispatcher's
-               and feature lead's contracts, injected from code)
+               auth.json import), models.ts, roles.ts (the dispatcher's,
+               feature lead's and worker's contracts and the run result's,
+               injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
                (backend + auth over agent's `WebContext`), anthropic.ts /

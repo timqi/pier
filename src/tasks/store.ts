@@ -5,7 +5,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
 import type { OpenItemMarker } from "../core/reply.js";
 import { TASK_RUN_STATES, type AgentRole, type LeadPhase, type TaskRunState } from "../core/types.js";
-import { createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
+import { createdPhase, createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -234,8 +234,7 @@ export class TaskStore {
 
   leadPhaseOf(sessionId: string): LeadPhase | undefined {
     const run = this.creatorOf(sessionId);
-    if (!run || createdRole(run) !== "lead" || run.context.definition.action.type !== "agent") return undefined;
-    return run.context.definition.action.launch?.design ? "design" : "build";
+    return run && createdPhase(run);
   }
 
   /** Every lead session with its phase (as `leadPhaseOf`), its creating run,

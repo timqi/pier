@@ -8,7 +8,7 @@ import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionEventPayload } from "../core/types.js";
+import type { AgentRole, LeadPhase, SessionEventPayload } from "../core/types.js";
 import type { PiEvent, PiMessage } from "./events.js";
 
 type Stream = (model: unknown, context: unknown, options?: unknown) => unknown;
@@ -184,10 +184,13 @@ describe("the pier package's skills off-list", () => {
     ]);
   });
 
-  it("opens a worker without pier-tasks and a lead with its contract, created or reopened", async () => {
-    const factory = new PiAgentFactory(() => "", ["/pier/skills"], undefined, undefined, undefined, undefined, undefined, {
-      scan: async () => ["worker-1", "lead-1"].map((id) => ({ id, path: join(mkdtempSync(join(tmpdir(), "pier-role-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 })),
-    }, (id) => (id === "worker-1" ? "worker" : id === "lead-1" ? "lead" : undefined));
+  it("opens a worker without pier-tasks and with its contract, a lead with its phase's, created or reopened", async () => {
+    const roles: Record<string, { role: AgentRole; phase?: LeadPhase }> = {
+      "worker-1": { role: "worker" }, "lead-1": { role: "lead", phase: "design" }, "lead-2": { role: "lead", phase: "build" },
+    };
+    const factory = new PiAgentFactory((role) => `surface for ${role ?? "anyone"}`, ["/pier/skills"], undefined, undefined, undefined, undefined, undefined, {
+      scan: async () => Object.keys(roles).map((id) => ({ id, path: join(mkdtempSync(join(tmpdir(), "pier-role-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 })),
+    }, (id) => roles[id] ?? {});
     const skills = [
       { name: "pier-tasks", filePath: "/pier/skills/pier-tasks/SKILL.md" },
       { name: "pier-help", filePath: "/pier/skills/pier-help/SKILL.md" },
@@ -195,13 +198,18 @@ describe("the pier package's skills off-list", () => {
     const opened = async (session: Promise<{ dispose(): Promise<void> }>) => {
       await (await session).dispose();
       const loader = loaders.at(-1)!;
-      return [...loader.skillsOverride({ skills }).skills.map((s) => s.name), ...loader.agentsFilesOverride({ agentsFiles: [] }).agentsFiles.map((f) => f.path)];
+      const files = loader.agentsFilesOverride({ agentsFiles: [] }).agentsFiles;
+      const section = files.find((f) => f.path === "<pier>/lead.md")?.content.match(/^## (\w+)/m)?.[1];
+      return [...loader.skillsOverride({ skills }).skills.map((s) => s.name), ...files.map((f) => f.path === "<pier>/AGENTS.md" ? f.content : f.path), ...(section ? [section] : [])];
     };
-    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual(["pier-help"]);
-    expect(await opened(factory.resume("worker-1"))).toEqual(["pier-help"]);
-    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "<pier>/lead.md"]);
-    expect(await opened(factory.resume("lead-1"))).toEqual(["pier-tasks", "pier-help", "<pier>/lead.md"]);
-    expect(await opened(factory.create({ cwd: "/tmp/wt" }))).toEqual(["pier-tasks", "pier-help"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual(["pier-help", "surface for worker", "<pier>/worker.md"]);
+    expect(await opened(factory.resume("worker-1"))).toEqual(["pier-help", "surface for worker", "<pier>/worker.md"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead", phase: "design" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Design"]);
+    expect(await opened(factory.resume("lead-1"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Design"]);
+    expect(await opened(factory.resume("lead-2"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Build"]);
+    // A lead with no recorded phase builds.
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Build"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt" }))).toEqual(["pier-tasks", "pier-help", "surface for anyone"]);
   });
 });
 
@@ -517,7 +525,7 @@ describe("the continuous conversation's seam", () => {
       () => ({ skillsOff: [] }), undefined, {
         scan: async () => [["member", home], ["worker-1", "/tmp/wt"], ["user-1", "/tmp/wt"]]
           .map(([id, cwd]) => ({ id: id!, path: path(), cwd: cwd!, created: 1, modified: 2 })),
-      }, (id) => (id === "worker-1" ? "worker" : undefined));
+      }, (id) => (id === "worker-1" ? { role: "worker" } : {}));
     const reserves = async (open: Promise<{ dispose(): Promise<void> }>) => {
       await (await open).dispose();
       return opened.at(-1)!.overrides;

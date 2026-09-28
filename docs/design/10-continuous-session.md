@@ -8,7 +8,7 @@ children; every instance has one. Behaviour not named here is
 ## Roles
 
 The behavioural contract of each role is `agent/roles.ts` (`DISPATCHER`,
-`LEAD`); this section holds what code enforces. The **head** answers, remembers
+`lead(phase)`, `WORKER`); this section holds what code enforces. The **head** answers, remembers
 and launches work; real work is a task-run child, and callbacks are the only
 delivery.
 
@@ -21,8 +21,10 @@ delivery.
 - The run that made a session fixes its role for the session's life
   (`createdRole`, `TaskStore.roleOf`); when its session appears in In progress is
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
-- A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk.
+- A worker opens without the `pier-tasks` skill and with `<pier>/worker.md`
+  (`WORKER`), its chat surface without buttons and attachments; a lead with
+  `<pier>/lead.md` (`lead(phase)`: the Design or the Build section, its phase
+  passed on `AgentLaunchOptions.phase`); neither on disk.
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes the head a callback (§Milestones); the head launches a new build lead on
   doc, its prompt opening `Build per `.
@@ -48,7 +50,7 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 - another result still owed the lead (a run in flight whose callback, or whose
   unfinished group's, names it): a plain callback, a lead turn outside any run;
 - the result that leaves nothing owed: resumes the lead's last run, prompted
-  `[Pier: the last result you were waiting on follows; …]`, and that run's
+  `[Pier: the last result owed you follows; …]` (`MILESTONE`), and that run's
   callback reaches the head once; the resume and the `delivered` marks commit in
   one transaction;
 - the lead's last run still running: pending, asked again in 10 s;
