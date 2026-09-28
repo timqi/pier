@@ -149,17 +149,18 @@ truth.
 
 ## Service restart, reload and update
 
-- `pier restart`: uses `systemctl --user restart --no-block pier`; running
-  turns and agent runs resume after a few seconds. There is nothing to wait
-  for.
+- Restart: Pier has no restart command; the supervisor that started it
+  restarts it (`systemctl --user restart --no-block pier` for the installed
+  service). Running turns and agent runs resume after a few seconds; there is
+  nothing to wait for.
 - `pier reload`: channel adapters re-read configuration and idle, unwatched
   sessions reopen with current agent files on their next message. Streaming or
   watched sessions are not interrupted.
 - `pier update`: a separate updater backs up the database and installs the new
   package, then stops and starts the service. Running turns and agent runs
-  resume after it comes back. All three are the operator's, for an installed
-  Linux systemd service: `pier` on your PATH runs them too, so never type one
-  yourself — point the user at them.
+  resume after it comes back. All three are the operator's: `pier` and
+  `systemctl` on your PATH run them too, so never type one yourself — point
+  the user at them.
 
 ## Only the Console can change
 

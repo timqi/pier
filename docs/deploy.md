@@ -92,7 +92,7 @@ Only its scrypt hash is stored. Lost it? Drop the row and restart:
 
 ```sh
 sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'
-pier restart
+systemctl --user restart pier
 ```
 
 - Changing or recovering the password signs out every browser.
@@ -118,17 +118,16 @@ sqlite3 ~/.pier/db/pier.db 'DELETE FROM passkeys'
 ## Restarting and reloading
 
 ```sh
-pier restart          # restart the service; running turns and runs resume after a few seconds
-pier reload           # apply channel config and recycle idle sessions in place
-pier tools sync       # install/update the managed CLI tools
+systemctl --user restart pier   # restart; running turns and runs resume after a few seconds
+pier reload                     # apply channel config and recycle idle sessions in place
+pier tools sync                 # install/update the managed CLI tools
 ```
 
-All three signal the installed service.
-
-- `pier restart`: `systemctl --user restart --no-block pier`; running turns and agent runs resume after a few seconds.
-- `pier reload`: reloads channel adapters, evicts idle unwatched sessions;
-  streaming or watched sessions, and sessions still holding queued messages,
-  stay until normal eviction. Console → Settings → Instance → **Reload** is
+- Pier has no restart command: the supervisor that started it restarts it —
+  systemd for the installed service, whoever ran `pier serve` otherwise.
+- `pier reload`: `SIGHUP` to the installed service; reloads channel adapters,
+  evicts idle unwatched sessions; streaming or watched sessions, and sessions
+  still holding queued messages, stay until normal eviction. Console → Settings → Instance → **Reload** is
   the same, also takes the asking tab's session (unless mid-turn or holding a
   queue), and answers `recycled` / `busy`.
 - `pier tools sync`: converges the tools switched on in Console → Settings into

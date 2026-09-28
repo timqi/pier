@@ -1,14 +1,15 @@
 # Stop and resume
 
-Pier is stoppable at any moment and resumes what the stop cut: systemd owns
-the process lifecycle, Pier owns the record and the resumption. No caller can
-wait on its own restart.
+Pier is stoppable at any moment and resumes what the stop cut: the platform's
+supervisor (systemd for the installed service) owns the process lifecycle,
+Pier owns the record and the resumption. No caller can wait on its own restart.
 
 ## Contract
 
-- **systemd is the only restart.** `systemctl --user restart pier`, `stop`,
-  the updater's `stop`, a crash, SIGKILL: one path, one outcome. There is no
-  in-process drain, no restart signal of Pier's own, no gate that refuses work.
+- **The supervisor is the only restart.** `systemctl --user restart pier`,
+  `stop`, the updater's `stop`, a crash, SIGKILL: one path, one outcome. There
+  is no `pier restart`, no in-process drain, no restart signal of Pier's own,
+  no gate that refuses work.
 - **A stop waits for nothing.** SIGTERM aborts every streaming session and
   exits in seconds. A tool cut mid-execution is recorded by Pi as
   `Operation aborted`; the resumed model sees that and checks its outcome.
@@ -52,7 +53,7 @@ The unit is unchanged: systemd's default `KillMode=control-group` sends
 SIGTERM to a tool's child as well, which is the abort Pi would have sent it;
 the default `TimeoutStopSec` never matters for a 3-second exit. A tool that
 blocks on `systemctl --user restart pier` without `--no-block` is cut like any
-other; `pier restart` passes `--no-block` so the issuer's turn ends cleanly.
+other; with `--no-block` the issuer's turn ends cleanly.
 
 ## Records
 
@@ -163,8 +164,7 @@ interruption always" holds for those.
 | a non-agent run the stop cut | `interrupted`, callback, home chat via `owesNotice` |
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
-`pier restart` prints: `restarting — Pier is back in a few seconds and
-resumes this turn.` A run whose result is only "the service is up" reads
+A run whose result is only "the service is up" reads
 `systemctl --user show pier -p ActiveEnterTimestamp` after its resume.
 
 ## Seams

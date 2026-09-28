@@ -108,7 +108,6 @@ unit override and API keys in Settings → Models.
 pier service install     # --port, --host, --pier-home, --force
 pier service status
 pier service uninstall
-pier restart             # restart; running turns resume after it
 pier reload              # re-read channel config and recycle idle sessions
 pier backup              # snapshot the database before a manual update
 pier update              # latest release, then hard-stop/restart the service

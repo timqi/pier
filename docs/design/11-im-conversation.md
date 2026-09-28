@@ -225,7 +225,7 @@ through what the head launches (`pier task`), never by a group's message.
   interruption always; a failure, or a cancel no one asked for the user (asked
   by a session other than the head — not the head's, a cascade's or a
   first-wins join's), only when its result goes to a lead or nobody, since the
-  head's callback note already carries it. A run that calls `pier restart`
+  head's callback note already carries it. A run that restarts the service
   resumes after it; it is not interrupted and needs no exemption.
 
 ## Storage
