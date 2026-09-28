@@ -80,9 +80,10 @@ the menu. Never name a model id from memory.
 `pier task cancel --run <id> | --group <id>` — the runs you launched.
 
 `pier task recover (--run <id> | --group <id>) --reason <text>` — the full
-result after its callback settled, for text the callback truncated (8 000
-chars per run, a group's members included) or lost to compaction. `--group`
-caps each member at 2 000, so a long member is recovered with `--run`.
+result after its callback settled, for text the callback clipped (8 000
+chars per run, a group's members included; a clipped result keeps its head
+and tail and drops the middle) or lost to compaction. `--group` clips each
+member at 2 000 the same way, so a long member is recovered with `--run`.
 **Never to check progress**: the refusal reveals no state.
 
 `pier task runs [--state failed,interrupted] [--since 7d] [--limit 50]` — the

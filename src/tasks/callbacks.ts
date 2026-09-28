@@ -79,8 +79,16 @@ export function runResultText(run: TaskRun): string {
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";
-  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — pier task recover --run ${run.id} --reason … returns the full text]`;
-  return result;
+  return clipResult(result, 8000, run.id);
+}
+
+/** A result over `max` keeps its head and its tail — the contract puts the
+ *  verified final state and `Needs your decision` last — and names what recovers the middle. */
+export function clipResult(text: string, max: number, runId: string): string {
+  if (text.length <= max) return text;
+  const head = Math.floor(max * 3 / 4);
+  const omitted = `[… ${String(text.length - max)} chars omitted — pier task recover --run ${runId} --reason … returns the full text]`;
+  return `${text.slice(0, head)}\n${omitted}\n${text.slice(text.length - (max - head))}`;
 }
 
 export class TaskCallbacks {

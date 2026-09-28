@@ -499,8 +499,8 @@ describe("task service", () => {
     );
   });
 
-  it("caps a chatty callback but recovers the full result", async () => {
-    const long = `start ${"x".repeat(9000)}`;
+  it("clips a chatty callback to its head and tail, and recovers the full result", async () => {
+    const long = `start ${"x".repeat(9000)}\nNeeds your decision: ship it?`;
     const { service, session } = setup(fakeSession("s1", { reply: long }));
     const task = await service.create({
       name: "chatty",
@@ -510,7 +510,10 @@ describe("task service", () => {
     const run = await service.waitForRun(service.run(task.id).id);
     const callback = runResultText(run);
     expect(callback.length).toBeLessThan(8200);
-    expect(callback).toContain(`pier task recover --run ${run.id}`);
+    expect(callback).toContain(`chars omitted — pier task recover --run ${run.id} --reason`);
+    expect(callback.startsWith("start x")).toBe(true);
+    expect(callback.endsWith("\nNeeds your decision: ship it?")).toBe(true);
+    expect(runResultText({ ...run, result: { type: "agent", text: "x".repeat(8000), sessionId: "s1" } })).toBe("x".repeat(8000));
     const single = await service.handle({ operation: "recover", run_id: run.id, reason: "callback text was truncated" }, "s1") as RunSummary;
     expect((single.result as { text: string }).text).toBe(long);
   });
