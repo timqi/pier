@@ -14,6 +14,7 @@ import { PiPackageStore } from "./agent/packages.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes, rotateBoardViews } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
+import { isChannelPlatform } from "./channels/types.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
 import { registerChannelRoutes } from "./channels/routes.js";
@@ -23,7 +24,7 @@ import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { saidText } from "./core/reply.js";
 import { pierDb } from "./db.js";
-import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
+import { deliverLedger, RestartLedger, resumeTurns, stopForExit, trackTurns, TurnsInFlight } from "./stop.js";
 import { surfacePrompt } from "./agent/roles.js";
 import { Router } from "./core/router.js";
 import { searchSessions } from "./core/search.js";
@@ -73,7 +74,7 @@ if ("heldBy" in lock) {
   log.error(`another Pier (pid ${lock.heldBy === null ? "unknown" : String(lock.heldBy)}) owns ${PIER_HOME} — refusing to start`);
   process.exit(1);
 }
-// Every exit path at once: the drain and both shutdowns end in `process.exit`,
+// Every exit path at once: the stop and a crash both end in `process.exit`,
 // and the crash that skips this is what the stale-claim takeover is for.
 process.on("exit", lock.release);
 
@@ -168,7 +169,7 @@ tasks = new TaskService(taskStore, factory, router, hub, {
       return;
     }
     restartLedger.record({ channelId: home.platform, conversationId: home.chatId, note: abnormalNote(run) });
-    // An adapter that is down logs the note as waiting (drain.ts) rather than holding it silently.
+    // An adapter that is down logs the note as waiting (stop.ts) rather than holding it silently.
     void tellChats();
   },
 });
@@ -214,8 +215,11 @@ resolveIm = resolveConversation(
 );
 // Channels connect once tokens are readable; a refused unlock must not take
 // down the web surface, which is where the operator repairs it. The chats a
-// previous restart cut off are told as soon as channels are up (drain.ts).
+// previous restart cut off are told as soon as channels are up (stop.ts).
 const restartLedger = new RestartLedger(db);
+// Before any turn can start: a turn that began unrecorded would not resume.
+const turnsInFlight = new TurnsInFlight(db);
+trackTurns(router, hub, turnsInFlight);
 let ledgerDelivery = Promise.resolve();
 /** One pass at a time: two concurrent passes would each post the same entry. */
 const tellChats = (): Promise<void> =>
@@ -242,8 +246,28 @@ await configurationSync.reconcile();
 tasks.start();
 readyForConfigReload = true;
 
+/** Once, with adapters up: a resumed reply needs its route, a failed resume a
+ *  chat to tell. Runs first, so a run's target is still `running` when the
+ *  turns are read. */
+let resumed = false;
+const resumeOnce = async (): Promise<void> => {
+  if (resumed) return;
+  resumed = true;
+  tasks.resumeAfterRestart();
+  await resumeTurns({
+    turns: turnsInFlight, ledger: restartLedger, router,
+    live: (id) => isChannelPlatform(id) && channels.live(id),
+    resumedByRun: (id) => {
+      const run = taskStore.findActiveRunForTarget(id);
+      return run?.state === "running" && run.context.definition.action.type === "agent";
+    },
+  });
+  await tellChats();
+};
+const unlocked = (): Promise<void> => startChannels().then(resumeOnce)
+  .catch((err: unknown) => log.error("resuming what the restart cut failed", err));
 void secrets.unlock().then(
-  startChannels,
+  unlocked,
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
@@ -254,48 +278,9 @@ const updates = new UpdateCheck();
 // At boot, not lazily: it puts the answer in the journal of a Pier nobody has
 // a browser open on.
 void updates.refresh();
-// The updater's handover, the SIGUSR2 drain and the teardown must see each
-// other, or two paths drain the same Pier and one reopens the gate the other
-// needs shut.
-let handingOver = false;
-let draining = false;
-let shuttingDown = false;
-const takeWorkAgain = (why: string): void => {
-  handingOver = false;
-  log.error(`${why} — taking work again`);
-  // Not ours to reopen: a restart or the teardown owns the gate now.
-  if (draining || shuttingDown) return;
-  router.endDrain();
-  tasks.unpause();
-  // Turns the drain deadline-aborted must not wait for a restart days away (§5).
-  void tellChats();
-};
-/** `systemctl start --no-block` returns when the job is queued; the real
- *  outcome is a SIGTERM after a registry download on someone else's network.
- *  Long enough not to reopen the gate mid-install, short enough that a handover
- *  that never happens does not refuse messages all afternoon. */
-const HANDOVER_GRACE_MS = 5 * 60_000;
-const handOverToUpdater = async (): Promise<UpdateStart> => {
-  // The updater's first act is `systemctl stop`, the fast teardown: the gate
-  // closes and the drain waits first, as `pier restart` does.
-  if (handingOver || draining || shuttingDown) return "busy";
-  handingOver = true;
-  await drainForRestart({ router, tasks, ledger: restartLedger });
-  const started = startUpdate({ say: (message: string) => log.info(message) });
-  if (started !== "started") {
-    takeWorkAgain(`update not started (${started})`);
-    return started;
-  }
-  // A handover that queues and goes nowhere would leave Pier refusing every
-  // message with no way back. Unref'd: must not keep the process up under stop.
-  setTimeout(() => {
-    takeWorkAgain(
-      `still running ${String(HANDOVER_GRACE_MS / 1000)}s after handing over — pier-update.service never stopped Pier` +
-        ` (check: journalctl --user -u pier-update.service -e)`,
-    );
-  }, HANDOVER_GRACE_MS).unref();
-  return started;
-};
+// The updater's first act is `systemctl stop`: the stop is the handover.
+const handOverToUpdater = (): Promise<UpdateStart> =>
+  Promise.resolve(startUpdate({ say: (message: string) => log.info(message) }));
 const updater = process.platform === "linux" && existsSync(unitPath())
   ? { apply: handOverToUpdater, problem: () => updaterProblem() }
   : null;
@@ -380,7 +365,7 @@ app.route("/", createServer({
   passkeys,
   updates,
   updater,
-  onUnlocked: () => void startChannels(),
+  onUnlocked: () => void unlocked(),
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
@@ -437,44 +422,33 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   log.error("unhandled rejection", reason);
 });
-const shutdown = (stopTasks = true): void => {
-  // SIGTERM can land while a drain is finishing.
+let shuttingDown = false;
+const shutdown = (signal: string): void => {
   if (shuttingDown) return;
   shuttingDown = true;
   // A socket an adapter cannot close must not turn `systemctl restart` into a
   // 90-second wait for SIGKILL.
   setTimeout(() => process.exit(0), 3000).unref();
   stopEviction();
-  // Aborted runs end interrupted, as boot recovery records them; the drain path
-  // leaves the ones it outlasted to that recovery.
-  if (stopTasks) tasks.stop();
-  void channels.stop().finally(() => {
-    server.close(() => process.exit(0));
-    // Every workbench tab holds an SSE stream open, so `close()` alone would
-    // wait out the timer above. (`in`: the served type is a union with HTTP/2.)
+  void stopForExit({
+    closeInbound: () => {
+      server.close();
+      return channels.stop();
+    },
+    router, turns: turnsInFlight, ledger: restartLedger, tasks,
+  }, signal).finally(() => {
+    // Every workbench tab holds an SSE stream open, which `close()` alone
+    // would wait out. (`in`: the served type is a union with HTTP/2.)
     if ("closeAllConnections" in server) server.closeAllConnections();
+    process.exit(0);
   });
 };
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    log.info(`${signal} received, shutting down`);
-    shutdown();
+    log.info(`${signal} received, stopping`);
+    shutdown(signal);
   });
 }
-// The slow restart (`pier restart`): drain, then exit for `Restart=always`.
-// `on`, not `once`: a second SIGUSR2 with no handler would fall back to Node's
-// default and kill the drain it meant to hurry.
-process.on("SIGUSR2", () => {
-  if (draining) {
-    log.info("SIGUSR2 received again — already draining");
-    return;
-  }
-  draining = true;
-  log.info("SIGUSR2 received, draining for restart");
-  void drainForRestart({ router, tasks, ledger: restartLedger })
-    .catch((err: unknown) => log.error("drain failed — shutting down anyway", err))
-    .then(() => shutdown(false));
-});
 // Only under systemd: a foreground `pier serve` keeps SIGHUP's default, dying
 // with its terminal instead of surviving as an orphan that holds the port.
 if (process.env.INVOCATION_ID) {

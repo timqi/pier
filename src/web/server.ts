@@ -54,10 +54,7 @@ async function queueResponse(action: () => Promise<unknown>, status: 200 | 202 =
   try {
     return Response.json(await action(), { status });
   } catch (err) {
-    const code = err instanceof QueueOperationError
-      ? err.reason === "draining" ? 503 : 409
-      : 404;
-    return Response.json({ error: String(err) }, { status: code });
+    return Response.json({ error: String(err) }, { status: err instanceof QueueOperationError ? 409 : 404 });
   }
 }
 
@@ -519,8 +516,6 @@ export function createServer(
     if (!Number.isInteger(index) || index < 0 || typeof body?.text !== "string" || !body.text.trim()) {
       return c.json({ error: "index and text required" }, 400);
     }
-    // Before touching anything: a refused dispatch must not cost a rewound transcript.
-    if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     if (older(id)) return c.json({ error: "an earlier session of the continuous conversation is read-only" }, 409);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);

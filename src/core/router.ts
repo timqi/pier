@@ -46,7 +46,7 @@ interface Attached {
 }
 
 export class QueueOperationError extends Error {
-  constructor(readonly reason: "busy" | "empty" | "draining", message: string) {
+  constructor(readonly reason: "busy" | "empty", message: string) {
     super(message);
   }
 }
@@ -82,9 +82,6 @@ export class Router {
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
-  /** Set by a graceful restart (src/drain.ts); `endDrain` is for the caller
-   *  that drains speculatively and may not get to exit. */
-  private draining = false;
   /** Set by the stop (src/stop.ts): no turn end is delivered or settled from
    *  here on — the boot's resume owns every turn that was running. */
   private stopped = false;
@@ -407,18 +404,12 @@ export class Router {
     });
   }
 
-  private checkQueueDrain(): void {
-    if (this.draining) throw new QueueOperationError("draining", "Pier is restarting; queued messages were not submitted");
-  }
-
   /** Once cleared, the originals exist only here: a failure hands them back
    *  to the conversation with the error, and nothing is kept for a resend. */
   async deliverQueue(sessionId: string, mode: "steer" | "restart" | "auto"): Promise<string> {
     let cleared = false;
     try {
-      this.checkQueueDrain();
       return await this.useQueue(sessionId, async (session) => {
-        this.checkQueueDrain();
         if (mode === "auto" && session.state !== "idle") return "";
         const queue = await session.clearQueue();
         if (!queue.steering.length && !queue.followUp.length) throw new QueueOperationError("empty", "Queue is empty");
@@ -430,9 +421,7 @@ export class Router {
           this.reportTo(sessionId, `Queued messages were not delivered — send them again: ${String(err)}\n\n${text}`);
         };
         try {
-          this.checkQueueDrain();
           if (mode === "restart") await this.abort(sessionId);
-          this.checkQueueDrain();
           // Not via dispatch: the text was headed at original dispatch, and a
           // second pass could attribute these words to the operator.
           const submitted = mode === "steer" && session.state === "streaming"
@@ -497,23 +486,6 @@ export class Router {
     this.senders.forget(sessionId);
   }
 
-  /** Refuse new work from every surface; in-flight turns keep running. */
-  beginDrain(): void {
-    this.draining = true;
-  }
-
-  /** The auto-updater closes the gate before handing over; when the handover
-   *  never happens, refusing every message forever is the worse outcome. */
-  endDrain(): void {
-    this.draining = false;
-  }
-
-  /** For surfaces that mutate state before dispatching (edit, queue-deliver):
-   *  a refused dispatch must not cost a rewound transcript or a cleared queue. */
-  isDraining(): boolean {
-    return this.draining;
-  }
-
   /** Told to the chat directly (§5): an adapter's dispatch catch only logs. */
   private refuse(key: ConversationKey, err: Error): never {
     this.channels.get(key.channelId)
@@ -522,13 +494,9 @@ export class Router {
     throw err;
   }
 
-  private refuseDraining(key: ConversationKey): never {
-    this.refuse(key, new Refused("Pier is restarting — this message was not taken; send it again in a moment."));
-  }
-
   /** Attached sessions still mid-turn, and conversations whose answer is still
-   *  going out (`sending`) — what the drain waits on, and what its deadline
-   *  writes into the ledger. */
+   *  going out (`sending`) — what auto-update calls idle, and the sends the
+   *  stop gives its remaining budget and then owns up to (src/stop.ts). */
   busy(): { session: AgentSession; key: ConversationKey; sending?: true }[] {
     return [
       ...[...this.bySession.values()]
@@ -539,7 +507,7 @@ export class Router {
     ];
   }
 
-  /** Every attached session, mid-turn or not — what the drain snapshots: Pi's
+  /** Every attached session, mid-turn or not — what the stop snapshots: Pi's
    *  queue lives only in the runtime, so an idle session's queued messages die
    *  with the process just the same. */
   attachedSessions(): { session: AgentSession; key: ConversationKey }[] {
@@ -617,11 +585,7 @@ export class Router {
   }
 
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
-    // Before ensure — a drain must not open a session — and after, for a
-    // dispatch that was inside a slow ensure when the gate closed.
-    if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
-    if (this.draining) this.refuseDraining(msg.key);
     const skilled = skillText(msg.text, session.skills());
     if (skilled instanceof SkillAmbiguous) this.refuse(msg.key, skilled);
     const { action, text } = decide({ ...msg, text: skilled }, session.state);

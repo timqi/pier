@@ -59,11 +59,7 @@ function panel(): HTMLElement {
       say(false, "starting the updater…");
       const res = await sendJson("/api/update", {});
       if (!res.ok) { now.disabled = false; return say(true, await failure(res, "Could not update")); }
-      // 202: something is still running, and the update waits for it.
-      const { draining } = await res.json() as { draining?: boolean };
-      say(false, draining
-        ? "Waiting for running work to finish — Pier then installs and restarts."
-        : "Installing — Pier restarts once it is on disk, and this page reconnects on its own.");
+      say(false, "Installing — Pier restarts once it is on disk, and this page reconnects on its own.");
     })();
     actions.append(now);
   }

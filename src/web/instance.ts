@@ -23,8 +23,7 @@ import type { UpdateCheck } from "../update.js";
 /** Injected so web/ never learns what systemd is, and the install never runs
  *  as a child of the request that asked for it. */
 export interface UpdateApplier {
-  /** `busy`: another handover or a restart already owns the gate. */
-  apply(): Promise<"started" | "busy" | "not-installed" | "failed">;
+  apply(): Promise<"started" | "not-installed" | "failed">;
   /** A stale updater is otherwise invisible until the update that needed it (§5). */
   problem(): string | null;
 }
@@ -99,10 +98,6 @@ export function registerInstanceRoutes(
     validateCustomTools,
   } = deps;
   const updateLog = logger("update");
-  // A busy Pier drains first, which can take minutes, and a response held that
-  // long dies at every proxy: past this cap the answer is "draining".
-  const APPLY_REPLY_CAP_MS = 10_000;
-
   // A workbench that threw after the response left is otherwise invisible here.
   const clientLog = logger("client");
   let reports: number[] = [];
@@ -172,22 +167,10 @@ export function registerInstanceRoutes(
       updateLog.error(`update to ${latest} refused: ${problem}`);
       return c.json({ error: problem }, 409);
     }
-    const applied = updater.apply().catch((err: unknown): "failed" => {
+    const started = await updater.apply().catch((err: unknown): "failed" => {
       updateLog.error("update handover failed", err);
       return "failed";
     });
-    const started = await Promise.race([
-      applied,
-      new Promise<"draining">((resolve) => setTimeout(resolve, APPLY_REPLY_CAP_MS, "draining").unref()),
-    ]);
-    if (started === "draining") {
-      // If the handover fails later, main.ts reports it and reopens the gate (§5).
-      updateLog.info(`updating to ${latest} on the Console's request — waiting for running work to finish`);
-      return c.json({ started: true, draining: true, latest }, 202);
-    }
-    if (started === "busy") {
-      return c.json({ error: "an update or restart is already in progress" }, 409);
-    }
     if (started !== "started") {
       updateLog.error(`update to ${latest} refused by the updater: ${started}`);
       return c.json({

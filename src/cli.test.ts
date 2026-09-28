@@ -68,6 +68,19 @@ describe("pier CLI", () => {
     expect((await run(["tools", "list"], { env })).stderr).toMatch(/unknown action "list"/);
   });
 
+  it.runIf(process.platform === "linux")("restarts through systemd without waiting on the job", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pier-cli-restart-"));
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "systemctl"), `#!/bin/sh\necho "$@" >> "${join(home, "calls")}"\n`);
+    chmodSync(join(bin, "systemctl"), 0o755);
+    const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    const result = await run(["restart"], { env });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("restarting — Pier is back in a few seconds and resumes this turn.");
+    expect(readFileSync(join(home, "calls"), "utf8")).toBe("--user restart --no-block pier.service\n");
+  });
+
   it("returns failure when systemd cannot load the installed unit", async () => {
     const home = mkdtempSync(join(tmpdir(), "pier-cli-failure-"));
     const bin = join(home, "bin");

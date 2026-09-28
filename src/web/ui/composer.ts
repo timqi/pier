@@ -473,7 +473,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     }
     const res = await sendJson(continuous ? "/api/continuous/messages" : `/api/sessions/${id}/messages`, { text, mode });
     if (!res.ok) {
-      // The body names the cause when there is one — a draining restart, say.
+      // The body names the cause when there is one — a session that cannot open, say.
       // After the reload, which wipes the pane an error row would go into.
       const why = await failure(res, "send failed");
       if (id) await deps.reload(id);

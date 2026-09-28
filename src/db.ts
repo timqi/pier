@@ -111,9 +111,9 @@ const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
-  // 3 — what a restart's drain deadline cut off, told to the chat at next boot.
+  // 3 — what a restart cut off, told to the chat at next boot.
   `
-  -- Turns a graceful restart cut off; each row is delivered at next boot, then cleared.
+  -- Notes a restart owes a chat; each row is delivered at next boot, then cleared.
   CREATE TABLE restart_ledger (
     id INTEGER PRIMARY KEY,
     channel_id TEXT NOT NULL,
@@ -361,6 +361,18 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE conversations DROP COLUMN updated_at;
   ALTER TABLE restart_ledger DROP COLUMN created_at;
   ALTER TABLE push_identity DROP COLUMN created_at;
+  `,
+  // 34 — turns in flight, so a stop of any kind resumes them at boot (src/stop.ts).
+  `
+  -- queued: Pi's in-memory queue as a JSON array, written only by a clean stop;
+  -- at: the last write, which the resume reads as the moment Pier went down.
+  CREATE TABLE turns_in_flight (
+    session_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    queued TEXT,
+    at INTEGER NOT NULL
+  );
   `,
 ];
 

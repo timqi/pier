@@ -170,7 +170,7 @@ export class ChannelRuntime {
       .catch((e: unknown) => this.log(`could not report it to ${channel.id}: ${String(e)}`));
   }
 
-  /** For restart-note delivery (src/drain.ts), which has no session to report
+  /** For restart-note delivery (src/stop.ts), which has no session to report
    *  through; false means the platform is not running. */
   async notify(platform: string, conversationId: string, text: string): Promise<boolean> {
     const channel = this.running.get(platform as ChannelPlatform);
