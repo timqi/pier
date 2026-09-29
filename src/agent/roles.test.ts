@@ -9,8 +9,10 @@ describe("the dispatcher contract", () => {
     expect(DISPATCHER).toContain("stage is written once at dispatch with nothing to count");
   });
 
-  it("asks first only for a seam or design", () => {
-    expect(DISPATCHER).toContain("Ask the user first only for a seam or a design");
+  it("leaves the merge and the worktree's removal to the user, and asks first beyond it only for a seam or design", () => {
+    expect(DISPATCHER).toContain("The merge and the worktree's removal are the user's decision, never yours or a child's");
+    expect(DISPATCHER).toContain("`review clean, waiting on you to merge`");
+    expect(DISPATCHER).toContain("Beyond the merge, ask the user first only for a seam or a design");
     expect(DISPATCHER).toContain("restart after the merge is still theirs");
   });
 
@@ -53,6 +55,8 @@ describe("the role contracts", () => {
     expect(lead("build")).toContain("review worker of the integrated branch (`--model balanced`, `hardest` for a seam)");
     expect(lead("build")).toContain("its end arriving as a callback counted among the results owed");
     expect(lead("build")).toContain("`--until merged`");
+    expect(lead("build")).toContain("never `wt merge`, so its worktree stays");
+    expect(lead("build")).toContain("Merging your branch into its target and removing any worktree are the user's decision, never yours");
     expect(lead("build")).not.toContain("[Finalize design]");
     for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
   });
@@ -60,6 +64,7 @@ describe("the role contracts", () => {
   it("gives a worker the run contract for its life, and the refusal it would otherwise learn from the CLI", () => {
     expect(WORKER).toContain(RUN_RESULT);
     expect(WORKER).toContain("`pier task` is refused");
+    expect(WORKER).toContain("Never merge or remove a worktree on your own");
     expect(WORKER).not.toContain("Next-step buttons");
   });
 });

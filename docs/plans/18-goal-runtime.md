@@ -1,4 +1,4 @@
-# Goal runtime — the review/merge loop leaves the main session
+# Goal runtime — the review loop leaves the main session
 
 Status: final.
 
@@ -23,15 +23,14 @@ lives in prompt text the head must copy forward, so it drifts.
   | step | on | next |
   | --- | --- | --- |
   | `work` (the root run, or a fix resume) | succeeded, no `Needs your decision` | `review` |
-  | `review` | `Verdict: clean` | `merge` |
+  | `review` | `Verdict: clean` | end `done`: the merge and the worktree's removal wait on the user |
   | `review` | `Verdict: findings`, round < cap | `work` again: resume the worker with the findings, round + 1 |
   | `review` | `Verdict: findings`, round = cap | end `cap` |
-  | `merge` (the worker resumed) | succeeded, no `Needs your decision` | end `done` |
   | any | `Needs your decision` in the result | end `decision` |
   | any | failed · cancelled · interrupted · timed out · no verdict | end `failed` |
 
-  A round is one findings → fix → re-review trip; the first review and the
-  merge count nothing. Cap 3, `--rounds <n>` overrides (1–9). No time or
+  A round is one findings → fix → re-review trip; the first review counts
+  nothing. Cap 3, `--rounds <n>` overrides (1–9). No time or
   token budget: the goal is at most `2 + 2·cap` runs, each under its own
   `--timeout`, which bounds it already.
 
@@ -40,7 +39,7 @@ lives in prompt text the head must copy forward, so it drifts.
   lead's turns do (`LEAD_TURN`). The end delivers one callback to the root
   run's callback target, the head's usual card: the last run's result, headed
   by a line the head reads without parsing —
-  `Goal: merged after 1 review round` · `Goal: needs your decision (round 2)` ·
+  `Goal: review clean after 1 review round, waiting on you to merge` · `Goal: needs your decision (round 2)` ·
   `Goal: 3 review rounds, still findings` · `Goal: failed at review — <why>`.
   The runs in between are ordinary ledger rows: the status panel, the run
   chips and `pier task runs` show each as it happens, so nothing that
@@ -64,23 +63,24 @@ lives in prompt text the head must copy forward, so it drifts.
   list: what a change weighs is the dispatcher's judgement of the task, not
   a path match.
 
-- **The prompts** (`goals.ts`, three constants):
+- **The prompts** (`goals.ts`, two constants):
   - fix: `[Pier: review round n/cap found issues; fix them in this worktree
     and end your turn without merging.]` then the review text;
-  - merge: `[Pier: review clean. Merge as your task instructs (wt merge
-    …, last), then report the final state.]`;
   - review: the branch, base and worktree, the output shape, the verdict line.
   The root prompt is still the head's; it names the merge target and stops
-  short of merging, as `WORKER` already says.
+  short of merging, as `WORKER` already says. The merge runs only on the
+  user's yes: the head resumes the worker `--run <root>` out of the goal with
+  the merge and the worktree's removal as an `Approved:` step.
 
 - **Open items derive the stage from the goal, not from the head.** The head
   writes `<open>problem — <stage> (run <root>)</open>` once, at dispatch, with
   nothing to count. `openItems()` finds the goal by the run's session
   (`TaskStore.goalOf`) and renders it on the run line: ` · until merged:
-  review round 2/3` while live, `merged`, `waiting on you`, `3/3 rounds`,
+  review round 2/3` while live, `review clean, waiting on you`, `waiting on you`, `3/3 rounds`,
   `failed: <why>` when ended. `openStatus` reads the goal before the stage:
-  live → `running`; `decision` or `cap` → `waiting on you`; `done` → `pending
-  release`; `failed` → `stopped`. The `· until` / `· auto n/cap` stage text
+  live → `running`; `decision`, `cap` or `done` → `waiting on you`; `failed` →
+  `stopped`; a run queued in the worker's session after the end (the merge)
+  drops the goal from its line. The `· until` / `· auto n/cap` stage text
   goes from `DISPATCHER`, and so does the generic auto-continue: a result
   short of a non-code end reports and waits, as before the Goal rules. It was
   the same cost as the code loop — a head turn per continue, the judgement
@@ -135,7 +135,7 @@ lives in prompt text the head must copy forward, so it drifts.
    `GOAL_STEP`; `TaskRun.goalId`; `OpenRun.goal` (step, round, cap, outcome).
 2. `db.ts`: migration 36 (`goals`); `TaskRun.goalId` rides in the run's JSON.
 3. `tasks/goals.ts` (new, one reason: the `--until merged` loop): the table,
-   the three prompts, `VERDICT`, `advance(run)`, `recover()`, `cancel()`.
+   the two prompts, `VERDICT`, `advance(run)`, `recover()`, `cancel()`.
    `tasks/` crosses its 3.2k ceiling; the raise's sentence is this loop.
 4. `tasks/service.ts`: `settled` → `goals.advance`; `settleCallback` settles a
    goal step as `GOAL_STEP`; the end's callback text gets its `Goal:` head;

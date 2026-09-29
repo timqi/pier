@@ -128,7 +128,7 @@ interface RunGoal {
 const goalText = (g: RunGoal): string => {
   const of = (n: number) => `${String(n)}/${String(g.cap)}`;
   switch (g.outcome) {
-    case "done": return "merged";
+    case "done": return g.step === "merge" ? "merged" : "review clean, waiting on you";
     case "decision": return "waiting on you";
     case "cap": return `${of(g.cap)} rounds, still findings`;
     case "failed": return g.reason ? `failed: ${g.reason}` : "failed";

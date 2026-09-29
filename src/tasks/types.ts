@@ -25,8 +25,8 @@ export interface AgentLaunchPolicy {
   /** A lead for a product or architecture design the user finalizes with
    *  `Design final:`; with `role: "lead"` only. Any other lead builds. */
   design?: true;
-  /** `merged`: the run is the root of a goal (tasks/goals.ts) — reviewed,
-   *  fixed and merged without a turn of its supervisor's until the end. */
+  /** `merged`: the run is the root of a goal (tasks/goals.ts) — reviewed and
+   *  fixed without a turn of its supervisor's until the end; the merge is the user's. */
   until?: "merged";
   /** Review rounds the goal allows (1–9) before it stops on the user; 3 when absent. */
   rounds?: number;
@@ -250,16 +250,17 @@ export const createdPhase = (run: TaskRun): LeadPhase | undefined => {
   return action.launch?.design ? "design" : "build";
 };
 
+/** `merge` only on a goal stored while the loop still resumed the worker to merge: the loop never enters it now. */
 export type GoalStep = "work" | "review" | "merge";
 
-/** How a goal ended: `done` merged; `decision` a step's result carried `Needs
+/** How a goal ended: `done` reviewed clean, the merge waiting on the user (merged, after a legacy `merge` step); `decision` a step's result carried `Needs
  *  your decision`; `cap` the last allowed review still found issues; `failed`
  *  a step failed, was cancelled, interrupted, timed out or gave no verdict. */
 export type GoalOutcome = "done" | "decision" | "cap" | "failed";
 
 /** A `--until merged` loop (tasks/goals.ts, docs/plans/18-goal-runtime.md):
  *  the root run's work, reviewed by a run Pier launches, fixed by resuming the
- *  worker, reviewed again up to `cap` rounds, then merged by the worker. */
+ *  worker, reviewed again up to `cap` rounds; it ends before the merge, the user's to confirm. */
 export interface Goal {
   id: string;
   rootRunId: string;
@@ -267,7 +268,7 @@ export interface Goal {
   supervisorSessionId: string;
   cap: number;
   /** Fix rounds started — one findings → fix → re-review trip each; the
-   *  first review and the merge count nothing. */
+   *  first review counts nothing. */
   round: number;
   step: GoalStep;
   currentRunId: string;
@@ -283,7 +284,7 @@ export interface Goal {
 export const GOAL_STEP = "a goal's step, not its end";
 
 /** A run behind an open item; a lead's carries its own launches, counted by state,
- *  a goal's root the goal's step, round, cap and end. */
+ *  a goal's root the goal's step, round, cap and end, until a run is queued in its session after that end. */
 export interface OpenRun extends LedgerRun {
   workers?: Record<TaskRunState, number>;
   goal?: Pick<Goal, "step" | "round" | "cap" | "outcome" | "reason">;
@@ -292,9 +293,9 @@ export interface OpenRun extends LedgerRun {
 /** Where an open item stands (`openStatus`, tasks/open-items.ts), first match:
  *  `running` while a run's goal is live, a run is queued or running, its session
  *  streams or a lead's workers are queued or running; `waiting on you` while a
- *  goal ended `decision` or `cap`, its stage says so or its session's design awaits
- *  Finalize; `pending release` when every run succeeded, a goal's root by its goal
- *  ending `done` (or it names none); else `stopped` — a run failed, was cancelled, interrupted,
+ *  goal ended `decision`, `cap` or `done` short of a legacy merge, its stage says so
+ *  or its session's design awaits Finalize; `pending release` when every run succeeded
+ *  and carries no goal but one a legacy merge ended; else `stopped` — a run failed, was cancelled, interrupted,
  *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
 export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
 

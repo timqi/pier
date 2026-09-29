@@ -44,13 +44,13 @@ export function openStatus(
     (!!r.targetSessionId && session.streaming(r.targetSessionId)) ||
     (r.workers?.queued ?? 0) + (r.workers?.running ?? 0) > 0;
   if (runs.some(live)) return { status: "running" };
-  // The head relays a stage's or a goal's question and the user answers it in the chat.
-  const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap");
+  // The head relays a stage's or a goal's question and the user answers it in the chat; a clean goal asks for the merge.
+  const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap" || (r.goal?.outcome === "done" && r.goal.step !== "merge"));
   if (asksInChat) return { status: "waiting on you" };
   const design = runs.find((r) => r.targetSessionId && session.designOpen(r.targetSessionId));
   if (design?.targetSessionId) return { status: "waiting on you", waitsIn: design.targetSessionId };
-  // A goal's end, not its root run's state, says whether the work landed: the review runs in another session.
-  const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" : phaseOf(r.state) === "succeeded");
+  // An ended goal still on its run has not landed, unless a legacy merge step ended it: its root run succeeded, the review ran in another session.
+  const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" && r.goal.step === "merge" : phaseOf(r.state) === "succeeded");
   return { status: runs.every(landed) ? "pending release" : "stopped" };
 }
 
@@ -85,7 +85,9 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
   const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
-    const goal = r.state !== NOT_IN_LEDGER && r.targetSessionId ? store.goalOf(r.targetSessionId) : undefined;
+    const found = r.state !== NOT_IN_LEDGER && r.targetSessionId ? store.goalOf(r.targetSessionId) : undefined;
+    // A run queued after its goal ended carries the user's answer — the merge, most often — and is read as any run.
+    const goal = found && !(found.finishedAt !== null && r.queuedAt > found.finishedAt) ? found : undefined;
     return {
       ...r,
       ...(workers ? { workers: { ...workers } } : {}),

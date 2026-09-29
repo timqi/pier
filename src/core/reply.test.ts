@@ -374,9 +374,9 @@ describe("a goal on its run line", () => {
       .toEqual(["review", "fix round 1/3", "re-review 1/3", "fix round 3/3", "re-review 3/3", "merging"]);
   });
   it("names how it ended", () => {
-    expect([at("merge", 1, "done"), at("work", 1, "decision"), at("review", 3, "cap"), at("review", 0, "failed", "no verdict"), at("work", 0, "failed")]
+    expect([at("merge", 1, "done"), at("review", 1, "done"), at("work", 1, "decision"), at("review", 3, "cap"), at("review", 0, "failed", "no verdict"), at("work", 0, "failed")]
       .map((t) => t.split(" · until merged: ")[1]))
-      .toEqual(["merged", "waiting on you", "3/3 rounds, still findings", "failed: no verdict", "failed"]);
+      .toEqual(["merged", "review clean, waiting on you", "waiting on you", "3/3 rounds, still findings", "failed: no verdict", "failed"]);
   });
 });
 

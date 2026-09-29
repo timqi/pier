@@ -12,7 +12,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory, ModelTier } from "../core/types.js";
-import { fixPrompt, MERGE_PROMPT } from "./goals.js";
+import { fixPrompt } from "./goals.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { GOAL_STEP, type Goal, type TaskRun } from "./types.js";
@@ -99,17 +99,17 @@ function onlyTheEndCalledBack(runs: TaskRun[]): void {
 }
 
 describe("a --until merged goal", () => {
-  it("reviews clean, merges, and calls back once: merged, review clean", async () => {
-    const { launch, ended, sessions, service, cwd, created, store } = rig({
-      s1: ["built on branch x", "merged: abc on main"],
+  it("reviews clean and calls back once, the merge left to the user", async () => {
+    const { launch, ended, sessions, service, cwd, created, store, callbacks } = rig({
+      s1: ["built on branch x", "merged anyway"],
       s2: ["nothing to fix\n\n**Verdict:** clean"],
     });
     const root = await launch({}, { timeoutSeconds: 120 });
     const { goal, text, runs } = await ended(root);
-    expect(goal).toMatchObject({ outcome: "done", round: 0, step: "merge", cap: 3, supervisorSessionId: "main" });
-    expect(text).toMatch(/^Goal: merged, review clean\nTask "build it" finished with state: succeeded/);
-    expect(text).toContain("merged: abc on main");
-    expect(runs.map((r) => r.triggerSource)).toEqual(["agent", "goal", "goal"]);
+    expect(goal).toMatchObject({ outcome: "done", round: 0, step: "review", cap: 3, supervisorSessionId: "main" });
+    expect(text).toMatch(/^Goal: review clean, waiting on you to merge\nTask "review 1: build it" finished with state: succeeded/);
+    expect(text).toContain("nothing to fix");
+    expect(runs.map((r) => r.triggerSource)).toEqual(["agent", "goal"]);
     onlyTheEndCalledBack(runs);
     // The review is a fresh run of the supervisor's, on the root's model, in its worktree.
     expect(runs[1]).toMatchObject({ invokedBySessionId: "main", sourceSessionId: "main", targetSessionId: "s2", callbackSessionId: "main" });
@@ -121,35 +121,39 @@ describe("a --until merged goal", () => {
     expect(review).toMatch(/The task the branch was built for:\n\nbuild it\n/);
     expect(review).toMatch(/`Verdict: clean`.*`Verdict: findings`\.$/);
     expect(store.getTask(runs[1]!.context.definition.id)?.timeoutSeconds).toBe(120);
-    // The merge resumes the worker's own session.
-    expect(runs[2]).toMatchObject({ targetSessionId: "s1", sessionMode: "reuse", resumedFromRunId: root.id });
-    expect(sessions.get("s1")!.systemInputs.map((i) => i.text)[1]).toBe(MERGE_PROMPT);
+    // The worker is never resumed to merge: that waits on the user, whose yes resumes it out of the goal.
+    expect(sessions.get("s1")!.systemInputs).toHaveLength(1);
+    const merge = await service.handle({ operation: "message", run_id: root.id, message: "merge it" }, "main") as { delivery: string; run: { runId: string } };
+    expect(merge.delivery).toBe("resume");
+    expect(store.getRun(merge.run.runId)!.goalId).toBeUndefined();
+    await vi.waitFor(() => expect(callbacks()).toHaveLength(2));
+    expect(callbacks()[1]).toContain("merged anyway");
     service.stop();
   });
 
   it("reads a verdict line case-insensitively, as VERDICT does", async () => {
-    const { launch, ended, service } = rig({ s1: ["built", "merged"], s2: ["verdict: clean"] });
+    const { launch, ended, service } = rig({ s1: ["built"], s2: ["verdict: clean"] });
     const { goal } = await ended(await launch());
-    expect(goal).toMatchObject({ outcome: "done", step: "merge" });
+    expect(goal).toMatchObject({ outcome: "done", step: "review" });
     service.stop();
   });
 
-  it("fixes on findings, re-reviews clean, then merges: merged after 1 review round", async () => {
+  it("fixes on findings, re-reviews clean, then waits on the user: clean after 1 review round", async () => {
     const { launch, ended, sessions, service } = rig({
-      s1: ["built", "fixed", "merged"],
+      s1: ["built", "fixed", "merged anyway"],
       s2: ["a.ts:1 · off by one · use <=\nVerdict: findings"],
       s3: ["Verdict: findings is what I expected, but\nVerdict: clean"],
     });
     const root = await launch();
     const { goal, text, runs } = await ended(root);
     expect(goal).toMatchObject({ outcome: "done", round: 1 });
-    expect(text.split("\n")[0]).toBe("Goal: merged after 1 review round");
-    expect(runs.map((r) => r.targetSessionId)).toEqual(["s1", "s2", "s1", "s3", "s1"]);
+    expect(text.split("\n")[0]).toBe("Goal: review clean after 1 review round, waiting on you to merge");
+    expect(runs.map((r) => r.targetSessionId)).toEqual(["s1", "s2", "s1", "s3"]);
     onlyTheEndCalledBack(runs);
     const worker = sessions.get("s1")!.systemInputs.map((i) => i.text);
     expect(worker[1]).toBe(fixPrompt(1, 3, "a.ts:1 · off by one · use <=\nVerdict: findings"));
     expect(worker[1]!.startsWith("[Pier: review round 1/3 found issues; fix them in this worktree and end your turn without merging.]")).toBe(true);
-    expect(worker[2]).toBe(MERGE_PROMPT);
+    expect(worker).toHaveLength(2);
     service.stop();
   });
 
@@ -212,7 +216,7 @@ describe("a --until merged goal", () => {
 
   it("takes the named review model from the menu", async () => {
     const { launch, ended, created, service } = rig(
-      { s1: ["built", "merged"], s2: ["Verdict: clean"] },
+      { s1: ["built"], s2: ["Verdict: clean"] },
       [{ provider: "p", id: "strong", tier: "hardest" }],
     );
     await ended(await launch({ reviewModel: "hardest" }));
@@ -253,7 +257,7 @@ describe("a --until merged goal", () => {
   });
 
   it("recovers a goal whose current run settled but never advanced", async () => {
-    const { store, service, cwd, callbacks, sessions } = rig({ w: ["merged"], s1: ["Verdict: clean"] });
+    const { store, service, cwd, callbacks, sessions } = rig({ w: ["merged anyway"], s1: ["Verdict: clean"] });
     const task = await service.create({
       name: "left over", trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "build", launch: { model: { provider: "test", id: "model" }, until: "merged" } },
@@ -274,8 +278,34 @@ describe("a --until merged goal", () => {
     service.start(60_000);
     await vi.waitFor(() => expect(callbacks()).toHaveLength(1));
     expect(store.getGoal("g1")).toMatchObject({ outcome: "done", round: 0 });
-    expect(callbacks()[0]).toMatch(/^Goal: merged, review clean\n/);
-    expect(sessions.get("w")!.systemInputs.map((i) => i.text)).toEqual([MERGE_PROMPT]);
+    expect(callbacks()[0]).toMatch(/^Goal: review clean, waiting on you to merge\n/);
+    expect(sessions.get("w")!.systemInputs).toEqual([]);
+    service.stop();
+  });
+
+  it("ends a goal stored mid-merge, before the loop left the merge to the user, done and merged", async () => {
+    const { store, service, cwd, callbacks, sessions } = rig({ w: [] });
+    const task = await service.create({
+      name: "legacy", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "build", launch: { model: { provider: "test", id: "model" }, until: "merged" } },
+    });
+    store.saveGoal({
+      id: "g1", rootRunId: "root", supervisorSessionId: "main", cap: 3, round: 1, step: "merge", currentRunId: "root",
+      outcome: null, reason: null, reviewModel: null, createdAt: 1, finishedAt: null,
+    });
+    store.saveRun({
+      id: "root", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null, resumedFromRunId: null, goalId: "g1",
+      triggerSource: "agent", invokedBySessionId: "main", sourceSessionId: "main", targetSessionId: "w",
+      sessionMode: "fresh", callbackSessionId: "main", background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: GOAL_STEP, callbackNextAttemptAt: null, state: "succeeded", input: null,
+      context: { definition: task, sessionId: "w", cwd, model: { provider: "test", id: "model" } }, probe: null, matched: null,
+      result: { type: "agent", text: "merged: abc on main", sessionId: "w" }, error: null, skipReason: null, queuedAt: 1, startedAt: 1, finishedAt: 2,
+    });
+    service.start(60_000);
+    await vi.waitFor(() => expect(callbacks()).toHaveLength(1));
+    expect(store.getGoal("g1")).toMatchObject({ outcome: "done", step: "merge" });
+    expect(callbacks()[0]).toMatch(/^Goal: merged after 1 review round\n/);
+    expect(sessions.get("w")!.systemInputs).toEqual([]);
     service.stop();
   });
 

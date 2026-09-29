@@ -1,6 +1,6 @@
 // The `--until merged` loop (docs/plans/18-goal-runtime.md): a worker run's
-// work is reviewed by a run Pier launches, fixed by resuming the worker, and
-// merged by it, driven from each step's settle with no model in the loop.
+// work is reviewed by a run Pier launches and fixed by resuming the worker until
+// clean, driven from each step's settle with no model in the loop; the merge is the user's.
 
 import { logger } from "../log.js";
 import { runCwd } from "./callbacks.js";
@@ -18,8 +18,6 @@ export const DECISION = /^Needs your decision/m;
 
 export const fixPrompt = (round: number, cap: number, review: string): string =>
   `[Pier: review round ${String(round)}/${String(cap)} found issues; fix them in this worktree and end your turn without merging.]\n\n${review}`;
-
-export const MERGE_PROMPT = "[Pier: review clean. Merge as your task instructs (wt merge …, last), then report the final state.]";
 
 /** `round` counts the fix rounds before this review, so the first reads as review 1. */
 export const reviewPrompt = (cwd: string, round: number, cap: number, task: string): string => [
@@ -46,7 +44,7 @@ interface GoalHost {
   deliver(run: TaskRun): Promise<void>;
 }
 
-type Next = { outcome: GoalOutcome; reason: string | null } | { step: GoalStep; round: number };
+type Next = { outcome: GoalOutcome; reason: string | null } | { step: Exclude<GoalStep, "merge">; round: number };
 
 export class TaskGoals {
   /** A boot pass and a settle may both reach the same goal; its next run is prepared once. */
@@ -112,7 +110,7 @@ export class TaskGoals {
         if (!current) return null;
         const prepared = review
           ? this.host.prepare(review, "goal", this.provenance(current, root))
-          : this.resumeWorker(current, root, next.step === "merge" ? MERGE_PROMPT : fixPrompt(next.round, current.cap, text));
+          : this.resumeWorker(current, root, fixPrompt(next.round, current.cap, text));
         this.store.saveGoal({ ...current, step: next.step, round: next.round, currentRunId: prepared.id });
         return prepared;
       });
@@ -164,10 +162,11 @@ export class TaskGoals {
     const text = run.result?.type === "agent" ? run.result.text : "";
     if (DECISION.test(text)) return { outcome: "decision", reason: null };
     if (goal.step === "work") return { step: "review", round: goal.round };
+    // A legacy merge step that succeeded merged: its end is still done.
     if (goal.step === "merge") return { outcome: "done", reason: null };
     const verdict = [...text.matchAll(new RegExp(VERDICT.source, VERDICT.flags + "g"))].at(-1)?.[1]?.toLowerCase();
     if (!verdict) return { outcome: "failed", reason: "no verdict" };
-    if (verdict === "clean") return { step: "merge", round: goal.round };
+    if (verdict === "clean") return { outcome: "done", reason: null };
     return goal.round >= goal.cap ? { outcome: "cap", reason: null } : { step: "work", round: goal.round + 1 };
   }
 

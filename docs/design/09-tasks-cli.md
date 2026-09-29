@@ -57,7 +57,8 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   milestone".
 - **`--until merged`**: rides as `launch.until` on a fresh `--prompt` run,
   the root of a goal (`tasks/goals.ts`): reviewed by a run Pier launches,
-  fixed by resuming the worker, merged by it; refused beside `--bash`,
+  fixed by resuming the worker, ended on a clean review with the merge left
+  to the user; refused beside `--bash`,
   `--task-id`, `--session`, `--run`, `--role` (argv), in a `--member` or with
   `--callback none` (server).
 - **`--rounds <n>`**: rides as `launch.rounds`, the fix rounds the goal allows
