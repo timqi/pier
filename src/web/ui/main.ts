@@ -47,6 +47,7 @@ import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderStat
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
+import { onTopicsChanged, seenTopics, setTopicFilter, topicFilter } from "./topics.js";
 import {
   activityThinking,
   activityToolEnd,
@@ -596,7 +597,11 @@ initDrawer({
   chain: () => chain,
   openContinuous,
   open: () => openItems,
+  topics: seenTopics,
+  filter: topicFilter,
+  setFilter: setTopicFilter,
 });
+onTopicsChanged(renderDrawer);
 initPalette({
   sessions: () => sessions,
   loadSessions: refreshSessions,

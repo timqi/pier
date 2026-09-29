@@ -37,6 +37,7 @@ beforeEach(async () => {
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
     sessions: () => sessions, currentId: () => state.current, select, chain: () => state.chain, openContinuous, open: () => state.items,
+    topics: () => [], filter: () => null, setFilter: vi.fn(),
   });
 });
 

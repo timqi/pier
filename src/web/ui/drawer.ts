@@ -1,12 +1,15 @@
 // The status panel: what needs you and what is running, counted on the bar's
 // status chip and listed in the panel it opens — the open items and the live
-// sessions no item holds, one row each. The palette borrows the dots.
+// sessions no item holds, one row each, then the topics the chat saw done.
+// The palette borrows the dots.
 
 import { $, agoLabel, h } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
+import { toggle } from "./form.js";
+import { recentDone, topicColour } from "./topics.js";
 import { openRunText, waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "../../tasks/types.js";
@@ -46,6 +49,10 @@ interface DrawerDeps {
   openContinuous: () => void;
   /** `GET /api/continuous/open`; null before it answers. */
   open: () => OpenItems | null;
+  /** The topics the chat pane has seen (topics.ts), the one it is filtered to, and the switch. */
+  topics: () => { problem: string; done: boolean }[];
+  filter: () => string | null;
+  setFilter: (problem: string | null) => void;
 }
 
 let deps: DrawerDeps;
@@ -157,6 +164,8 @@ interface PanelRow {
   status: RowStatus;
   title: string;
   open: () => void;
+  /** An open item's problem: its dot and its switch. */
+  topic?: string;
 }
 
 function row(r: PanelRow): HTMLElement {
@@ -164,8 +173,8 @@ function row(r: PanelRow): HTMLElement {
   const name = h("span", "min-w-0 flex-1 py-1",
     h("span", "flex min-w-0 items-center gap-1.5", h("span", "min-w-0 truncate", r.label), ...(r.who ? tag(r.who, r.who) : [])),
     h("span", "block truncate text-xs leading-4 text-neutral-500", r.detail));
-  const status = h("span", `flex-none rounded px-1.5 text-[0.6875rem] font-medium leading-5 ${STATUS_TONE[r.status]}`, r.status);
-  const button = h("button", OPEN, name, status);
+  const status = h("span", `row-status flex-none rounded px-1.5 text-[0.6875rem] font-medium leading-5 ${STATUS_TONE[r.status]}`, r.status);
+  const button = h("button", OPEN, ...(r.topic ? [topicDot(r.topic)] : []), name);
   button.setAttribute("type", "button");
   button.onclick = () => {
     closeMenu();
@@ -174,7 +183,30 @@ function row(r: PanelRow): HTMLElement {
   if (r.id === deps.currentId()) button.setAttribute("aria-current", "page");
   li.dataset.sessionId = r.id;
   li.title = r.title;
-  li.append(button);
+  li.append(button, ...(r.topic ? [topicSwitch(r.topic)] : []), status);
+  return li;
+}
+
+function topicDot(problem: string): HTMLElement {
+  const dot = h("span", "h-2 w-2 flex-none rounded-full");
+  dot.style.background = topicColour(problem);
+  return dot;
+}
+
+/** Radio semantics through the filter: one topic at a time, and the redraw turns the rest off. */
+function topicSwitch(problem: string): HTMLElement {
+  const sw = toggle("", "", deps.filter() === problem, (on) => deps.setFilter(on ? problem : null));
+  sw.classList.add("topic-switch", "flex-none", "pointer-coarse:min-h-11");
+  sw.setAttribute("aria-label", "Only this topic in the chat");
+  sw.title = "Only this topic in the chat";
+  return sw;
+}
+
+/** A topic the chat saw a `<done>` for: nothing to open, only its filter. */
+function doneRow(problem: string): HTMLElement {
+  const li = h("li", `${ROW} min-h-10`, topicDot(problem), h("span", "min-w-0 flex-1 truncate", problem), topicSwitch(problem));
+  li.dataset.sessionId = `topic:${problem}`;
+  li.title = problem;
   return li;
 }
 
@@ -214,21 +246,21 @@ function itemRow(i: OpenItem, now: number): PanelRow {
   const target = run?.targetSessionId ?? undefined;
   const who = run ? whoOf(deps.sessions().find((s) => s.id === target)) || (run.workers ? "lead" : "worker") : "";
   return {
-    id: target ?? `item:${i.problem}`, label: i.problem, who, detail, status: i.status,
+    id: target ?? `item:${i.problem}`, label: i.problem, who, detail, status: i.status, topic: i.problem,
     title: [i.problem, detail, ...i.runs.flatMap((r) => (r.cwd ? [r.cwd] : []))].filter(Boolean).join("\n"),
     open: () => (target ? deps.select(target) : deps.openContinuous()),
   };
 }
 
 /** An unlisted run: an item of its own, queued until it starts. */
-const unlistedRow = (r: OpenRun, now: number): PanelRow => ({
-  ...itemRow({ problem: r.name, stage: "", runs: [r], status: "running" }, now),
-  ...(r.state === "queued" ? { status: "queued" as const } : {}),
-});
+const unlistedRow = (r: OpenRun, now: number): PanelRow => {
+  const { topic: _, ...item } = itemRow({ problem: r.name, stage: "", runs: [r], status: "running" }, now);
+  return { ...item, ...(r.state === "queued" ? { status: "queued" as const } : {}) };
+};
 
 /** The open items, then the unlisted runs, then the live sessions none of them
  *  holds: one row per session, split by who acts next. */
-function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; runningCount: number; sessions: SessionInfo[] } {
+function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; done: HTMLElement[]; runningCount: number; sessions: SessionInfo[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain());
@@ -241,21 +273,23 @@ function groups(now: number): { waiting: HTMLElement[]; running: HTMLElement[]; 
     }),
   ];
   const waits = (r: PanelRow): boolean => waitsOnYou(r.status);
-  return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), runningCount: all.filter((r) => r.status === "running").length, sessions };
+  const listed = new Set(open.items.map((i) => i.problem));
+  const done = recentDone(deps.topics()).filter((p) => !listed.has(p)).map(doneRow);
+  return { waiting: all.filter(waits).map(row), running: all.filter((r) => !waits(r)).map(row), done, runningCount: all.filter((r) => r.status === "running").length, sessions };
 }
 
 // --- the chip and the panel -------------------------------------------------------------
 
-/** The panel's two lists while it is open; a render fills them in place. */
-let lists: [HTMLElement, HTMLElement] | null = null;
-let rows: [HTMLElement[], HTMLElement[]] = [[], []];
+/** The panel's three lists while it is open; a render fills them in place. */
+let lists: [HTMLElement, HTMLElement, HTMLElement] | null = null;
+let rows: HTMLElement[][] = [[], [], []];
 /** Any row: the chip is there, and opens the panel. */
 let shown = false;
 
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
+  `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}\n${JSON.stringify(deps.topics())}\n${deps.filter() ?? ""}`;
 
 let drawn = "";
 
@@ -263,16 +297,16 @@ export function renderDrawer(): void {
   const key = renderKey();
   if (key === drawn) return;
   drawn = key;
-  const { waiting, running, runningCount, sessions } = groups(Date.now());
-  rows = [waiting, running];
+  const { waiting, running, done, runningCount, sessions } = groups(Date.now());
+  rows = [waiting, running, done];
   // The app icon counts a turn to look at — unread, or a design to finalize —
   // plus the conversation's own unread reply, which the bar stands for instead of a row.
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
   // The rows open the panel; the counts are only its copy, and a row neither counts is still an entrance.
   const total = waiting.length + running.length;
   const counts = [...(runningCount ? [`${runningCount} running`] : []), ...(waiting.length ? [`${waiting.length} needs you`] : [])];
-  shown = total > 0;
-  chip.textContent = counts.join(" · ") || (shown ? `${total} open` : "");
+  shown = total > 0 || done.length > 0;
+  chip.textContent = counts.join(" · ") || (total ? `${total} open` : shown ? "topics" : "");
   chip.classList.toggle("hidden", !shown);
   chip.classList.toggle("block", shown);
   chip.classList.toggle("text-amber-700", waiting.length > 0);
@@ -284,17 +318,19 @@ export function renderDrawer(): void {
   refreshPalette(); // its dots read the same sessions
 }
 
-/** Refill keeping the focused row focused: Escape has to find its way back.
+/** Refill keeping the focused control focused: Escape has to find its way back.
  *  A group with no rows loses its head. */
-function fill(into: [HTMLElement, HTMLElement]): void {
-  const focusId = document.activeElement?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+function fill(into: HTMLElement[]): void {
+  const focused = document.activeElement;
+  const focusId = focused?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  const control = focused?.matches("input") ? "input" : ".session-open";
   into.forEach((ul, i) => {
     ul.replaceChildren(...rows[i]!);
     ul.previousElementSibling?.classList.toggle("hidden", !rows[i]!.length);
+    ul.previousElementSibling?.classList.toggle("mt-2", i > 0 && rows.slice(0, i).some((r) => r.length > 0));
   });
-  into[1].previousElementSibling?.classList.toggle("mt-2", rows[0].length > 0);
   if (!focusId) return;
-  rows.flat().find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
+  rows.flat().find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(control)?.focus({ preventScroll: true });
 }
 
 const HEAD = "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500";
@@ -303,12 +339,13 @@ const HEAD = "px-2 pb-1 text-xs font-semibold leading-5 text-neutral-500";
 export function openDrawer(): void {
   if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!shown) return;
-  const [waiting, running] = [h("ul", ""), h("ul", "")];
+  const [waiting, running, done] = [h("ul", ""), h("ul", ""), h("ul", "")];
   waiting.dataset.list = "waiting";
   running.dataset.list = "running";
+  done.dataset.list = "done";
   const panel = h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm",
-    h("div", HEAD, "Waiting on you"), waiting, h("div", HEAD, "In progress"), running);
-  lists = [waiting, running];
+    h("div", HEAD, "Waiting on you"), waiting, h("div", HEAD, "In progress"), running, h("div", HEAD, "Recently done"), done);
+  lists = [waiting, running, done];
   fill(lists);
   openPanel(chip, panel).setAttribute("aria-label", "Status");
 }

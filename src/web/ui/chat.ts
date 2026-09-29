@@ -18,6 +18,7 @@ import {
   finishActivity,
   FOLD_ROW,
   initTurnActivity,
+  intoProcess,
   linkRuns,
   renderBackgroundRun,
   replayActivity,
@@ -29,7 +30,9 @@ import {
   STATE_STYLE,
   stateGlyph,
   takeActivityGroup,
+  takeProcessFold,
 } from "./turn-activity.js";
+import { applyTopicFilterTo, resetTopics, tagReply } from "./topics.js";
 import type {
   BackgroundRun,
   ChatTurn,
@@ -208,6 +211,7 @@ export function appendTurn(
 ): HTMLElement {
   sealActivity();
   // Keep the completed work beside its reply, outside the reading bubble.
+  const launched = kind === "assistant" ? takeProcessFold() : null;
   const steps = kind === "assistant" ? takeActivityGroup() : null;
   const s = ROW_STYLE[kind];
   // Only user messages introduce a clock separator after a conversation gap.
@@ -262,9 +266,11 @@ export function appendTurn(
     timeTimer ??= setInterval(paintTimes, 60_000);
     time.title = stampTime(stamp);
     turnsPane.append(time);
+    applyTopicFilterTo(time);
   }
   if (steps) turnsPane.append(steps);
-  turnsPane.append(row);
+  turnsPane.append(row, ...(launched ? [launched] : []));
+  for (const el of [steps, row]) if (el) applyTopicFilterTo(el);
   trimRows();
   scrollBottom();
   return node;
@@ -272,7 +278,7 @@ export function appendTurn(
 
 /** The caption identifies the IM speaker; clocks sit outside the bubble. */
 function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
-  const line = h("div", "mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
+  const line = h("div", "speaker-line mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
   const who = speaker?.name ?? speaker?.id;
   if (who) {
     const label = h("span", "font-semibold text-inherit", who);
@@ -310,7 +316,8 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
 
 /** Session seeds, callbacks and delegations are one line until opened: the
  *  exchange is the reading, the line its receipt. A chat command's answer is
- *  what the user asked to see, so it is never folded. */
+ *  what the user asked to see, so it is never folded. Task inputs join the
+ *  process line (turn-activity.ts). */
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
@@ -349,7 +356,15 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
   }
   row.append(head, content);
-  turnsPane.append(row);
+  const task = origin.kind === "task-delegation" ? "delegation" : origin.kind === "task-callback" ? "callback" : origin.kind === "task-message" ? "message" : null;
+  if (task) {
+    row.dataset.process = task;
+    if (state) row.dataset.state = state;
+    intoProcess(row);
+  } else {
+    turnsPane.append(row);
+    applyTopicFilterTo(row);
+  }
   trimRows();
   scrollBottom();
 }
@@ -368,6 +383,7 @@ function droppedAfter(row: HTMLElement): number {
   for (let el = row.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
     if (kind === "user" || kind === "assistant" || kind === "system") n++;
+    if (kind === "process") n += el.querySelectorAll('[data-kind="system"]').length;
   }
   return n;
 }
@@ -569,8 +585,10 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
   );
 }
 
-const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
-  renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
+function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
+  const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
+  tagReply(node.parentElement!, raw);
+}
 
 // --- streaming text ---------------------------------------------------------------
 
@@ -687,6 +705,7 @@ export function resetChat(): void {
   stopStreamPaint();
   resetActivity();
   resetSuggestions();
+  resetTopics();
 }
 
 /** An empty pane while the snapshot loads is indistinguishable from an empty session (§5). */

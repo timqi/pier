@@ -176,6 +176,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - The status panel is the one place the web shows what is going on: **Waiting on you** over **In progress**, grouped as `/status` groups them ([10 §Open items](10-continuous-session.md#open-items)); a group's head is hidden while it has no rows.
 - One row per session: the open items (`GET /api/continuous/open`), then its unlisted runs, then the live sessions outside Pier none of them holds. A session is live while streaming, while a run targets it or while runs it launched are in flight, while its last turn is unread, or while its design waits on Finalize. A failed run's callback reaches the head, so a failure is the head's unread, never a row.
 - Every row reads the same: the name (an item's problem, a run's or session's title) with who works it (`lead · <phase>`, `worker`, or an IM session's channel) as a tag, a second line with where it stands — an item's `run <id8>… <state> <age>` per run, then its stage, a session's `working`, `N subagents running`, `run queued`, `turn finished — not viewed yet` or `design — finalize when it is ready` with `active <age>` — and one status tag on the right: `waiting on you` (amber), `pending release`, `stopped`, `running` (green) or `queued`; a row is in Waiting on you only with `waiting on you` (`waitsOnYou`, a session's by its mark), and the chip and badge count by the same predicate. An item's status is the server's (`openStatus`, [10 §Open items](10-continuous-session.md#open-items)).
+- An item row carries its topic's dot and an "only this topic" switch that filters the chat pane to that topic's rows (the conversation's kinds; dividers and the pager stay); one switch is on at a time, and the bar shows the active topic beside the status chip, its × clearing it. **Recently done** lists the last five topics the pane saw a `<done>` for that are no longer open, dot and switch only; the chip stays, reading `topics`, while any exist. Topics and the filter are the pane's, reset with its transcript.
 - Re-read on `sessions-changed`, `task-run-changed`, `open-items-changed`, and a state change of a session an item holds.
 - A row opens its session — an item its first run's, else the conversation — in the column (`#/session/<id>`) and closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
 - The panel is a 32rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
@@ -231,6 +232,16 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   message's creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs render as System input rows with a Session link and the run
   id as text, never as user messages.
+- **Process line**: run cards, delegations, task messages and callbacks fold
+  into one line (`N runs · <count> <state> · M callbacks`, a spinner while a run
+  moves, else the worst state's glyph) under the reply they follow, opening to
+  the cards, which fold as before; a run launched during a turn hangs under
+  that turn's reply, live and on replay.
+- **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
+  (`replyTopic`) is tagged with its problem — a colour bar and a label, the
+  colour a stable hash of the problem (`topics.ts` `topicHue`); the user
+  message above it, its work group and the process line under it inherit;
+  untagged rows carry nothing.
 - **Edit**: any user message; sending rewinds the transcript to it and the
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy

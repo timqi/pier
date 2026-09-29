@@ -1,12 +1,13 @@
 // What a turn did besides speak: the per-turn Activity group (thinking + tool
-// steps) and the detached background-run cards, rendered into #turns between
-// chat rows.
+// steps) and the process line of background-run cards and task inputs,
+// rendered into #turns between chat rows.
 
 import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { chevron, detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
+import { applyTopicFilterTo } from "./topics.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun, RunModel } from "../../core/types.js";
 
@@ -177,12 +178,13 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   // after the pane let go is where the trimmed DOM survives.
   for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
   let row = backgroundRows.get(run.runId);
+  const fresh = !row;
   if (!row) {
     row = runCard(STATE_STYLE[run.state].edge);
     row.dataset.kind = "background-run";
-    turns.el.append(row);
     backgroundRows.set(run.runId, row);
   }
+  row.dataset.state = run.state;
   const open = row.hasAttribute("data-expanded");
   // Folded like a callback row: the prompt is the delegating turn's own text.
   row.className = `${cardClass(STATE_STYLE[run.state].edge)} ${FOLD_ROW} system-row`;
@@ -209,7 +211,67 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     ...(body ? { expands: body, open } : {}),
   });
   row.replaceChildren(head, ...(body ? [body] : []));
+  if (fresh) intoProcess(row);
+  else refreshProcessSummary(row.closest<HTMLElement>('[data-kind="process"]'));
   turns.scroll();
+}
+
+// --- the process line ----------------------------------------------------------------
+// Run cards, delegations and callbacks: one line under the reply they follow.
+
+/** Into the process line at the pane's tail, or a new one there. */
+export function intoProcess(card: HTMLElement): void {
+  let fold = turns.el.lastElementChild as HTMLDetailsElement | null;
+  if (fold?.dataset.kind !== "process") {
+    const above = fold;
+    fold = detailsRow(`${FOLD_ROW} py-1 rounded-xl text-[11.5px] leading-normal text-neutral-400 hover:text-neutral-600 open:text-neutral-500 open:ring-1 open:ring-inset open:ring-neutral-200 open:py-2`, [
+      h("span", "process-glyph flex flex-none"),
+      h("span", "process-summary min-w-0 truncate"),
+    ]).el;
+    fold.dataset.kind = "process";
+    if (above?.dataset.kind === "assistant" && above.dataset.topic) fold.dataset.topic = above.dataset.topic;
+    fold.append(h("div", "process-body"));
+    turns.el.append(fold);
+    applyTopicFilterTo(fold);
+  }
+  fold.lastElementChild!.append(card);
+  refreshProcessSummary(fold);
+}
+
+/** A turn's own launches hang under its reply: the line right after the work
+ *  group it was launched from moves below the reply with it. */
+export function takeProcessFold(): HTMLElement | null {
+  const fold = turns.el.lastElementChild as HTMLElement | null;
+  if (fold?.dataset.kind !== "process" || !lastGroup || fold.previousElementSibling !== lastGroup) return null;
+  fold.remove();
+  return fold;
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** Which state the line's glyph shows when nothing is moving: the one to look at. */
+const WORST: BackgroundRun["state"][] = ["failed", "interrupted", "cancelled", "skipped", "succeeded"];
+
+export function refreshProcessSummary(fold: HTMLElement | null): void {
+  if (!fold) return;
+  const cards = [...fold.lastElementChild!.children] as HTMLElement[];
+  const runs = cards.filter((c) => c.dataset.kind === "background-run");
+  const states = new Map<string, number>();
+  for (const run of runs) states.set(run.dataset.state!, (states.get(run.dataset.state!) ?? 0) + 1);
+  const inputs = new Map<string, number>();
+  for (const c of cards) if (c.dataset.process) inputs.set(c.dataset.process, (inputs.get(c.dataset.process) ?? 0) + 1);
+  const parts = [
+    ...(runs.length ? [plural(runs.length, "run")] : []),
+    ...[...states].map(([state, n]) => `${n} ${state}`),
+    ...[...inputs].map(([kind, n]) => plural(n, kind)),
+  ];
+  const summary = fold.querySelector<HTMLElement>(".process-summary")!;
+  summary.textContent = parts.join(" \u00b7 ");
+  const present = new Set(cards.map((c) => c.dataset.state));
+  const worst = WORST.find((s) => present.has(s));
+  const glyph = cards.some((c) => c.hasAttribute("data-active"))
+    ? icon(LoaderCircle, "h-3 w-3 spinner")
+    : worst ? stateGlyph(worst) : h("span", "hidden");
+  fold.querySelector(".process-glyph")!.replaceChildren(glyph);
 }
 
 // --- activity group ------------------------------------------------------------------
@@ -375,6 +437,7 @@ function ensureActivity(ts: number): Activity {
   el.append(rowsEl);
   tailFollow(el, rowsEl);
   turns.el.append(el);
+  applyTopicFilterTo(el);
   lastGroup = el;
   turns.scroll();
   activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };

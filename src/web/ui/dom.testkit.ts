@@ -238,6 +238,7 @@ export class FakeElement extends EventTarget {
   get children(): FakeElement[] { return this.#nodes.filter((n): n is FakeElement => n instanceof FakeElement); }
   get childElementCount(): number { return this.children.length; }
   get firstElementChild(): FakeElement | null { return this.children[0] ?? null; }
+  get lastElementChild(): FakeElement | null { return this.children.at(-1) ?? null; }
   get parentElement(): FakeElement | null { return this.parentNode; }
   get previousElementSibling(): FakeElement | null {
     const siblings = this.parentNode?.children ?? [];

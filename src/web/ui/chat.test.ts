@@ -277,3 +277,77 @@ describe("file references", () => {
     expect(asked.flat()).toEqual(["/tmp/run.log"]);
   });
 });
+
+describe("topics and the process line", () => {
+  const pane = () => doc.querySelector("#turns")!;
+  const kinds = () => pane().children.map((r) => r.dataset.kind);
+  const run = (runId: string, over: Partial<import("../../core/types.js").BackgroundRun> = {}) => ({
+    runId, taskId: "t", taskName: runId, state: "running" as const, targetSessionId: null, sessionMode: "fresh" as const,
+    prompt: "go", queuedAt: 1, startedAt: 1, finishedAt: null, queuedMessages: 0, ...over,
+  });
+  const callback = (runId: string, state: "succeeded" | "failed" = "succeeded") => chat.appendSystemInput("done\n\nok", {
+    kind: "task-callback", taskId: "t", runId, sourceSessionId: null, source: { taskName: runId }, state,
+  });
+
+  it("tags an `<open>` reply and the user message above it; a `<done>` marks the topic done", async () => {
+    const topics = await import("./topics.js");
+    chat.renderSnapshot([
+      { role: "user", text: "review auth please", at: 1 },
+      { role: "assistant", text: "On it.\n<open>auth review — worker running</open>" },
+      { role: "user", text: "and later", at: 2 },
+      { role: "assistant", text: "Merged.\n<done>auth review</done>" },
+      { role: "user", text: "thanks", at: 3 },
+      { role: "assistant", text: "Welcome." },
+    ], "idle", []);
+    const [u1, a1, u2, a2, u3, a3] = pane().children.filter((r) => r.dataset.kind !== "time");
+    for (const r of [u1, a1, u2, a2]) expect(r!.dataset.topic).toBe("auth review");
+    expect(a1!.querySelector(".topic-tag")!.textContent).toBe("auth review");
+    expect(a1!.textContent).not.toContain("<open>");
+    for (const r of [u3, a3]) expect(r!.dataset.topic).toBeUndefined();
+    expect(topics.seenTopics()).toEqual([{ problem: "auth review", done: true }]);
+    // The filter keeps the topic's rows and hides the rest.
+    topics.setTopicFilter("auth review");
+    expect([u1, a1, u2, a2, u3, a3].map((r) => r!.hidden)).toEqual([false, false, false, false, true, true]);
+    chat.resetChat();
+    expect(topics.topicFilter()).toBeNull();
+    expect(topics.seenTopics()).toEqual([]);
+  });
+
+  it("folds callbacks and a run card after a reply into one line that says what is in it", () => {
+    chat.appendTurn("assistant", "Delegated.", true);
+    callback("r1");
+    callback("r2", "failed");
+    renderRun(run("r3"));
+    expect(kinds()).toEqual(["assistant", "process"]);
+    const fold = pane().children.at(-1)!;
+    expect(fold.localName).toBe("details");
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector(".process-summary")!.textContent).toBe("1 run · 1 running · 2 callbacks");
+    expect(fold.querySelector(".process-glyph")!.querySelector(".spinner")).not.toBeNull();
+    renderRun(run("r3", { state: "succeeded", finishedAt: 2 }));
+    expect(fold.querySelector(".process-summary")!.textContent).toBe("1 run · 1 succeeded · 2 callbacks");
+    // Nothing moving: the glyph is the state to look at.
+    expect(fold.querySelector(".process-glyph")!.querySelector(".spinner")).toBeNull();
+    expect(fold.querySelector(".process-glyph")!.querySelector("svg")!.getAttribute("class")).toContain("text-red-600");
+  });
+
+  it("hangs a run launched during a turn under that turn's reply, live and on replay alike", async () => {
+    const steps = [{ kind: "tool" as const, id: "c1", toolName: "bash", args: {}, done: true }];
+    const { replayActivity } = await import("./turn-activity.js");
+    replayActivity(steps, 1000);
+    renderRun(run("r1"));
+    chat.completeTurn("Launched.\n<topic>deploy</topic>");
+    expect(kinds()).toEqual(["activity", "assistant", "process"]);
+    const live = pane().children.map((r) => [r.dataset.kind, r.dataset.topic]);
+    expect(live).toEqual([["activity", "deploy"], ["assistant", "deploy"], ["process", "deploy"]]);
+
+    chat.resetChat();
+    chat.renderSnapshot([{ role: "assistant", text: "Launched.\n<topic>deploy</topic>", steps, meta: { completedAt: 5, durationMs: 1000, tokens: 1 } }], "idle", [run("r1")]);
+    expect(pane().children.map((r) => [r.dataset.kind, r.dataset.topic])).toEqual(live);
+  });
+
+  let renderRun: (r: ReturnType<typeof run>) => void;
+  beforeEach(async () => {
+    renderRun = (await import("./turn-activity.js")).renderBackgroundRun;
+  });
+});

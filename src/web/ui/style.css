@@ -432,7 +432,7 @@ main {
      lower floor, packed, and the log shows more of them, or a 256px box holds
      five rows of air. The row's own py-0.5 is outside the floor, so a row's
      pitch is 4px more than the floor says. */
-  #turns [data-kind="activity"] > summary { min-height: 44px; }
+  #turns :is([data-kind="activity"], [data-kind="process"]) > summary { min-height: 44px; }
   #turns [data-kind="activity"] details > summary { min-height: 28px; }
   #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
@@ -502,7 +502,7 @@ main {
      scroll edge effect smears into the status bar. */
   mask-image: linear-gradient(to bottom, transparent 8px, black 2.5rem, black calc(100% - 2rem), transparent);
 }
-#turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
+:is(#turns, .process-body) > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
   max-width: 88%;
   margin-block: 0.875rem;
@@ -524,15 +524,15 @@ main {
   background: var(--color-white);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
 }
-#turns > :is([data-kind="system"], [data-kind="error"]) {
+:is(#turns, .process-body) > :is([data-kind="system"], [data-kind="error"]) {
   border-left-width: 2px;
   max-width: 100%;
 }
-#turns > :is([data-kind="activity"], [data-kind="background-run"]) {
+:is(#turns, .process-body) > :is([data-kind="activity"], [data-kind="background-run"]) {
   margin-block: 0.75rem;
   border-radius: 1rem;
 }
-#turns > .system-card { border-left-width: 0; }
+:is(#turns, .process-body) > .system-card { border-left-width: 0; }
 .system-card::before {
   content: "";
   position: absolute;
@@ -552,14 +552,37 @@ main {
   padding: 0.125rem 0.375rem;
   background: color-mix(in oklab, currentColor 8%, transparent);
 }
-#turns > [data-kind="system"].system-card {
+:is(#turns, .process-body) > [data-kind="system"].system-card {
   width: auto;
   padding-block: 0.625rem;
   border-radius: 0.75rem;
 }
 /* Activity groups, system rows and run cards (turn-activity.ts FOLD_ROW): one
    inline padding, folded or open, so their chevrons share a column. */
-#turns > .fold-row { padding-inline: 0.75rem; }
+:is(#turns, .process-body) > .fold-row { padding-inline: 0.75rem; }
+/* The process line (turn-activity.ts intoProcess): the activity group's line;
+   its cards open under it on the same column. */
+#turns > [data-kind="process"] { margin-block: 0.25rem; border-radius: 1rem; }
+#turns > [data-kind="process"] > .process-body { margin-top: 0.25rem; margin-inline: -0.75rem; }
+/* A topic (topics.ts): its colour is the row's `--topic`, the bar an inset edge
+   beside the bubble's ring so the radii stay. */
+#turns > [data-kind="user"][data-topic] { box-shadow: inset 3px 0 0 var(--topic), inset 0 0 0 1px var(--color-indigo-300); }
+#turns > [data-kind="assistant"][data-topic] {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 3px 0 0 var(--topic), inset 0 0 0 1px var(--color-neutral-200);
+}
+.topic-tag, .topic-filter {
+  color: var(--topic);
+  background: color-mix(in oklab, var(--topic) 12%, transparent);
+}
+.topic-tag {
+  width: fit-content;
+  max-width: min(24ch, 100%);
+  border-radius: 0.375rem;
+  padding: 0 0.375rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #turns > [data-kind="activity"] {
   max-width: 88%;
   margin-bottom: 0;
@@ -602,7 +625,7 @@ main {
 /* --- system rows (chat.ts appendSystemInput) ---------------------------------
    Folded, a line at the divider's weight; opened, the card it was. One id on
    the line: the session's link when there is one, else the run's. */
-#turns > .system-row:not([data-expanded]) {
+:is(#turns, .process-body) > .system-row:not([data-expanded]) {
   margin-block: 0.25rem;
   padding-block: 0.125rem;
   background: none;

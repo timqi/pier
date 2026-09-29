@@ -35,7 +35,11 @@ let sessions: Row[] = [];
 let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
+let topics: { problem: string; done: boolean }[] = [];
+let filter: string | null = null;
 const select = vi.fn();
+// As main.ts wires it: the filter moves, and the panel redraws from it.
+const setFilter = vi.fn((p: string | null) => { filter = p; drawer.renderDrawer(); });
 
 beforeEach(async () => {
   vi.resetModules();
@@ -47,7 +51,12 @@ beforeEach(async () => {
   chain = [];
   current = null;
   open = null;
-  drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open });
+  topics = [];
+  filter = null;
+  drawer.initDrawer({
+    sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open,
+    topics: () => topics, filter: () => filter, setFilter,
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -55,7 +64,8 @@ const chip = () => doc.querySelector("#status-chip")!;
 const panelRows = () => doc.querySelectorAll(".session-open");
 /** A row as it reads: label, who, second line, status. */
 const cells = (b: import("./dom.testkit.js").FakeElement): string[] => {
-  const [name, status] = b.children;
+  const name = b.children.at(-1);
+  const status = b.parentElement!.querySelector(".row-status");
   const [line, detail] = name!.children;
   const [label, who] = line!.children;
   return [label!.textContent, who?.textContent ?? "", detail!.textContent, status!.textContent];
@@ -245,4 +255,55 @@ it("hides a group's head while it has no rows", () => {
   drawer.renderDrawer();
   expect(head("waiting").classList.contains("hidden")).toBe(false);
   expect(head("running").classList.contains("mt-2")).toBe(true);
+});
+
+it("gives each item row its topic's dot and an only-this-topic switch, one on at a time", async () => {
+  const { topicColour } = await import("./topics.js");
+  open = { items: [{ problem: "a", stage: "", runs: [], status: "running" }, { problem: "b", stage: "", runs: [], status: "waiting on you" }], unlisted: [] };
+  sessions = [row("s", { state: "streaming" })];
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  const li = (id: string) => doc.querySelector(`[data-session-id='${id}']`)!;
+  const box = (id: string) => li(id).querySelector("input")!;
+  expect(li("item:a").querySelector(".session-open")!.children[0]!.style.background).toBe(topicColour("a"));
+  const sw = li("item:a").querySelector(".topic-switch")!;
+  expect(sw.getAttribute("aria-label")).toBe("Only this topic in the chat");
+  // Beside the open button, never inside it, and before the status.
+  expect(sw.closest("button")).toBeNull();
+  expect(sw.nextElementSibling!.classList.contains("row-status")).toBe(true);
+  // A session row has no topic to filter by.
+  expect(li("s").querySelector("input")).toBeNull();
+
+  box("item:a").checked = true;
+  box("item:a").onchange?.();
+  expect(setFilter).toHaveBeenLastCalledWith("a");
+  box("item:b").checked = true;
+  box("item:b").onchange?.();
+  expect(setFilter).toHaveBeenLastCalledWith("b");
+  expect([box("item:a").checked, box("item:b").checked]).toEqual([false, true]);
+  box("item:b").checked = false;
+  box("item:b").onchange?.();
+  expect(setFilter).toHaveBeenLastCalledWith(null);
+});
+
+it("lists the last done topics not open under Recently done, and keeps the chip for them", () => {
+  topics = ["a", "b", "c", "d", "e", "f", "g"].map((problem) => ({ problem, done: problem !== "a" }));
+  open = { items: [{ problem: "g", stage: "", runs: [], status: "running" }], unlisted: [] };
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  const done = doc.querySelector("[data-list='done']")!;
+  // Most recently done first, of the last five; one still open stays in its own group.
+  expect(done.children.map((r) => r.textContent)).toEqual(["f", "e", "d", "c"]);
+  expect(done.previousElementSibling!.classList.contains("hidden")).toBe(false);
+  expect(done.querySelector(".session-open")).toBeNull();
+  expect(done.querySelectorAll("input")).toHaveLength(4);
+
+  open = { items: [], unlisted: [] };
+  topics = [{ problem: "x", done: true }];
+  drawer.renderDrawer();
+  expect(chip().textContent).toBe("topics");
+  expect(chip().classList.contains("hidden")).toBe(false);
+  topics = [];
+  drawer.renderDrawer();
+  expect(chip().classList.contains("hidden")).toBe(true);
 });
