@@ -247,11 +247,11 @@ export function createServer(
   const operatorSent = new Set<string>();
   const sentByOperator = (id: string): void => void operatorSent.add(id);
   const runningNow = new Set<string>();
-  // The run's last turn that said something; turn-end precedes the idle state.
+  // Whether every turn of the run stayed silent; turn-end precedes the idle state.
   // A head's silent turn (a dispatch, a stage moved) is traced by the stage, not a mark.
   const silentLast = new Map<string, boolean>();
   router.onTurnEnd((id, text) => {
-    if (text.trim()) silentLast.set(id, isSilentReply(splitReply(text)));
+    if (text.trim()) silentLast.set(id, (silentLast.get(id) ?? true) && isSilentReply(splitReply(text)));
   });
   hub.subscribeWorkspace((e) => {
     if (e.type !== "session-state") return;
