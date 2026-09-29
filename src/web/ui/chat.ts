@@ -1,6 +1,6 @@
-// The turns pane: chat rows, markdown, streaming text, system-input rows, the
-// turn card a reply closes around its lines, and inline user-message edit.
-// Renders into #turns only.
+// The turns pane: chat rows, markdown, streaming text, the reply bubble whose
+// chip row carries the turn's causes, steps and runs, and inline user-message
+// edit. Renders into #turns only.
 
 import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
@@ -14,13 +14,13 @@ import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM
 import { button } from "./form.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
+  activityLive,
   activityProgress,
-  discardProgress,
+  chip,
   finishActivity,
-  FOLD_ROW,
   initTurnActivity,
-  isLiveGroup,
   linkRuns,
+  noteTurnError,
   renderBackgroundRun,
   replayActivity,
   resetActivity,
@@ -49,7 +49,8 @@ export interface ChatDeps {
   sessionChannel: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
-  send: (mode: "auto" | "steer", label?: string) => void;
+  /** `quote`: the reply a next-step label answers, sent as a Reply to it. */
+  send: (mode: "auto" | "steer", label?: string, quote?: QuoteSource) => void;
   /** A user turn this client just drew itself: ledger it so the `user-message`
    *  event reconciles instead of drawing it twice, and show the run as live. */
   ownTurn: (text: string) => void;
@@ -73,78 +74,73 @@ export const turnsPane = $("#turns");
 export function initChat(d: ChatDeps): void {
   deps = d;
   // The pane is handed over rather than imported back: see TurnsPane there.
-  initTurnActivity(d, { el: turnsPane, scroll: scrollBottom, bulk: () => bulk, intoCard });
+  initTurnActivity(d, { el: turnsPane, scroll: scrollBottom, bulk: () => bulk, chip: chipInto });
 }
 
-// --- the turn card ---------------------------------------------------------------------
-// One framed row per agent turn: its cause lines and steps lines, the body, the
-// runs it launched. Lines are drawn at the tail as they happen; the frame
-// closes when the turn ends.
+// --- the turn's bubble ---------------------------------------------------------------
+// The reply bubble is the card: a chip row at its top — one chip per cause,
+// steps group and launched run, in arrival order, each its own fold over a
+// detail under the row — then the text. The bubble opens at the tail with its
+// first chip or delta (`data-pending`) and the body fills it when the turn
+// ends; a user bubble in between leaves it a chip-row-only bubble where it was.
 
-/** What a body adopts: contiguous lines directly above it, back to the previous
- *  body or user bubble. A user message is never a cause line. */
-const adoptable = (el: Element): boolean => {
-  const kind = (el as HTMLElement).dataset.kind;
-  return (kind === "activity" && !isLiveGroup(el)) || kind === "background-run" || "cause" in (el as HTMLElement).dataset;
-};
+const isBubble = (el: HTMLElement | null): el is HTMLElement =>
+  el?.dataset.kind === "assistant" || el?.dataset.kind === "error";
 
-/** The card at the tail, or the tail as a card when it is a bare body. */
-function tailCard(): HTMLElement | null {
+/** The tail while it is still this turn's. */
+function pendingBubble(): HTMLElement | null {
   const tail = turnsPane.lastElementChild as HTMLElement | null;
-  if (!tail) return null;
-  if (tail.dataset.kind === "turn") return tail;
-  if (tail.dataset.kind !== "assistant" && tail.dataset.kind !== "error") return null;
-  return closeCard(null, [tail]);
+  return tail && "pending" in tail.dataset ? tail : null;
 }
 
-function closeCard(body: HTMLElement | null, lines: HTMLElement[]): HTMLElement {
-  const card = h("div", "turn-card relative");
-  card.dataset.kind = "turn";
-  if (!bulk) card.dataset.frame = ""; // the frame fades in around lines already drawn
-  if (readonlyRows) card.dataset.readonly = "";
-  const runs = lines.filter((el) => el.dataset.kind === "background-run");
-  card.append(...lines.filter((el) => !runs.includes(el)), ...(body ? [body] : []), ...runs);
-  // The card is the filtered unit from here: a line a mid-turn filter hid stays visible with it.
-  for (const el of card.children as Iterable<HTMLElement>) {
-    delete el.dataset.live;
-    el.hidden = false;
-  }
-  // A reply tagged before its card closed hands the topic up (tagReply covers the other order).
-  const topic = [...card.children].map((el) => (el as HTMLElement).dataset.topic).find(Boolean);
-  if (topic) {
-    card.dataset.topic = topic;
-    card.style.setProperty("--topic", topicColour(topic));
-  }
-  turnsPane.append(card);
-  arriveRow(card);
-  return card;
+function openBubble(): HTMLElement {
+  const bubble = h("div", `group relative ${ROW_STYLE.assistant.row}`);
+  bubble.dataset.kind = "assistant";
+  bubble.dataset.pending = "";
+  if (readonlyRows) bubble.dataset.readonly = "";
+  if (!bulk) bubble.dataset.enter = "";
+  turnsPane.append(bubble);
+  arriveRow(bubble);
+  return bubble;
 }
 
-/** Where a turn's result lands: framed with the lines it adopts, or bare when
- *  it adopts nothing. `body` null is a turn that ended without one. */
-function endTurn(body: HTMLElement | null): HTMLElement | null {
-  const lines: HTMLElement[] = [];
-  for (let el = turnsPane.lastElementChild; el && adoptable(el); el = el.previousElementSibling) lines.unshift(el as HTMLElement);
-  if (!lines.length) {
-    if (body) {
-      turnsPane.append(body);
-      arriveRow(body);
-    }
-    return body;
+/** An error row is the turn's result only once nothing is in flight: one
+ *  reported mid-tool or mid-text (a notify failure, a title fetch) is not. */
+const errorSettles = (): boolean => !streamingEl && !activityLive();
+
+/** The bubble's chip row and the details under it, made on the first chip. A
+ *  topic tag already on the bubble moves in as the row's first chip. */
+function chipSlots(bubble: HTMLElement): [row: HTMLElement, details: HTMLElement] {
+  const kids = [...bubble.children] as HTMLElement[];
+  const row = kids.find((el) => el.classList.contains("chip-row"));
+  if (row) return [row, row.nextElementSibling as HTMLElement];
+  const made = h("div", "chip-row mb-1 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-tight");
+  const details = h("div", "chip-details");
+  const tag = kids.find((el) => el.classList.contains("topic-tag"));
+  if (tag) {
+    tag.classList.remove("mb-1"); // the row's gap is the tag's now
+    made.append(tag);
   }
-  return closeCard(body, lines);
+  bubble.prepend(made, details);
+  return [made, details];
 }
 
-/** A run line: the footer of the card at the tail, or the tail until a body adopts it. */
-function intoCard(line: HTMLElement): void {
-  line.dataset.kind = "background-run";
-  const card = tailCard();
-  if (card) card.append(line);
-  else {
-    turnsPane.append(line);
-    arriveRow(line);
-  }
+/** A chip into the turn's bubble: the tail while it is still this turn's, else
+ *  a new one opened there. `join`: a run chip joins the tail bubble even after
+ *  its text landed — the run was launched by that reply. */
+function chipInto(el: HTMLElement, detail: HTMLElement | null, join = false): void {
+  const tail = turnsPane.lastElementChild as HTMLElement | null;
+  const bubble = pendingBubble() ?? (join && isBubble(tail) ? tail : openBubble());
+  const [row, details] = chipSlots(bubble);
+  row.append(el);
+  if (detail) details.append(detail);
   trimRows();
+}
+
+/** A turn that ended without a body leaves its bubble as it stands. */
+function endTurn(): void {
+  const bubble = pendingBubble();
+  if (bubble) delete bubble.dataset.pending;
 }
 
 // --- scrolling -------------------------------------------------------------------
@@ -296,19 +292,30 @@ export function appendTurn(
   markdown = false,
   at?: number,
 ): HTMLElement {
-  sealActivity();
+  // An error while the turn is still in flight — text streaming, a tool owed or
+  // just answered — is not its result: a bare row above the bubble, which stays
+  // pending, and the group it interrupts keeps collecting. Decided before the
+  // seal, which would close a thinking-only group and read the turn as over.
+  const mid = kind === "error" && !errorSettles() ? pendingBubble() : null;
+  if (!mid) sealActivity();
   const s = ROW_STYLE[kind];
+  // A reply or a failed turn is a turn's result: it fills the bubble the turn's
+  // chips opened. A user bubble or a status line closes that bubble as it stands.
+  const pending = kind === "assistant" || (kind === "error" && !mid) ? pendingBubble() : null;
+  if (!pending && !mid) endTurn();
   // Only user messages introduce a clock separator after a conversation gap.
   const stamp = kind === "user" && at !== undefined && stampDue(at) ? at : undefined;
   // Consecutive rows from the same sender read as one block (Slack grouping) —
   // except across a stamp, which is a break in the conversation.
-  const grouped = stamp === undefined &&
-    (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
-  const row = h("div", `group relative ${s.row}`);
+  const prev = ((pending ?? mid)?.previousElementSibling ?? (pending || mid ? null : turnsPane.lastElementChild)) as HTMLElement | null;
+  const grouped = stamp === undefined && prev?.dataset.kind === kind;
+  const row = pending ?? h("div", "");
+  row.className = `group relative ${s.row}`;
   row.dataset.kind = kind;
+  delete row.dataset.pending;
   if (readonlyRows) row.dataset.readonly = "";
   if (grouped) row.dataset.grouped = "";
-  if (!bulk) row.dataset.enter = ""; // History replay must not animate every old message.
+  if (!bulk && !pending) row.dataset.enter = ""; // History replay must not animate every old message.
   const files = kind === "user" ? splitInboundFiles(text) : null;
   const body = files?.text ?? text;
   // The speaker header (core/identity.ts) is written for the model; as body
@@ -345,12 +352,9 @@ export function appendTurn(
     turnsPane.append(time);
     arriveRow(time);
   }
-  // A reply or a failed turn is a turn's result; a user bubble or a status line is not.
-  if (kind === "assistant" || kind === "error") endTurn(row);
-  else {
-    turnsPane.append(row);
-    arriveRow(row);
-  }
+  if (mid) mid.before(row);
+  else if (!pending) turnsPane.append(row);
+  arriveRow(row); // a filter set mid-turn hid the pending bubble; its result shows it
   trimRows();
   scrollBottom();
   return node;
@@ -458,38 +462,38 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
   return [meta, text.slice(at + 2)];
 }
 
-/** Session seeds, callbacks and delegations are one line until opened: the
- *  exchange is the reading, the line its receipt, and the cause line of the
- *  turn that answers it. A chat command's answer is what the user asked to
- *  see, so it is never folded and no turn adopts it. */
+/** Session seeds, callbacks and delegations are a cause chip of the turn that
+ *  answers them, opening to the exchange: the exchange is the reading, the
+ *  chip its receipt. A chat command's answer is what the user asked to see,
+ *  so it is a standalone open card and never a turn's. */
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
   sealActivity();
   const state = origin.kind === "task-callback" ? origin.state : undefined;
-  const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
-  row.classList.add(FOLD_ROW);
-  row.dataset.kind = "system";
+  const card = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   const [meta, body] = splitMetaBlock(withoutLanguage(text));
   const content = runBody(body);
-  if (origin.kind !== "chat-command") row.classList.add("system-row");
+  const glyphEl = (): SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
+  const labelCls = state ? STATE_STYLE[state].label : cls;
+  const name = origin.kind === "session-seed" ? origin.reason
+    : origin.kind === "chat-command" ? undefined
+    : origin.source?.taskName ?? meta?.split("\n")[0];
   const head = origin.kind === "session-seed"
-    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label, labelCls: cls, taskName: origin.reason, sessionId: origin.previousSessionId, expands: content })
+    ? runHead({ glyph: glyphEl(), label, labelCls, taskName: name, sessionId: origin.previousSessionId })
     : origin.kind === "chat-command"
-    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label: `/${origin.command}`, labelCls: cls })
+    ? runHead({ glyph: glyphEl(), label: `/${origin.command}`, labelCls })
     : runHead({
-      glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
+      glyph: glyphEl(),
       label: state ? `${label} \u00b7 ${state}` : label,
-      labelCls: state ? STATE_STYLE[state].label : cls,
-      ...(origin.source
-        ? { taskName: origin.source.taskName, model: origin.source }
-        : meta ? { taskName: meta.split("\n")[0]! } : {}),
+      labelCls,
+      ...(name ? { taskName: name } : {}),
+      ...(origin.source ? { model: origin.source } : {}),
       ...(state === "failed" || state === "interrupted"
         ? { failure: body.split("\n").find((line) => line.trim())?.trim() ?? state }
         : {}),
       runId: origin.runId,
       sessionId: origin.sourceSessionId,
-      expands: content,
     });
   if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions, deps.select);
   if (origin.kind === "task-callback") {
@@ -499,14 +503,20 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     if (id) renderFileRefs(codes, id, origin.cwd ? [origin.cwd] : []);
     if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
   }
-  row.append(head, content);
-  if (origin.kind !== "chat-command") {
-    row.dataset.cause = "";
-    if (state) row.dataset.state = state;
+  card.append(head, content);
+  if (origin.kind === "chat-command") {
+    endTurn();
+    card.dataset.kind = "system";
+    turnsPane.append(card);
+    arriveRow(card);
+    trimRows();
+  } else {
+    const cause = chip({ glyph: glyphEl(), label: state ? `${label} \u00b7 ${state}` : label, labelCls, ...(name ? { name } : {}) }, card);
+    cause.dataset.kind = "system";
+    cause.dataset.cause = "";
+    if (state) cause.dataset.state = state;
+    chipInto(cause, card);
   }
-  turnsPane.append(row);
-  arriveRow(row);
-  trimRows();
   scrollBottom();
 }
 
@@ -517,14 +527,17 @@ let cancelEdit: (() => void) | null = null;
  *  turns under it leave with it. */
 const editable = (row: HTMLElement): boolean => row.isConnected && row.dataset.kind === "user";
 
+const hasBody = (row: HTMLElement): boolean => [...row.children].some((c) => c.classList.contains("break-words"));
+
 /** What the rewind takes with the edited row — invisible from the row itself,
  *  and the whole difference between editing the last message and an older one. */
 function droppedAfter(row: HTMLElement): number {
   let n = 0;
   for (let el = row.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
-    if (kind === "user" || kind === "assistant" || kind === "system") n++;
-    if (kind === "turn") n += el.querySelectorAll('[data-kind="system"], [data-kind="assistant"]').length;
+    // A bubble of chips alone holds no message of its own; its cause chips are messages.
+    if ((kind === "user" || kind === "assistant" || kind === "system") && hasBody(el)) n++;
+    n += el.querySelectorAll("[data-cause]").length;
   }
   return n;
 }
@@ -714,7 +727,9 @@ function renderAssistant(
   if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
   if (offer) {
-    renderSuggestions(node.parentElement ?? node, suggestions, (label) => deps.send("auto", label));
+    // A pick answers this reply: sent as a Reply to it, so the model reads which offer was taken.
+    const row = node.parentElement ?? node;
+    renderSuggestions(row, suggestions, (label) => deps.send("auto", label, { role: "assistant", at: Number(row.dataset.at), text: raw }));
   }
   // Last, so the clock reads under the whole turn — buttons included.
   if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
@@ -786,10 +801,12 @@ function stopStreamPaint(): void {
   streamDirty = false;
 }
 
-/** Append a text-delta to the in-flight streamed block. */
+/** Append a text-delta to the in-flight streamed block: the text of the turn's
+ *  bubble, under its chip row, until a boundary says it was an update. */
 export function appendDelta(text: string): void {
   if (!streamingEl) {
-    streamingEl = activityProgress(Date.now());
+    streamingEl = h("div", `stream break-words ${ROW_STYLE.assistant.body}`);
+    (pendingBubble() ?? openBubble()).append(streamingEl);
     streamStable = 0;
     streamNodes = 0;
   }
@@ -797,44 +814,43 @@ export function appendDelta(text: string): void {
   paintStreaming();
 }
 
-/** A tool or input boundary confirms this text was an intermediate update. */
+/** A tool or input boundary confirms this text was an intermediate update: it
+ *  leaves the bubble for the steps log. */
 export function finalizeStreaming(): void {
-  if (!streamingEl) return;
-  const node = streamingEl;
-  streamingEl = null;
-  stopStreamPaint();
-  node.classList.remove("md");
-  node.classList.add("whitespace-pre-wrap");
-  node.textContent = node.dataset.raw ?? "";
+  const raw = takeStreaming();
+  if (raw !== undefined) activityProgress(Date.now(), raw);
 }
 
-/** Move the provisional text out of the log once the turn's outcome is known. */
+/** The streamed text out of the bubble once the turn's outcome is known. */
 function takeStreaming(): string | undefined {
   if (!streamingEl) return undefined;
   const raw = streamingEl.dataset.raw;
-  discardProgress(streamingEl);
+  streamingEl.remove();
   streamingEl = null;
   stopStreamPaint();
   return raw;
 }
 
 /** turn-end carries the authoritative final answer, including after reconnect. */
-export function completeTurn(text: string | undefined, meta?: TurnMeta): void {
+/** `error`: the turn ended on this failure; the error row that follows is its
+ *  result, so the bubble stays pending for it. */
+export function completeTurn(text: string | undefined, meta?: TurnMeta, error?: string): void {
   if (text === "") finalizeStreaming(); // no final answer: retain provisional text in the log
   const pending = takeStreaming();
+  if (error) noteTurnError();
   finishActivity("done");
   const answer = text ?? pending;
   if (answer) appendAssistant(answer, meta, true);
-  else endTurn(null);
+  else if (!error) endTurn();
 }
 
 /** An interrupted partial answer stays readable instead of disappearing; a
- *  turn cut short before it spoke still closes as a card of its steps. */
+ *  turn cut short before it spoke leaves a bubble of its chips. */
 export function interruptTurn(): void {
   const partial = takeStreaming();
   finishActivity("interrupted");
   if (partial) appendAssistant(partial);
-  else endTurn(null);
+  else endTurn();
 }
 
 /** Reset everything before a session snapshot re-render. */
@@ -928,11 +944,11 @@ export function renderSnapshot(
       const live = state === "streaming" && i === turns.length - 1 && t.role === "assistant";
       const steps = t.steps;
       if (steps?.length) {
-        replayActivity(steps, t.meta?.durationMs, live, i);
-        // Launched during the turn: the card's footer once the answer closes it.
+        replayActivity(steps, t.meta?.durationMs, live, i, !!t.error);
+        // Launched during the turn: chips of the bubble the answer fills.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
-        // Cut short before it spoke: the steps line is the card's whole content.
-        if (!live && !t.text && !t.error) endTurn(null);
+        // Cut short before it spoke: the steps chip is the bubble's whole content.
+        if (!live && !t.text && !t.error) endTurn();
       }
       if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.

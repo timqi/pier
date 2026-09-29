@@ -1,13 +1,12 @@
 // What a turn did besides speak: the per-turn Activity group (thinking + tool
-// steps) and the background-run lines, rendered into #turns as the lines a
-// turn card (chat.ts) closes around.
+// steps) and the background runs, rendered as chips in the reply bubble's chip
+// row (chat.ts), each chip its own fold over its detail.
 
 import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
-import { chevron, detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
-import { arriveRow } from "./topics.js";
+import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun, RunModel } from "../../core/types.js";
 
@@ -18,8 +17,10 @@ interface TurnsPane {
   scroll: (force?: boolean) => void;
   /** A whole snapshot is being replayed: no step may measure layout. */
   bulk: () => boolean;
-  /** A run line into the footer of the card at the tail, or at the tail to be adopted. */
-  intoCard: (line: HTMLElement) => void;
+  /** A chip and its detail into the turn's bubble: the tail while it is still
+   *  this turn's, else a new one opened there. `join`: a run chip joins the
+   *  tail bubble even after its text landed. */
+  chip: (chip: HTMLElement, detail: HTMLElement | null, join?: boolean) => void;
 }
 
 let deps: ChatDeps;
@@ -51,22 +52,12 @@ interface RunHead {
   runId?: string;
   /** The session doing the work when it is not this one; "console" is nobody. */
   sessionId?: string | null;
-  /** A failed or interrupted run's first line: on a collapsed line, never behind the chevron. */
+  /** A failed or interrupted run's first line. */
   failure?: string;
-  /** A system row's body: glyph, label and name become the button that shows
-   *  it, and the row wears `data-expanded` while it is shown. */
-  expands?: HTMLElement;
-  /** Starts shown: a re-rendered head keeps the reader's choice. Absent, the
-   *  browser's Show work choice decides. */
-  open?: boolean;
 }
 
-/** Quiet card body; the coloured edge and labelled chip carry type/status.
- *  Inline padding is the placement's: `fold-row` in the transcript. */
-const cardClass = (tone: string): string => `system-card group relative mt-1.5 rounded-xl py-2.5 ${tone}`;
-export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
-/** A transcript row that folds: its chevron sits in the column every such row shares. */
-export const FOLD_ROW = "fold-row";
+/** Quiet card body; the coloured edge and labelled chip carry type/status. */
+export const runCard = (tone: string): HTMLElement => h("div", `system-card relative rounded-xl px-3 py-2.5 ${tone}`);
 export const runBody = (text: string): HTMLElement =>
   h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
@@ -92,29 +83,25 @@ export function linkRuns(content: HTMLElement, sessions: Record<string, string>,
 
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
-  const head = h("div", `run-head flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);
-  const lead = o.expands ? expander(head, o.expands, o.open ?? workOpen()) : head;
-  lead.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
+  const head = h("div", "run-head flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500");
+  head.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
-  // subagent's name is its whole prompt line. A collapsed line is one line.
-  if (o.taskName) lead.append(h("span", o.expands ? "run-name min-w-0 truncate text-[12.5px] font-medium text-neutral-800" : "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
+  // subagent's name is its whole prompt line.
+  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
   if (o.failure) {
     const failure = h("span", `run-failure min-w-0 truncate text-[12.5px] ${o.labelCls}`, o.failure);
     failure.title = o.failure;
-    lead.append(failure);
+    head.append(failure);
   }
   const { tier, model, thinking } = o.model ?? {};
   if (tier || model || thinking) {
-    // Text inside the toggle, not a control: below md it is the line under
-    // the name (style.css), so the name keeps the first line's room.
     const badge = h("span", "run-model font-mono text-neutral-500");
     if (tier) badge.append(h("span", "run-tier", tier));
     if (model) badge.append(h("span", "run-model-id", model.id));
     if (thinking) badge.append(h("span", "run-thinking", thinking));
     badge.title = [tier && `Tier ${tier}`, model && `${model.provider} / ${model.id}`, thinking && `Reasoning ${thinking}`].filter(Boolean).join(" · ");
-    lead.append(h("span", "run-model-line flex-none", badge));
+    head.append(h("span", "run-model-line flex-none", badge));
   }
-  if (lead !== head) head.append(lead);
   const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "run-note flex-none", o.note));
   // The run id is text; the indigo session chip is the link. What each is
@@ -135,43 +122,53 @@ export function runHead(o: RunHead): HTMLElement {
   return head;
 }
 
-/** The chevron-led button of a collapsible head. A native button: Enter and
- *  Space toggle it, and the session link beside it stays its own control. */
-function expander(head: HTMLElement, body: HTMLElement, open: boolean): HTMLElement {
-  const toggle = h("button", "flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left pointer-coarse:min-h-11", chevron());
-  toggle.setAttribute("type", "button");
-  toggle.dataset.expander = "";
-  const set = (open: boolean): void => {
-    body.hidden = !open;
-    toggle.classList.toggle("chev-open", open);
-    toggle.setAttribute("aria-expanded", String(open));
-    head.parentElement?.toggleAttribute("data-expanded", open);
-  };
-  set(open);
-  expanders.set(toggle, set);
-  toggle.onclick = () => set(body.hidden === true);
-  return toggle;
+// --- chips ------------------------------------------------------------------------
+// A chip is its fold: the button naming one thing the turn did, and while open
+// its detail lies under the chip row. Every chip starts closed and opens only
+// by its own click; a replayed steps log fetches its detail on the first one.
+
+/** What a chip says; a chip re-painted keeps its element, detail and state. */
+interface ChipSpec {
+  glyph?: Element;
+  label: string;
+  labelCls: string;
+  /** The run's name, in the bubble's type. */
+  name?: string;
 }
 
-const expanders = new WeakMap<Element, (open: boolean) => void>();
+const CHIP_CLASS = "chip run-label inline-flex max-w-full items-center gap-1 text-left";
+const chipDetails = new WeakMap<Element, HTMLElement>();
+const lazyLoaders = new WeakMap<Element, () => void>();
 
-// --- show / hide work -------------------------------------------------------------------
-// One choice per browser for every line-level fold: cause text, steps log, run
-// prompt. A steps log whose detail is still on the server (`data-lazy`) stays
-// closed until the reader opens it: "open" must not fetch every turn's detail.
-// Tool rows inside a log stay per row for the same reason.
-
-const WORK_KEY = "pier.work";
-
-export const workOpen = (): boolean => localStorage.getItem(WORK_KEY) === "open";
-
-/** Every fold in the pane follows, and lines that arrive later follow too. */
-export function setWorkOpen(open: boolean): void {
-  localStorage.setItem(WORK_KEY, open ? "open" : "closed");
-  for (const group of turns.el.querySelectorAll<HTMLDetailsElement>('details[data-kind="activity"]')) {
-    if (!open || !("lazy" in group.dataset)) group.open = open;
+export function chip(o: ChipSpec, detail?: HTMLElement): HTMLElement {
+  const el = h("button", CHIP_CLASS);
+  el.setAttribute("type", "button");
+  paintChip(el, o);
+  if (detail) {
+    detail.hidden = true;
+    chipDetails.set(el, detail);
+    el.setAttribute("aria-expanded", "false");
+    el.onclick = () => setChipOpen(el, detail.hidden === true);
   }
-  for (const toggle of turns.el.querySelectorAll("[data-expander]")) expanders.get(toggle)?.(open);
+  return el;
+}
+
+export function paintChip(el: HTMLElement, o: ChipSpec): void {
+  el.className = `${CHIP_CLASS} ${o.labelCls}`;
+  el.replaceChildren(
+    ...(o.glyph ? [o.glyph] : []),
+    h("span", "flex-none font-semibold", o.label),
+    ...(o.name ? [h("span", "chip-name min-w-0 truncate font-medium text-neutral-800", o.name)] : []),
+  );
+}
+
+export function setChipOpen(el: HTMLElement, open: boolean): void {
+  const detail = chipDetails.get(el);
+  if (!detail) return;
+  detail.hidden = !open;
+  el.setAttribute("aria-expanded", String(open));
+  el.toggleAttribute("data-open", open);
+  if (open) lazyLoaders.get(el)?.();
 }
 
 // --- background runs (detached task calls made from this session) ------------------
@@ -191,36 +188,31 @@ export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: 
 export const stateGlyph = (state: BackgroundRun["state"]): SVGElement =>
   icon(STATE_STYLE[state].glyph, `h-3 w-3 ${state === "queued" || state === "running" ? "spinner" : ""} ${STATE_STYLE[state].label}`);
 
-const backgroundRows = new Map<string, HTMLElement>();
+const runChips = new Map<string, HTMLElement>();
 
-/** The prompt is drawn once per card and kept across status re-renders: a
- *  reader who expanded it must not watch it snap shut when the run moves on. */
-const promptBodies = new WeakMap<HTMLElement, HTMLElement>();
+/** The chip's detail, drawn once and re-headed on every status: a reader who
+ *  opened it must not watch it snap shut when the run moves on. */
+const runDetails = new WeakMap<HTMLElement, { card: HTMLElement; prompt: HTMLElement | null }>();
 
 export function renderBackgroundRun(run: BackgroundRun): void {
-  // Rows leave the pane without telling us (rewind, trim); a card held here
+  // Chips leave the pane without telling us (rewind, trim); one held here
   // after the pane let go is where the trimmed DOM survives.
-  for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
-  let row = backgroundRows.get(run.runId);
-  const fresh = !row;
-  if (!row) {
-    row = runCard(STATE_STYLE[run.state].edge);
-    row.dataset.kind = "background-run";
-    backgroundRows.set(run.runId, row);
-  }
-  row.dataset.state = run.state;
-  const open = row.hasAttribute("data-expanded");
-  // Folded like a callback row: the prompt is the delegating turn's own text.
-  row.className = `${cardClass(STATE_STYLE[run.state].edge)} ${FOLD_ROW} system-row`;
-  const active = run.state === "queued" || run.state === "running";
-  // The header's running chip finds its card by this mark (chat.ts).
-  row.toggleAttribute("data-active", active);
+  for (const [id, el] of runChips) if (!el.isConnected) runChips.delete(id);
+  let el = runChips.get(run.runId);
+  const fresh = !el;
+  const spec = { glyph: stateGlyph(run.state), label: `run · ${run.state}`, labelCls: STATE_STYLE[run.state].label, name: run.taskName };
+  if (!el) {
+    const prompt = run.prompt === null ? null : runBody(run.prompt);
+    const card = runCard(STATE_STYLE[run.state].edge);
+    el = chip(spec, card);
+    el.dataset.kind = "background-run";
+    runChips.set(run.runId, el);
+    runDetails.set(el, { card, prompt });
+  } else paintChip(el, spec);
+  el.dataset.state = run.state;
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
-  let body = promptBodies.get(row);
-  if (!body && run.prompt !== null) {
-    body = runBody(run.prompt);
-    promptBodies.set(row, body);
-  }
+  const { card, prompt } = runDetails.get(el)!;
+  card.className = runCard(STATE_STYLE[run.state].edge).className;
   // No control on the card: the run's page, one click away on its id, is where
   // a run is stopped.
   const head = runHead({
@@ -232,10 +224,9 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     model: run,
     runId: run.runId,
     sessionId: run.targetSessionId,
-    ...(body ? { expands: body, ...(fresh ? {} : { open }) } : {}),
   });
-  row.replaceChildren(head, ...(body ? [body] : []));
-  if (fresh) turns.intoCard(row);
+  card.replaceChildren(head, ...(prompt ? [prompt] : []));
+  if (fresh) turns.chip(el, card, true);
   turns.scroll();
 }
 
@@ -250,7 +241,8 @@ interface ToolRow {
 }
 
 interface Activity {
-  el: HTMLDetailsElement;
+  /** The steps chip, `data-kind="activity"`; its detail is `rowsEl`, the log. */
+  chip: HTMLElement;
   statusIcon: HTMLElement | SVGElement;
   headline: HTMLElement;
   rowsEl: HTMLElement;
@@ -313,7 +305,7 @@ function flushThinking(): void {
   thinkDirty = false;
 }
 
-/** Keyed by the group element so a transcript reload collects them with it. */
+/** Keyed by the steps chip so a transcript reload collects them with it. */
 interface DetailRow {
   tool: string;
   call: string;
@@ -321,8 +313,8 @@ interface DetailRow {
   argsPre: HTMLElement;
   outputPre: HTMLElement;
 }
-const detailRows = new WeakMap<HTMLDetailsElement, DetailRow[]>();
-const rowsOf = (group: HTMLDetailsElement): DetailRow[] => {
+const detailRows = new WeakMap<HTMLElement, DetailRow[]>();
+const rowsOf = (group: HTMLElement): DetailRow[] => {
   const rows = detailRows.get(group) ?? [];
   detailRows.set(group, rows);
   return rows;
@@ -335,32 +327,25 @@ export function sealActivity(): void {
   if (activity && !activity.toolRows.size) finishActivity("done");
 }
 
-/** A group still collecting steps stays where it is: what it is about to
- *  receive happened *after* the row going in, so no card may close on it. */
-export const isLiveGroup = (el: Element): boolean => activity?.el === el;
+/** A group still collecting steps (a tool result owed): the turn is not over,
+ *  so a row going in now is not its result. */
+export const activityLive = (): boolean => activity !== null;
 
 /** Reset before a session snapshot re-render (chat.ts resetChat). */
 export function resetActivity(): void {
   activity = null;
   think = null; // the pre it was painting goes with the pane
   flushThinking();
-  backgroundRows.clear();
+  runChips.clear();
 }
 
-/** Work stays on its own line above the reply; status colour names the outcome. */
+/** The steps chip's colour names the outcome; running is neutral, the spinner carries the motion. */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
-  running: "text-neutral-500 open:bg-black/[0.02] dark:open:bg-neutral-100",
-  done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500 dark:open:bg-neutral-100",
-  failed: "text-red-600 open:bg-red-50",
-  interrupted: "text-amber-700 open:bg-amber-50",
+  running: "text-neutral-600",
+  done: "text-neutral-500",
+  failed: "text-red-600",
+  interrupted: "text-amber-700",
 };
-
-/** Expanding shows an independent work log, never a disclosure inside prose. */
-function styleGroup(el: HTMLElement, status: ActivityStatus): void {
-  el.dataset.status = status;
-  // The outline is a ring, not a border: opening must not move the chevron.
-  el.className = `${FOLD_ROW} py-1 rounded-xl text-[11.5px] leading-normal open:ring-1 open:ring-inset open:ring-neutral-200 open:py-2 ${STATUS_STYLE[status]}`;
-}
 
 const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, IconNode> = {
   failed: X,
@@ -375,34 +360,31 @@ function statusIconEl(status: ActivityStatus): HTMLElement | SVGElement {
   return icon(STATUS_ICON[status], "h-3 w-3");
 }
 
-/** `open`: the remembered choice unless the caller knows better. */
-function ensureActivity(ts: number, open = workOpen()): Activity {
+function ensureActivity(ts: number): Activity {
   if (activity) return activity;
   const statusIcon = statusIconEl("running");
-  const headline = h("span", "min-w-0 truncate", "working…");
-  const { el } = detailsRow("", [statusIcon, headline]);
+  // Caps at ~10 step rows, then scrolls: an opened log can't swallow the chat.
+  const rowsEl = h("div", "activity-log flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain rounded-xl px-2 py-1.5 text-[11.5px] leading-normal ring-1 ring-inset ring-neutral-200 bg-black/[0.02] dark:bg-neutral-100");
+  const el = chip({ glyph: statusIcon, label: "working…", labelCls: STATUS_STYLE.running }, rowsEl);
+  const headline = el.lastElementChild as HTMLElement;
+  headline.classList.add("min-w-0", "truncate");
   el.dataset.kind = "activity";
-  el.open = open;
-  styleGroup(el, "running");
-  // Caps at ~10 step rows, then scrolls: an expanded group can't swallow the chat.
-  const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5 dark:border-neutral-200");
-  el.append(rowsEl);
+  el.dataset.status = "running";
   tailFollow(el, rowsEl);
-  turns.el.append(el);
-  arriveRow(el);
+  turns.chip(el, rowsEl);
   turns.scroll();
-  activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
+  activity = { chip: el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
 }
 
-/** Assistant text is provisional until turn-end: keep it with the work log. */
-export function activityProgress(ts: number, text = ""): HTMLElement {
+/** Text a tool or reasoning boundary confirmed as an update, not the reply:
+ *  it leaves the bubble for the log (chat.ts finalizeStreaming). */
+export function activityProgress(ts: number, text: string): void {
   const a = ensureActivity(ts);
   flushThinking();
   a.thinking = null;
   a.steps += 1;
   const node = h("div", "whitespace-pre-wrap break-words text-[12.5px] text-neutral-600", text);
-  node.dataset.raw = text;
   // 2px edge + pl-5 lands the text on the tool rows' column (px-1 + h-3 chevron + gap-1.5);
   // the hairline is the one mark that says the model is speaking.
   const row = h("div", "border-l-2 border-neutral-200 py-0.5 pl-5", node);
@@ -411,38 +393,29 @@ export function activityProgress(ts: number, text = ""): HTMLElement {
   activityHeadline(a, "running", "writing…");
   tailSteps(a);
   turns.scroll();
-  return node;
-}
-
-/** Promoting the final text must not leave a duplicate or an empty work log. */
-export function discardProgress(node: HTMLElement): void {
-  const group = node.closest<HTMLDetailsElement>('details[data-kind="activity"]');
-  node.parentElement?.remove();
-  if (group && !group.lastElementChild?.childElementCount) {
-    if (activity?.el === group) activity = null;
-    group.remove();
-  }
 }
 
 /** Opening lands on the newest step and a running group follows the tail;
  *  scrolling off the bottom stops the following until they come back down. */
-function tailFollow(el: HTMLDetailsElement, rowsEl: HTMLElement): void {
+function tailFollow(el: HTMLElement, rowsEl: HTMLElement): void {
   rowsEl.dataset.follow = "1";
   rowsEl.addEventListener("scroll", () => {
     const atBottom = rowsEl.scrollHeight - rowsEl.scrollTop - rowsEl.clientHeight < 24;
     rowsEl.dataset.follow = atBottom ? "1" : "";
   });
-  el.addEventListener("toggle", () => {
-    if (!el.open) return;
+  const toggle = el.onclick;
+  el.onclick = (ev) => {
+    toggle?.call(el, ev);
+    if (rowsEl.hidden) return;
     rowsEl.scrollTop = rowsEl.scrollHeight;
     rowsEl.dataset.follow = "1";
-  });
+  };
 }
 
 /** Skipped on replay and while closed: reading scrollHeight flushes layout for
  *  the whole transcript, once per step, for nothing on screen. */
 function tailSteps(a: Activity): void {
-  if (turns.bulk() || !a.el.open || !a.rowsEl.dataset.follow) return;
+  if (turns.bulk() || a.rowsEl.hidden || !a.rowsEl.dataset.follow) return;
   a.rowsEl.scrollTop = a.rowsEl.scrollHeight;
 }
 
@@ -452,7 +425,8 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
   const outcome = status === "running" ? "working" : status === "done" ? "" : status;
   const parts = [outcome, a.steps ? `${a.steps} step${a.steps === 1 ? "" : "s"}` : "", `${secs}s`, status === "running" ? latest : ""];
   a.headline.textContent = parts.filter(Boolean).join(" · ");
-  styleGroup(a.el, status);
+  a.chip.dataset.status = status;
+  a.chip.className = `${CHIP_CLASS} ${STATUS_STYLE[status]}`;
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
   a.statusIcon = icon;
@@ -466,12 +440,13 @@ export function finishActivity(status: ActivityStatus): void {
     if (row.el.dataset.state === "running") toolState(row, "interrupted");
   }
   // One failed step doesn't fail the group — its red row says enough. All-red
-  // is reserved for every tool step failing, or a turn-level error (sawError).
-  const toolSteps = rowsOf(activity.el).length;
+  // is reserved for every tool step failing, or a turn-level error (sawError),
+  // which wins over a tool it cut short so live and replay agree.
+  const toolSteps = rowsOf(activity.chip).length;
   const allFailed = toolSteps > 0 && activity.failedSteps === toolSteps;
   activityHeadline(
     activity,
-    (activity.sawError || allFailed) && status === "done" ? "failed"
+    activity.sawError || (allFailed && status === "done") ? "failed"
       : status === "done" && activity.toolRows.size ? "interrupted" : status,
   );
   activity = null;
@@ -509,7 +484,7 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   el.append(h("div", "mt-1 flex flex-col gap-1 pl-4", argsPre, outputPre));
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
-  rowsOf(a.el).push({ tool: name, call: id, preview, argsPre, outputPre });
+  rowsOf(a.chip).push({ tool: name, call: id, preview, argsPre, outputPre });
   const row = { el, statusEl, outputPre };
   toolState(row, "running");
   a.toolRows.set(id, row);
@@ -578,11 +553,13 @@ export function replayActivity(
   /** Index of this turn in the snapshot, for fetching its detail on demand.
    *  Absent only for a group with no turn to point at. */
   turnIndex?: number,
+  /** The turn ended on an error: the group settles as failed, as the live one did. */
+  failed = false,
 ): void {
   const start = Date.now() - durationMs; // headline duration is now - startTs
-  // Detail still on the server: closed whatever the choice, fetched on the first open.
+  // Detail still on the server: fetched on the first open.
   const lazy = turnIndex !== undefined && steps.some((s) => s.kind === "tool" && s.args === undefined);
-  const group = ensureActivity(start, lazy ? false : undefined).el;
+  const group = ensureActivity(start).chip;
   if (lazy) group.dataset.lazy = "";
   for (const s of steps) {
     if (s.kind === "progress") {
@@ -605,21 +582,20 @@ export function replayActivity(
   // The turn still running keeps its group open, so the live stream counts on
   // into it instead of opening a second bubble beneath the replayed one.
   if (live) return;
+  if (failed) noteTurnError();
   finishActivity(steps.some((s) => s.kind === "tool" && !s.done) ? "interrupted" : "done");
 }
 
-/** Args and output are ~90% of a transcript and live behind this very toggle,
+/** Args and output are ~90% of a transcript and live behind this very chip,
  *  so they travel per opened group, one request for the whole group. */
-function onFirstOpen(group: HTMLDetailsElement, turnIndex: number): void {
-  const load = (): void => {
-    if (!group.open) return;
-    group.removeEventListener("toggle", load);
+function onFirstOpen(group: HTMLElement, turnIndex: number): void {
+  lazyLoaders.set(group, () => {
+    lazyLoaders.delete(group);
     void fillDetail(group, turnIndex);
-  };
-  group.addEventListener("toggle", load);
+  });
 }
 
-async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise<void> {
+async function fillDetail(group: HTMLElement, turnIndex: number): Promise<void> {
   const sessionId = deps.sessionId();
   const rows = rowsOf(group);
   // Steps the live stream delivered in full keep their place but are never overwritten.

@@ -1,5 +1,6 @@
-// System rows on index.html: the `/status` card opens its runs' sessions, and
-// seeds, callbacks, delegations and run cards fold to one line that opens in place.
+// The turns pane on index.html: the `/status` card opens its runs' sessions;
+// seeds, callbacks, delegations and runs are chips of the reply's bubble, each
+// opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemInputOrigin } from "../../core/types.js";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
@@ -11,9 +12,8 @@ let chat: typeof import("./chat.js");
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 vi.mock("./highlight.js", () => ({ highlightCode: async () => {} }));
 const select = vi.fn();
-/** The browser's remembered choices (the Show work toggle). */
-const stored = new Map<string, string>();
 const quote = vi.fn();
+const send = vi.fn();
 
 beforeEach(async () => {
   vi.resetModules();
@@ -21,14 +21,13 @@ beforeEach(async () => {
   doc = installPage();
   // Only the tail-follow uses them, and the fake DOM has no layout to follow.
   for (const name of ["ResizeObserver", "MutationObserver"]) vi.stubGlobal(name, class { observe(): void {} });
-  stored.clear();
-  vi.stubGlobal("localStorage", { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => stored.set(k, v) });
   chat = await import("./chat.js");
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
-    select, send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+    select, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
   });
   quote.mockClear();
+  send.mockClear();
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -61,18 +60,21 @@ it("draws the same links from a reloaded transcript, and none for an answer with
   expect(card().textContent).toContain(text);
 });
 
-const toggle = () => card().querySelector("button[aria-expanded]")!;
-/** The collapsed line: what a sighted reader sees with the body hidden. */
+/** A cause chip (`data-kind="system"` on the chip) and the detail it opens. */
+const toggle = () => card();
+/** The chip's words: what a reader sees with the detail closed. */
 const line = () => toggle().textContent;
-const body = () => card().children.at(-1)!;
+const bubble = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='assistant'], [data-kind='error']").at(-1)!;
+const detail = () => bubble().querySelector(".chip-details")!.children.at(-1)!;
+const body = () => detail().children.at(-1)!;
 const model = { provider: "anthropic", id: "claude-x" };
 
 it("folds a session seed to its reason and the previous session's id", () => {
   chat.appendSystemInput("Memory\n\nlast exchanges…", { kind: "session-seed", reason: "idle", previousSessionId: "prev1234abcd" });
-  expect(card().classList.contains("system-row")).toBe(true);
+  expect(toggle().classList.contains("chip")).toBe(true);
   expect(line()).toBe("session seedidle");
-  expect(card().querySelector(".run-session")!.textContent).toBe("prev1234");
-  expect(body().hidden).toBe(true);
+  expect(detail().querySelector(".run-session")!.textContent).toBe("prev1234");
+  expect(detail().hidden).toBe(true);
 });
 
 it("shows a callback without the language stamp the model reads", () => {
@@ -84,63 +86,68 @@ it("shows a callback without the language stamp the model reads", () => {
   expect(card().textContent).not.toContain("lang=zh");
 });
 
-it("folds a callback to state, name, model and run id, and opens and closes on its button", () => {
+it("folds a callback to state and name; the detail carries model, ids and the text, and opens on the chip", () => {
   chat.appendSystemInput('Task "fix it" finished with state: succeeded\nrun r1\n\nAll green.', {
     kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run",
     source: { taskName: "fix it", tier: "balanced", model, thinking: "high" }, state: "succeeded",
   });
-  // The model is quiet text after the name, inside the toggle (below md, its own line under the label).
-  expect(line()).toBe("callback · succeededfix itbalancedclaude-xhigh");
-  expect(card().querySelector(".run-id")!.textContent).toBe("run45678");
+  // Mode, model and ids leave the chip for its opened head.
+  expect(line()).toBe("callback · succeededfix it");
+  expect(toggle().querySelector(".chip-name")!.textContent).toBe("fix it");
+  const head = detail().querySelector(".run-head")!;
+  expect(head.textContent).toBe("callback · succeededfix itbalancedclaude-xhighrun45678s-run");
   // One badge, `tier · id · level`: the stylesheet draws the dots between its parts.
-  const badge = toggle().querySelector(".run-model")!;
+  const badge = head.querySelector(".run-model")!;
   expect([...badge.children].map((part) => [part.className, part.textContent]))
     .toEqual([["run-tier", "balanced"], ["run-model-id", "claude-x"], ["run-thinking", "high"]]);
   expect(badge.getAttribute("title")).toBe("Tier balanced · anthropic / claude-x · Reasoning high");
   expect(body().textContent).toBe("All green.");
   expect(toggle().localName).toBe("button"); // Enter and Space are the browser's
   expect(toggle().getAttribute("type")).toBe("button");
+  expect(toggle().getAttribute("aria-expanded")).toBe("false");
   toggle().onclick?.();
-  expect(card().hasAttribute("data-expanded")).toBe(true);
+  expect(toggle().hasAttribute("data-open")).toBe(true);
   expect(toggle().getAttribute("aria-expanded")).toBe("true");
-  expect(body().hidden).toBe(false);
-  card().querySelector(".run-session")!.onclick?.();
+  expect(detail().hidden).toBe(false);
+  detail().querySelector(".run-session")!.onclick?.();
   expect(select).toHaveBeenLastCalledWith("s-run");
   toggle().onclick?.();
-  expect(card().hasAttribute("data-expanded")).toBe(false);
-  expect(body().hidden).toBe(true);
+  expect(toggle().hasAttribute("data-open")).toBe(false);
+  expect(detail().hidden).toBe(true);
 });
 
 it("keeps a failed callback's reason on the line, in the state's colour", () => {
   chat.appendSystemInput('Task "deploy" finished with state: failed\nrun r2\n\n\nprovider 529: overloaded\nstack…', {
     kind: "task-callback", taskId: "t2", runId: "run2", sourceSessionId: null, source: { taskName: "deploy" }, state: "failed",
   });
-  expect(line()).toBe("callback · faileddeployprovider 529: overloaded");
-  expect(card().querySelector(".run-model")).toBeNull(); // nothing recorded, no empty badge
-  expect(toggle().querySelector(".run-label")!.classList.contains("text-red-600")).toBe(true);
+  expect(line()).toBe("callback · faileddeploy");
+  expect(toggle().classList.contains("text-red-600")).toBe(true);
+  expect(detail().querySelector(".run-failure")!.textContent).toBe("provider 529: overloaded");
+  expect(detail().querySelector(".run-model")).toBeNull(); // nothing recorded, no empty badge
   chat.appendSystemInput("x\n\n", {
     kind: "task-callback", taskId: "t3", runId: "run3", sourceSessionId: null, source: { taskName: "probe" }, state: "interrupted",
   });
-  expect(line()).toBe("callback · interruptedprobeinterrupted");
-  expect(toggle().querySelector(".run-label")!.classList.contains("text-amber-700")).toBe(true);
+  expect(line()).toBe("callback · interruptedprobe");
+  expect(toggle().classList.contains("text-amber-700")).toBe(true);
+  expect(detail().querySelector(".run-failure")!.textContent).toBe("interrupted");
 });
 
 it("folds a delegation and a task message to name and run id; a command answer stays open", () => {
   chat.appendSystemInput("Task: review\n\nRead the diff.", { kind: "task-delegation", taskId: "t4", runId: "run4abcdefg", sourceSessionId: "s-lead" });
   expect(line()).toBe("delegationTask: review");
-  expect(card().querySelector(".run-id")!.textContent).toBe("run4abcd");
+  expect(detail().querySelector(".run-id")!.textContent).toBe("run4abcd");
   chat.appendSystemInput("steer text", {
     kind: "task-message", taskId: "t5", runId: "run5", sourceSessionId: "s5", messageId: "m", messageKind: "follow_up", source: { taskName: "lead" },
   });
   expect(line()).toBe("follow uplead");
   chat.appendSystemInput("Started a new session.", { kind: "chat-command", command: "new" });
-  expect(card().classList.contains("system-row")).toBe(false);
+  expect(card().classList.contains("chip")).toBe(false);
   expect(card().querySelector("button[aria-expanded]")).toBeNull();
-  expect(body().hidden).toBe(false);
-  expect(card().getAttribute("data-kind")).toBe("system");
+  expect(card().children.at(-1)!.hidden).toBe(false);
+  expect(card().parentElement).toBe(doc.querySelector("#turns"));
 });
 
-it("folds a run card like a callback, and a status update keeps it open", async () => {
+it("folds a run to a chip like a callback, and a status update keeps its detail open", async () => {
   const run = {
     runId: "qvv3qbffxyz", taskId: "t6", taskName: "IM conversation", state: "running" as const, targetSessionId: "s-run6",
     sessionMode: "fresh" as const, prompt: "Build per the design doc.", queuedAt: 1, startedAt: 1, finishedAt: null, queuedMessages: 0,
@@ -148,19 +155,20 @@ it("folds a run card like a callback, and a status update keeps it open", async 
   };
   const { renderBackgroundRun } = await import("./turn-activity.js");
   renderBackgroundRun(run);
-  const runCard = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
-  const runToggle = () => runCard().querySelector("button[aria-expanded]")!;
-  expect(runCard().classList.contains("system-row")).toBe(true);
-  expect(runToggle().textContent).toBe("run · runningIM conversationclaude-xmedium");
-  expect(runCard().querySelector(".run-model")!.textContent).toBe("claude-xmedium");
-  expect(runCard().children.at(-1)!.hidden).toBe(true);
+  const runToggle = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
+  expect(runToggle().classList.contains("chip")).toBe(true);
+  expect(runToggle().textContent).toBe("run · runningIM conversation");
+  expect(detail().querySelector(".run-model")!.textContent).toBe("claude-xmedium");
+  expect(detail().querySelector(".run-note")!.textContent).toMatch(/^fresh · \d+s$/);
+  expect(detail().hidden).toBe(true);
   runToggle().onclick?.();
-  expect(runCard().hasAttribute("data-expanded")).toBe(true);
+  expect(runToggle().hasAttribute("data-open")).toBe(true);
   renderBackgroundRun({ ...run, state: "succeeded", finishedAt: 142_001 });
-  expect(runToggle().textContent).toBe("run · succeededIM conversationclaude-xmedium");
+  expect(runToggle().textContent).toBe("run · succeededIM conversation");
   expect(runToggle().getAttribute("aria-expanded")).toBe("true");
-  expect(runCard().children.at(-1)!.hidden).toBe(false);
-  expect(runCard().children.at(-1)!.textContent).toBe("Build per the design doc.");
+  expect(detail().hidden).toBe(false);
+  expect(detail().querySelector(".run-note")!.textContent).toBe("fresh · 142s");
+  expect(body().textContent).toBe("Build per the design doc.");
 });
 
 it("names a run card by its session once there is one, and by the run id until then", async () => {
@@ -170,11 +178,10 @@ it("names a run card by its session once there is one, and by the run id until t
   };
   const { renderBackgroundRun } = await import("./turn-activity.js");
   renderBackgroundRun(run);
-  const runCard = () => doc.querySelector("#turns")!.querySelectorAll("[data-kind='background-run']").at(-1)!;
-  expect(runCard().querySelector(".run-id")!.textContent).toBe("ykt7hre3");
-  expect(runCard().querySelector(".run-session")).toBeNull();
+  expect(detail().querySelector(".run-id")!.textContent).toBe("ykt7hre3");
+  expect(detail().querySelector(".run-session")).toBeNull();
   renderBackgroundRun({ ...run, state: "running", targetSessionId: "s7abcdef1234", startedAt: 2 });
-  const session = runCard().querySelector(".run-session")!;
+  const session = detail().querySelector(".run-session")!;
   expect(session.localName).toBe("button");
   expect(session.textContent).toBe("s7abcdef");
   session.onclick?.();
@@ -283,7 +290,7 @@ describe("file references", () => {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s-child",
       source: { taskName: "sync" }, state: "succeeded", cwd: "/w/child",
     });
-    const callback = card();
+    const callback = detail();
     await vi.waitFor(() => expect(refs(callback)).toEqual(["/w/child/src/config-sync.ts:239", "/tmp/run.log"]));
     expect(asked.flat()).toEqual(["/w/child/src/config-sync.ts", "/tmp/run.log"]);
     // The body still reads as the child wrote it, backticks included.
@@ -296,7 +303,7 @@ describe("file references", () => {
     chat.appendSystemInput("2 task callbacks\n\n`src/a.ts` and `/tmp/run.log`", {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: null, runIds: ["r1", "r2"],
     });
-    await vi.waitFor(() => expect(refs(card())).toEqual(["/tmp/run.log"]));
+    await vi.waitFor(() => expect(refs(detail())).toEqual(["/tmp/run.log"]));
     expect(asked.flat()).toEqual(["/tmp/run.log"]);
   });
 });
@@ -361,11 +368,16 @@ describe("the reply quote", () => {
   });
 });
 
-describe("turn cards", () => {
+describe("the turn's bubble", () => {
   const pane = () => doc.querySelector("#turns")!;
   const kinds = () => pane().children.map((r) => r.dataset.kind);
-  const card = () => pane().querySelectorAll("[data-kind='turn']").at(-1)!;
-  const inCard = () => card().children.map((r) => r.dataset.kind);
+  const bubble = () => pane().querySelectorAll("[data-kind='assistant'], [data-kind='error']").at(-1)!;
+  const chipRow = (b = bubble()) => b.children.find((el) => el.classList.contains("chip-row"))!;
+  const chips = (b = bubble()) => chipRow(b)?.children.map((c) => c.dataset.kind ?? c.className.split(" ")[0]) ?? [];
+  const details = () => bubble().children.find((el) => el.classList.contains("chip-details"))!.children;
+  const stepsChip = () => chipRow().querySelector("[data-kind='activity']")!;
+  /** The bubble's parts, top to bottom, by the class that names each. */
+  const parts = () => bubble().children.map((el) => ["chip-row", "chip-details", "stream", "md", "message-tools"].find((c) => el.classList.contains(c)) ?? el.className);
   const run = (runId: string, over: Partial<import("../../core/types.js").BackgroundRun> = {}) => ({
     runId, taskId: "t", taskName: runId, state: "running" as const, targetSessionId: null, sessionMode: "fresh" as const,
     prompt: "go", queuedAt: 1, startedAt: 1, finishedAt: null, queuedMessages: 0, ...over,
@@ -403,125 +415,180 @@ describe("turn cards", () => {
     expect(topics.seenTopics()).toEqual([]);
   });
 
-  it("keeps a reply visible inside its card whatever the filter, and a card takes the topic of a reply tagged first", async () => {
+  it("puts the topic tag first in the chip row, whichever of tag and chip came first", async () => {
     const topics = await import("./topics.js");
     chat.appendTurn("user", "go", false, 1);
-    chat.completeTurn("On it.\n<open>auth</open>", { completedAt: 2, durationMs: 1, tokens: 1 });
-    topics.setTopicFilter("auth");
-    // The card of a reply about something else arrives live, and its reply with it.
-    chat.appendTurn("user", "and this", false, 3);
     callback("r1");
     chat.completeTurn("Other.\n<topic>deploy</topic>", { completedAt: 4, durationMs: 1, tokens: 1 });
-    expect(card().dataset.topic).toBe("deploy");
-    expect(card().hidden).toBe(false);
-    expect(card().querySelector("[data-kind='assistant']")!.hidden).toBe(false);
-    // Switching the filter hides the card, never a row inside it.
-    topics.setTopicFilter(null);
+    expect(chips()).toEqual(["topic-tag", "system"]);
+    expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
+    expect(bubble().dataset.topic).toBe("deploy");
+    expect(bubble().style.getPropertyValue("--topic")).toMatch(/^oklch/);
     topics.setTopicFilter("auth");
-    expect(card().hidden).toBe(true);
-    expect(card().querySelector("[data-kind='assistant']")!.hidden).toBe(false);
+    expect(bubble().hidden).toBe(true);
     topics.setTopicFilter(null);
-    // A bare tagged reply gets its card only when a run lands after it.
+    // A bare tagged reply grows its chip row when a run lands after it.
     chat.appendTurn("user", "more", false, 5);
     chat.completeTurn("Later.\n<topic>docs</topic>", { completedAt: 6, durationMs: 1, tokens: 1 });
-    expect(kinds().at(-1)).toBe("assistant");
+    expect(chipRow()).toBeUndefined();
+    expect(bubble().children[0]!.classList.contains("mb-1")).toBe(true);
     activity.renderBackgroundRun(run("r2"));
-    expect(inCard()).toEqual(["assistant", "background-run"]);
-    expect(card().dataset.topic).toBe("docs");
-    expect(card().style.getPropertyValue("--topic")).toMatch(/^oklch/);
+    expect(chips()).toEqual(["topic-tag", "background-run"]);
+    expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
+    expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
   });
 
-  it("closes the card over lines a mid-turn filter change hid, so clearing the filter shows them all", async () => {
+  it("shows the bubble a mid-turn filter change hid once its reply lands", async () => {
     const topics = await import("./topics.js");
     chat.appendTurn("user", "go", false, 1);
     chat.completeTurn("On it.\n<open>auth</open>", { completedAt: 2, durationMs: 1, tokens: 1 });
     callback("r1");
     activity.activityToolStart(1, "c1", "bash", {});
     topics.setTopicFilter("auth");
-    expect(pane().querySelectorAll("[data-kind='system'], [data-kind='activity']").map((r) => r.hidden)).toEqual([true, true]);
+    expect(bubble().hidden).toBe(true);
     activity.activityToolEnd("c1", false, "ok");
     chat.completeTurn("Other.\n<topic>deploy</topic>", { completedAt: 3, durationMs: 1, tokens: 1 });
-    expect(inCard()).toEqual(["system", "activity", "assistant"]);
-    expect(card().hidden).toBe(false);
-    topics.setTopicFilter(null);
-    expect(card().children.map((r) => r.hidden)).toEqual([false, false, false]);
+    expect(chips()).toEqual(["topic-tag", "system", "activity"]);
+    expect(bubble().hidden).toBe(false);
+    expect("live" in bubble().dataset).toBe(true);
   });
 
-  it("closes a card around the cause line, the steps line and the reply; a plain reply stays a bare row", () => {
+  it("opens the bubble with its first chip and fills it with the reply; a plain reply has no chip row", () => {
     chat.appendTurn("user", "go", false, 1);
     chat.appendTurn("assistant", "Sure.", true);
     expect(kinds()).toEqual(["time", "user", "assistant"]);
+    expect(chipRow()).toBeUndefined();
     callback("r1");
+    expect(kinds()).toEqual(["time", "user", "assistant", "assistant"]);
+    expect("pending" in bubble().dataset).toBe(true);
     activity.activityToolStart(1, "c1", "bash", {});
     activity.activityToolEnd("c1", false, "ok");
-    expect(kinds()).toEqual(["time", "user", "assistant", "system", "activity"]);
+    expect(chips()).toEqual(["system", "activity"]);
     chat.completeTurn("Done.\n<topic>deploy</topic>", { completedAt: 5, durationMs: 1000, tokens: 1 });
-    expect(kinds()).toEqual(["time", "user", "assistant", "turn"]);
-    expect(inCard()).toEqual(["system", "activity", "assistant"]);
-    // The steps line says the count, not an outcome; the card carries the topic.
-    expect(card().querySelector("[data-kind='activity']")!.querySelector("summary")!.textContent).toMatch(/^1 step · \d+s$/);
-    expect(card().dataset.topic).toBe("deploy");
-    expect(card().querySelector("[data-kind='assistant']")!.dataset.topic).toBe("deploy");
-    expect(card().hasAttribute("data-frame")).toBe(true);
+    expect(kinds()).toEqual(["time", "user", "assistant", "assistant"]);
+    expect("pending" in bubble().dataset).toBe(false);
+    expect(chips()).toEqual(["topic-tag", "system", "activity"]);
+    expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
+    expect(bubble().querySelector(".md")!.textContent.trim()).toBe("Done.");
+    // The steps chip says the count, not an outcome; its detail is the log, closed.
+    expect(stepsChip().textContent).toMatch(/^1 step · \d+s$/);
+    expect(stepsChip().getAttribute("aria-expanded")).toBe("false");
+    expect(details().map((d) => d.hidden)).toEqual([true, true]);
+    expect(bubble().dataset.topic).toBe("deploy");
   });
 
-  it("keeps a steered input between the two steps lines it split, and a launched run as the footer", () => {
+  it("streams the reply's text under the chip row, and moves it to the log at a tool boundary", () => {
+    callback("r1");
+    chat.appendDelta("Looking");
+    expect(parts()).toEqual(["chip-row", "chip-details", "stream"]);
+    expect(bubble().textContent).toContain("Looking");
+    chat.finalizeStreaming();
+    activity.activityToolStart(1, "c1", "bash", {});
+    activity.activityToolEnd("c1", false, "ok");
+    expect(chips()).toEqual(["system", "activity"]);
+    const log = details().at(-1)!;
+    expect(log.querySelectorAll("[data-kind='progress']").map((r) => r.textContent)).toEqual(["Looking"]);
+    chat.appendDelta("Done");
+    expect(parts()).toEqual(["chip-row", "chip-details", "stream"]);
+    chat.completeTurn("Done.", { completedAt: 5, durationMs: 1000, tokens: 1 });
+    expect(stepsChip().textContent).toMatch(/^2 steps · \d+s$/);
+    expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
+    expect(kinds()).toEqual(["assistant"]);
+  });
+
+  it("keeps chips in arrival order across a steered input, and a launched run joins the reply's bubble", () => {
     activity.activityToolStart(1, "c1", "bash", {});
     activity.activityToolEnd("c1", false, "");
     activity.renderBackgroundRun(run("r1"));
     callback("r2");
     activity.activityToolStart(2, "c2", "read", {});
     activity.activityToolEnd("c2", false, "");
-    expect(kinds()).toEqual(["activity", "background-run", "system", "activity"]);
+    expect(kinds()).toEqual(["assistant"]);
+    expect(chips()).toEqual(["activity", "background-run", "system", "activity"]);
     chat.completeTurn("Both done.");
-    expect(kinds()).toEqual(["turn"]);
-    expect(inCard()).toEqual(["activity", "system", "activity", "assistant", "background-run"]);
-    // A run launched after the reply landed joins the same footer; a status update stays in place.
+    expect(kinds()).toEqual(["assistant"]);
+    // A run launched after the reply landed joins the same row; a status update stays in place.
     activity.renderBackgroundRun(run("r3"));
     activity.renderBackgroundRun(run("r1", { state: "succeeded", finishedAt: 9 }));
-    expect(inCard()).toEqual(["activity", "system", "activity", "assistant", "background-run", "background-run"]);
-    expect(card().querySelectorAll("[data-kind='background-run']").map((r) => r.dataset.state)).toEqual(["succeeded", "running"]);
+    expect(chips()).toEqual(["activity", "background-run", "system", "activity", "background-run"]);
+    expect(chipRow().querySelectorAll("[data-kind='background-run']").map((r) => r.dataset.state)).toEqual(["succeeded", "running"]);
+    expect(details().map((d) => d.className.split(" ")[0])).toEqual(["activity-log", "system-card", "system-card", "activity-log", "system-card"]);
   });
 
-  it("leaves a cause line unframed when a user bubble separates it from the reply", () => {
+  it("leaves a chip-row-only bubble when a user bubble separates it from the reply", () => {
     callback("r1");
     chat.appendTurn("user", "and this", false, 1);
     chat.completeTurn("Reply.");
-    expect(kinds()).toEqual(["system", "time", "user", "assistant"]);
-    // A run launched by a bare reply frames it after the fact.
+    expect(kinds()).toEqual(["assistant", "time", "user", "assistant"]);
+    const [orphan] = pane().querySelectorAll("[data-kind='assistant']");
+    expect("pending" in orphan!.dataset).toBe(false);
+    expect(chips(orphan)).toEqual(["system"]);
+    expect(chipRow()).toBeUndefined();
+    // A run launched by a bare reply grows its chip row after the fact.
     activity.renderBackgroundRun(run("r2"));
-    expect(kinds()).toEqual(["system", "time", "user", "turn"]);
-    expect(inCard()).toEqual(["assistant", "background-run"]);
+    expect(kinds()).toEqual(["assistant", "time", "user", "assistant"]);
+    expect(chips()).toEqual(["background-run"]);
   });
 
-  it("closes a silent turn, an interrupted turn and a failed turn as cards too", () => {
+  it("carries the chip row on a silent, an interrupted and a failed turn's own material", () => {
     callback("r1");
     chat.completeTurn("<silent>nothing to add</silent>");
-    expect(inCard()).toEqual(["system", "assistant"]);
-    expect(card().textContent).toContain("Stayed silent — nothing to add");
+    expect(chips()).toEqual(["system"]);
+    expect(bubble().textContent).toContain("Stayed silent — nothing to add");
     activity.activityToolStart(1, "c1", "bash", {});
     chat.interruptTurn();
-    expect(kinds()).toEqual(["turn", "turn"]);
-    expect(inCard()).toEqual(["activity"]);
-    expect(card().querySelector("summary")!.textContent).toMatch(/^interrupted · 1 step/);
+    expect(kinds()).toEqual(["assistant", "assistant"]);
+    expect(chips()).toEqual(["activity"]);
+    expect(stepsChip().textContent).toMatch(/^interrupted · 1 step/);
+    expect(stepsChip().classList.contains("text-amber-700")).toBe(true);
+    // A turn that ends on a failure: the turn-end carries it, then the error row is its result.
     activity.activityToolStart(2, "c2", "bash", {});
     activity.activityToolEnd("c2", true, "boom");
-    activity.noteTurnError();
+    chat.completeTurn("", undefined, "provider 529");
+    expect("pending" in bubble().dataset).toBe(true);
     chat.appendTurn("error", "provider 529");
+    expect(kinds()).toEqual(["assistant", "assistant", "error"]);
+    expect(chips()).toEqual(["activity"]);
+    expect(stepsChip().textContent).toMatch(/^failed · 1 step/);
+    expect(stepsChip().classList.contains("text-red-600")).toBe(true);
+    // Nothing pending: a turn that ends with nothing draws nothing.
     chat.completeTurn(undefined);
-    expect(kinds()).toEqual(["turn", "turn", "turn"]);
-    expect(inCard()).toEqual(["activity", "error"]);
-    // Nothing left to adopt: a turn that ends with nothing draws nothing.
-    chat.completeTurn(undefined);
-    expect(kinds()).toEqual(["turn", "turn", "turn"]);
+    expect(kinds()).toEqual(["assistant", "assistant", "error"]);
     // A chat command's answer is Pier's, never a turn's.
     chat.appendSystemInput("ok", { kind: "chat-command", command: "new" });
     chat.completeTurn("Hi.");
-    expect(kinds()).toEqual(["turn", "turn", "turn", "system", "assistant"]);
+    expect(kinds()).toEqual(["assistant", "assistant", "error", "system", "assistant"]);
+    expect(chipRow()).toBeUndefined();
   });
 
-  it("builds the same cards from a snapshot as the live stream drew", () => {
-    const shape = () => pane().children.map((r) => [r.dataset.kind, r.dataset.topic, ...(r.dataset.kind === "turn" ? [r.children.map((c) => c.dataset.kind)] : [])]);
+  it("leaves an error reported mid-flight a bare row, never the turn's result", () => {
+    callback("r1");
+    activity.activityToolStart(1, "c1", "bash", {});
+    chat.appendTurn("error", "notify slack failed");
+    // The row goes above the turn's bubble, which stays pending for its result.
+    expect(kinds()).toEqual(["error", "assistant"]);
+    expect(chipRow(pane().children[0]!)).toBeUndefined();
+    activity.activityToolEnd("c1", false, "ok");
+    // In the gap after a tool answered, before the next step, the turn is still on.
+    chat.appendTurn("error", "notify slack failed again");
+    activity.activityToolStart(2, "c2", "bash", {});
+    activity.activityToolEnd("c2", false, "ok");
+    activity.activityThinking(3, "hm");
+    chat.appendTurn("error", "session title: no auth");
+    chat.appendDelta("Still");
+    chat.appendTurn("error", "notify lark failed");
+    expect(kinds()).toEqual(["error", "error", "error", "error", "assistant"]);
+    chat.completeTurn("Done.");
+    expect(kinds()).toEqual(["error", "error", "error", "error", "assistant"]);
+    // One group, all of it: no error split the steps.
+    expect(chips(pane().children[4]!)).toEqual(["system", "activity"]);
+    expect(stepsChip().textContent).toMatch(/^3 steps/);
+    expect(stepsChip().dataset.status).toBe("done");
+    expect(pane().children[4]!.textContent).toContain("Done.");
+  });
+
+  it("builds the same bubbles from a snapshot as the live stream drew", () => {
+    const shape = () => pane().children.map((r) => [r.dataset.kind, r.dataset.topic, chips(r), r.querySelector("[data-kind='activity']")?.dataset.status]);
     chat.appendTurn("user", "go", false, 1);
     chat.appendSystemInput("done\n\nok", { kind: "task-callback", taskId: "t", runId: "r0", sourceSessionId: null, source: { taskName: "r0" }, state: "succeeded" });
     activity.activityToolStart(1, "c1", "bash", {});
@@ -530,11 +597,21 @@ describe("turn cards", () => {
     chat.completeTurn("Launched.\n<topic>deploy</topic>", { completedAt: 5, durationMs: 1000, tokens: 1 });
     activity.activityToolStart(6, "c2", "bash", {});
     chat.interruptTurn();
+    activity.activityToolStart(7, "c3", "bash", {});
+    activity.activityToolEnd("c3", false, "");
+    chat.completeTurn("", undefined, "overloaded");
+    chat.appendTurn("error", "overloaded");
+    // Failed with a tool still owed: the failure names the group, not the cut.
+    activity.activityToolStart(8, "c4", "bash", {});
+    chat.completeTurn("", undefined, "overloaded");
+    chat.appendTurn("error", "overloaded");
     const live = shape();
     expect(live).toEqual([
-      ["time", "deploy"], ["user", "deploy"],
-      ["turn", "deploy", ["system", "activity", "assistant", "background-run"]],
-      ["turn", undefined, ["activity"]],
+      ["time", "deploy", [], undefined], ["user", "deploy", [], undefined],
+      ["assistant", "deploy", ["topic-tag", "system", "activity", "background-run"], "done"],
+      ["assistant", undefined, ["activity"], "interrupted"],
+      ["error", undefined, ["activity"], "failed"],
+      ["error", undefined, ["activity"], "failed"],
     ]);
     chat.resetChat();
     chat.renderSnapshot([
@@ -542,63 +619,56 @@ describe("turn cards", () => {
       { role: "system", text: "done\n\nok", origin: { kind: "task-callback", taskId: "t", runId: "r0", sourceSessionId: null, source: { taskName: "r0" }, state: "succeeded" } },
       { role: "assistant", text: "Launched.\n<topic>deploy</topic>", steps, meta: { completedAt: 5, durationMs: 1000, tokens: 1 } },
       { role: "assistant", text: "", steps: [{ kind: "tool", id: "c2", toolName: "bash", args: {}, done: false }] },
+      { role: "assistant", text: "", error: "overloaded", steps: [{ kind: "tool", id: "c3", toolName: "bash", args: {}, done: true }] },
+      { role: "assistant", text: "", error: "overloaded", steps: [{ kind: "tool", id: "c4", toolName: "bash", args: {}, done: false }] },
     ], "idle", [run("r1")]);
     expect(shape()).toEqual(live);
-    expect(pane().querySelectorAll("[data-frame]")).toEqual([]); // history replay does not animate
+    expect(pane().querySelectorAll("[data-enter]")).toEqual([]); // history replay does not animate
   });
 
-  it("opens and closes every line-level fold from one remembered choice; a line that arrives follows it", () => {
+  it("counts what an edit drops by messages, not bubbles: a cause chip is one, a bubble of chips alone none", () => {
+    const user = chat.appendTurn("user", "go", false, 1).parentElement!;
     callback("r1");
-    activity.activityToolStart(1, "c1", "bash", {});
-    activity.activityToolEnd("c1", false, "out");
-    activity.renderBackgroundRun(run("r2"));
+    chat.appendTurn("user", "and this", false, 2);
+    callback("r2");
     chat.completeTurn("Done.");
-    const folds = () => [
-      ...card().querySelectorAll("button[aria-expanded]").map((b) => b.getAttribute("aria-expanded")),
-      String(card().querySelector("details[data-kind='activity']")!.open),
-    ];
-    expect(folds()).toEqual(["false", "false", "false"]);
-    activity.setWorkOpen(true);
-    expect(folds()).toEqual(["true", "true", "true"]);
-    expect(stored.get("pier.work")).toBe("open");
-    // Tool rows inside the log stay per row: opening every output would fetch every output.
-    expect(card().querySelector("[data-kind='activity']")!.querySelector("details")!.open).toBe(false);
-    callback("r3");
-    activity.activityToolStart(2, "c2", "bash", {});
-    chat.completeTurn("Again.");
-    expect(folds()).toEqual(["true", "true"]);
-    // One line's own chevron overrides the choice for that line alone.
-    card().querySelector("button[aria-expanded]")!.onclick?.();
-    expect(folds()).toEqual(["false", "true"]);
-    activity.setWorkOpen(false);
-    expect(folds()).toEqual(["false", "false"]);
-    expect(pane().querySelectorAll("button[aria-expanded='true']")).toEqual([]);
+    activity.renderBackgroundRun(run("r3"));
+    // r1's chip-only bubble, the second user row, r2 and the reply: four messages.
+    fake(user.querySelector(".message-tools")!.querySelector("button")).onclick!();
+    expect(user.textContent).toContain("sending drops the 4 messages after this one");
   });
 
-  it("leaves a replayed log whose detail is still on the server closed, whatever the choice, until the reader opens it", async () => {
+  it("sends a picked next step as a reply to the bubble that offered it", () => {
+    chat.appendTurn("user", "go", false, 1);
+    chat.completeTurn("Done.\n\n---\n[Ship it] | [Wait]", { completedAt: 2, durationMs: 1, tokens: 1 });
+    const buttons = bubble().querySelectorAll("button").filter((b) => b.textContent === "Ship it");
+    buttons[0]!.onclick?.();
+    expect(send).toHaveBeenCalledWith("auto", "Ship it", { role: "assistant", at: 2, text: "Done.\n\n---\n[Ship it] | [Wait]" });
+  });
+
+  it("opens each chip on its own click only; a replayed log fetches its detail on the first", async () => {
     const fetch = vi.fn(async () => Response.json({ steps: [{ kind: "tool", id: "c1", toolName: "bash", args: { cmd: "ls" }, done: true }] }));
     vi.stubGlobal("fetch", fetch);
-    stored.set("pier.work", "open");
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },
       { role: "assistant", text: "Done.", steps: [{ kind: "tool", id: "c1", toolName: "bash", done: true }], meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
       { role: "user", text: "again", at: 3 },
       { role: "assistant", text: "Done.", steps, meta: { completedAt: 4, durationMs: 1, tokens: 1 } },
     ], "idle", []);
-    const [lazy, held] = pane().querySelectorAll("details[data-kind='activity']");
-    expect([lazy!.open, held!.open]).toEqual([false, true]);
+    const [lazy, held] = pane().querySelectorAll("[data-kind='activity']");
+    expect([lazy!.getAttribute("aria-expanded"), held!.getAttribute("aria-expanded")]).toEqual(["false", "false"]);
+    expect("lazy" in lazy!.dataset).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
-    activity.setWorkOpen(false);
-    activity.setWorkOpen(true);
-    expect([lazy!.open, held!.open]).toEqual([false, true]);
+    held!.onclick?.();
+    expect(held!.getAttribute("aria-expanded")).toBe("true");
     expect(fetch).not.toHaveBeenCalled();
-    // Opened by hand: fetched once, and from then on it follows the choice.
-    lazy!.open = true;
-    lazy!.dispatchEvent(new Event("toggle"));
+    // Tool rows inside the log stay per row: opening every output would fetch every output.
+    expect(details().at(-1)!.querySelector("details")!.open).toBe(false);
+    lazy!.onclick?.();
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect("lazy" in lazy!.dataset).toBe(false));
-    activity.setWorkOpen(false);
-    activity.setWorkOpen(true);
-    expect(lazy!.open).toBe(true);
+    lazy!.onclick?.();
+    lazy!.onclick?.();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 });

@@ -82,24 +82,27 @@ updates this document.
 - Assistant replies: solid reading surface, comfortable width.
 - During a turn, progress, thinking and tool activity live in expandable steps
   before the reply; after it, the final text is the reply — not duplicated, no
-  empty activity groups.
+  empty activity groups. The chip row draws first and the text streams under
+  it, so nothing moves when the turn ends.
 - Live rendering, restored history and reconnection replay tell one story.
 - Aborted work keeps its unfinished text; errors and states without a reply
   stay explicit. Nothing that happened may disappear.
 - Activity history limits never displace queued or running work.
-- System inputs (seed, callback, delegation) and run cards: one line at the divider's weight
-  — chevron, kind chip, topic, id in mono — opening in place to a wide neutral
-  card; failure text stays on the line, a failed callback red-chipped and an
-  interrupted one amber, so the count of lines is the count of things that
-  happened. Chat command answers stay open. Steps groups, system rows and run
-  cards share one chevron column — one inline padding, one chevron element —
-  folded or open.
-- A turn is one card: a hairline ring at the reply's radius around its cause
-  lines, steps lines, body and launched runs, on the lines' own material, the
-  reply keeping its reading surface inside; the ring fades in as the body
-  lands, never before, and reduced motion draws it at once. A topic bar runs
-  the card's height. One bar control, Show work, opens or closes every line
-  fold; no line summarises the others.
+- A turn is its reply bubble. Its process is one row of chips at the top —
+  the topic tag, then a chip per cause (seed, callback, delegation), steps
+  group and launched run, in arrival order — the text under it, next-step
+  buttons at the bottom. A chip is the `.run-label` material in its state
+  colour (a failed callback red, an interrupted one amber, running neutral
+  with a spinner) and the run's name in the bubble's type; the count of chips
+  is the count of things that happened, and no chip summarises the others.
+  An error or silent body carries the same row on its own material.
+- A chip is its fold: the button (`aria-expanded`, Enter/Space, a visible
+  focus ring; on touch a 44px hit area that does not grow the chip) whose
+  open state is a ring, laying its detail — the cause's neutral card, the
+  steps log, the run's head and prompt — under the row, at the bubble's
+  width, in chip order. Every chip starts closed and opens only by its own
+  click; there is no global open. Mode, model, duration and ids are the
+  opened head's, never the chip's. Chat command answers stay open cards.
 - A quote is a bar and two clamped lines at the top of the user's bubble, the
   bar in the quoted topic's colour, the excerpt in the bubble's own type at a
   step down; the row controls (Reply, Edit) share one gutter and one hover;

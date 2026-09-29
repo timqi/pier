@@ -50,7 +50,7 @@ vi.mock("./drawer.js", () => ({
 }));
 vi.mock("./turn-activity.js", () => ({
   activityThinking: vi.fn(), activityToolEnd: vi.fn(), activityToolStart: vi.fn(),
-  noteTurnError: vi.fn(), renderBackgroundRun: vi.fn(),
+  renderBackgroundRun: vi.fn(),
 }));
 vi.mock("./views.js", () => ({
   // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).

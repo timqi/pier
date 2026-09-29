@@ -51,11 +51,11 @@ it("tags a row once: one label, under the speaker caption, updated in place", ()
 it("filters the conversation's kinds to one topic and keeps the structure; off shows all", () => {
   const rows = {
     user: add("user", "a"), assistant: add("assistant", "b"), process: add("process", "a"), error: add("error"),
-    time: add("time"), activity: add("activity"), divider: add("divider"), pager: add("pager"), trim: add("trim"),
+    time: add("time"), divider: add("divider"), pager: add("pager"), trim: add("trim"),
   };
   topics.setTopicFilter("a");
   const hidden = () => Object.entries(rows).filter(([, r]) => r.hidden).map(([k]) => k);
-  expect(hidden()).toEqual(["assistant", "error", "time", "activity"]);
+  expect(hidden()).toEqual(["assistant", "error", "time"]);
   expect(turns().dataset.topicFilter).toBe("a");
   // A row that arrives under the filter stays in view, tagged elsewhere or
   // not, until the switch is flipped again; a re-tag alone never hides it.

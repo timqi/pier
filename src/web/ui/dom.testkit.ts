@@ -361,6 +361,7 @@ export class FakeElement extends EventTarget {
     setTimeout(() => this.dispatchEvent(new Event("close")));
   }
   scrollIntoView(): void {}
+  setSelectionRange(): void {}
   getAnimations(): Animation[] { return []; }
   getClientRects(): object[] { return []; }
   getBoundingClientRect(): { x: number; y: number; width: number; height: number; top: number; right: number; bottom: number; left: number } {

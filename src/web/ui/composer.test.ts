@@ -445,6 +445,15 @@ describe("the reply quote", () => {
     fake(strip().querySelector("button")).onclick!();
     expect(strip().classList.contains("hidden")).toBe(true);
   });
+
+  it("sends a next-step label as a reply to the bubble that offered it, the staged quote untouched", async () => {
+    composer.setQuote({ role: "user", at: noon, text: "earlier" });
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    await composer.send("auto", "Deploy", source);
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text)
+      .toBe("[re assistant 2024-06-01 12:00]\n> Merged.\n>\n> ---\n> [Deploy] | [Show diff]\n\nDeploy");
+    expect(strip().textContent).toBe("earlier");
+  });
 });
 
 it("ends the optimistic turn a continuous command never starts", async () => {

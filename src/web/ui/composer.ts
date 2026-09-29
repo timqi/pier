@@ -454,8 +454,9 @@ function autosize(): void {
 let sending = false; // uploads await; a second Enter meanwhile must not double-send
 
 /** `label` sends that text instead of the composer's — a next-step button
- *  click is a side action and must not consume the user's unsent draft. */
-export async function send(mode: "auto" | "steer", label?: string): Promise<void> {
+ *  click is a side action and must not consume the user's unsent draft, nor
+ *  its staged quote; `quote` is the reply that offered the label. */
+export async function send(mode: "auto" | "steer", label?: string, quote?: QuoteSource): Promise<void> {
   const typed = (label ?? input.value).trim();
   const files = label === undefined ? pendingFiles : [];
   const id = deps.sessionId();
@@ -474,8 +475,9 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     renderFileStrip();
   }
   // A command or skill ask is not a reply: the quote stays staged for the next message.
-  const quote = label === undefined && !/^[/%]/.test(typed) ? pendingQuote : null;
-  if (quote) setQuote(null);
+  const staged = label === undefined && !/^[/%]/.test(typed) ? pendingQuote : null;
+  if (staged) setQuote(null);
+  quote ??= staged ?? undefined;
   try {
     // Files first: their markers are part of the message text, so the upload
     // must land before the text exists.
@@ -490,7 +492,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
         saveDraft();
         pendingFiles = files.map(withUpload); // fresh uploads: the failed ones are spent
         renderFileStrip();
-        setQuote(quote);
+        setQuote(staged);
         return;
       }
       markers = uploaded;

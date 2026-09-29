@@ -54,7 +54,6 @@ import {
   activityThinking,
   activityToolEnd,
   activityToolStart,
-  noteTurnError,
   renderBackgroundRun,
 } from "./turn-activity.js";
 import {
@@ -373,7 +372,7 @@ function handleEvent(e: SessionEvent): void {
       break;
     case "turn-end":
       turnOpen = false;
-      completeTurn(e.text, e.meta);
+      completeTurn(e.text, e.meta, e.error);
       // meta carries the context size and the completion time — keep both live.
       if (e.meta) noteTurnMeta(e.meta);
       break;
@@ -388,7 +387,6 @@ function handleEvent(e: SessionEvent): void {
       scrollBottom();
       break;
     case "error":
-      noteTurnError();
       appendTurn("error", e.message);
       // A prompt Pi refused before its turn began (no model, no auth) has no
       // state event to follow: the optimistic streaming would never clear.
@@ -582,7 +580,7 @@ initChat({
   sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
   select: (id) => void select(id),
-  send: (mode, label) => void send(mode, label),
+  send: (mode, label, quote) => void send(mode, label, quote),
   ownTurn: (text) => {
     markOptimisticUser(text);
     ownState("streaming"); // an edit resend starts a turn

@@ -200,60 +200,65 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Chat pane (`chat.ts`, `composer.ts`)
 
-- Transcript: provisional text streams into the work log; tool/reasoning
-  boundaries retain it as progress; `turn-end` promotes the final answer
-  without duplicating it. Snapshot reconstruction folds intermediate assistant
-  messages, preserving user/system boundaries. Gap/day separators carry an age
-  refreshed every minute; exact timestamps on hover.
-- **Activity groups**: collapsible work log before the reply — thinking,
-  progress, tool activity; headline shows status, step count (every row:
-  thinking, progress, tool), duration; tool rows reveal args/output, thinking
-  rows tail-capped text; expanded logs scroll independently; simple replies
-  leave no empty log; interrupted work stays visible. System inputs
-  (seed, callback, delegation) are one line, opening to the card:
-  `↺ session seed · <reason> · <previous id8>`, `↩ callback · <state> · <run
-  name> · <badge> · <id8>`, `↗ delegation · <run name> · <badge> · <id8>`
-  (the glyphs are `ui/icons.ts` icons), where `<badge>` is the run's recorded
-  `tier · model id · reasoning` in quiet mono text, each part only when
-  recorded — below md the label and ids take the first line and the name and
-  badge the second, a tiered badge without its id (its tooltip has it) — and
-  `<id8>`
-  is the other session's id, a link to it, else the run id as text. A
-  click or ↵ expands in place; expansion is per row, in memory. A
-  `/status` answer, `Stayed silent — <reason>` and chat command answers stay
-  one open line or card. A compaction (Pi's automatic one) leaves one system
-  line, `context-compacted`, the only trace it leaves anywhere (§5).
-- **Task communication**: runs launched by `pier task run` create Background
-  Run rows, updated from `task-status` events and folded like a callback —
-  `✓ run · <state> · <run name> · <mode> · <duration> · <badge> · <id8>`, opening
-  to the prompt, kept open across updates; the status panel's In progress lists the
-  runs still in flight. A row whose run
-  holds pending `--after` messages says `N queued` (`queuedMessages`), and the
-  message's creation, delivery and expiry each emit `task-status`. Delegation and
-  callback inputs render as System input rows with a Session link and the run
-  id as text, never as user messages.
-- **Turn card**: every agent turn ends as one framed row (`data-kind="turn"`,
-  `chat.ts` `closeCard`) holding, in order, the cause lines (callbacks,
-  delegations, task messages, a seed — `data-cause`, never a user message),
-  the steps lines (`N steps · <secs>`, one per stretch of work, a steered
-  input between two), the body (the reply, `Stayed silent — <reason>`, an
-  error, or for an interrupted turn the steps line reading `interrupted · N
-  steps` as the whole content), then the runs the turn launched. Lines draw at
-  the pane's tail live; the frame closes when the body lands (`data-frame`,
-  a fade the reduced-motion query removes) and a run launched after the reply
-  joins the footer; replay builds the same cards unanimated. A reply with no
-  lines to adopt stays a bare row; a chat command's answer never joins a card.
-  No summary line: each line is its own fold. The bar's **Show work**
-  (`#work-toggle`, `localStorage` `pier.work`) opens or closes every
-  line-level fold at once and a line that arrives follows it; a line's own
-  chevron overrides for that line alone; tool rows inside the log stay per
-  row. A replayed steps log whose detail is still on the server (`data-lazy`)
-  stays closed until the reader opens it, whatever the choice — Show work
-  never fetches every turn's detail — and follows the choice once fetched.
+- Transcript: text streams into the turn's bubble under its chip row; a
+  tool/reasoning boundary moves it into the steps log as a progress row;
+  `turn-end` fills the bubble with the final answer without duplicating it.
+  Snapshot reconstruction folds intermediate assistant messages, preserving
+  user/system boundaries. Gap/day separators carry an age refreshed every
+  minute; exact timestamps on hover.
+- **Turn bubble**: every agent turn is one reply bubble (`chat.ts`
+  `chipInto`, `data-pending` until its body lands). At its top, one **chip
+  row** (`.chip-row`) — the topic tag first, then one chip per thing the turn
+  did, in arrival order, no summary, no cap: a cause (a callback, delegation,
+  task message or seed — `data-cause`, never a user message), a steps group
+  (`N steps · <secs>`, one per stretch of work, a steered input between two;
+  live `⟳ N steps · <secs> · writing…`; `failed · …` red, `interrupted · …`
+  amber), a launched run. Under the row the body: the reply, `Stayed silent
+  — <reason>`, an error on its own material, or nothing for a turn cut short
+  before it spoke. The bubble opens at the tail with its first chip or delta;
+  the body fills it; a run launched after the reply joins the row's end; a
+  user bubble in between leaves a chip-row-only bubble where it was. An
+  error is the body only once nothing is in flight — no text streaming, no
+  steps group open; a turn's own failure arrives as `turn-end` with `error`
+  and then the `error` event, in that order, so the turn-end closes the
+  group and the row that follows is the result. One reported mid-flight (a
+  notify failure, a title fetch) is a bare row above the bubble, which
+  stays pending, its group untouched. Replay builds the same bubbles
+  unanimated; a failed turn's steps chip is red live and replayed alike,
+  a tool it cut short included. A reply with no chips has no row; a
+  chat command's answer is its own open card, never a turn's.
+- **Chips** (`turn-activity.ts` `chip`): each is the button (`aria-expanded`)
+  over its own detail, laid under the row in chip order — the cause's card,
+  the steps log, the run's head and prompt. Every chip starts closed and
+  opens only by its click; opened details persist across a run's status
+  updates. Cause chips: `↺ session seed · <reason>`, `↩ callback · <state> ·
+  <run name>`, `↗ delegation · <run name>` (the glyphs are `ui/icons.ts`
+  icons), a failed callback red, an interrupted one amber. Run chips: `run ·
+  <state> · <run name>`, live across states. Mode, duration, `N queued`
+  (`queuedMessages`), the `tier · model id · reasoning` badge (each part only
+  when recorded; below md a tiered badge without its id, its tooltip has it)
+  and `<id8>` — the other session's id, a link to it, else the run id as
+  text — are the opened head's, never the chip's. The steps log: thinking,
+  progress, tool rows; tool rows reveal args/output, thinking rows
+  tail-capped text; an opened log scrolls independently and follows its
+  tail; simple replies leave no empty log; interrupted work stays visible. A
+  replayed log whose detail is still on the server (`data-lazy`) fetches it
+  on its first open, once. A compaction (Pi's automatic one) leaves one
+  system line, `context-compacted`, the only trace it leaves anywhere (§5).
+- **Task communication**: runs launched by `pier task run` are run chips of
+  the bubble that launched them, updated from `task-status` events; the
+  status panel's In progress lists the runs still in flight. The message's
+  creation, delivery and expiry each emit `task-status`. Delegation and
+  callback inputs are cause chips with a Session link in the head, never
+  user messages.
+- **Next steps**: a reply's trailing `[label]` line is a row of buttons at
+  the bubble's bottom, the only row that sends; a click sends the label as
+  a Reply to that bubble (`withQuote`), the composer's own staged quote
+  untouched.
 - **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
   (`replyTopic`) is tagged with its problem — a colour bar and a label, the
   colour a stable hash of the problem (`topics.ts` `topicHue`); the user
-  message above it and its card inherit; untagged rows carry nothing.
+  message above it inherits; untagged rows carry nothing.
 - **Edit**: any user message; sending rewinds the transcript to it and the
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy

@@ -15,8 +15,6 @@ vi.mock("./menu.js", () => ({
 }));
 vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./chat.js", () => ({ appendTurn: vi.fn() }));
-const work = vi.hoisted(() => ({ open: false, setWorkOpen: vi.fn((open: boolean) => { work.open = open; }) }));
-vi.mock("./turn-activity.js", () => ({ workOpen: () => work.open, setWorkOpen: work.setWorkOpen }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
 vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
 const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
@@ -71,7 +69,6 @@ beforeEach(async () => {
   current = undefined;
   conversation = false;
   drawer.head = undefined;
-  work.open = false;
   header = await import("./session-header.js");
   picker = await import("./model-picker.js");
   api = await import("./api.js");
@@ -289,16 +286,3 @@ it("keeps the cached list and reports the failure when the read fails", async ()
   expect(picker.modelPicker).toHaveBeenCalledTimes(2);
 });
 
-// One control for every fold in the pane; the glyph says what a press does next.
-it("flips every line-level fold from the bar and names the next press", () => {
-  const toggle = fake(document.querySelector("#work-toggle"));
-  expect(toggle.getAttribute("aria-label")).toBe("Show work");
-  expect(toggle.getAttribute("aria-pressed")).toBe("false");
-  toggle.onclick?.();
-  expect(work.setWorkOpen).toHaveBeenLastCalledWith(true);
-  expect(toggle.getAttribute("aria-label")).toBe("Hide work");
-  expect(toggle.getAttribute("aria-pressed")).toBe("true");
-  toggle.onclick?.();
-  expect(work.setWorkOpen).toHaveBeenLastCalledWith(false);
-  expect(toggle.getAttribute("aria-label")).toBe("Show work");
-});

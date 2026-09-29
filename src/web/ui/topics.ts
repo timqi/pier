@@ -43,23 +43,28 @@ export const recentDone = (list = seenTopics(), n = 5): string[] =>
 
 // --- tagging ----------------------------------------------------------------------------
 
+/** The tag is the first chip of a reply's chip row (chat.ts chipSlots), or
+ *  the bubble's first line where there is no row. */
 export function tagRow(row: HTMLElement, problem: string): void {
   row.dataset.topic = problem;
   row.style.setProperty("--topic", topicColour(problem));
   let label = row.querySelector<HTMLElement>(".topic-tag");
   if (!label) {
-    label = h("div", "topic-tag mb-1 text-[11px] leading-tight");
-    const caption = row.querySelector(".speaker-line");
+    const kids = [...row.children];
+    const chipRow = kids.find((el) => el.classList.contains("chip-row"));
+    // In a chip row the row's gap spaces it; alone, its own margin does.
+    label = h("div", `topic-tag text-[11px] leading-tight ${chipRow ? "" : "mb-1"}`);
+    const caption = kids.find((el) => el.classList.contains("speaker-line"));
     if (caption) caption.after(label);
-    else row.prepend(label);
+    else (chipRow ?? row).prepend(label);
   }
   label.textContent = problem;
   label.title = problem;
   applyTopicFilterTo(row);
 }
 
-/** A reply names its topic; its card holds it by containment, and the user
- *  message it answers inherits. `row` is the reply's own bubble. */
+/** A reply names its topic, and the user message it answers inherits. `row`
+ *  is the reply's bubble. */
 export function tagReply(row: HTMLElement, raw: string): void {
   const topic = replyTopic(raw);
   if (!topic) return;
@@ -71,11 +76,9 @@ export function tagReply(row: HTMLElement, raw: string): void {
     el.style.setProperty("--topic", topicColour(topic));
     applyTopicFilterTo(el);
   };
-  const card = row.parentElement?.dataset.kind === "turn" ? row.parentElement : null;
-  if (card) inherit(card);
-  for (let el = (card ?? row).previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
+  for (let el = row.previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
-    if (kind === "assistant" || kind === "turn" || kind === "divider" || kind === "pager") break;
+    if (kind === "assistant" || kind === "divider" || kind === "pager") break;
     if (kind !== "user") continue;
     if (el.dataset.topic) break;
     tagRow(el, topic);
@@ -88,15 +91,13 @@ export function tagReply(row: HTMLElement, raw: string): void {
 // --- the filter -------------------------------------------------------------------------
 
 /** Structure, not conversation: a filtered pane still says where sessions begin and end. */
-const FILTERED = new Set(["user", "assistant", "system", "activity", "background-run", "turn", "error", "time"]);
+const FILTERED = new Set(["user", "assistant", "system", "error", "time"]);
 let filter: string | null = null;
 let barChip: HTMLElement | null = null;
 
 export const topicFilter = (): string | null => filter;
 
 export function applyTopicFilterTo(row: HTMLElement): void {
-  // A card's rows go with the card: a reply hidden inside a visible card is a hole.
-  if (row.parentElement?.dataset.kind === "turn") return;
   row.hidden = filter !== null && !("live" in row.dataset) && FILTERED.has(row.dataset.kind ?? "") && row.dataset.topic !== filter;
 }
 
