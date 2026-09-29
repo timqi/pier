@@ -162,6 +162,14 @@ let follow = true;
  *  buttons), which judged by the bottom alone reads as "the user left". */
 let lastTop = 0;
 
+/** Every write of ours moves `lastTop` with it: a pin taken mid-rebuild (the
+ *  streamed block gone, the final reply not yet in) lands above where the
+ *  reply then ends, and that event must not read as a drag upward. */
+function setTop(top: number): void {
+  turnsPane.scrollTop = top;
+  lastTop = turnsPane.scrollTop;
+}
+
 turnsPane.addEventListener("scroll", () => {
   const top = turnsPane.scrollTop;
   // A few pixels of slack: a pin lands on a fractional offset, and rounding
@@ -180,7 +188,7 @@ function repin(): void {
   pinning = requestAnimationFrame(() => {
     pinning = 0;
     // Re-checked: a frame is long enough for the user to have scrolled away.
-    if (follow && !bulk) turnsPane.scrollTop = turnsPane.scrollHeight;
+    if (follow && !bulk) setTop(turnsPane.scrollHeight);
   });
 }
 
@@ -204,14 +212,14 @@ export function followTail(): void {
  *  px above the end; follow stays armed only if that is the end, or the next
  *  repin would take them to the tail. */
 export function keepScroll(fromBottom: number): void {
-  turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
+  setTop(turnsPane.scrollHeight - fromBottom);
   follow = atBottom();
 }
 
 export function scrollBottom(force = false): void {
   if (bulk) return;
   if (force) follow = true;
-  if (follow) turnsPane.scrollTop = turnsPane.scrollHeight;
+  if (follow) setTop(turnsPane.scrollHeight);
 }
 
 /** How long a revealed row stays lit — the CSS animation's length, kept here

@@ -3,6 +3,7 @@
 // opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemInputOrigin } from "../../core/types.js";
+import { STREAM_PAINT_MS } from "./dom.js";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
 let doc: FakeDocument;
@@ -331,6 +332,98 @@ it("keeps a reader put above the tail after a re-render, and follows one who was
   pane.scrollTop = 1500;
   chat.scrollBottom();
   expect(pane.scrollTop).toBe(2000);
+});
+
+// The final reply replaces the streamed block: the pin taken between the two
+// sees the shorter pane, and its scroll event lands after the reply grew it back.
+describe("tail follow across the final render", () => {
+  let mutated: () => void;
+  let frames: FrameRequestCallback[];
+  let pane: FakeElement;
+  let top: number;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    doc = installPage();
+    frames = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal("ResizeObserver", class { observe(): void {} });
+    vi.stubGlobal("MutationObserver", class { constructor(cb: () => void) { mutated = cb; } observe(): void {} });
+    pane = doc.querySelector("#turns")!;
+    // A layout: the pane is as tall as its text, and scrollTop clamps to it.
+    top = 0;
+    const height = (): number => 500 + pane.textContent.length * 20;
+    Object.defineProperties(pane, {
+      clientHeight: { value: 500 },
+      scrollHeight: { get: height },
+      scrollTop: { get: () => top, set: (v: number) => { top = Math.max(0, Math.min(v, height() - 500)); } },
+    });
+    chat = await import("./chat.js");
+    chat.initChat({
+      sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming",
+      select, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+    });
+  });
+
+  /** One frame: the scroll event — a browser fires one only when the offset
+   *  moved — then the observers' re-pin. */
+  let seen = 0;
+  const frame = (): void => {
+    if (top !== seen) pane.dispatchEvent(new Event("scroll"));
+    seen = top;
+    mutated();
+    for (const cb of frames.splice(0)) cb(0);
+  };
+  const atEnd = (): boolean => top === pane.scrollHeight - 500;
+
+  it("keeps a reader at the tail pinned to the end of the rendered reply", async () => {
+    chat.appendTurn("user", "go", false, 1);
+    const activity = await import("./turn-activity.js");
+    activity.activityToolStart(2, "t1", "bash", { command: "ls" });
+    activity.activityToolEnd("t1", false, "ok");
+    chat.appendDelta("Looking at it");
+    frame();
+    expect(atEnd()).toBe(true);
+    chat.completeTurn(`Looking at it.\n\n${"A long paragraph of the final answer. ".repeat(20)}`, { completedAt: 3, durationMs: 1, tokens: 1 });
+    frame();
+    expect(atEnd()).toBe(true);
+  });
+
+  it("leaves a reader who scrolled up where they are while the reply streams and lands", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      chat.appendTurn("user", "go", false, 1);
+      chat.appendDelta("Looking at it. ".repeat(20));
+      frame();
+      expect(atEnd()).toBe(true);
+      pane.scrollTop = 100;
+      frame();
+      const before = pane.scrollHeight;
+      chat.appendDelta("More. ".repeat(20));
+      vi.advanceTimersByTime(STREAM_PAINT_MS); // the coalesced paint of the second delta
+      frame();
+      expect(pane.scrollHeight).toBeGreaterThan(before);
+      chat.completeTurn(undefined, { completedAt: 3, durationMs: 1, tokens: 1 });
+      frame();
+      expect(top).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases follow for a reader who drags up between the final render and its frame", () => {
+    chat.appendTurn("user", "go", false, 1);
+    chat.appendDelta("Looking at it. ".repeat(20));
+    frame();
+    expect(atEnd()).toBe(true);
+    chat.completeTurn(`Looking at it.\n\n${"A long paragraph of the final answer. ".repeat(20)}`, { completedAt: 3, durationMs: 1, tokens: 1 });
+    pane.scrollTop = 100;
+    frame();
+    expect(top).toBe(100);
+    chat.scrollBottom(); // unforced: moves only a reader who is still followed
+    frame();
+    expect(top).toBe(100);
+  });
 });
 
 describe("file references", () => {
