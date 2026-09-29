@@ -39,7 +39,7 @@ lives in prompt text the head must copy forward, so it drifts.
   lead's turns do (`LEAD_TURN`). The end delivers one callback to the root
   run's callback target, the head's usual card: the last run's result, headed
   by a line the head reads without parsing —
-  `Goal: review clean after 1 review round, waiting on you to merge` · `Goal: needs your decision (round 2)` ·
+  `Goal: review clean after 1 review round, waiting on you to merge` · `Goal: needs your decision after 2 review rounds` ·
   `Goal: 3 review rounds, still findings` · `Goal: failed at review — <why>`.
   The runs in between are ordinary ledger rows: the status panel, the run
   chips and `pier task runs` show each as it happens, so nothing that

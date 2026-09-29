@@ -178,7 +178,7 @@ describe("a --until merged goal", () => {
     const root = await work.launch();
     const first = await work.ended(root);
     expect(first.goal).toMatchObject({ outcome: "decision", round: 0, step: "work" });
-    expect(first.text).toMatch(/^Goal: needs your decision \(round 0\)\n/);
+    expect(first.text).toMatch(/^Goal: needs your decision\n/);
     expect(work.created).toEqual(["s1:test/model"]);
     expect(first.runs).toHaveLength(1);
     work.service.stop();
@@ -188,6 +188,12 @@ describe("a --until merged goal", () => {
     expect(second.goal).toMatchObject({ outcome: "decision", step: "review" });
     onlyTheEndCalledBack(second.runs);
     review.service.stop();
+
+    const fix = rig({ s1: ["built", "Needs your decision\n- rename it?"], s2: ["a.ts:1 · off by one · use <=\nVerdict: findings"] });
+    const third = await fix.ended(await fix.launch());
+    expect(third.goal).toMatchObject({ outcome: "decision", round: 1, step: "work" });
+    expect(third.text).toMatch(/^Goal: needs your decision after 1 review round\n/);
+    fix.service.stop();
   });
 
   it("fails on a failed review, and on a review with no verdict line", async () => {

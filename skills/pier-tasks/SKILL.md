@@ -47,7 +47,7 @@ then `Needs your decision` only when something does; it stops only on a
 destructive step or a question only you can answer — answer with
 `--run <id> --prompt`; a step the user approved goes in the prompt as
 `Approved: <step>`. Core owns the join: never aggregate members by hand.
-A goal callback opens with one of four lines: `Goal: review clean, waiting on you to merge` or `Goal: review clean after N review rounds, waiting on you to merge` means ready, unmerged; `Goal: needs your decision (round N)` asks you to decide; `Goal: N review rounds, still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure. The cap defaults to 3 rounds and `--rounds` accepts 1–9. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; `pier task cancel --run <root>` cancels the goal.
+A goal callback opens with one of four lines: `Goal: review clean, waiting on you to merge` or `Goal: review clean after N review rounds, waiting on you to merge` means ready, unmerged; `Goal: needs your decision` or `Goal: needs your decision after N review rounds` asks you to decide; `Goal: N review rounds, still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure. The cap defaults to 3 rounds and `--rounds` accepts 1–9. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; `pier task cancel --run <root>` cancels the goal.
 The merge and the worktree's removal are the user's decision, never a worker's or a lead's own: a prompt never tells a child to merge until the user said yes, and then `--run <id> --prompt` carries it as `Approved: merge into <target> and remove the worktree`.
 
 ## Model choice
