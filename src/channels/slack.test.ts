@@ -1344,6 +1344,9 @@ describe("the home chat", () => {
       expect(client.sent).toEqual([]);
       await channel.notify(`${HOME}/1900.000100`, { text: "✓ storage", origin: callback });
       expect(client.sent.map((p) => p.thread_ts)).toEqual(["1900.000100"]);
+      // A failed run's trace never depends on the head choosing to speak.
+      await channel.notify(HOME, { text: "✗ storage", origin: { ...callback, state: "failed" } });
+      expect(client.sent).toHaveLength(2);
     });
   });
 });

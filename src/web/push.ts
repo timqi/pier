@@ -206,8 +206,8 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     if (e.state === "streaming") {
       if (watching.has(e.sessionId)) return;
       let text = "";
-      // The last turn that said something: a run ends one turn per answer, and
-      // a silence after the answer would replace it with "Turn finished."
+      // The last turn that spoke: a run ends one turn per answer, and a silent
+      // turn after the answer (a callback's stage) must not replace it.
       const stop = hub.subscribe(e.sessionId, (ev) => {
         if (ev.type !== "turn-end" || !ev.text) return;
         if (!text || !isSilentReply(splitReply(ev.text))) text = ev.text;

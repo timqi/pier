@@ -18,7 +18,7 @@ import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
-import { awaitsTurn, isSilentReply } from "../core/reply.js";
+import { awaitsTurn, isSilentReply, shownByStatus } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -511,7 +511,7 @@ export class SlackChannel implements Channel {
       return;
     }
     // The home's main flow shows task progress in the status message; the web keeps the cards.
-    if (!to.threadTs && (note.origin.kind === "task-delegation" || note.origin.kind === "task-callback")) {
+    if (!to.threadTs && shownByStatus(note.origin)) {
       return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
     const ts = await this.out.note(to.channel, to.threadTs, note);

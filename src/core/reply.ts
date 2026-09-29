@@ -50,6 +50,12 @@ export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
 export const awaitsTurn = (origin: NoteOrigin): boolean =>
   origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed";
 
+/** Is this note progress the home chat's status message already shows? A run
+ *  that failed is not: its trace must not depend on the head choosing to speak. */
+export const shownByStatus = (origin: NoteOrigin): boolean =>
+  (origin.kind === "task-delegation" || origin.kind === "task-callback")
+  && (origin.state === undefined || origin.state === "succeeded" || origin.state === "skipped");
+
 /** Punctuation that may be lifted out of a `**strong**` run: nothing a reader
  *  can see changes, and the delimiter comes off a character the parser refuses
  *  to close on. */

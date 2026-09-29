@@ -76,11 +76,27 @@ describe("the status message", () => {
     expect(edits.calls).toEqual(["post D1 > a", "edit m1 > b", "delete m1", "post D1 > b"]);
     expect(edits.logged[0]).toMatch(/^status: edit failed/);
 
+    db.exec("DELETE FROM status_messages");
     const posts = rig({ post: true });
-    await posts.status.show("D2", view("a"));
-    await posts.status.show("D2", view("a"));
-    expect(posts.calls).toEqual(["post D2 > a", "post D2 > a"]);
+    await posts.status.show("D1", view("a"));
+    await posts.status.show("D1", view("a"));
+    expect(posts.calls).toEqual(["post D1 > a", "post D1 > a"]);
     expect(posts.logged).toHaveLength(2);
+  });
+
+  it("a home moved within the platform loses the old chat's card", async () => {
+    const { status, calls } = rig();
+    await status.show("D1", view("a"));
+    await status.show("D2", view("a"));
+    expect(calls).toEqual(["post D1 > a", "delete m1", "post D2 > a"]);
+  });
+
+  it("a main-flow post after a shown view re-posts it at once", async () => {
+    const { status, calls } = rig();
+    await status.show("D1", view("a"));
+    status.behind("D1");
+    await status.show("D1", view("a"));
+    expect(calls).toEqual(["post D1 > a", "delete m1", "post D1 > a"]);
   });
 
   it("a burst runs one refresh at a time and ends on the newest view", async () => {

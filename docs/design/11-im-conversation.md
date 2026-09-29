@@ -99,8 +99,8 @@ Both platforms, the same rule.
   before, in the main flow.
 - **Then**: the user's replies in the thread are the lead's messages; a button
   tap echoes into the thread; a reply carrying `Design final:` is recorded as
-  today (`designFinal`, `router.onTurnEnd`) and the head's callback note
-  appears in the main flow. The thread stays bound after the design closes;
+  today (`designFinal`, `router.onTurnEnd`); the head's callback note is the
+  status message's, not the main flow's (§Status). The thread stays bound after the design closes;
   it reaches the same session.
 - **The root is edited in place** (`Channel.editRoot(thread, note)`: Slack
   `chat.update`, Lark `message.patch`) on two transitions only: `Design
@@ -127,9 +127,9 @@ thread half only for the home chat; any other is refused.
 
 | What | Renders as |
 | --- | --- |
-| the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` |
+| the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` (a silent main-flow reply: §Status) |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, 👀 on the echo, the row retired (Lark: button value `root: ""` names the home) |
-| a task callback / delegation | main flow: nothing (logged at debug); the status message and the web timeline carry it. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
+| a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; the status message and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | a failure | `⚠ failed` note |
@@ -170,8 +170,12 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   view's text, one per home chat. Same text as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place, or deleted and posted
   anew when the adapter has posted a reply, note or thread root into the main
-  flow since. A user's own message never moves it. One refresh runs at a time;
-  the newest waiting view replaces the older.
+  flow since — at once when a view has been shown, else on the next refresh;
+  `startChannels` refreshes once, after the restart note. A user's own message
+  never moves it. One refresh runs at a time; the newest waiting view replaces
+  the older. A home moved within the platform loses the old chat's card on the
+  next refresh; moved across platforms, the old card stays until that adapter
+  refreshes.
 - A silent head reply in the main flow posts its `stayed silent — <reason>`
   footer only when its turn settled a message and opened no item; otherwise
   nothing — the reaction or the status message is the trace.
@@ -262,8 +266,10 @@ through what the head launches (`pier task`), never by a group's message.
   nothing else there would say so (`owesNotice`, `tasks/service.ts`): an
   interruption always; a failure, or a cancel no one asked for the user (asked
   by a session other than the head — not the head's, a cascade's or a
-  first-wins join's), only when its result goes to a lead or nobody, since the
-  head's callback note already carries it. A run that restarts the service
+  first-wins join's), only when its result goes to a lead or nobody: to the
+  head, its callback note is posted in the main flow even there — a note whose
+  `origin.state` is not `succeeded`/`skipped` is never left to the status
+  message (`shownByStatus`, `core/reply.ts`). A run that restarts the service
   resumes after it; it is not interrupted and needs no exemption.
 
 ## Storage
@@ -321,9 +327,11 @@ through what the head launches (`pier task`), never by a group's message.
 
 ## Acceptance
 
-- A day of use from the phone: every reply, callback, seed and `/status`
-  answer of the head appears in the DM's main flow in order, with 👀 on each
-  message until answered; nothing appears twice on the phone (no push beside
+- A day of use from the phone: every spoken reply, seed and `/status` answer
+  of the head appears in the DM's main flow in order, a message wears its
+  item's state until it is done, one status message shows what is open, and a
+  callback shows only as that message moving unless a run failed or the head
+  speaks (§Status); nothing appears twice on the phone (no push beside
   the DM); the web timeline matches.
 - Disabling the platform in the Console returns the head to the web with
   Web Push, with no restart.

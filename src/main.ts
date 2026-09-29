@@ -197,8 +197,8 @@ const channels = new ChannelRuntime(channelStore, router, chain, control, conver
  *  item, coalesced: one turn end fires several. */
 const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state"]);
 let statusTimer: NodeJS.Timeout | undefined;
-hub.subscribeWorkspace((e) => {
-  if (!STATUS_EVENTS.has(e.type) || statusTimer) return;
+const refreshStatus = (): void => {
+  if (statusTimer) return;
   statusTimer = setTimeout(() => {
     statusTimer = undefined;
     try {
@@ -209,6 +209,9 @@ hub.subscribeWorkspace((e) => {
       log.error("status: the open items could not be read", err);
     }
   }, 1500);
+};
+hub.subscribeWorkspace((e) => {
+  if (STATUS_EVENTS.has(e.type)) refreshStatus();
 });
 /** The head answers in the home chat while its adapter runs (docs/design/11), else on
  *  the web with Web Push; an older member gets no home key, or an adapter's start
@@ -249,6 +252,8 @@ const tellChats = (): Promise<void> =>
 const startChannels = async (): Promise<void> => {
   await channels.reload();
   await tellChats();
+  // The restart note landed above the status message; and a home moved needs its first.
+  refreshStatus();
 };
 /** Adapters re-read their configuration and sessions are let go, so the next
  *  message re-opens them with current skills, extensions, prompts and

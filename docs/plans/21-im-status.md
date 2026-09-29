@@ -100,6 +100,9 @@ the item is done:
 - Pinning the status message; a status message in any chat but the home; a
   per-thread status.
 - A reaction on a message answered on the web (there is no message).
+- A home moved to the other platform leaves the old platform's status
+  message posted until that adapter next refreshes; within one platform the
+  old chat's card is deleted on the next refresh.
 
 ## Tests
 
