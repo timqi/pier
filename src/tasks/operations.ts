@@ -264,7 +264,7 @@ export async function handleTask(
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
         if (until(entry) !== undefined || (entry.task_id !== undefined && until(definitions.get(requiredString(entry.task_id, "task_id"))) !== undefined)) {
-          throw new Error("--until merged is one run's loop; a --member cannot carry it");
+          throw new Error("--until reviewed is one run's loop; a --member cannot carry it");
         }
         resolved.push(entry.task_id === undefined
           ? await resolveDraft(definitions, menu, notLead(entry), callerSessionId)
@@ -282,11 +282,11 @@ export async function handleTask(
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     if (until(draft) !== undefined) {
-      if (record(draft)?.action !== undefined) throw new Error("--until merged applies to a fresh --prompt run, not --bash or --session");
-      if (input.callback === "none") throw new Error("--until merged reports its end as a callback; callback none has nobody to tell");
+      if (record(draft)?.action !== undefined) throw new Error("--until reviewed applies to a fresh --prompt run, not --bash or --session");
+      if (input.callback === "none") throw new Error("--until reviewed reports its end as a callback; callback none has nobody to tell");
     }
     if (input.task_id !== undefined && until(definitions.get(requiredString(input.task_id, "task_id"))) !== undefined) {
-      throw new Error("--until merged applies to a fresh --prompt run, not a saved definition (--task-id)");
+      throw new Error("--until reviewed applies to a fresh --prompt run, not a saved definition (--task-id)");
     }
     const task = draft
       ? await resolveDraft(definitions, menu, notLead(draft), callerSessionId)
@@ -354,11 +354,16 @@ export async function handleTask(
     if (goal?.finishedAt === null && isTerminal(run.state)) {
       throw new Error(`run ${run.id} is in a goal (${goalStepText(goal)}); cancel it or wait for its end`);
     }
+    const goalAgain = input.until !== undefined;
+    if (goalAgain) {
+      if (input.until !== "reviewed" && input.until !== "merged") throw new Error("until must be reviewed");
+      if (!isTerminal(run.state)) throw new Error(`run ${run.id} is ${run.state}: --until reviewed resumes an ended goal's root; steer it without --until`);
+    }
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
       const callbackMode = callbackModeOf(input);
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
-      const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true });
+      const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true }, goalAgain);
       return { delivery: "resume", run: receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId) };
     }
     if (input.callback !== undefined || input.callback_session_id !== undefined) {

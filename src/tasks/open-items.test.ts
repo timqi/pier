@@ -234,7 +234,7 @@ describe("the open items", () => {
     expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("pending release");
   });
 
-  // The goal, not the stage or the root run's state, says where a `--until merged` item stands.
+  // The goal, not the stage or the root run's state, says where a `--until reviewed` item stands.
   it("reads a goal's item from its goal: live, a decision, the cap, clean, failed", () => {
     const r = rig();
     const now = r.now;
@@ -271,14 +271,14 @@ describe("the open items", () => {
     ]);
     expect(openItemsStatus(open, now).text.split("\n")).toEqual([
       "Waiting on you",
-      "- goal decision — worker building (waiting on you) · run decision succeeded 1m ago · until merged: waiting on you",
-      "- goal cap — worker building (waiting on you) · run cap succeeded 1m ago · until merged: 3/3 rounds, still findings",
-      "- goal done — worker building (waiting on you) · run done succeeded 1m ago · until merged: review clean, waiting on you",
+      "- goal decision — worker building (waiting on you) · run decision succeeded 1m ago · until reviewed: waiting on you",
+      "- goal cap — worker building (waiting on you) · run cap succeeded 1m ago · until reviewed: 3/3 rounds, still findings",
+      "- goal done — worker building (waiting on you) · run done succeeded 1m ago · until reviewed: review clean, waiting on you",
       "In progress",
-      "- goal live — worker building (running) · run live succeeded 1m ago · until merged: re-review 2/3",
-      "- goal failed — worker building (stopped) · run failed succeeded 1m ago · until merged: failed: no verdict",
+      "- goal live — worker building (running) · run live succeeded 1m ago · until reviewed: re-review 2/3",
+      "- goal failed — worker building (stopped) · run failed succeeded 1m ago · until reviewed: failed: no verdict",
       "- goal merged — worker building (pending release) · run merge succeeded 1m ago",
-      "- goal legacy — worker building (pending release) · run legacy succeeded 1m ago · until merged: merged",
+      "- goal legacy — worker building (pending release) · run legacy succeeded 1m ago · until reviewed: merged",
     ]);
   });
 

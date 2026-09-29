@@ -115,7 +115,7 @@ export const runStatus = (r: LedgerRun, now: number): string =>
 export const workerCounts = (workers: Record<TaskRunState, number>): string =>
   TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`).join(", ") || "none";
 
-/** A `--until merged` goal as core sees it: tasks/types.ts `OpenRun.goal`, structurally. */
+/** A `--until reviewed` goal as core sees it: tasks/types.ts `OpenRun.goal`, structurally. */
 interface RunGoal {
   step: "work" | "review" | "merge";
   round: number;
@@ -144,7 +144,7 @@ const goalText = (g: RunGoal): string => {
 export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, number>; goal?: RunGoal }, now: number): string =>
   r.state === NOT_IN_LEDGER
     ? `run ${r.runId} — ${NOT_IN_LEDGER}`
-    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}${r.goal ? ` · until merged: ${goalText(r.goal)}` : ""}`;
+    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}${r.goal ? ` · until reviewed: ${goalText(r.goal)}` : ""}`;
 
 /** The one open-item status (tasks/types.ts `OpenStatus`) that asks anything of the user:
  *  what `/status`, the status panel, its chip's `needs you` and the app badge group by. */

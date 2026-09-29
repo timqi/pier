@@ -129,9 +129,10 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     launch.design = true;
   }
   if (value.until !== undefined) {
-    if (value.until !== "merged") throw new Error("agent until must be merged");
+    // `merged` is the stored and the typed alias: the loop ends at the review, never the merge.
+    if (value.until !== "reviewed" && value.until !== "merged") throw new Error("agent until must be reviewed");
     if (launch.role) throw new Error("agent until applies to a worker, not a lead");
-    launch.until = "merged";
+    launch.until = "reviewed";
   }
   if (value.rounds !== undefined) {
     const rounds = value.rounds;
