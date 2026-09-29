@@ -41,6 +41,7 @@ describe("pier task", () => {
       [["stats", "--days", "7"], { operation: "stats", days: 7 }],
       [["run", "--prompt", "design it", "--name", "d", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", name: "d", launch: { model: "opus", role: "lead" } }],
       [["run", "--prompt", "design it", "--name", "d", "--role", "lead", "--design"], { operation: "run", prompt: "design it", name: "d", launch: { role: "lead", design: true } }],
+      [["run", "--prompt", "build it", "--name", "b", "--role", "lead", "--worktree", "feat"], { operation: "run", prompt: "build it", name: "b", launch: { role: "lead", worktree: "feat" } }],
       [["run", "--prompt", "fix it", "--name", "f", "--model", "balanced", "--worktree", "fix-x"], { operation: "run", prompt: "fix it", name: "f", launch: { model: "balanced", worktree: "fix-x" } }],
       // 0 passes as typed; definitions.ts drops the key, and with it the goal.
       [["run", "--prompt", "fix it", "--name", "f", "--model", "balanced", "--rounds", "0"], { operation: "run", prompt: "fix it", name: "f", launch: { model: "balanced", rounds: 0 } }],
@@ -205,7 +206,11 @@ describe("pier task", () => {
       [["cancel"], "task: cancel takes exactly one of --run or --group"],
       [["recover", "--run", "r", "--group", "g", "--reason", "x"], "task: recover takes exactly one of --run or --group"],
       [["recover", "--run", "r"], "task: recover needs --reason"],
-      [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a whole number of seconds"],
+      [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a positive whole number of seconds"],
+      [["run", "--prompt", "x", "--name", "n", "--timeout", "0"], "task: --timeout must be a positive whole number of seconds"],
+      [["run", "--prompt", "x", "--name", "n", "--timeout", "86401"], "task: --timeout must be at most 86400 seconds"],
+      [["run", "--prompt", " ", "--name", "n"], "task: --prompt is empty"],
+      [["run", "--prompt", "x", "--name", " "], "task: a new run needs --name: the session's title, a few words in the user's language"],
       [["run"], "task: a new run needs --prompt, --bash or --task-id"],
       [["run", "--prompt", "x", "--bash", "y"], "task: a run takes exactly one of --prompt or --bash"],
       [["run", "--bash", "x", "--model", "gpt"], "task: --model/--thinking/--role/--design apply to a prompt, not --bash"],
@@ -229,7 +234,8 @@ describe("pier task", () => {
       [["run", "--bash", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --bash"],
       [["run", "--task-id", "t1", "--rounds", "2"], "task: --rounds applies to a fresh --prompt run, not beside --task-id"],
       [["run", "--session", "s1", "--prompt", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --session"],
-      [["run", "--prompt", "x", "--name", "n", "--role", "lead", "--rounds", "2"], "task: --rounds applies to a fresh --prompt run, not beside --role"],
+      [["run", "--prompt", "x", "--name", "n", "--role", "lead", "--rounds", "2"], "task: --rounds applies to a worker, not beside --role"],
+      [["run", "--prompt", "x", "--name", "n", "--role", "lead", "--worktree", "b", "--review-model", "hardest"], "task: --review-model applies to a worker, not beside --role"],
       [["run", "--run", "r1", "--prompt", "x", "--rounds", "2", "--after"], "task: --rounds resumes an ended goal's root; --after queues behind a running turn"],
       [["run", "--run", "r1", "--prompt", "x", "--review-model", "hardest"], "task: --review-model beside --run applies with --rounds"],
       [["run", "--run", "r1", "--prompt", "x", "--worktree", "b"], "task: --worktree does not apply to an existing run (--run)"],
@@ -240,7 +246,7 @@ describe("pier task", () => {
       [["save", "--name", "n", "--prompt", "x", "--watch", "true"], "task: --watch and --every go together"],
       [["save", "--name", "n", "--prompt", "x", "--cron", "* * * * *", "--tz", "UTC", "--every", "5"], "task: a task has one trigger: --cron/--tz or --watch/--every/--repeat"],
       [["save", "--name", "n", "--bash", "x", "--model", "gpt"], "task: --model/--thinking apply to a prompt, not --bash"],
-      [["save", "--name", "n", "--prompt", "x", "--watch", "true", "--every", "soon"], "task: --every must be a whole number of seconds"],
+      [["save", "--name", "n", "--prompt", "x", "--watch", "true", "--every", "soon"], "task: --every must be a positive whole number of seconds"],
     ];
     for (const [argv] of bad) expect(await run(...argv), argv.join(" ")).toBe(2);
     expect(posted).toEqual([]);

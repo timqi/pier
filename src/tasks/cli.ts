@@ -90,7 +90,10 @@ const flagsOf = (values: Values): Flag[] => (Object.keys(values) as Flag[]).filt
 const seconds = (flag: Flag, raw: string | boolean | undefined): number | undefined => {
   if (raw === undefined) return undefined;
   const n = Number(raw);
-  return Number.isInteger(n) ? n : refuse(`--${flag} must be a whole number of seconds`);
+  if (!Number.isInteger(n) || n < 1) refuse(`--${flag} must be a positive whole number of seconds`);
+  // parseDraft's bound, here so no worktree is made for a run it then refuses.
+  if (flag === "timeout" && n > 86_400) refuse("--timeout must be at most 86400 seconds");
+  return n;
 };
 
 /** `launch` as the server takes it: `model` is a menu name it resolves. */
@@ -176,7 +179,7 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
 function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   let stdinReads = 0;
   const text = (raw: string | boolean | undefined): string | undefined => {
-    if (raw !== "-") return raw === undefined ? undefined : String(raw);
+    if (raw !== "-") return raw === undefined ? undefined : String(raw).trim() ? String(raw) : refuse("--prompt is empty");
     if (stdinReads++) refuse("only one --prompt may read stdin (-)");
     // An agent's shell has no TTY: a `-` with nothing piped is an empty prompt, named here rather than by the server.
     return io.stdin() || refuse("--prompt - read nothing from stdin");
@@ -215,9 +218,12 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   const entry = (v: Values, own = v): Params => {
     const goal = (["worktree", "rounds"] as const).find((flag) => v[flag] !== undefined);
     if (goal) {
-      const beside = (["bash", "task-id", "session", "role"] as const).find((flag) => v[flag] !== undefined);
+      const beside = (["bash", "task-id", "session"] as const).find((flag) => v[flag] !== undefined);
       if (beside) refuse(`--${goal} applies to a fresh --prompt run, not beside --${beside}`);
     }
+    // A lead's --worktree makes its worktree only: its goal is its own review.
+    const review = (["rounds", "review-model"] as const).find((flag) => v[flag] !== undefined);
+    if (review && v.role !== undefined) refuse(`--${review} applies to a worker, not beside --role`);
     const launch = launchOf(v);
     const timeoutSeconds = seconds("timeout", v.timeout);
     if (v["task-id"] !== undefined) {
@@ -233,7 +239,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     }
     const prompt = text(v.prompt) ?? refuse("a new run needs --prompt, --bash or --task-id");
     if (v.session === undefined) {
-      if (v.name === undefined) refuse("a new run needs --name: the session's title, a few words in the user's language");
+      if (v.name === undefined || !String(v.name).trim()) refuse("a new run needs --name: the session's title, a few words in the user's language");
       return compact({ prompt, cwd: v.cwd, launch, name: v.name, timeoutSeconds });
     }
     if (v.cwd !== undefined) refuse("--cwd applies to a fresh session, not --session");

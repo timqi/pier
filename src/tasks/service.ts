@@ -448,7 +448,9 @@ export class TaskService {
     // run a paused task on demand. Archiving is the terminal state.
     if (task.archived) throw new Error("archived tasks cannot run");
     const { action, trigger } = task;
-    if (action.type !== "agent" || action.launch?.rounds === undefined) return this.runs.prepare(task, input, source, parentRunId, provenance);
+    // A row stored with `until` and no `rounds` is the goal it was (goals.open caps it at 3).
+    const launch: { rounds?: number; until?: unknown } | undefined = action.type === "agent" ? action.launch : undefined;
+    if (action.type !== "agent" || (launch?.rounds === undefined && launch?.until === undefined)) return this.runs.prepare(task, input, source, parentRunId, provenance);
     // operations.ts refuses these first; a goal is one launched run's loop.
     if (action.session.mode !== "fresh" || trigger.type !== "manual" || provenance.groupId || parentRunId !== null) {
       throw new Error("a goal (--rounds, --worktree) is one fresh --prompt run's, not a reused session's, a schedule's, a batch member's or a chained task's");

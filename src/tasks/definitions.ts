@@ -109,12 +109,12 @@ function parseThinking(raw: unknown): ThinkingLevel {
   return raw;
 }
 
-/** After it, `rounds !== undefined` ⇔ the run roots a goal: `--worktree` alone
- *  means 3 reviews, `rounds: 0` none, a row stored with `until` 3 unless it named its rounds. */
+/** After it, `rounds !== undefined` ⇔ the run roots a goal: a worker's `--worktree` alone
+ *  means 3 reviews (a lead's none), `rounds: 0` none, a row stored with `until` 3 unless it named its rounds. */
 export function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
   if (raw === undefined) return undefined;
   const given = record(raw);
-  const value = given && (given.until !== undefined || given.worktree !== undefined) ? { ...given, rounds: given.rounds ?? 3 } : given;
+  const value = given && (given.until !== undefined || (given.worktree !== undefined && given.role === undefined)) ? { ...given, rounds: given.rounds ?? 3 } : given;
   if (!value) throw new Error("agent launch policy must be an object");
   const launch: AgentLaunchPolicy = {};
   if (value.model !== undefined) launch.model = parseModel(value.model);
@@ -139,7 +139,7 @@ export function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     }
     if (rounds) launch.rounds = rounds;
   }
-  if (launch.role && (launch.rounds !== undefined || launch.worktree)) throw new Error("agent rounds and worktree apply to a worker, not a lead");
+  if (launch.role && value.rounds !== undefined) throw new Error("agent rounds apply to a worker, not a lead");
   if (value.reviewModel !== undefined) {
     if (typeof value.reviewModel !== "string" || !value.reviewModel.trim() || launch.rounds === undefined) {
       throw new Error("agent reviewModel must be a model name, beside rounds or worktree");

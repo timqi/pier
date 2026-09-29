@@ -218,9 +218,14 @@ export async function handleTask(
     if (lead && role === "lead") throw new Error("a feature lead cannot launch a lead; a build lead is your supervisor's to launch, from your milestone");
     return draft;
   };
-  // Read off a draft or a saved definition, the way `notLead` reads the role: whether it roots a goal or makes a worktree.
+  // Read off a draft or a saved definition, the way `notLead` reads the role: whether it roots a goal
+  // (a stored `until` included; a lead's worktree opens none), and whether it is one run's (a worktree too).
   const launchOf = (draft: unknown) => record(record(draft)?.launch) ?? record(record(record(draft)?.action)?.launch);
-  const goalish = (draft: unknown): boolean => launchOf(draft)?.rounds !== undefined || launchOf(draft)?.worktree !== undefined;
+  const goalish = (draft: unknown): boolean => {
+    const launch = launchOf(draft);
+    return launch?.rounds !== undefined || launch?.until !== undefined || (launch?.worktree !== undefined && launch.role === undefined);
+  };
+  const oneRun = (draft: unknown): boolean => goalish(draft) || launchOf(draft)?.worktree !== undefined;
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") {
     // What the schedule answer needs: the next occurrence and the last run's state, not the run.
@@ -241,7 +246,7 @@ export async function handleTask(
     return id;
   };
   if (input.operation === "save") {
-    if (goalish(input.task)) throw new Error("--worktree and --rounds are one run's; save files a definition that runs again");
+    if (oneRun(input.task)) throw new Error("--worktree and --rounds are one run's; save files a definition that runs again");
     const draft = await expandDraft(host, definitions, menu, input.task, callerSessionId);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
     return definitions.update(filed(), draft);
@@ -265,7 +270,7 @@ export async function handleTask(
       for (const rawEntry of input.tasks) {
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
-        if (goalish(entry) || (entry.task_id !== undefined && goalish(definitions.get(requiredString(entry.task_id, "task_id"))))) {
+        if (oneRun(entry) || (entry.task_id !== undefined && oneRun(definitions.get(requiredString(entry.task_id, "task_id"))))) {
           throw new Error("a goal (--rounds, --worktree) is one run's loop; a --member cannot carry it");
         }
         resolved.push(entry.task_id === undefined
@@ -283,17 +288,16 @@ export async function handleTask(
       return receipt(summarizeGroup(group, runs), groupCallbackSessionId, callbackMode, callerSessionId);
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
-    if (goalish(draft)) {
-      if (record(draft)?.action !== undefined) throw new Error("--rounds and --worktree apply to a fresh --prompt run, not --bash or --session");
-      if (input.callback === "none" && launchOf(draft)?.rounds !== 0) throw new Error("a goal reports its end as a callback; callback none has nobody to tell");
-    }
-    if (input.task_id !== undefined && goalish(definitions.get(requiredString(input.task_id, "task_id")))) {
+    if (oneRun(draft) && record(draft)?.action !== undefined) throw new Error("--rounds and --worktree apply to a fresh --prompt run, not --bash or --session");
+    if (goalish(draft) && input.callback === "none" && launchOf(draft)?.rounds !== 0) throw new Error("a goal reports its end as a callback; callback none has nobody to tell");
+    if (input.task_id !== undefined && oneRun(definitions.get(requiredString(input.task_id, "task_id")))) {
       throw new Error("--rounds and --worktree apply to a fresh --prompt run, not a saved definition (--task-id)");
     }
+    // Before the draft: a refused callback must not leave a worktree behind.
+    const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const task = draft
       ? await resolveDraft(host, definitions, menu, notLead(draft), callerSessionId)
       : notLead(definitions.get(requiredString(input.task_id, "task_id")));
-    const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const run = host.run(task.id, null, "agent", null, {
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
@@ -374,11 +378,12 @@ export async function handleTask(
     return { delivery, message: await host.control(run.id, callerSessionId, delivery, message) };
   }
   if (input.operation === "finish") {
+    if (lead) throw new Error("a lead never merges into the target; the finish is your supervisor's, from your milestone");
     const root = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(root);
-    const task = await finishDraft(host, store, root, menu, input.remove_worktree === true);
+    const task = await resolveDraft(host, definitions, menu, await finishDraft(host, store, root, input.remove_worktree === true), callerSessionId);
     const provenance = { invokedBySessionId: callerSessionId, sourceSessionId: callerSessionId, callbackSessionId: callerSessionId, background: true };
-    const run = host.run((await definitions.create(task, `session:${callerSessionId}`, "subagent")).id, null, "agent", null, provenance);
+    const run = host.run(task.id, null, "agent", null, provenance);
     return receipt(summarize(run), callerSessionId, "followUp", callerSessionId);
   }
   throw new Error("unknown task operation");
@@ -387,7 +392,7 @@ export async function handleTask(
 /** A reviewed goal's merge, or a build lead's integrated branch (the lead reviewed
  *  it), as a cheap worker's run in the main repo, refused unless the worktree is
  *  still exactly what the last review read. */
-async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, menu: Menu, remove: boolean): Promise<unknown> {
+async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, remove: boolean): Promise<unknown> {
   const goal = root.goalId ? store.getGoal(root.goalId) : undefined;
   const path = runCwd(root);
   const lead = root.targetSessionId !== null && store.leadPhaseOf(root.targetSessionId) === "build" ? root.targetSessionId : undefined;
@@ -397,16 +402,20 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, m
   if (reviewed && (reviewed.outcome !== "done" || reviewed.step === "merge")) {
     throw new Error(`run ${root.id}'s goal ended ${reviewed.step === "merge" ? "merged" : reviewed.outcome ?? "failed"}, nothing to merge`);
   }
-  if (lead && !reviewed && store.findActiveRunForTarget(lead)) throw new Error(`run ${root.id}'s lead session ${lead} is still at work; wait for its milestone`);
+  const session = root.targetSessionId;
+  if (session !== null && store.findActiveRunForTarget(session)) throw new Error(`run ${root.id}'s session ${session} is still at work; wait for its end`);
   const tree = await host.worktree(path);
   const branch = reviewed?.branch ?? tree.branch;
+  const base = reviewed?.base ?? tree.base;
+  if (branch === base) throw new Error(`${branch} is its own target; nothing to merge`);
   const sha = reviewed?.reviewed ?? tree.head;
   const again = `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1`;
   if (tree.head !== sha) throw new Error(`${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
   if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed ? `, then ${again}` : ""}`);
   const main = await host.mainRepo(path);
-  const prompt = finishPrompt({ branch, base: reviewed?.base ?? tree.base, sha, path, main, remove });
-  const action = { type: "agent", session: { mode: "fresh", cwd: main }, prompt, launch: resolveModel("cheap", await menu()) };
+  const prompt = finishPrompt({ branch, base, sha, path, main, remove });
+  // The tier by name: `expandDraft` resolves it on the menu like any draft's.
+  const action = { type: "agent", session: { mode: "fresh", cwd: main }, prompt, launch: { model: "cheap" } };
   return { name: `finish: ${root.context.definition.name}`, action };
 }
 
@@ -462,8 +471,8 @@ const menuLines = (menu: MenuEntry[]): string =>
   || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
- *  directory, or in the worktree `launch.worktree` names, made last so a draft
- *  refused for anything else leaves none behind; the rest passes through to parseDraft. */
+ *  directory, or in the worktree `launch.worktree` names, made after every check here;
+ *  parseDraft's after it are argv's too (cli.ts), so only a raw socket draft can orphan one. */
 async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu: Menu, raw: unknown, callerSessionId: string): Promise<unknown> {
   let draft = record(raw);
   if (!draft) return raw;
@@ -522,15 +531,16 @@ async function resolveDraft(
   raw: unknown,
   callerSessionId: string,
 ): Promise<TaskDefinition> {
-  const draft = record(await expandDraft(host, definitions, menu, raw, callerSessionId));
-  if (!draft) throw new Error("task definition required");
-  if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
+  const given = record(raw);
+  if (given?.trigger !== undefined && record(given.trigger)?.type !== "manual") {
     throw new Error("inline subagent tasks must use a manual trigger");
   }
   // Delivery of a one-off run is the top-level fields' business; a nested
   // callback only means anything on a stored definition's schedule.
-  if (draft.callback !== undefined || draft.callback_session_id !== undefined) {
+  if (given?.callback !== undefined || given?.callback_session_id !== undefined) {
     throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
+  const draft = record(await expandDraft(host, definitions, menu, raw, callerSessionId));
+  if (!draft) throw new Error("task definition required");
   return definitions.create({ ...draft, trigger: { type: "manual" }, callback: { type: "none" } }, `session:${callerSessionId}`, "subagent");
 }

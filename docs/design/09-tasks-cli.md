@@ -25,8 +25,8 @@ stdout, exit 0; `run`'s and `finish`'s is one line instead (`receiptLine`, `task
 a resume `resumed: …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
 argv errors are the usage line, exit 2, before the socket is touched.
-`--prompt -` reads stdin, and an empty one is an argv error; nothing else
-reads it.
+`--prompt -` reads stdin; nothing else reads it. An empty `--prompt` (stdin
+or typed) or `--name`, and a `--timeout` outside 1–86400, are argv errors.
 
 The CLI checks argv shape only; the server (`handleTask` → `parseDraft`) is
 the one validator of the params object.
@@ -50,7 +50,8 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
 - **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
   session is a feature lead's for its life (§Two levels); any other value, and
   `--role` beside `--session`, is refused by the server; beside `--task-id` or
-  `--bash`, by argv. `--design` rides as `launch.design: true` and tags the
+  `--bash`, by argv. `--worktree` beside it makes the lead's worktree and
+  opens no goal; `--rounds` and `--review-model` beside it are refused. `--design` rides as `launch.design: true` and tags the
   lead `design` (the user finalizes it); the server refuses it without
   `--role lead`. A lead run's callback fires only for a milestone resume,
   a result with a `Design final:` line, a build lead's run that leaves no result
@@ -68,8 +69,11 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
 - **`--worktree <branch>`**: rides as `launch.worktree`; the server runs
   `wt switch -c <branch> -b <--cwd's branch> --no-cd -y --format json` in
   `--cwd` (never a shell) and starts the session in the worktree it prints,
-  after every other check passed; `wt`'s failure is the refusal
-  (`task: wt: …`). Alone it means `--rounds 3`; refused where `--rounds` is.
+  after the server's other checks and before the definition is filed, whose
+  own checks argv makes first; `wt`'s failure is the refusal
+  (`task: wt: …`). Alone on a worker it means `--rounds 3`; on a lead, no
+  goal. Refused beside `--bash`, `--task-id`, `--session`, in a `--member`
+  and on `save`.
 - **`--run <root> --prompt … --rounds <n>`**: accepted only when that run is
   a goal's root whose goal has ended; the resume opens a new goal of `n`
   reviews (1–9) on the resumed run, on `--review-model` else the ended goal's.
@@ -111,8 +115,11 @@ pier task finish --run <root> [--remove-worktree]
   (a lead's: the worktree's HEAD), the target the goal's `base` else the
   worktree's. Refused unless HEAD is that sha (`task: <branch> moved past the
   reviewed sha …; re-review with pier task run --run <root> --prompt "<what
-  changed>" --rounds 1`), the tree is clean, and a lead's session has no run
-  queued or running.
+  changed>" --rounds 1`), the tree is clean, the branch is not its own target
+  (`task: <branch> is its own target; nothing to merge`), and the root's
+  session has no run queued or running (`task: run <id>'s session <s> is
+  still at work; wait for its end`). A lead never finishes (`task: a lead
+  never merges into the target; …`).
 - Launches one fresh `cheap`-tier worker run, `finish: <root's name>`, in the
   main repo (the worktree's common git dir's parent), prompt `finishPrompt`
   (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
@@ -243,13 +250,10 @@ goal's step, not its end", and the goal's end is one callback to the root
 run's target, headed by its `Goal:` line; `--run` on a goal's settled run
 while the goal is live is refused (`task: run <id> is in a goal (<step>);
 cancel it or wait for its end`), and `cancel --run` ends the goal.
-The `Goal:` line names the root, `(run <root>, <branch> in <worktree>)`; when
+The `Goal:` line names the root, `(run <root>)`, with `, <branch> in
+<worktree>` inside once a review has pinned the branch; when
 a review ended the goal the body is the worker's latest result (3000
 characters), then `Review:` and the review's (1000).
-
-The merge is code, not prose: `finish` is the only path, launched by the head
-on the user's yes, the sha pinned to what the last review read; a goal never
-merges on its own.
 
 ## Two levels, no tree
 

@@ -5,12 +5,16 @@
 ### Changed
 
 - A run result and a goal's review end with one status line, the last non-blank line outside code blocks, plain text: `Verdict: clean`, `Verdict: findings`, `Verdict: blocked — <why>` or `Needs your decision — <question>`. A bolded, bulleted or fenced verdict is no verdict; a second status line ends the goal `failed` (`several status lines`); `Verdict: blocked` ends it `failed — blocked — <why>`.
-- `--until merged` is `--until reviewed`: the loop ends at a clean review, the merge the user's. `merged` is still accepted and stored as `reviewed`; the open-items line reads ` · until reviewed: …`.
+- `--until` is gone: `--rounds <n>` roots a goal of n reviews (1–9, `0` none) on a fresh `--prompt` run, a stored `until` reads as 3, and `pier task run --run <root> --prompt <answer> --rounds <n>` resumes an ended goal's root as a new goal.
+- A fresh `--prompt` run, top-level or a `--member`, requires `--name`, the session's title.
+- A goal's run line in the open items reads ` · review: <step>`.
+- A goal a review ended calls back with the worker's latest result, then `Review:` and the review's; the `Goal:` line names its root, `(run <root>, <branch> in <worktree>)`.
 - A goal's review is pinned to the commit it reviews: Pier reads the worktree's HEAD, branch, target and merge-base before launching it, names them in the review prompt with the checks the reviewer runs first, and ends the goal `failed` on a dirty worktree or a git failure instead of reviewing a stale commit. The done callback reads `Goal: review clean at <sha7>, waiting on you to merge`; the fix prompt says commit before the turn ends.
 
 ### Added
 
-- `pier task run --run <root> --prompt <answer> --until reviewed`: the user's answer to a goal that ended (`needs your decision`, `still findings`, `failed`) resumes its root as a new goal with the launch's rounds and review model; refused on a run that roots no goal, on a goal still live, or on a root a later goal replaced.
+- `pier task finish --run <root> [--remove-worktree]`: merges a reviewed goal's branch, or an idle build lead's, into its target as a `cheap` run in the main repo, refused unless HEAD is the reviewed sha and the tree clean.
+- `pier task run --worktree <branch>`: the run starts in a new `wt` worktree off `--cwd`'s branch; on a worker it roots a goal of 3 reviews, on a lead it opens none.
 
 ## 0.4.0 — 2026-09-28
 

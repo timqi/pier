@@ -99,8 +99,8 @@ the same parenthesis on `needs your decision`, `still findings` and
   root. `--worktree` without `--rounds` → `rounds: 3`; `--rounds 0` → no
   goal (the key deleted); `--rounds n` without `--worktree` → a goal in
   `--cwd`. `--review-model` needs a goal (else refused: "beside --rounds or
-  --worktree"). A `--role lead` run takes neither `--worktree` nor a goal
-  (refused as `--until` was).
+  --worktree"). A `--role lead` run takes `--worktree` alone: the worktree is
+  made and no goal opens; `--rounds` beside `--role` is refused.
 - Cap semantics (`goals.ts`): `Goal.cap` counts reviews. A `findings` review
   ends the goal `cap` when `goal.round + 1 >= goal.cap`; `--rounds 1` is one
   review, no fix. `reviewPrompt`'s head reads `review N of <cap>`; `fixPrompt`

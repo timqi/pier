@@ -5,6 +5,8 @@ describe("the dispatcher contract", () => {
   it("defaults code workers to a worktree and reviews, and leaves the stage uncounted", () => {
     expect(DISPATCHER).toContain("`--worktree <branch> --cwd <repo>`: its own `wt` worktree and 3 reviews");
     expect(DISPATCHER).toContain("`--rounds 0` for none");
+    expect(DISPATCHER).toContain("a lead, `--role lead --worktree <branch> --cwd <repo>`: its own `wt` worktree, no goal");
+    expect(DISPATCHER).toContain("`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree>");
     for (const gone of ["--until", "wt switch -c"]) {
       expect(DISPATCHER).not.toContain(gone);
       expect(lead("build")).not.toContain(gone);
@@ -25,6 +27,7 @@ describe("the dispatcher contract", () => {
     expect(DISPATCHER).toContain('`pier task run --run <root> --prompt "<answer>" --rounds <n>`, never a review by hand');
     expect(DISPATCHER).toContain("goes to a child to check, never re-run by you");
     expect(DISPATCHER).toContain("A child does: any edit outside this directory, any implementation, any review of a diff");
+    expect(DISPATCHER).not.toContain("creating a worktree");
   });
 
   it("merges through `pier task finish` on the user's yes, a button being one, the removal only when they said so", () => {

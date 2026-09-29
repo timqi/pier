@@ -14,10 +14,11 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory, ModelTier } from "../core/types.js";
+import { parseLaunch } from "./definitions.js";
 import { fixPrompt, statusLine } from "./goals.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import { GOAL_STEP, type Goal, type TaskRun } from "./types.js";
+import { GOAL_STEP, type Goal, type TaskDefinition, type TaskRun } from "./types.js";
 
 // No operator config reaches the service's git: hooks, fsmonitor or a pager would.
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -111,6 +112,17 @@ function rig(script: Record<string, Reply[]>, menu: { provider: string; id: stri
   };
   return { cwd, head, sessions, created, service, store, launch, ended, goalOf, callbacks };
 }
+
+describe("parseLaunch", () => {
+  it("roots a goal on a worker's --worktree or a stored until, never on a lead's worktree", () => {
+    expect(parseLaunch({ worktree: "b" })).toEqual({ worktree: "b", rounds: 3 });
+    expect(parseLaunch({ worktree: "b", rounds: 0 })).toEqual({ worktree: "b" });
+    expect(parseLaunch({ until: "merged" })).toEqual({ rounds: 3 });
+    expect(parseLaunch({ role: "lead", worktree: "b" })).toEqual({ role: "lead", worktree: "b" });
+    expect(() => parseLaunch({ role: "lead", rounds: 0 })).toThrow("agent rounds apply to a worker, not a lead");
+    expect(() => parseLaunch({ role: "lead", until: "merged" })).toThrow("agent rounds apply to a worker, not a lead");
+  });
+});
 
 /** Every run but the end settled as a step; the end is the one delivered. */
 function onlyTheEndCalledBack(runs: TaskRun[]): void {
@@ -207,6 +219,31 @@ describe("a goal", () => {
       action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "build", launch: { model: { provider: "test", id: "model" }, until: "merged" } },
     });
     expect(task.action.type === "agent" && task.action.launch).toEqual({ model: { provider: "test", id: "model" }, rounds: 3 });
+    service.stop();
+  });
+
+  it("treats a raw stored row with `until` and no `rounds` as a goal: refused by --task-id, opened by the service", async () => {
+    const { service, store, cwd } = rig({ s1: ["built"], s2: ["Verdict: clean"] });
+    const plain = await service.create({ name: "old", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "build", launch: { model: { provider: "test", id: "model" } } } });
+    const raw = { ...plain, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "build", launch: { model: { provider: "test", id: "model" }, until: "merged" } } } as unknown as TaskDefinition;
+    store.saveTask(raw);
+    await expect(service.handle({ operation: "run", task_id: raw.id }, "main"))
+      .rejects.toThrow("--rounds and --worktree apply to a fresh --prompt run, not a saved definition (--task-id)");
+    const run = service.run(raw.id, null, "agent", null, { invokedBySessionId: "main", callbackSessionId: "main", background: true });
+    expect(store.getGoal(run.goalId!)).toMatchObject({ cap: 3 });
+    service.stop();
+  });
+
+  it("makes a lead's --worktree and opens no goal", async () => {
+    const { service, store, cwd } = rig({ s1: ["planned"] });
+    const made: string[][] = [];
+    service.addWorktree = async (at, branch) => { made.push([at, branch]); return cwd; };
+    const { runId } = await service.handle({ operation: "run", prompt: "lead it", name: "lead it", cwd, launch: { model: "test/model", role: "lead", worktree: "lead-b" } }, "main") as { runId: string };
+    expect(made).toEqual([[cwd, "lead-b"]]);
+    const run = store.getRun(runId)!;
+    expect(run.goalId).toBeUndefined();
+    expect(run.context.definition.action).toMatchObject({ session: { mode: "fresh", cwd }, launch: { role: "lead", worktree: "lead-b" } });
+    expect(run.context.definition.action.type === "agent" && run.context.definition.action.launch?.rounds).toBeUndefined();
     service.stop();
   });
 
@@ -478,8 +515,10 @@ describe("a goal", () => {
   it("is refused where no one would hear its end or where it is not one fresh run", async () => {
     const { service, cwd } = rig({});
     const run = (extra: Record<string, unknown>) => service.handle({ operation: "run", prompt: "x", name: "x", cwd, launch: { model: "test/model", rounds: 3 }, ...extra }, "main");
-    await expect(run({ launch: { model: "test/model", rounds: 3, role: "lead" } })).rejects.toThrow(/rounds and worktree apply to a worker, not a lead/);
-    await expect(run({ launch: { model: "test/model", worktree: "b", role: "lead" } })).rejects.toThrow(/rounds and worktree apply to a worker, not a lead/);
+    await expect(run({ launch: { model: "test/model", rounds: 3, role: "lead" } })).rejects.toThrow("agent rounds apply to a worker, not a lead");
+    await expect(run({ launch: { model: "test/model", rounds: 0, worktree: "b", role: "lead" } })).rejects.toThrow("agent rounds apply to a worker, not a lead");
+    await expect(service.handle({ operation: "save", task: { name: "n", prompt: "x", cwd, launch: { model: "test/model", worktree: "b", role: "lead" } } }, "main"))
+      .rejects.toThrow("--worktree and --rounds are one run's; save files a definition that runs again");
     for (const rounds of [-1, 10, 1.5]) {
       await expect(run({ launch: { model: "test/model", rounds } })).rejects.toThrow(/rounds must be a whole number from 0 to 9/);
     }
@@ -550,11 +589,28 @@ describe("pier task finish", () => {
     expect(action.type === "agent" && action.prompt).toContain(`Approved: merge feature into main at ${r.head}\n\nWorktree: ${r.cwd}\n`);
     await r.service.handle({ operation: "message", run_id: runId, message: "one more thing" }, "main");
     await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")?.state).toBe("running"));
-    await expect(finish(r, runId)).rejects.toThrow(`run ${runId}'s lead session s1 is still at work; wait for its milestone`);
+    await expect(finish(r, runId)).rejects.toThrow(`run ${runId}'s session s1 is still at work; wait for its end`);
     release("done");
     await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")).toBeUndefined());
+    await expect(r.service.handle({ operation: "finish", run_id: runId }, "s1"))
+      .rejects.toThrow("a lead never merges into the target; the finish is your supervisor's, from your milestone");
     writeFileSync(join(r.cwd, "b.ts"), "left\n");
     await expect(finish(r, runId)).rejects.toThrow(`${r.cwd} has uncommitted changes; commit them`);
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: r.cwd });
+    await expect(finish(r, runId)).rejects.toThrow("main is its own target; nothing to merge");
+    r.service.stop();
+  });
+
+  it("refuses a reviewed goal's root while its session is at work again", async () => {
+    let release: (text: string) => void = () => {};
+    const r = rig({ s1: ["built", new Promise<string>((done) => { release = done; })], s2: ["Verdict: clean"] }, cheap);
+    const root = await r.launch();
+    await r.ended(root);
+    await r.service.handle({ operation: "message", run_id: root.id, message: "one more thing" }, "main");
+    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")?.state).toBe("running"));
+    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s session s1 is still at work; wait for its end`);
+    release("done");
+    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")).toBeUndefined());
     r.service.stop();
   });
 });
