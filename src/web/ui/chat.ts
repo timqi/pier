@@ -4,7 +4,7 @@
 
 import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
+import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
@@ -12,7 +12,7 @@ import { splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type 
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
-import { renderSuggestions, resetSuggestions } from "./suggestions.js";
+import { refreshSuggestions, renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   activityLive,
   activityProgress,
@@ -726,8 +726,8 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   if (id) renderFileRefs(codes, id, [...(cwd ? [cwd] : []), ...callbackCwds.filter((c) => c !== cwd)]);
 }
 
-/** `offer`: next-step buttons only on the turn that just ended or the last
- *  one on replay; an older turn's run has moved on. */
+/** `offer`: the live next-step buttons, on the turn that just ended or the
+ *  last one on replay; an older turn's are muted and follow its topic. */
 function renderAssistant(
   node: HTMLElement,
   raw: string,
@@ -739,10 +739,11 @@ function renderAssistant(
   // An empty bubble reads as a bug; this is the view the operator debugs in.
   if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
-  if (offer) {
+  if (!readonlyRows) {
     // A pick answers this reply: sent as a Reply to it, so the model reads which offer was taken.
     const row = node.parentElement ?? node;
-    renderSuggestions(row, suggestions, (label) => deps.send("auto", label, { role: "assistant", at: Number(row.dataset.at), text: raw }));
+    const pick = (label: string): void => deps.send("auto", label, { role: "assistant", at: Number(row.dataset.at), text: raw });
+    renderSuggestions(row, suggestions, pick, offer, replyTopic(raw));
   }
   // Last, so the clock reads under the whole turn — buttons included.
   if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
@@ -760,6 +761,7 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
 function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
   const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
   tagReply(node.parentElement!, raw, jumpBack);
+  if (!bulk) refreshSuggestions();
 }
 
 // --- streaming text ---------------------------------------------------------------
@@ -985,6 +987,7 @@ export function renderSnapshot(
     bulk = false; // a row that threw must not leave the pane unable to scroll
     readonlyRows = false;
   }
+  refreshSuggestions();
   scrollBottom(true);
 }
 

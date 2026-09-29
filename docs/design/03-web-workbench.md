@@ -255,7 +255,13 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Next steps**: a reply's trailing `[label]` line is a row of buttons at
   the bubble's bottom, the only row that sends; a click sends the label as
   a Reply to that bubble (`withQuote`), the composer's own staged quote
-  untouched.
+  untouched, and the picked row goes away. The last reply of an idle
+  session has the live row (indigo). Any other reply's row is muted
+  (neutral, `aria-description` "option from an earlier reply") and shown
+  only while it is its topic's (`replyTopic`) newest reply on screen and
+  that topic is an open item; a reply with no topic shows none. Re-checked
+  when the items change and on every reply; a running snapshot's last reply
+  is an earlier one.
 - **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
   (`replyTopic`) is tagged with its problem — a label in a stable hash of the
   problem's colour (`topics.ts` `topicHue`), the only place the colour is on

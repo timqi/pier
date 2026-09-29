@@ -92,9 +92,10 @@ updates this document.
 - A turn is its reply bubble. Its process is one row of chips at the top —
   the topic tag, then a chip per cause (seed, callback, delegation), steps
   group and launched run, in arrival order — the text under it, next-step
-  buttons at the bottom. A chip is the `.run-label` material in its state
-  colour (a failed callback red, an interrupted one amber, running neutral
-  with a spinner) and the run's name in the bubble's type; the count of chips
+  buttons at the bottom (an earlier turn's muted, on an open topic's newest
+  reply only). A chip is the `.run-label` material in its state colour (a failed
+  callback red, an interrupted one amber, running neutral with a spinner)
+  and the run's name in the bubble's type; the count of chips
   is the count of things that happened, and no chip summarises the others.
   An error or silent body carries the same row on its own material.
 - A chip is its fold: the button (`aria-expanded`, Enter/Space, a visible

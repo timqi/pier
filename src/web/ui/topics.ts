@@ -16,6 +16,8 @@ export const topicColour = (problem: string): string => `oklch(0.62 0.15 ${topic
 /** The open items' stages (`GET /api/continuous/open`); a topic not here is done. */
 let stages = new Map<string, string>();
 
+export const topicOpen = (problem: string): boolean => stages.has(problem);
+
 /** A tag's click: the row it sits on, to jump back from (chat.ts). */
 type Jump = (row: HTMLElement) => void;
 

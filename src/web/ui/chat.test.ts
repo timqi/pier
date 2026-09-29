@@ -210,6 +210,112 @@ it("keeps the prior answer's buttons when the turn after it failed", () => {
   expect(buttons).toEqual(["Ship it", "Wait"]);
 });
 
+describe("an earlier turn's next steps", () => {
+  const labels = () => doc.querySelector("#turns")!.querySelectorAll("button")
+    .filter((b) => ["Ship it", "Wait", "Next"].includes(b.textContent) && !b.closest("[hidden]"))
+    .map((b) => b.textContent);
+  const earlier = "<open>auth — review</open>\nReview?\n\n---\n[Ship it] | [Wait]";
+  const snapshot = (first = earlier) => chat.renderSnapshot([
+    { role: "user", text: "go", at: 1 },
+    { role: "assistant", text: first, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
+    { role: "user", text: "else", at: 3 },
+    { role: "assistant", text: "Other.\n\n---\n[Next]", meta: { completedAt: 4, durationMs: 1, tokens: 1 } },
+  ], "idle", []);
+
+  it("shows them muted while the topic is open, hides them once it is done, the last turn's live throughout", async () => {
+    const topics = await import("./topics.js");
+    const { refreshSuggestions } = await import("./suggestions.js");
+    topics.setTopicStages([{ problem: "auth", stage: "review" }]);
+    snapshot();
+    expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
+    const group = doc.querySelector(".earlier-options")!;
+    expect(group.querySelectorAll("button")[0]!.className).toContain("text-neutral-500");
+    expect(doc.querySelectorAll(".earlier-options")).toHaveLength(1);
+    topics.setTopicStages([]);
+    refreshSuggestions();
+    expect(labels()).toEqual(["Next"]);
+    topics.setTopicStages([{ problem: "auth", stage: "review" }]);
+    refreshSuggestions();
+    expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
+  });
+
+  it("offers nothing on an earlier turn without a topic", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    snapshot("Review?\n\n---\n[Ship it] | [Wait]");
+    expect(labels()).toEqual(["Next"]);
+  });
+
+  it("mutes the live group when a newer turn ends, and sends a pick as a reply to the turn that offered it", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    chat.appendTurn("user", "go", false, 1);
+    chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
+    expect(doc.querySelectorAll(".earlier-options")).toHaveLength(0);
+    chat.appendTurn("user", "else", false, 3);
+    chat.completeTurn("Other.", { completedAt: 4, durationMs: 1, tokens: 1 });
+    expect(labels()).toEqual(["Ship it", "Wait"]);
+    const pick = doc.querySelector(".earlier-options")!.querySelectorAll("button")[1]!;
+    pick.onclick!();
+    expect(send).toHaveBeenCalledWith("auto", "Wait", { role: "assistant", at: 2, text: earlier });
+    expect(labels()).toEqual([]);
+  });
+
+  it("keeps a picked row away after a reload once the topic has a newer reply", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    const { withQuote } = await import("../../core/identity.js");
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: earlier, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
+      { role: "user", text: withQuote({ role: "assistant", at: 2, text: earlier }, "Wait"), at: 3 },
+      { role: "assistant", text: "<topic>auth</topic>\nWaiting.", meta: { completedAt: 4, durationMs: 1, tokens: 1 } },
+    ], "idle", []);
+    expect(labels()).toEqual([]);
+  });
+
+  it("shows only the open topic's newest reply's row, none when that reply offers none", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    const reply = (at: number, text: string) => [
+      { role: "user" as const, text: "go", at: at - 1 },
+      { role: "assistant" as const, text, meta: { completedAt: at, durationMs: 1, tokens: 1 } },
+    ];
+    const newer = "<topic>auth</topic>\nAgain?\n\n---\n[Next]";
+    chat.renderSnapshot([...reply(2, earlier), ...reply(4, newer), ...reply(6, "Other.")], "idle", []);
+    expect(labels()).toEqual(["Next"]);
+    chat.renderSnapshot([...reply(2, earlier), ...reply(4, "<topic>auth</topic>\nNoted."), ...reply(6, "Other.")], "idle", []);
+    expect(labels()).toEqual([]);
+  });
+
+  it("reads a running snapshot's last reply as earlier: muted while its topic's newest", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: earlier, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
+      { role: "user", text: "something else", at: 3 },
+      { role: "assistant", text: "Work" },
+    ], "streaming", []);
+    expect(labels()).toEqual(["Ship it", "Wait"]);
+    expect(doc.querySelector(".earlier-options")!.querySelectorAll("button")[0]!.getAttribute("aria-description")).toBe("option from an earlier reply");
+  });
+
+  it("hides the muted row live once a newer reply of the same topic ends", async () => {
+    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    chat.appendTurn("user", "go", false, 1);
+    chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
+    chat.appendTurn("user", "else", false, 3);
+    chat.completeTurn("Other.", { completedAt: 4, durationMs: 1, tokens: 1 });
+    expect(labels()).toEqual(["Ship it", "Wait"]);
+    chat.appendTurn("user", "more", false, 5);
+    chat.completeTurn("<topic>auth</topic>\nStill on it.", { completedAt: 6, durationMs: 1, tokens: 1 });
+    expect(labels()).toEqual([]);
+  });
+
+  it("drops a demoted group whose turn names no topic", () => {
+    chat.appendTurn("user", "go", false, 1);
+    chat.completeTurn("Plain.\n\n---\n[Ship it]", { completedAt: 2, durationMs: 1, tokens: 1 });
+    chat.completeTurn("Other.", { completedAt: 4, durationMs: 1, tokens: 1 });
+    expect(labels()).toEqual([]);
+  });
+});
+
 // A snapshot re-arms tail follow; a page of history above the reader must not
 // leave it armed, or the next repin takes them to the newest row.
 it("keeps a reader put above the tail after a re-render, and follows one who was at it", () => {

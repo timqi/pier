@@ -50,6 +50,7 @@ import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderStat
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
+import { refreshSuggestions } from "./suggestions.js";
 import { setTopicStages } from "./topics.js";
 import {
   activityThinking,
@@ -167,10 +168,11 @@ const refreshOpenItems = coalesce(async () => {
   renderDrawer();
 });
 
-/** The panel's rows and the chat's tags read the same items. */
+/** The panel's rows, the chat's tags and its earlier options read the same items. */
 function commitOpenItems(open: OpenItems): void {
   openItems = open;
   setTopicStages(open.items);
+  refreshSuggestions();
 }
 
 /** A status panel row: the conversation, at the topic's latest reply, or —
