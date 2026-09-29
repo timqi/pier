@@ -33,6 +33,7 @@ import {
 } from "./turn-activity.js";
 import { dividerLine, foldSeed, foldSilence, unfold } from "./folds.js";
 import { refreshTopicTags, tagReply } from "./topics.js";
+import { rowGestures } from "./row-gestures.js";
 import type {
   BackgroundRun,
   ChainReason,
@@ -382,7 +383,7 @@ export function appendTurn(
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
-  if (kind === "user" || kind === "assistant") row.append(rowTools(kind, row, node));
+  if (kind === "user" || kind === "assistant") row.append(rowGestures(row, rowTools(kind, row, node), node));
   if (stamp !== undefined) {
     const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
     time.dataset.kind = "time";
@@ -419,12 +420,14 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
 }
 
 /** The row's toolbar in the gutter beside it: Reply on every chat row, Edit on
- *  a user row that is the head's (an earlier session is read-only). */
+ *  a user row that is the head's (an earlier session is read-only). A touch
+ *  screen shows it only to a keyboard; a finger has the row's gestures. */
 function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElement): HTMLElement {
   const tools = h("div", `message-tools absolute top-1 flex ${kind === "user" ? "right-full flex-row-reverse" : "left-full"}`);
-  const tool = (glyph: IconNode, label: string, title: string, onclick: () => void): HTMLElement => {
+  const tool = (glyph: IconNode, action: string, label: string, title: string, onclick: () => void): HTMLElement => {
     const b = h("button", "flex h-8 w-8 items-center justify-center rounded-full", icon(glyph));
     b.setAttribute("type", "button");
+    b.dataset.action = action; // its name in the touch menu (row-gestures.ts)
     b.setAttribute("aria-label", label);
     b.title = title;
     b.onclick = onclick;
@@ -432,12 +435,11 @@ function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElemen
   };
   if (kind === "user" && !readonlyRows) {
     cancelEdit?.();
-    tools.append(tool(Pencil, "Edit message", "Edit message — resends it and drops everything after it", () => startEdit(row, node)));
+    tools.append(tool(Pencil, "Edit", "Edit message", "Edit message — resends it and drops everything after it", () => startEdit(row, node)));
   }
   // What the bubble shows: a user row's header and markers are not its words.
-  const reply = tool(Reply, "Reply to this message", "Reply — quotes this message under yours", () =>
+  const reply = tool(Reply, "Reply", "Reply to this message", "Reply — quotes this message under yours", () =>
     deps.quote({ role: kind, at: Number(row.dataset.at), text: shownText(kind, node) }));
-  reply.dataset.reply = "";
   reply.hidden = !("at" in row.dataset); // a streaming reply has no time yet: setRowTime shows it
   tools.append(reply);
   return tools;
@@ -724,7 +726,7 @@ function stampDue(at: number): boolean {
 function setRowTime(row: HTMLElement, at: number): void {
   row.dataset.at = String(at);
   row.dataset.time = stampTime(at).slice(11);
-  const reply = row.querySelector<HTMLElement>("[data-reply]");
+  const reply = row.querySelector<HTMLElement>("[data-action='Reply']");
   if (reply) reply.hidden = false;
 }
 

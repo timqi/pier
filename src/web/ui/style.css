@@ -497,6 +497,7 @@ main {
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts revealTurn). */
   scroll-padding-block: calc(var(--head-h) + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
+  overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
   /* The fade is complete across the heading's 8px inset (margin above): a row
      showing through that strip is a ghost line over the bar, which iOS 26's
      scroll edge effect smears into the status bar. */
@@ -587,17 +588,53 @@ main {
 /* Waiting on you, unanswered: the status panel's `waiting on you` amber-700, not the unread dot's. */
 .topic-tag[data-waiting]::after { content: ""; flex: none; width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: var(--color-amber-700); }
 #turns > [data-kind="user"]:has(textarea) { width: 88%; }
-/* The row toolbar (chat.ts rowTools): shown on hover, or always where there is none. */
+/* The row toolbar (chat.ts rowTools): shown on hover. Without hover it is the
+   keyboard's and the screen reader's — a finger swipes and holds the row
+   (row-gestures.ts) — so it stays in the tree, painted only under focus-visible. */
 .message-tools { color: var(--color-neutral-500); opacity: 0; transition: opacity 160ms; }
 [data-editing] > .message-tools { visibility: hidden; }
 :is([data-kind="user"], [data-kind="assistant"]):hover > .message-tools, .message-tools:focus-within { opacity: 0.85; }
 .message-tools > button:hover { background: var(--color-indigo-100); }
-@media (hover: none) { .message-tools { opacity: 0.85; } }
-/* A thumb gets 44px targets, and two of them no longer fit the gutter beside
-   an 88%-wide bubble: they sit along the bubble's bottom edge instead. */
+@media (hover: none) {
+  .message-tools:not(:has(:focus-visible)) { width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+#turns > :is([data-kind="user"], [data-kind="assistant"]) {
+  touch-action: pan-y pinch-zoom; /* a sideways finger is the swipe, never a pan */
+  transition: transform 200ms var(--ease-surface), outline-color 300ms;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+#turns > [data-swiping] { transition: none; }
+#turns > [data-copied="ok"] { outline-color: var(--color-emerald-500); }
+#turns > [data-copied="failed"] { outline-color: var(--color-red-500); }
+/* The Reply glyph left of a swiped row, filling in as the swipe nears the
+   point where letting go replies. */
+.swipe-hint {
+  position: absolute;
+  right: calc(100% + 0.75rem);
+  top: 50%;
+  display: flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--color-neutral-500);
+  background: var(--color-neutral-100);
+  opacity: var(--swipe, 0);
+  transform: translateY(-50%) scale(calc(0.6 + 0.4 * var(--swipe, 0)));
+  transition: background-color 120ms, color 120ms;
+}
+.swipe-hint[data-armed] { color: var(--color-white); background: var(--color-indigo-500); }
+/* A held finger opens the row's menu, so the platform's own hold — selection
+   handles, the callout, a link's preview — must not fire under it; Select
+   text in that menu hands selection back until it collapses. */
 @media (pointer: coarse) {
-  .message-tools { position: static; flex-direction: row; justify-content: flex-end; margin: 0 -0.5rem -0.625rem; }
-  .message-tools > button { min-width: 44px; min-height: 44px; }
+  #turns > :is([data-kind="user"], [data-kind="assistant"]):not([data-editing], [data-selecting]) {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 /* The quote at the top of a user bubble (chat.ts quoteBlock). */
 .quote-block {

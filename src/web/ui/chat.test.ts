@@ -571,7 +571,7 @@ describe("the reply quote", () => {
   it("quotes a user row's shown words, header and markers off, and finds the source by them", () => {
     const stored = "[qiqi<U1> 2024-06-01 12:00 lang=zh]\n看一下";
     const user = fake(chat.appendTurn("user", stored, false, noon).parentElement);
-    fake(user.querySelector("[data-reply]")).onclick!();
+    fake(user.querySelector("[data-action='Reply']")).onclick!();
     expect(quote).toHaveBeenCalledWith({ role: "user", at: noon, text: "看一下" });
     const reply = fake(chat.appendTurn("user", "[re user 2024-06-01 12:00]\n> 看一下\n\n好", false, noon + 60_000).parentElement);
     fake(reply.querySelector(".quote-block")).onclick!();
@@ -583,7 +583,7 @@ describe("the reply quote", () => {
       { role: "assistant", text: "Cut off." },
       { role: "assistant", text: "Done.", meta: { completedAt: noon, durationMs: 1, tokens: 1 } },
     ], "idle", []);
-    const [cut, done] = pane().querySelectorAll("[data-reply]");
+    const [cut, done] = pane().querySelectorAll("[data-action='Reply']");
     expect(cut!.hidden).toBe(true);
     expect(done!.hidden).toBe(false);
   });
@@ -594,6 +594,180 @@ describe("the reply quote", () => {
     block.onclick!();
     expect(pane().querySelector("[data-reveal]")).toBeNull();
     expect(block.title).toMatch(/Not on this screen/);
+  });
+});
+
+// A finger has no hover: it swipes a row to reply and holds it for the toolbar's actions.
+describe("a touch on a row", () => {
+  const noon = new Date(2024, 5, 1, 12, 0, 0).getTime();
+  const pane = () => doc.querySelector("#turns")!;
+  const written: string[] = [];
+  beforeEach(() => {
+    written.length = 0;
+    vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 390, innerHeight: 800 }));
+    vi.stubGlobal("navigator", { clipboard: { writeText: async (t: string) => void written.push(t) } });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => vi.useRealTimers());
+  const pointer = (row: FakeElement, type: string, x: number, y = 100, pointerType = "touch"): Event => {
+    const ev = Object.assign(new Event(type, { cancelable: true }), { pointerType, isPrimary: true, clientX: x, clientY: y });
+    row.dispatchEvent(ev);
+    return ev;
+  };
+  const swipe = (row: FakeElement, to: number, dy = 0): void => {
+    pointer(row, "pointerdown", 100);
+    for (let x = 100; x <= 100 + to; x += 10) pointer(row, "pointermove", x, 100 + (dy * (x - 100)) / (to || 1));
+  };
+  const sheet = () => doc.querySelector(".glass-menu");
+  const items = () => sheet()?.querySelectorAll("button").map((b) => b.textContent) ?? [];
+  const pick = (label: string) => sheet()!.querySelectorAll("button").find((b) => b.textContent === label)!.onclick!();
+
+  it("replies to a row swiped right past the threshold, the row following the finger and springing back", () => {
+    const row = fake(chat.appendTurn("assistant", "Merged.", true, noon).parentElement);
+    swipe(row, 70);
+    expect(row.style.transform).toMatch(/^translateX\(\d+(\.\d+)?px\)$/);
+    expect(row.querySelector(".swipe-hint")!.hasAttribute("data-armed")).toBe(true);
+    pointer(row, "pointerup", 170);
+    expect(quote).toHaveBeenCalledWith({ role: "assistant", at: noon, text: "Merged." });
+    expect(row.style.transform).toBe("");
+    expect(row.querySelector(".swipe-hint")).toBeNull();
+  });
+
+  it("lets go of a short swipe, a scroll, a mouse and a row with no time without replying", () => {
+    const row = fake(chat.appendTurn("assistant", "Merged.", true, noon).parentElement);
+    swipe(row, 30);
+    pointer(row, "pointerup", 130);
+    swipe(row, 70, 200); // mostly down: the pane's scroll
+    expect(row.style.transform).toBe("");
+    pointer(row, "pointerup", 170);
+    pointer(row, "pointerdown", 100, 100, "mouse");
+    pointer(row, "pointermove", 200, 100, "mouse");
+    pointer(row, "pointerup", 200, 100, "mouse");
+    swipe(row, 70);
+    pointer(row, "pointercancel", 170);
+    expect(quote).not.toHaveBeenCalled();
+    expect(row.style.transform).toBe("");
+    // A reply cut off before its time was recorded has no Reply to slide to.
+    chat.renderSnapshot([{ role: "assistant", text: "Cut off." }], "idle", []);
+    const cut = fake(pane().querySelectorAll("[data-kind='assistant']").at(-1));
+    expect(fake(cut.querySelector("[data-action='Reply']")).hidden).toBe(true);
+    swipe(cut, 70);
+    expect(cut.style.transform ?? "").toBe("");
+    pointer(cut, "pointerup", 170);
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("holds a head's user row open to Reply, Copy, Edit and Select text, and edits from there", () => {
+    const row = fake(chat.appendTurn("user", "[re user 2024-06-01 11:00]\n> gone\n\nship it", false, noon).parentElement);
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    expect(items()).toEqual(["Reply", "Copy", "Edit", "Select text"]);
+    // The release clicks what is under the finger by then — the sheet's
+    // backdrop — and that one click is the hold's, not a close.
+    const click = (): boolean => {
+      const ev = new Event("click", { cancelable: true });
+      doc.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    doc.dispatchEvent(new Event("pointerup"));
+    expect(click()).toBe(true);
+    expect(click()).toBe(false);
+    pick("Edit");
+    expect(sheet()?.hasAttribute("data-closing") ?? true).toBe(true);
+    expect(row.dataset.editing).toBe("");
+    // An editing row keeps its textarea's own touch.
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    expect(doc.querySelectorAll(".glass-menu").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
+  });
+
+  it("copies a reply's words without its markers, and an earlier session's rows offer no Edit", async () => {
+    const row = fake(chat.appendTurn("assistant", "Merged.\n<topic>auth</topic>", true, noon).parentElement);
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    expect(items()).toEqual(["Reply", "Copy", "Select text"]);
+    pick("Copy");
+    await vi.waitFor(() => expect(row.dataset.copied).toBe("ok"));
+    expect(written).toEqual(["Merged."]);
+    // A second copy before the first flash fades restarts it.
+    vi.advanceTimersByTime(100);
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    pick("Copy");
+    await vi.waitFor(() => expect(written).toHaveLength(2));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    vi.advanceTimersByTime(300); // past the first copy's 700 ms
+    expect(row.dataset.copied).toBe("ok");
+    vi.advanceTimersByTime(400);
+    expect(row.dataset.copied).toBeUndefined();
+    chat.renderSnapshot([{ role: "user", text: "old", at: noon }], "idle", [], true);
+    const old = fake(pane().querySelectorAll("[data-kind='user']").at(-1));
+    pointer(old, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    expect(items()).toEqual(["Reply", "Copy", "Select text"]);
+  });
+
+  it("opens on Android's contextmenu after a cancelled touch, and the next tap on the menu is not eaten", () => {
+    const row = fake(chat.appendTurn("user", "go", false, noon).parentElement);
+    pointer(row, "pointerdown", 100);
+    pointer(row, "pointercancel", 100);
+    const menu = pointer(row, "contextmenu", 100);
+    expect(menu.defaultPrevented).toBe(true);
+    expect(items()).toEqual(["Reply", "Copy", "Edit", "Select text"]);
+    // No release reaches the page; the tap on a menu item starts with its own press.
+    doc.dispatchEvent(new Event("pointerdown"));
+    const tap = new Event("click", { cancelable: true });
+    doc.dispatchEvent(tap);
+    expect(tap.defaultPrevented).toBe(false);
+    // A contextmenu without pointerType is a touch's only while one is pressed.
+    const idle = fake(chat.appendTurn("user", "and", false, noon).parentElement);
+    const bare = new Event("contextmenu", { cancelable: true });
+    idle.dispatchEvent(bare);
+    expect(bare.defaultPrevented).toBe(false);
+    // Nor on the held row once a mouse presses it: the hold is over.
+    pointer(row, "pointerdown", 100, 100, "mouse");
+    const right = new Event("contextmenu", { cancelable: true });
+    row.dispatchEvent(right);
+    expect(right.defaultPrevented).toBe(false);
+  });
+
+  it("leaves a row whose text is being selected to the platform's handles", () => {
+    let selected = "";
+    vi.stubGlobal("getSelection", () => ({ selectAllChildren: () => void (selected = "go"), toString: () => selected }));
+    const row = fake(chat.appendTurn("user", "go", false, noon).parentElement);
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    pick("Select text");
+    expect(row.dataset.selecting).toBe("");
+    doc.dispatchEvent(new Event("pointerup"));
+    vi.advanceTimersByTime(400);
+    pointer(row, "pointerdown", 100);
+    vi.advanceTimersByTime(450);
+    expect(doc.querySelectorAll(".glass-menu").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
+    swipe(row, 70);
+    expect(row.style.transform ?? "").toBe("");
+    pointer(row, "pointerup", 170);
+    expect(quote).not.toHaveBeenCalled();
+    expect(pointer(row, "contextmenu", 100).defaultPrevented).toBe(false);
+    // A collapsed selection gives the row back to the finger.
+    selected = "";
+    doc.dispatchEvent(new Event("selectionchange"));
+    expect(row.dataset.selecting).toBeUndefined();
+  });
+
+  it("leaves a finger that moves before the hold, or holds a code span, to what it was doing", () => {
+    const row = fake(chat.appendTurn("assistant", "Run `npm test` now.", true, noon).parentElement);
+    pointer(row, "pointerdown", 100);
+    pointer(row, "pointermove", 100, 140);
+    vi.advanceTimersByTime(450);
+    expect(sheet()).toBeNull();
+    const code = fake(row.querySelector("code"));
+    expect(code.dataset.hold).toBe("");
+    const ev = Object.assign(new Event("pointerdown"), { pointerType: "touch", isPrimary: true, clientX: 100, clientY: 100 });
+    Object.defineProperty(ev, "target", { value: code });
+    row.dispatchEvent(ev);
+    vi.advanceTimersByTime(450);
+    expect(sheet()).toBeNull();
   });
 });
 

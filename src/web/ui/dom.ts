@@ -104,7 +104,7 @@ function externalLinks(root: HTMLElement): void {
 
 /** navigator.clipboard is secure-context only and the dev target binds 0.0.0.0,
  *  so a LAN-IP visit falls back to the legacy selection trick. */
-async function copy(text: string): Promise<void> {
+export async function copy(text: string): Promise<void> {
   if (navigator.clipboard) return navigator.clipboard.writeText(text);
   const area = document.createElement("textarea");
   area.value = text;
@@ -150,8 +150,8 @@ export function addCodeCopy(root: HTMLElement): void {
 
 /** Long enough that a press meant as the start of a drag or a selection is
  *  not read as a hold; the slop is what a finger moves while holding still. */
-const HOLD_MS = 450;
-const HOLD_SLOP = 8;
+export const HOLD_MS = 450;
+export const HOLD_SLOP = 8;
 const FLASH_MS = 700;
 
 /** The copy affordance for a span too small to carry a button: press and hold
@@ -164,6 +164,7 @@ export function holdToCopy(el: HTMLElement, text: () => string): void {
   let from = { x: 0, y: 0 };
   let held = false;
   const stop = (): void => clearTimeout(timer);
+  el.dataset.hold = ""; // a row's own hold (row-gestures.ts) stands down on it
   // The outcome where the gesture happened: no toast, and no layout shift. A
   // second hold restarts the flash instead of inheriting the first one's fade.
   const flash = (tone: string): void => {

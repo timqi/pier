@@ -298,6 +298,17 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`quoteSource`: same role and minute, then the row whose text opens with
   the excerpt); a source not on screen leaves the block inert with a title
   saying so. Only user messages carry quotes.
+- **Row gestures** (`row-gestures.ts`, touch pointers only): the toolbar is
+  the one list of a row's actions. A swipe right past 56px presses its Reply;
+  mostly vertical is the pane's scroll, a start within 24px of the left edge
+  is Safari's back swipe, a row with Reply hidden does not move. A 450 ms
+  hold that stays put opens the menu (`menu.ts`, a sheet below `sm`): Reply,
+  Copy (the reply's markdown without markers; the row's outline flashes
+  green or red), Edit where the toolbar has it, Select text; the release's
+  click is eaten (until the next press, when no release follows), an inline
+  code span keeps its own hold, an editing row none. A touch row has no
+  native selection or callout until Select text, which selects the body and
+  lasts, gestures off, until the selection collapses.
 - **Pier**: the head's snapshot under earlier sessions
   paged in read-only (no pencil, no next-step buttons), each closed by a
   divider naming the rotation. **Earlier session**, or scrolling to the top,

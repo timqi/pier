@@ -354,6 +354,13 @@ export class FakeElement extends EventTarget {
     if ([...ancestors(this)].some((n) => n.inert)) return;
     focused.set(this.#document()!, this);
   }
+  /** Like the browser, nothing on a disabled control; `onclick` is a listener like any other. */
+  click(): void {
+    if (FORM_CONTROLS.has(this.localName) && this.disabled) return;
+    const ev = new Event("click", { cancelable: true });
+    this.dispatchEvent(ev);
+    this.onclick?.(ev);
+  }
   showModal(): void { this.open = true; }
   /** Like the browser, the close event arrives on a later task, not inside close(). */
   close(): void {

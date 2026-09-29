@@ -113,8 +113,11 @@ updates this document.
   and ids are the opened head's, never the chip's. Chat command answers stay open cards.
 - A quote is a neutral grey bar and two clamped lines at the top of the
   user's bubble, the excerpt in the bubble's own type at a
-  step down; the row controls (Reply, Edit) share one gutter and one hover;
-  on touch they are always shown, 44px, along the bubble's bottom edge.
+  step down; the row controls (Reply, Edit) share one gutter and one hover.
+  Without hover they are not painted (focus-visible and screen readers still
+  reach them): a finger swipes the row right to reply — the row follows, a
+  Reply glyph fills in and turns indigo at the release point — and holds it
+  for a sheet of Reply, Copy, Edit, Select text.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
   not yet landed), clear success/failure/interruption for results; running is
   neutral — the spinner carries the motion. Accents small.
