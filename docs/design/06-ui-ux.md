@@ -34,7 +34,9 @@ updates this document.
   utility, never a literal colour. An instance's accent (Settings → Instance)
   is that ramp re-authored per preset in `style.css`, light and dark, keyed by
   `<html data-accent>`; the manifest and icon take the preset's 600 step from
-  the server's table. No colour math at runtime, no second palette.
+  the server's table. No colour math at runtime, no second palette; the one
+  exception is a topic's colour (`topics.ts` `topicHue`), a hue hashed from
+  the open item's key so it holds across sessions and reloads without a table.
 
 ## Layout
 

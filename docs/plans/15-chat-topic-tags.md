@@ -1,6 +1,6 @@
 # Chat topic tags — every message names the open item it belongs to
 
-Status: building. Branch `chat-topic-tags`, not merged.
+Status: built, self-tested (check, lint, 1805 tests, build); not seen in a browser. Branch `chat-topic-tags`, not merged.
 
 ## Decisions
 

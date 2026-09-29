@@ -57,9 +57,15 @@ it("filters the conversation's kinds to one topic and keeps the structure; off s
   const hidden = () => Object.entries(rows).filter(([, r]) => r.hidden).map(([k]) => k);
   expect(hidden()).toEqual(["assistant", "error", "time", "activity"]);
   expect(turns().dataset.topicFilter).toBe("a");
-  // A row appended under the filter is judged the same way.
-  const late = add("system");
-  topics.applyTopicFilterTo(late);
+  // A row that arrives under the filter stays in view, tagged elsewhere or
+  // not, until the switch is flipped again; a re-tag alone never hides it.
+  const late = add("user");
+  topics.arriveRow(late);
+  expect(late.hidden).toBe(false);
+  topics.tagRow(late, "b");
+  expect(late.hidden).toBe(false);
+  topics.setTopicFilter("b");
+  topics.setTopicFilter("a");
   expect(late.hidden).toBe(true);
   // The bar says so, and its × clears it.
   const chip = doc.querySelector(".topic-filter")!;

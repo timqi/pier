@@ -7,7 +7,7 @@ import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { chevron, detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
-import { applyTopicFilterTo } from "./topics.js";
+import { arriveRow } from "./topics.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun, RunModel } from "../../core/types.js";
 
@@ -232,7 +232,7 @@ export function intoProcess(card: HTMLElement): void {
     if (above?.dataset.kind === "assistant" && above.dataset.topic) fold.dataset.topic = above.dataset.topic;
     fold.append(h("div", "process-body"));
     turns.el.append(fold);
-    applyTopicFilterTo(fold);
+    arriveRow(fold);
   }
   fold.lastElementChild!.append(card);
   refreshProcessSummary(fold);
@@ -437,7 +437,7 @@ function ensureActivity(ts: number): Activity {
   el.append(rowsEl);
   tailFollow(el, rowsEl);
   turns.el.append(el);
-  applyTopicFilterTo(el);
+  arriveRow(el);
   lastGroup = el;
   turns.scroll();
   activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };

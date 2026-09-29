@@ -32,7 +32,7 @@ import {
   takeActivityGroup,
   takeProcessFold,
 } from "./turn-activity.js";
-import { applyTopicFilterTo, resetTopics, tagReply } from "./topics.js";
+import { arriveRow, resetTopics, tagReply } from "./topics.js";
 import type {
   BackgroundRun,
   ChatTurn,
@@ -266,11 +266,11 @@ export function appendTurn(
     timeTimer ??= setInterval(paintTimes, 60_000);
     time.title = stampTime(stamp);
     turnsPane.append(time);
-    applyTopicFilterTo(time);
+    arriveRow(time);
   }
   if (steps) turnsPane.append(steps);
   turnsPane.append(row, ...(launched ? [launched] : []));
-  for (const el of [steps, row]) if (el) applyTopicFilterTo(el);
+  for (const el of [steps, row]) if (el) arriveRow(el);
   trimRows();
   scrollBottom();
   return node;
@@ -363,7 +363,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     intoProcess(row);
   } else {
     turnsPane.append(row);
-    applyTopicFilterTo(row);
+    arriveRow(row);
   }
   trimRows();
   scrollBottom();

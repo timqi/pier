@@ -95,7 +95,15 @@ let barChip: HTMLElement | null = null;
 export const topicFilter = (): string | null => filter;
 
 export function applyTopicFilterTo(row: HTMLElement): void {
-  row.hidden = filter !== null && FILTERED.has(row.dataset.kind ?? "") && row.dataset.topic !== filter;
+  row.hidden = filter !== null && !("live" in row.dataset) && FILTERED.has(row.dataset.kind ?? "") && row.dataset.topic !== filter;
+}
+
+/** A row appended while the filter is on stays in view whatever its topic: the
+ *  switch narrows what was there, and a message just sent, or the reply to it,
+ *  must never look like nothing happened (\u00a75). */
+export function arriveRow(row: HTMLElement): void {
+  if (filter !== null) row.dataset.live = "";
+  applyTopicFilterTo(row);
 }
 
 export function applyTopicFilter(): void {
@@ -103,7 +111,10 @@ export function applyTopicFilter(): void {
   if (!turns) return;
   if (filter === null) delete turns.dataset.topicFilter;
   else turns.dataset.topicFilter = filter;
-  for (const row of turns.children) applyTopicFilterTo(row as HTMLElement);
+  for (const row of turns.children) {
+    delete (row as HTMLElement).dataset.live;
+    applyTopicFilterTo(row as HTMLElement);
+  }
 }
 
 export function setTopicFilter(problem: string | null): void {
