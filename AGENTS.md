@@ -126,7 +126,7 @@ exists to catch.
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
 | `core/` | 1.8k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
-| `channels/` | 4.6k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
+| `channels/` | 4.7k | two adapters in one shape plus the shared layer that would otherwise be copied between them; the home chat's status message and the reaction a message wears for its item, on both adapters, are the lines past 4.6k |
 | `web/` | 14k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
 | `agent/` | 2.95k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
 | `tasks/` | 3.75k | one delivery engine, the scheduler, the owner seam, the goal loop run as code, `pier task finish` and the `--worktree` seam |

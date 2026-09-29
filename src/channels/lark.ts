@@ -14,12 +14,13 @@ import type {
   ConversationKey,
   InboundMessage,
   NoteOrigin,
+  OpenItemsView,
 } from "../core/types.js";
 import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
-import { awaitsTurn } from "../core/reply.js";
+import { awaitsTurn, isSilentReply } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -38,9 +39,10 @@ import {
 } from "./lark-api.js";
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
-import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
+import { card, chunk, LARK_MAX, markdown, OFFER_PREFIX } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
+import { StatusMessage } from "./status.js";
 
 const REACTIONS = { working: "OnIt", waiting: "WHAT", done: "DONE" };
 // The event is already acked, so this bounds concurrency, not the backlog.
@@ -99,6 +101,7 @@ export class LarkChannel implements Channel {
   private readonly discovered = new Set<string>();
   private me = "";
   private readonly out: LarkOutbound;
+  private readonly statusLine: StatusMessage;
   private socket?: LarkSocket;
   private running = false;
 
@@ -111,17 +114,24 @@ export class LarkChannel implements Channel {
     // token = App ID, appToken = App Secret (see lark-api.ts).
     this.api = deps.client ?? new LarkApi(config.token, config.appToken, this.log);
     this.out = new LarkOutbound(this.api, this.log);
+    const ledger = deps.receipts ?? new ReceiptLedger("lark");
     this.receipts = new Receipts(
       {
         addReaction: (_chatId, messageId, emoji) => this.api.addReaction(messageId, emoji),
         removeReaction: (_chatId, messageId, emoji) => this.api.removeReaction(messageId, emoji),
       },
-      deps.receipts ?? new ReceiptLedger("lark"),
+      ledger,
       this.log,
       REACTIONS,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
+    // One card, so the text is cut to the budget rather than split.
+    this.statusLine = new StatusMessage("lark", ledger.db, {
+      post: async (chatId, body) => (await this.api.sendCard(chatId, card([markdown(body)]))).messageId,
+      edit: (_chatId, messageId, body) => this.api.patchCard(messageId, card([markdown(body)])),
+      delete: (_chatId, messageId) => this.api.deleteMessage(messageId),
+    }, this.receipts, this.log, (text) => chunk(`*▤ open items*\n${text}`, LARK_MAX)[0] ?? "");
     if (deps.control) {
       this.panel = new LarkPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -502,8 +512,15 @@ export class LarkChannel implements Channel {
       await this.receipts.settle(conversation);
       return;
     }
+    // The home's main flow keeps a turn that opened an item wearing its state.
+    const main = "chatId" in to;
+    const opened = main ? reply.opened?.[0] : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
-    await this.receipts.settleAfter(conversation, () => this.out.reply(to, reply), reply.meta);
+    await this.receipts.settleAfter(conversation, async (settles) => {
+      // The home's quiet turn says so only to a message nothing else answers.
+      if (main && isSilentReply(reply) && (opened || !settles)) return;
+      if ((await this.out.reply(to, reply)) && main) this.statusLine.behind(to.chatId);
+    }, reply.meta, opened);
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of
@@ -517,7 +534,12 @@ export class LarkChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
+    // The home's main flow shows task progress in the status message; the web keeps the cards.
+    if ("chatId" in to && (note.origin.kind === "task-delegation" || note.origin.kind === "task-callback")) {
+      return logger("lark").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
+    }
     const messageId = await this.out.note(to, note);
+    if (messageId && "chatId" in to) this.statusLine.behind(to.chatId);
     if (messageId && awaitsTurn(note.origin)) {
       this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);
     }
@@ -527,11 +549,13 @@ export class LarkChannel implements Channel {
     if (!this.isHome(chatId)) throw new Error(`refusing to open a topic in ${chatId}: not the home chat`);
     const messageId = await this.out.note({ chatId }, note);
     if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
+    this.statusLine.behind(chatId);
     return conversationId(chatId, messageId);
   }
 
-  async status(chatId: string): Promise<void> {
-    throw new Error(`refusing a status message in ${chatId}: not built yet on Lark`);
+  async status(chatId: string, view: OpenItemsView): Promise<void> {
+    if (!this.isHome(chatId)) throw new Error(`refusing a status message in ${chatId}: not the home chat`);
+    await this.statusLine.show(chatId, view);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

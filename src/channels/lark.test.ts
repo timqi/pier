@@ -1012,6 +1012,89 @@ describe("the home chat", () => {
     expect(bodyText(client.replied.at(-1)!.card)).toBe("▸ Finalize design");
     expect(inbound.at(-1)).toMatchObject({ key: child, text: "Finalize design" });
   });
+
+  // docs/design/11-im-conversation.md §Status
+  describe("status", () => {
+    const meta = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 10, model: "m" };
+    const view = (text: string, items: [string, string][] = []) =>
+      ({ text, items: items.map(([problem, status]) => ({ problem, status })) });
+
+    it("keeps one labelled card below the main flow's last post, and only in the home chat", async () => {
+      await channel.status(HOME, view("storage — running"));
+      expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([[HOME, "*▤ open items*\nstorage — running"]]);
+      await channel.status(HOME, view("storage — waiting on you"));
+      expect(client.patched.at(-1)!.messageId).toBe("om_900");
+      expect(bodyText(client.patched.at(-1)!.card)).toBe("*▤ open items*\nstorage — waiting on you");
+      await channel.status(HOME, view("storage — waiting on you"));
+      expect(client.patched).toHaveLength(1);
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.status(HOME, view("storage — waiting on you"));
+      expect(client.deleted).toEqual(["om_900"]);
+      expect(client.sent.map((p) => bodyText(p.card).split("\n")[0])).toEqual(["*▤ open items*", "done", "*▤ open items*"]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.deleted).toEqual(["om_900", "om_902"]);
+      await expect(channel.status(CHAT, view("x"))).rejects.toThrow(/not the home chat/);
+    });
+
+    it("a note and a topic root re-post the status below them; an echoed pick does not", async () => {
+      const origin = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+      await channel.status(HOME, view("a"));
+      await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
+      await channel.status(HOME, view("b"));
+      await channel.openThread(HOME, { text: "▷ storage", origin });
+      await channel.status(HOME, view("c"));
+      expect(client.deleted).toEqual(["om_900", "om_902"]);
+      await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+      await channel.status(HOME, view("d"));
+      await act({ messageId: "om_905", chatId: HOME, operatorId: USER, value: { key: "sg:0", root: "", label: "Deploy" } });
+      await channel.status(HOME, view("e"));
+      expect(client.deleted).toEqual(["om_900", "om_902", "om_904"]);
+      expect(bodyText(client.patched.at(-1)!.card)).toBe("*▤ open items*\ne");
+    });
+
+    it("a turn that opened an item keeps the message's 👀, then ❓ and ✅ as the item moves", async () => {
+      await feed(dm({ text: "design storage", messageId: "om_i1" }));
+      await channel.send(HOME, { text: "on it", suggestions: [], meta, opened: ["storage", "cache"] });
+      expect(client.reactions).toEqual([{ messageId: "om_i1", emoji: "OnIt", add: true }]);
+      // A view read in the join's millisecond may predate the marker; only a later one says gone.
+      await new Promise((r) => setTimeout(r, 2));
+      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
+      expect(client.reactions.slice(1)).toEqual([
+        { messageId: "om_i1", emoji: "OnIt", add: false },
+        { messageId: "om_i1", emoji: "WHAT", add: true },
+      ]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.reactions.slice(3)).toEqual([
+        { messageId: "om_i1", emoji: "WHAT", add: false },
+        { messageId: "om_i1", emoji: "DONE", add: true },
+      ]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.reactions).toHaveLength(5);
+    });
+
+    it("a quiet main-flow turn posts its footer only for a settled message that opened nothing", async () => {
+      await channel.send(HOME, { text: "", suggestions: [], meta });
+      expect(client.sent).toEqual([]);
+      await feed(dm({ text: "ok", messageId: "om_q1" }));
+      await channel.send(HOME, { text: "", suggestions: [], meta, opened: ["storage"] });
+      expect(client.sent).toEqual([]);
+      await feed(dm({ text: "thanks", messageId: "om_q2" }));
+      await channel.send(HOME, { text: "", suggestions: [], meta });
+      expect(client.sent).toHaveLength(1);
+      expect(client.reactions.at(-1)).toEqual({ messageId: "om_q2", emoji: "OnIt", add: false });
+    });
+
+    it("task delegation and callback notes skip the home main flow; its topics still post them", async () => {
+      const callback = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+      const delegation = { kind: "task-delegation" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+      await channel.notify(HOME, { text: "▷ storage", origin: delegation });
+      await channel.notify(HOME, { text: "✓ storage", origin: callback });
+      expect(client.sent).toEqual([]);
+      await channel.notify(`${HOME}/om_root`, { text: "✓ storage", origin: callback });
+      expect(client.sent).toEqual([]);
+      expect(client.replied.map((r) => r.to)).toEqual(["om_root"]);
+    });
+  });
 });
 
 describe("discovery", () => {

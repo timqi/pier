@@ -176,7 +176,7 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   footer only when its turn settled a message and opened no item; otherwise
   nothing — the reaction or the status message is the trace.
 - Every platform failure is logged with a `status:` or `reaction` prefix and
-  never thrown into the hub. Lark's `status()` rejects: not built yet.
+  never thrown into the hub.
 
 | Emoji | Slack | Lark |
 | --- | --- | --- |

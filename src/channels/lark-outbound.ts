@@ -35,15 +35,16 @@ export class LarkOutbound {
 
   /** An empty turn still posts its footer and says which kind of nothing (§5).
    *  The footer folds into the last chunk's element (a second element renders
-   *  a blank gap); only a bodiless turn gets the standalone one. */
-  async reply(to: LarkTarget, reply: AgentReply): Promise<void> {
+   *  a blank gap); only a bodiless turn gets the standalone one. Answers
+   *  whether anything was posted. */
+  async reply(to: LarkTarget, reply: AgentReply): Promise<boolean> {
     // A local file link is dead in Lark: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
     const meta = reply.meta ? formatTurnMeta(reply.meta) : "";
     const quiet = isSilentReply(reply) ? quietLabel(reply.silence) : "";
     const note = [quiet, meta].filter(Boolean).join(" · ");
-    if (!(text || reply.suggestions.length || note || paths.length)) return;
+    if (!(text || reply.suggestions.length || note || paths.length)) return false;
     // An empty root is a main-flow button, which only the home chat has (lark.ts onAction).
     const root = "root" in to ? to.root : "";
     const row = reply.suggestions.length
@@ -63,6 +64,7 @@ export class LarkOutbound {
     }
     const lost = await sendAttachments(paths, (file) => this.api.uploadFile(to, file), this.log);
     if (lost) await this.post(to, card([markdown(lost)]));
+    return true;
   }
 
   post(to: LarkTarget, sent: LarkCard): Promise<{ messageId: string }> {
