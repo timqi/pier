@@ -12,6 +12,7 @@ import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
+import { TaskGoals } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
@@ -64,6 +65,7 @@ export class TaskService {
   private readonly groups: TaskGroups;
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
+  private readonly goals: TaskGoals;
 
   constructor(
     readonly store: TaskStore,
@@ -126,6 +128,13 @@ export class TaskService {
       (run) => this.execution.start(run),
       (run) => this.changed(run),
     );
+    this.goals = new TaskGoals(store, this.definitions, {
+      prepare: (definition, source, provenance) => this.runs.prepare(definition, null, source, null, provenance),
+      start: (run) => this.runs.start(run),
+      cancelRun: (id) => { this.execution.cancel(id); },
+      models: () => this.models().then((listed) => listed.models),
+      deliver: (run) => this.callbacks.deliver(run),
+    });
     router.onTurnEnd((sessionId, text) => {
       // Only the head's turns write the list.
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
@@ -205,6 +214,7 @@ export class TaskService {
     const now = Date.now();
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
+    this.goals.recover();
     this.groups.recover(now);
     this.runTimer(tickMs);
   }
@@ -243,6 +253,7 @@ export class TaskService {
     }
     this.callbacks.recover(at);
     this.groups.recover(at);
+    this.goals.recover();
   }
 
   private runTimer(tickMs: number): void {
@@ -395,7 +406,17 @@ export class TaskService {
     // `enabled:false` pauses scheduling only; manual and agent triggers still
     // run a paused task on demand. Archiving is the terminal state.
     if (task.archived) throw new Error("archived tasks cannot run");
-    return this.runs.prepare(task, input, source, parentRunId, provenance);
+    const { action, trigger } = task;
+    if (action.type !== "agent" || !action.launch?.until) return this.runs.prepare(task, input, source, parentRunId, provenance);
+    // operations.ts refuses these first; a goal is one launched run's loop.
+    if (action.session.mode !== "fresh" || trigger.type !== "manual" || provenance.groupId || parentRunId !== null) {
+      throw new Error("--until merged applies to one fresh --prompt run, not a reused session, a schedule, a batch member or a chained task");
+    }
+    return this.store.transact(() => {
+      const run = this.runs.prepare(task, input, source, parentRunId, provenance);
+      this.goals.open(run);
+      return run;
+    });
   }
 
   async waitForRun(id: string): Promise<TaskRun> {
@@ -413,6 +434,11 @@ export class TaskService {
    *  any other session did not, so that run's end is noticed; the cascade is not. */
   cancel(id: string, by?: string): TaskRun {
     const run = this.getRun(id);
+    const goal = run.goalId ? this.store.getGoal(run.goalId) : undefined;
+    if (goal?.finishedAt === null) {
+      this.goals.cancel(goal, by ?? "Pier");
+      return this.getRun(id);
+    }
     const unasked = by !== undefined && this.headOf(by) !== this.head();
     for (const target of [run, ...this.descendants(run)]) {
       if (!isTerminal(target.state)) this.execution.cancel(target.id, unasked && target === run);
@@ -579,6 +605,8 @@ export class TaskService {
     if (waiters) for (const resolve of waiters) resolve(run);
     this.waiters.delete(run.id);
     this.groups.onSettled(run);
+    // advance() ends the goal on its own throws; this catch is for the end itself failing.
+    void this.goals.advance(run).catch((err: unknown) => log.error(`run ${run.id}: its goal could not advance or end`, err));
     this.designLead(run);
     this.abnormalEnd(run, unasked);
   }

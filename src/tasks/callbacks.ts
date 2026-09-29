@@ -5,7 +5,7 @@ import { modelKey, type LedgerRun, type RunModel, type SystemInputSource } from 
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import type { TaskCallback, TaskRun } from "./types.js";
+import { GOAL_STEP, type Goal, type TaskCallback, type TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
  *  deep link to it, and without this that costs a second call. */
@@ -57,13 +57,27 @@ export const DESIGN_FINAL = /^Design final:/m;
 /** On the record of a lead run that owed its supervisor nothing, so the run says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
-/** Decided once, as the run finishes. A lead reports milestones only: any
+/** What heads a goal's end callback: the head reads it without parsing the result. */
+export const goalLine = (goal: Goal): string => {
+  const rounds = `${String(goal.round)} review round${goal.round === 1 ? "" : "s"}`;
+  if (goal.outcome === "done") return goal.round ? `Goal: merged after ${rounds}` : "Goal: merged, review clean";
+  if (goal.outcome === "decision") return `Goal: needs your decision (round ${String(goal.round)})`;
+  if (goal.outcome === "cap") return `Goal: ${rounds}, still findings`;
+  return `Goal: failed at ${goal.step} — ${goal.reason ?? "unknown"}`;
+};
+
+/** Decided once, as the run finishes. A live goal's step calls nobody back:
+ *  the goal's end does (goals.ts). A lead reports milestones only: any
  *  other turn of its the user reads in its session, and settles as `--callback none`.
  *  A build lead's turn that leaves nothing coming to it is its milestone: it
  *  declares its own completion, where only the user finalizes a design.
  *  A turn that did not succeed is not a turn the user read: it calls back. */
-export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf" | "awaitsResults">): void {
+export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf" | "awaitsResults" | "getGoal">): void {
   if (!run.callbackSessionId) return;
+  if (run.goalId && store.getGoal(run.goalId)?.finishedAt === null) {
+    run.callbackError = GOAL_STEP;
+    return;
+  }
   // A watch probe that did not match is the interval passing, not a result.
   if (run.matched === false && run.state === "succeeded") return;
   // The session's creator fixes its role: a `--session` or `--run` turn on a lead's session is a lead's.
@@ -157,6 +171,7 @@ export class TaskCallbacks {
 
   private text(runs: TaskRun[]): string {
     const sections = runs.map((run) => [
+      ...this.goalHead(run),
       `Task "${run.context.definition.name}" finished with state: ${run.state}`,
       runRef(run),
       "",
@@ -164,5 +179,10 @@ export class TaskCallbacks {
     ].join("\n"));
     if (sections.length === 1) return sections[0]!;
     return [`${String(sections.length)} task callbacks`, "", sections.join("\n\n---\n\n")].join("\n");
+  }
+
+  private goalHead(run: TaskRun): string[] {
+    const goal = run.goalId ? this.store.getGoal(run.goalId) : undefined;
+    return goal?.outcome ? [goalLine(goal)] : [];
   }
 }

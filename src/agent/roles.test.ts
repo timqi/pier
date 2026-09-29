@@ -1,22 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { openItemMarkers } from "../core/reply.js";
 import { DISPATCHER, lead, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
 
 describe("the dispatcher contract", () => {
-  it("shows the goal in a marker the parser reads back, the goal in the stage", () => {
-    const example = /`(<open>[^`]*until[^`]*<\/open>)`/.exec(DISPATCHER)?.[1];
-    expect(example).toBeDefined();
-    expect(openItemMarkers(example!).markers).toEqual([
-      { op: "open", problem: "CI \u4fee\u590d", stage: expect.stringMatching(/^worker running \u00b7 until /), runIds: ["<id>"] },
-    ]);
-    // The cap is a number the head counts against; the contract names it once.
-    expect(DISPATCHER).toMatch(/auto 1\/3/);
+  it("defaults code workers to goals and leaves the stage uncounted", () => {
+    expect(DISPATCHER).toContain("`--until merged`");
+    expect(DISPATCHER).not.toContain("· auto");
+    expect(DISPATCHER).toContain("callback opens with a `Goal:` line");
+    expect(DISPATCHER).toContain("stage is written once at dispatch with nothing to count");
   });
 
-  it("shows a note in the marker the chain appends, and the default goal of a code worker", () => {
-    const example = /`(<note>[^`]*<\/note>)`/.exec(DISPATCHER)?.[1];
-    expect(openItemMarkers(example!).notes).toEqual(["line"]);
-    expect(DISPATCHER).toContain("`\u00b7 until \u5ba1\u67e5\u901a\u8fc7\u5e76\u5408\u5e76`");
+  it("asks first only for a seam or design", () => {
+    expect(DISPATCHER).toContain("Ask the user first only for a seam or a design");
+    expect(DISPATCHER).toContain("restart after the merge is still theirs");
   });
 
   it("names the three tiers once, in one line, and leaves the skill's prose to the skill", () => {
@@ -54,6 +49,10 @@ describe("the role contracts", () => {
     expect(lead("design")).toContain("[Finalize design]");
     expect(lead("build")).toContain("## Build");
     expect(lead("build")).not.toContain("## Design");
+    expect(lead("build")).toContain("Before the milestone that declares the build done");
+    expect(lead("build")).toContain("review worker of the integrated branch (`--model balanced`, `hardest` for a seam)");
+    expect(lead("build")).toContain("its end arriving as a callback counted among the results owed");
+    expect(lead("build")).toContain("`--until merged`");
     expect(lead("build")).not.toContain("[Finalize design]");
     for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
   });

@@ -227,8 +227,8 @@ function sessionRow(s: SessionInfo, mark: Mark): PanelRow {
 }
 
 /** An open item: its problem and its stage — its runs where it names none, and
- *  on the tooltip with who runs them. It lands on the topic's latest reply, else
- *  its first run's session. */
+ *  on the tooltip with who runs them. It lands in the child session it waits in,
+ *  else on the topic's latest reply, else its first run's session. */
 function itemRow(i: OpenItem, now: number): PanelRow {
   const runs = i.runs.map((r) => openRunText(r, now)).join(" · ");
   const run = i.runs.find((r) => r.targetSessionId);
@@ -238,9 +238,12 @@ function itemRow(i: OpenItem, now: number): PanelRow {
     id: target ?? `item:${i.problem}`, dot: runDot(i.problem, i.runs.some((r) => r.state === "running")),
     label: i.problem, who: "", detail: i.stage || runs, status: i.status,
     title: [i.problem, i.stage, runs, who, ...i.runs.flatMap((r) => (r.cwd ? [r.cwd] : []))].filter(Boolean).join("\n"),
-    open: () => void deps.showTopic(i.problem, !!target).then((shown) => {
-      if (!shown && target) deps.select(target);
-    }),
+    open: () => {
+      if (i.waitsIn) deps.select(i.waitsIn);
+      else void deps.showTopic(i.problem, !!target).then((shown) => {
+        if (!shown && target) deps.select(target);
+      });
+    },
   };
 }
 

@@ -128,6 +128,24 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     if (value.design !== true || launch.role !== "lead") throw new Error("agent design must be true, on a lead");
     launch.design = true;
   }
+  if (value.until !== undefined) {
+    if (value.until !== "merged") throw new Error("agent until must be merged");
+    if (launch.role) throw new Error("agent until applies to a worker, not a lead");
+    launch.until = "merged";
+  }
+  if (value.rounds !== undefined) {
+    const rounds = value.rounds;
+    if (typeof rounds !== "number" || !Number.isInteger(rounds) || rounds < 1 || rounds > 9 || !launch.until) {
+      throw new Error("agent rounds must be a whole number from 1 to 9, beside until");
+    }
+    launch.rounds = rounds;
+  }
+  if (value.reviewModel !== undefined) {
+    if (typeof value.reviewModel !== "string" || !value.reviewModel.trim() || !launch.until) {
+      throw new Error("agent reviewModel must be a model name, beside until");
+    }
+    launch.reviewModel = value.reviewModel.trim();
+  }
   return Object.keys(launch).length ? launch : undefined;
 }
 

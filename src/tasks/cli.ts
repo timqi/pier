@@ -22,6 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
+  until: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" },
   days: { type: "string" }, state: { type: "string" }, since: { type: "string" }, limit: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
@@ -33,7 +34,8 @@ type Params = Record<string, unknown>;
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
     usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
-      "        [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
+      "        [--thinking <level>] [--role lead [--design]] [--until merged [--rounds <n>] [--review-model <tier|model>]]\n" +
+      "        [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
   },
@@ -88,10 +90,15 @@ const seconds = (flag: Flag, raw: string | boolean | undefined): number | undefi
 };
 
 /** `launch` as the server takes it: `model` is a menu name it resolves. */
-const launchOf = (v: Values): Params | undefined =>
-  v.model === undefined && v.thinking === undefined && v.role === undefined && v.design === undefined
-    ? undefined
-    : compact({ model: v.model, thinking: v.thinking, role: v.role, design: v.design });
+const launchOf = (v: Values): Params | undefined => {
+  if (v.rounds !== undefined || v["review-model"] !== undefined) {
+    if (v.until === undefined) refuse("--rounds and --review-model apply beside --until");
+  }
+  const rounds = v.rounds === undefined ? undefined : Number(v.rounds);
+  if (rounds !== undefined && !Number.isInteger(rounds)) refuse("--rounds must be a whole number");
+  const launch = compact({ model: v.model, thinking: v.thinking, role: v.role, design: v.design, until: v.until, rounds, reviewModel: v["review-model"] });
+  return Object.keys(launch).length ? launch : undefined;
+};
 
 /** Argv is split at each bare `--member`; a value equal to it is unreachable,
  *  since parseArgs (strict) refuses option-like values anyway. */
@@ -201,10 +208,14 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   /** One new run, in the three shapes `tasks[]` accepts. A saved
    *  definition runs as is: batch defaults pass it by, its own flags are refused. */
   const entry = (v: Values, own = v): Params => {
+    if (v.until !== undefined) {
+      const beside = (["bash", "task-id", "session", "role"] as const).find((flag) => v[flag] !== undefined);
+      if (beside) refuse(`--until applies to a fresh --prompt run, not beside --${beside}`);
+    }
     const launch = launchOf(v);
     const timeoutSeconds = seconds("timeout", v.timeout);
     if (v["task-id"] !== undefined) {
-      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "role", "design", "name", "timeout"].includes(flag));
+      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "role", "design", "until", "rounds", "review-model", "name", "timeout"].includes(flag));
       if (extra) refuse(`--${extra} does not apply to a saved definition (--task-id)`);
       return { task_id: v["task-id"] };
     }
@@ -223,6 +234,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
 
   if (values.run !== undefined) {
     if (members.length) refuse("--run addresses one existing run; --member starts new ones");
+    if (values.until !== undefined) refuse("--until applies to a new run; --run addresses an existing one");
     const extra = flagsOf(values).find((flag) => !["run", "after", "prompt", "callback", "callback-session"].includes(flag));
     if (extra) refuse(`--${extra} does not apply to an existing run (--run)`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");

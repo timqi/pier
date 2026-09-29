@@ -8,7 +8,7 @@ import { NOT_IN_LEDGER, TASK_RUN_STATES, type LedgerRun, type TaskRunState } fro
 import { logger } from "../log.js";
 import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
-import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "./types.js";
+import type { OpenItem, OpenItems, OpenRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -31,23 +31,31 @@ const WAITING = /\bwaiting on you\b/i;
 type Unrated = Omit<OpenItem, "status">;
 
 /** The one reading of an item's status (tasks/types.ts `OpenStatus`), from its whole
- *  run tree — each run, its session, a lead's workers, the only runs below a lead since
- *  workers never delegate — and its stage's `waiting on you` marker. */
+ *  run tree — each run, its goal, its session, a lead's workers, the only runs below a
+ *  lead since workers never delegate — and its stage's `waiting on you` marker; beside it
+ *  `waitsIn`, the child session a wait is answered in, from the same reason. */
 export function openStatus(
   { stage, runs }: Unrated,
   session: { streaming: (id: string) => boolean; designOpen: (id: string) => boolean },
-): OpenStatus {
+): Pick<OpenItem, "status" | "waitsIn"> {
   const live = (r: OpenRun): boolean =>
+    (!!r.goal && r.goal.outcome === null) ||
     phaseOf(r.state) === "live" ||
     (!!r.targetSessionId && session.streaming(r.targetSessionId)) ||
     (r.workers?.queued ?? 0) + (r.workers?.running ?? 0) > 0;
-  if (runs.some(live)) return "running";
-  if (WAITING.test(stage) || runs.some((r) => r.targetSessionId && session.designOpen(r.targetSessionId))) return "waiting on you";
-  return runs.every((r) => phaseOf(r.state) === "succeeded") ? "pending release" : "stopped";
+  if (runs.some(live)) return { status: "running" };
+  // The head relays a stage's or a goal's question and the user answers it in the chat.
+  const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap");
+  if (asksInChat) return { status: "waiting on you" };
+  const design = runs.find((r) => r.targetSessionId && session.designOpen(r.targetSessionId));
+  if (design?.targetSessionId) return { status: "waiting on you", waitsIn: design.targetSessionId };
+  // A goal's end, not its root run's state, says whether the work landed: the review runs in another session.
+  const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" : phaseOf(r.state) === "succeeded");
+  return { status: runs.every(landed) ? "pending release" : "stopped" };
 }
 
 /** The store reads the list is joined against. */
-export type OpenItemReads = Pick<TaskStore, "getRun" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
+export type OpenItemReads = Pick<TaskStore, "getRun" | "goalOf" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
 /** `members`: the chain, newest first; `designs`: the open designs of sessions not closed. */
 export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], designs: LedgerRun[]): OpenItems {
@@ -75,17 +83,22 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
   const shown = new Set([...all.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
-  const withWorkers = (r: OpenRun): OpenRun => {
+  const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
-    return workers ? { ...r, workers: { ...workers } } : r;
+    const goal = r.state !== NOT_IN_LEDGER && r.targetSessionId ? store.goalOf(r.targetSessionId) : undefined;
+    return {
+      ...r,
+      ...(workers ? { workers: { ...workers } } : {}),
+      ...(goal ? { goal: { step: goal.step, round: goal.round, cap: goal.cap, outcome: goal.outcome, reason: goal.reason } } : {}),
+    };
   };
   const session = { streaming: (id: string) => router.stateOf(id) === "streaming", designOpen: (id: string) => awaiting.has(id) };
   return {
     items: all.map((i) => {
-      const rated = { ...i, runs: i.runs.map(withWorkers) };
-      return { ...rated, status: openStatus(rated, session) };
+      const rated = { ...i, runs: i.runs.map(joined) };
+      return { ...rated, ...openStatus(rated, session) };
     }),
-    unlisted: unlisted.map(withWorkers),
+    unlisted: unlisted.map(joined),
   };
 }
 

@@ -34,7 +34,8 @@ the one validator of the params object.
 
 ```
 pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
-        [--thinking <level>] [--role lead [--design]] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+        [--thinking <level>] [--role lead [--design]] [--until merged [--rounds <n>] [--review-model <tier|model>]]
+        [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
@@ -54,6 +55,16 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   coming to it, or a run that did not succeed; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a
   milestone".
+- **`--until merged`**: rides as `launch.until` on a fresh `--prompt` run,
+  the root of a goal (`tasks/goals.ts`): reviewed by a run Pier launches,
+  fixed by resuming the worker, merged by it; refused beside `--bash`,
+  `--task-id`, `--session`, `--run`, `--role` (argv), in a `--member` or with
+  `--callback none` (server).
+- **`--rounds <n>`**: rides as `launch.rounds`, the fix rounds the goal allows
+  (1–9, default 3) before it ends on the user; refused without `--until`.
+- **`--review-model <tier|model>`**: rides as `launch.reviewModel`, the
+  review's model; absent, the root's tier, else its model; refused without
+  `--until`.
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
@@ -190,6 +201,12 @@ A subagent that needs an answer ends its turn with the question as its
 result; the supervisor answers with `pier task run --run <id> --prompt
 "<answer>"` (a resume). There is no mid-run channel; control messages are
 `steer` and `follow_up` only (`tasks/messages.ts`, migration 25).
+
+A goal's step runs settle as `--callback none` with `callbackError` "a
+goal's step, not its end", and the goal's end is one callback to the root
+run's target, headed by its `Goal:` line; `--run` on a goal's settled run
+while the goal is live is refused (`task: run <id> is in a goal (<step>);
+cancel it or wait for its end`), and `cancel --run` ends the goal.
 
 ## Two levels, no tree
 

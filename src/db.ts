@@ -386,6 +386,19 @@ const MIGRATIONS: readonly string[] = [
   ))
   WHERE json_type(json, '$.chats') = 'array';
   `,
+  // 36 — goals: a `--until merged` run's review/fix/merge loop (tasks/goals.ts);
+  // a run of one names it in json.goalId.
+  `
+  CREATE TABLE goals (
+    id TEXT PRIMARY KEY,
+    root_run_id TEXT NOT NULL UNIQUE,
+    current_run_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX goals_live ON goals(finished_at) WHERE finished_at IS NULL;
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

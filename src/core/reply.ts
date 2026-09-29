@@ -115,12 +115,36 @@ export const runStatus = (r: LedgerRun, now: number): string =>
 export const workerCounts = (workers: Record<TaskRunState, number>): string =>
   TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`).join(", ") || "none";
 
-/** A run behind an open item, `run <id8>… <state> <age>`, a lead's with its workers;
- *  web/ui/turn-activity.ts `linkRuns` reads the token back. */
-export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, number> }, now: number): string =>
+/** A `--until merged` goal as core sees it: tasks/types.ts `OpenRun.goal`, structurally. */
+interface RunGoal {
+  step: "work" | "review" | "merge";
+  round: number;
+  cap: number;
+  outcome: "done" | "decision" | "cap" | "failed" | null;
+  reason: string | null;
+}
+
+/** Where a goal stands; `round` counts fix rounds, so a review after round n is its re-review and never reads past the cap. */
+const goalText = (g: RunGoal): string => {
+  const of = (n: number) => `${String(n)}/${String(g.cap)}`;
+  switch (g.outcome) {
+    case "done": return "merged";
+    case "decision": return "waiting on you";
+    case "cap": return `${of(g.cap)} rounds, still findings`;
+    case "failed": return g.reason ? `failed: ${g.reason}` : "failed";
+    case null:
+      if (g.step === "merge") return "merging";
+      if (g.step === "review") return g.round ? `re-review ${of(g.round)}` : "review";
+      return g.round ? `fix round ${of(g.round)}` : "working";
+  }
+};
+
+/** A run behind an open item, `run <id8>… <state> <age>`, a lead's with its workers,
+ *  a goal's root with where the goal stands; web/ui/turn-activity.ts `linkRuns` reads the token back. */
+export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, number>; goal?: RunGoal }, now: number): string =>
   r.state === NOT_IN_LEDGER
     ? `run ${r.runId} — ${NOT_IN_LEDGER}`
-    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}`;
+    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}${r.goal ? ` · until merged: ${goalText(r.goal)}` : ""}`;
 
 /** The one open-item status (tasks/types.ts `OpenStatus`) that asks anything of the user:
  *  what `/status`, the status panel, its chip's `needs you` and the app badge group by. */

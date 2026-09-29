@@ -20,6 +20,7 @@ export interface RunProvenance {
   groupId?: string | null;
   resumedFromRunId?: string | null;
   resumePrompt?: string;
+  goalId?: string;
 }
 
 export class TaskRunQueue {
@@ -63,6 +64,7 @@ export class TaskRunQueue {
       parentRunId,
       groupId: provenance.groupId ?? null,
       resumedFromRunId: provenance.resumedFromRunId ?? null,
+      ...(provenance.goalId ? { goalId: provenance.goalId } : {}),
       triggerSource: source,
       invokedBySessionId,
       sourceSessionId,

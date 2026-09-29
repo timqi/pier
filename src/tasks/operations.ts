@@ -10,7 +10,7 @@ import { clipResult } from "./callbacks.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
-import { isTerminal, type CallbackFields, type CallbackMode, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
+import { isTerminal, type CallbackFields, type CallbackMode, type Goal, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -217,6 +217,9 @@ export async function handleTask(
     if (lead && role === "lead") throw new Error("a feature lead cannot launch a lead; a build lead is your supervisor's to launch, from your milestone");
     return draft;
   };
+  // Read off a draft or a saved definition, the way `notLead` reads the role.
+  const until = (draft: unknown): unknown =>
+    record(record(draft)?.launch)?.until ?? record(record(record(draft)?.action)?.launch)?.until;
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") {
     // What the schedule answer needs: the next occurrence and the last run's state, not the run.
@@ -260,6 +263,9 @@ export async function handleTask(
       for (const rawEntry of input.tasks) {
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
+        if (until(entry) !== undefined || (entry.task_id !== undefined && until(definitions.get(requiredString(entry.task_id, "task_id"))) !== undefined)) {
+          throw new Error("--until merged is one run's loop; a --member cannot carry it");
+        }
         resolved.push(entry.task_id === undefined
           ? await resolveDraft(definitions, menu, notLead(entry), callerSessionId)
           : notLead(definitions.get(requiredString(entry.task_id, "task_id"))));
@@ -275,6 +281,13 @@ export async function handleTask(
       return receipt(summarizeGroup(group, runs), groupCallbackSessionId, callbackMode, callerSessionId);
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
+    if (until(draft) !== undefined) {
+      if (record(draft)?.action !== undefined) throw new Error("--until merged applies to a fresh --prompt run, not --bash or --session");
+      if (input.callback === "none") throw new Error("--until merged reports its end as a callback; callback none has nobody to tell");
+    }
+    if (input.task_id !== undefined && until(definitions.get(requiredString(input.task_id, "task_id"))) !== undefined) {
+      throw new Error("--until merged applies to a fresh --prompt run, not a saved definition (--task-id)");
+    }
     const task = draft
       ? await resolveDraft(definitions, menu, notLead(draft), callerSessionId)
       : notLead(definitions.get(requiredString(input.task_id, "task_id")));
@@ -337,6 +350,10 @@ export async function handleTask(
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(run);
     const message = requiredString(input.message, "message");
+    const goal = run.goalId ? store.getGoal(run.goalId) : undefined;
+    if (goal?.finishedAt === null && isTerminal(run.state)) {
+      throw new Error(`run ${run.id} is in a goal (${goalStepText(goal)}); cancel it or wait for its end`);
+    }
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
       const callbackMode = callbackModeOf(input);
@@ -362,6 +379,14 @@ function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | 
 }
 
 /** A label for the Console, not an identifier. */
+/** Where a live goal stands, as the `--run` refusal names it. */
+const goalStepText = (goal: Goal): string => {
+  const of = `${String(goal.round)}/${String(goal.cap)}`;
+  if (goal.step === "merge") return "merging";
+  if (goal.step === "review") return `review ${String(goal.round + 1)}`;
+  return goal.round === 0 ? "working" : `fix round ${of}`;
+};
+
 function nameFrom(text: string): string {
   const line = text.split("\n")
     .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim())
@@ -374,7 +399,7 @@ function nameFrom(text: string): string {
  *  `provider/id` is refused with the lines to pick from, so the agent never
  *  guesses an id. A tier is never a substring: "cheap" matching an id would
  *  pick a pin the operator did not assign. */
-function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string; tier?: ModelTier } {
+export function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string; tier?: ModelTier } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
   const pick = (pin: MenuEntry) => ({ model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking, tier: pin.tier });

@@ -25,6 +25,14 @@ export interface AgentLaunchPolicy {
   /** A lead for a product or architecture design the user finalizes with
    *  `Design final:`; with `role: "lead"` only. Any other lead builds. */
   design?: true;
+  /** `merged`: the run is the root of a goal (tasks/goals.ts) — reviewed,
+   *  fixed and merged without a turn of its supervisor's until the end. */
+  until?: "merged";
+  /** Review rounds the goal allows (1–9) before it stops on the user; 3 when absent. */
+  rounds?: number;
+  /** The review's model as the dispatcher named it (a tier or a menu name);
+   *  the root run's tier, else its model, when absent. */
+  reviewModel?: string;
 }
 
 export type AgentTaskAction = {
@@ -118,7 +126,10 @@ export interface TaskRun extends CallbackFields {
   parentRunId: string | null;
   groupId: string | null;
   resumedFromRunId: string | null;
-  triggerSource: "manual" | "cron" | "watch" | "agent" | "task";
+  /** The goal this run is a step of (`Goal.id`), its root run included; absent means none. */
+  goalId?: string;
+  /** `goal`: launched by a goal's loop, not by a session's request. */
+  triggerSource: "manual" | "cron" | "watch" | "agent" | "task" | "goal";
   invokedBySessionId: string | null;
   sourceSessionId: string | null;
   targetSessionId: string | null;
@@ -239,25 +250,63 @@ export const createdPhase = (run: TaskRun): LeadPhase | undefined => {
   return action.launch?.design ? "design" : "build";
 };
 
-/** A run behind an open item; a lead's carries its own launches, counted by state. */
+export type GoalStep = "work" | "review" | "merge";
+
+/** How a goal ended: `done` merged; `decision` a step's result carried `Needs
+ *  your decision`; `cap` the last allowed review still found issues; `failed`
+ *  a step failed, was cancelled, interrupted, timed out or gave no verdict. */
+export type GoalOutcome = "done" | "decision" | "cap" | "failed";
+
+/** A `--until merged` loop (tasks/goals.ts, docs/plans/18-goal-runtime.md):
+ *  the root run's work, reviewed by a run Pier launches, fixed by resuming the
+ *  worker, reviewed again up to `cap` rounds, then merged by the worker. */
+export interface Goal {
+  id: string;
+  rootRunId: string;
+  /** Who launched the root run: every step is owned and cancelled as theirs. */
+  supervisorSessionId: string;
+  cap: number;
+  /** Fix rounds started — one findings → fix → re-review trip each; the
+   *  first review and the merge count nothing. */
+  round: number;
+  step: GoalStep;
+  currentRunId: string;
+  outcome: GoalOutcome | null;
+  /** Why it ended, for `failed`; the cancelling session's word, a step's error, `no verdict`. */
+  reason: string | null;
+  reviewModel: string | null;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+/** On the record of a goal's run that is not its end, so the run says why it called nobody back. */
+export const GOAL_STEP = "a goal's step, not its end";
+
+/** A run behind an open item; a lead's carries its own launches, counted by state,
+ *  a goal's root the goal's step, round, cap and end. */
 export interface OpenRun extends LedgerRun {
   workers?: Record<TaskRunState, number>;
+  goal?: Pick<Goal, "step" | "round" | "cap" | "outcome" | "reason">;
 }
 
 /** Where an open item stands (`openStatus`, tasks/open-items.ts), first match:
- *  `running` while a run is queued or running, its session streams or a lead's
- *  workers are queued or running; `waiting on you` while its stage says so or its
- *  session's design awaits Finalize; `pending release` when every run succeeded
- *  (or it names none); else `stopped` — a run failed, was cancelled, interrupted,
+ *  `running` while a run's goal is live, a run is queued or running, its session
+ *  streams or a lead's workers are queued or running; `waiting on you` while a
+ *  goal ended `decision` or `cap`, its stage says so or its session's design awaits
+ *  Finalize; `pending release` when every run succeeded, a goal's root by its goal
+ *  ending `done` (or it names none); else `stopped` — a run failed, was cancelled, interrupted,
  *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
 export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
 
-/** `runs`: each named run's session, by its newest run. */
+/** `runs`: each named run's session, by its newest run. `waitsIn`: the session
+ *  a `waiting on you` item is answered in, derived beside the status; absent
+ *  when the answer is given in the main chat. */
 export interface OpenItem {
   problem: string;
   stage: string;
   runs: OpenRun[];
   status: OpenStatus;
+  waitsIn?: string;
 }
 
 /** What the continuous conversation is solving, as main last said it

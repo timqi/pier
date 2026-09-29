@@ -38,6 +38,7 @@ delivery.
   phase (`TaskStore.leads`): `design` when its creating run carries
   `launch.design` (`--design`, set by the head only for a product or architecture
   design the user finalizes), `build` for any other lead.
+- A worker launched `--until merged` is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead may launch one too and reviews its own integrated branch before its done milestone.
 - Models are the tiers of [pier-tasks §Model
   choice](../../skills/pier-tasks/SKILL.md#model-choice); a lead is `hardest`,
   `--thinking high` to design and `medium` to build.
@@ -137,11 +138,14 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
   | status | when |
   | --- | --- |
-  | `running` | a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
-  | `waiting on you` | the stage says `waiting on you`, or its session's design awaits Finalize |
-  | `pending release` | every run `succeeded` (or it names none) |
-  | `stopped` | a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
+  | `running` | a run's goal live; else a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
+  | `waiting on you` | a run's goal ended `decision` or `cap`; else the stage says `waiting on you`, or its session's design awaits Finalize |
+  | `pending release` | every run `succeeded`, a goal's root only once its goal ended `done` (or it names none) |
+  | `stopped` | a goal ended `failed`; else a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
 
+- A `waiting on you` item's `waitsIn` is the child session the answer is given
+  in, from the same reason: a design awaiting Finalize → its lead's session; a
+  stage's `waiting on you` or a goal's `decision`/`cap` → absent, the chat.
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
   `core/reply.ts`): `/status`'s first group, the status panel's, its chip's
   `needs you`; a finished worker's outcome is read from its lead's run, not its own.
@@ -149,16 +153,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
   backlog in MEMORY.md.
-- A goal is text in the stage, `DISPATCHER`'s convention and nothing the
-  parser or a surface reads: `· until <condition>` names the checkable end the
-  head rewrites into every stage, `· auto <n>/<cap>` how many times it has
-  continued the child (`--run <id> --prompt`) past a result short of it that
-  stopped on nothing needing the user; the cap is 3 unless the user set one,
-  and a result still short at the cap turns the stage into `waiting on you:
-  <blocker>`. No goal, and the head reports and waits.
-- A code worker's default goal is `· until 审查通过并合并`: on its success the
-  head dispatches a review, then continues the worker to merge, asking the
-  user first only for a seam, a design, or the restart after.
+- A `--until merged` run's goal is read from the ledger (`TaskStore.goalOf`,
+  by the run's session), never from the stage.
 - Every design lead not closed whose runs have not reported `Design final:`
   (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
   named by its creating run, unless an item or an unlisted run already holds
@@ -167,7 +163,10 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   every other item and each unlisted run as `- <name> — not on the list`; a line
   is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
   it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
-  `core/reply.ts`) and a lead's ` · workers: <counts>`; `Nothing open.` when
+  `core/reply.ts`), a lead's ` · workers: <counts>` and a goal's root's
+  ` · until merged: <text>` — `working`, `fix round n/cap`, `review`,
+  `re-review n/cap`, `merging` while live; `merged`, `waiting on you`,
+  `cap/cap rounds, still findings`, `failed: <reason>` once ended; `Nothing open.` when
   both are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the

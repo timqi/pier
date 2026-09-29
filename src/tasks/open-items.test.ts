@@ -11,7 +11,7 @@ import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type
 import { openItems, openItemsStatus, openStatus, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { OpenRun, TaskDefinition, TaskRun } from "./types.js";
+import type { Goal, OpenRun, TaskDefinition, TaskRun } from "./types.js";
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -46,6 +46,7 @@ function rig() {
   const workerReads: string[][] = [];
   const reads: OpenItemReads = {
     getRun: (id) => store.getRun(id),
+    goalOf: (id) => store.goalOf(id),
     latestRunForTarget: (id) => store.latestRunForTarget(id),
     inFlightRuns: () => store.inFlightRuns(),
     leads: () => store.leads(),
@@ -63,7 +64,11 @@ function rig() {
   const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
     db.prepare("INSERT INTO open_items VALUES (?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
   const list = (members = ["h1"], designs: LedgerRun[] = []) => openItems(reads, router, members, designs);
-  return { now, save, workers, workerReads, router, item, list };
+  const goal = (rootRunId: string, over: Partial<Goal> = {}) => store.saveGoal({
+    id: `g-${rootRunId}`, rootRunId, supervisorSessionId: "h1", cap: 3, round: 0, step: "work", currentRunId: rootRunId,
+    outcome: null, reason: null, reviewModel: null, createdAt: 0, finishedAt: null, ...over,
+  });
+  return { now, save, workers, workerReads, router, item, list, goal };
 }
 
 describe("the open items", () => {
@@ -208,7 +213,7 @@ describe("the open items", () => {
     const at = (state: string, over: Partial<OpenRun> = {}): OpenRun => ({ ...run("r", { state, targetSessionId: "s" }), ...over });
     const none = (id: string): boolean => id === "";
     const quiet = { streaming: none, designOpen: none };
-    const status = (runs: OpenRun[], stage = "", session = quiet) => openStatus({ problem: "p", stage, runs }, session);
+    const status = (runs: OpenRun[], stage = "", session = quiet) => openStatus({ problem: "p", stage, runs }, session).status;
     expect(Object.fromEntries([...TASK_RUN_STATES, NOT_IN_LEDGER].map((s) => [s, status([at(s)])]))).toEqual({
       queued: "running", running: "running", succeeded: "pending release", failed: "stopped",
       cancelled: "stopped", interrupted: "stopped", skipped: "stopped", [NOT_IN_LEDGER]: "stopped",
@@ -227,6 +232,59 @@ describe("the open items", () => {
     expect(status([at("succeeded", { workers: workers({ queued: 1 }) })])).toBe("running");
     // A finished worker's outcome is its lead's to read: the lead's run decides.
     expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("pending release");
+  });
+
+  // The goal, not the stage or the root run's state, says where a `--until merged` item stands.
+  it("reads a goal's item from its goal: live, a decision, the cap, merged, failed", () => {
+    const r = rig();
+    const now = r.now;
+    const ends: [string, Partial<Goal>][] = [
+      ["live", { step: "review", round: 2 }],
+      ["decision", { outcome: "decision", finishedAt: now }],
+      ["cap", { step: "review", round: 3, outcome: "cap", finishedAt: now }],
+      ["done", { step: "merge", round: 1, outcome: "done", finishedAt: now }],
+      ["failed", { step: "review", outcome: "failed", reason: "no verdict", finishedAt: now }],
+    ];
+    ends.forEach(([id, over], i) => {
+      r.save(saved(id, { targetSessionId: `s-${id}`, state: "succeeded", finishedAt: now - MIN }));
+      r.goal(id, over);
+      r.item(`goal ${id}`, "worker building", [id], i);
+    });
+    const open = r.list();
+    expect(open.items.map((i) => [i.problem, i.status, i.waitsIn])).toEqual([
+      ["goal live", "running", undefined],
+      ["goal decision", "waiting on you", undefined],
+      ["goal cap", "waiting on you", undefined],
+      ["goal done", "pending release", undefined],
+      ["goal failed", "stopped", undefined],
+    ]);
+    expect(openItemsStatus(open, now).text.split("\n")).toEqual([
+      "Waiting on you",
+      "- goal decision — worker building (waiting on you) · run decision succeeded 1m ago · until merged: waiting on you",
+      "- goal cap — worker building (waiting on you) · run cap succeeded 1m ago · until merged: 3/3 rounds, still findings",
+      "In progress",
+      "- goal live — worker building (running) · run live succeeded 1m ago · until merged: re-review 2/3",
+      "- goal done — worker building (pending release) · run done succeeded 1m ago · until merged: merged",
+      "- goal failed — worker building (stopped) · run failed succeeded 1m ago · until merged: failed: no verdict",
+    ]);
+  });
+
+  it("names the child session a wait is answered in: a design's lead; never a stage's or a goal's, answered in the chat", () => {
+    const r = rig();
+    const now = r.now;
+    const design = run("d1", { name: "Rail redesign", state: "succeeded", targetSessionId: "s-d1", finishedAt: now });
+    r.save(
+      saved("w-stage", { targetSessionId: "s-stage", state: "succeeded", finishedAt: now }),
+      saved("w-goal", { targetSessionId: "s-goal", state: "succeeded", finishedAt: now }),
+    );
+    r.goal("w-goal", { outcome: "decision", finishedAt: now });
+    r.item("stage wait", "waiting on you: 60K or 80K?", ["w-stage"], 1);
+    r.item("goal wait", "worker building", ["w-goal"], 2);
+    expect(r.list(["h1"], [design]).items.map((i) => [i.problem, i.status, i.waitsIn])).toEqual([
+      ["stage wait", "waiting on you", undefined],
+      ["goal wait", "waiting on you", undefined],
+      ["Rail redesign", "waiting on you", "s-d1"],
+    ]);
   });
 
   it("groups a lead whose turn ended under In progress while its workers run, and a succeeded item under Waiting on you only by its stage", () => {

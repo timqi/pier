@@ -33,6 +33,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
 | `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--role`/`--design`/`--session` beside it are refused |
+| `--until merged [--rounds <n>] [--review-model <tier|model>]` | a code worker's default: reviewed, fixed up to n rounds, merged by the worker, one callback opening `Goal:` |
 
 `--bash` is for a command whose output needs no model **and** runs too long to
 hold your turn; a quick one belongs in your own shell, where `&` and `wait`
@@ -46,6 +47,7 @@ then `Needs your decision` only when something does; it stops only on a
 destructive step or a question only you can answer — answer with
 `--run <id> --prompt`; a step the user approved goes in the prompt as
 `Approved: <step>`. Core owns the join: never aggregate members by hand.
+A goal callback opens with one of four lines: `Goal: merged, review clean` or `Goal: merged after N review rounds` means merged; `Goal: needs your decision (round N)` asks you to decide; `Goal: N review rounds, still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure. The cap defaults to 3 rounds and `--rounds` accepts 1–9. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; `pier task cancel --run <root>` cancels the goal.
 
 ## Model choice
 
@@ -60,11 +62,9 @@ overrides (`off/minimal/low/medium/high/xhigh/max`).
 | coding a feature or a fix; integration | `balanced` |
 | research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
 
-A tier follows the change's difficulty, not the task's kind: a review takes the
-builder's tier, `hardest` only when the diff touches a seam
-(`src/core/types.ts`, `src/channels/types.ts`, `src/tasks/types.ts`, `src/db.ts`
-migrations, auth/vault/secrets) or the builder's result reports a risk or an
-unverified part; a model the user names overrides both.
+A review takes the builder's tier, `hardest` when the change touches a seam
+or looks risky — `--review-model` on a goal, `--model` on a review you launch
+yourself; it is your judgement of the task, the loop reads no diffs.
 
 Any other name is a substring of provider or id ("let gpt review it" is
 `--model gpt`); none or several hits lists the pins. `--model ?` prints the

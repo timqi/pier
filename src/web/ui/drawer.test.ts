@@ -293,6 +293,15 @@ it("lands an item on its topic's latest reply, else on its run's session, else s
   expect(select).not.toHaveBeenCalled();
 });
 
+it("opens an item that waits in a child session in that session, not on its topic", () => {
+  open = { items: [{ problem: "d", stage: "", runs: [{ runId: "l1", name: "l1", state: "succeeded", targetSessionId: "s-l1", cwd: null, queuedAt: 0, finishedAt: 0 }], status: "waiting on you", waitsIn: "s-l1" }], unlisted: [] };
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  panelRows()[0]!.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s-l1");
+  expect(showTopic).not.toHaveBeenCalled();
+});
+
 it("has no Recently done group, and no chip without a row", () => {
   open = { items: [{ problem: "a", stage: "", runs: [], status: "running" }], unlisted: [] };
   drawer.renderDrawer();

@@ -5,7 +5,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
 import type { OpenItemMarker } from "../core/reply.js";
 import { TASK_RUN_STATES, type AgentRole, type LeadPhase, type TaskRunState } from "../core/types.js";
-import { createdPhase, createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
+import { createdPhase, createdRole, type Goal, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -144,7 +144,7 @@ export class TaskStore {
     return this.#many(`
       SELECT json FROM task_runs
       WHERE state IN ('succeeded', 'failed', 'cancelled', 'interrupted')
-        AND json_extract(json, '$.triggerSource') IN ('agent', 'manual')
+        AND json_extract(json, '$.triggerSource') IN ('agent', 'manual', 'goal')
         AND json_extract(json, '$.context.definition.action.type') = 'agent'
         AND json_extract(json, '$.context.model') IS NOT NULL
         AND json_extract(json, '$.finishedAt') >= ?
@@ -307,6 +307,33 @@ export class TaskStore {
       WHERE json_extract(json, '$.invokedBySessionId') = ?
       ORDER BY queued_at DESC LIMIT ?
     `, sessionId, clamp(limit, 200));
+  }
+
+  saveGoal(goal: Goal): void {
+    this.sql(`
+      INSERT INTO goals(id, root_run_id, current_run_id, created_at, finished_at, json)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        current_run_id=excluded.current_run_id, finished_at=excluded.finished_at, json=excluded.json
+    `).run(goal.id, goal.rootRunId, goal.currentRunId, goal.createdAt, goal.finishedAt, JSON.stringify(goal));
+  }
+
+  getGoal(id: string): Goal | undefined {
+    return this.#one("SELECT json FROM goals WHERE id = ?", id);
+  }
+
+  /** The goal whose root run made or targets the session: an open item's run line reads it. */
+  goalOf(sessionId: string): Goal | undefined {
+    return this.#one(`
+      SELECT g.json FROM goals g JOIN task_runs r ON r.id = g.root_run_id
+      WHERE json_extract(r.json, '$.targetSessionId') = ?
+      ORDER BY g.created_at DESC LIMIT 1
+    `, sessionId);
+  }
+
+  /** Goals not ended, oldest first: the boot pass advances any whose current run settled unadvanced. */
+  liveGoals(): Goal[] {
+    return this.#many("SELECT json FROM goals WHERE finished_at IS NULL ORDER BY created_at");
   }
 
   saveGroup(group: TaskGroup): void {
