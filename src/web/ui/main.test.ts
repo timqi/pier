@@ -406,7 +406,7 @@ describe("the continuous conversation", () => {
     await settled();
     expect(historyCalls()).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h1/history"]);
     expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h0" }], "idle", [], true);
-    expect(h.appendDivider).toHaveBeenCalledWith("new session — idle 1h", 5);
+    expect(h.appendDivider).toHaveBeenCalledWith("idle", 5);
     // Everything is paged in: no pager is drawn over the first session.
     expect(h.appendPager).toHaveBeenCalledTimes(1);
   });

@@ -71,7 +71,7 @@ const body = () => detail().children.at(-1)!;
 const model = { provider: "anthropic", id: "claude-x" };
 
 it("folds a session seed into the divider that opened its session, opening to its reason and the previous session's id", () => {
-  chat.appendDivider("new session — idle 1h", 5);
+  chat.appendDivider("idle", 5);
   chat.appendSystemInput("Memory\n\nlast exchanges…", { kind: "session-seed", reason: "idle", previousSessionId: "prev1234abcd" });
   const rows = doc.querySelector("#turns")!.children;
   expect(rows.map((r) => r.dataset.kind)).toEqual(["divider", "system"]);
@@ -88,12 +88,23 @@ it("folds a session seed into the divider that opened its session, opening to it
   expect(card().hidden).toBe(true);
 });
 
-it("draws a seed its own divider where none opened its session", () => {
-  chat.appendSystemInput("Memory", { kind: "session-seed", reason: "first", previousSessionId: null });
+it("draws a seed its own divider, in the divider's words, where none opened its session", () => {
+  chat.appendSystemInput("Memory", { kind: "session-seed", reason: "full", previousSessionId: null });
   const rows = doc.querySelector("#turns")!.children;
   expect(rows.map((r) => r.dataset.kind)).toEqual(["divider", "system"]);
-  expect(rows[0]!.textContent).toBe("new session · first");
+  expect(rows[0]!.textContent).toBe("new session — the previous one was full");
   expect(card().hidden).toBe(true);
+});
+
+it("trims a seed's card with the divider that opens it", () => {
+  chat.appendDivider("idle", 5);
+  chat.appendSystemInput("Memory", { kind: "session-seed", reason: "idle", previousSessionId: null });
+  const kinds = () => doc.querySelector("#turns")!.children.map((r) => r.dataset.kind);
+  for (let i = 0; i < 400; i++) chat.appendTurn("user", `m${i}`);
+  expect(kinds().slice(0, 2)).toEqual(["divider", "system"]);
+  while (kinds().includes("divider")) chat.appendTurn("user", "more");
+  expect(kinds().slice(0, 2)).toEqual(["trim", "user"]);
+  expect(doc.querySelector("#turns")!.querySelector("[data-seed]")).toBeNull();
 });
 
 it("shows a callback without the language stamp the model reads", () => {
@@ -881,6 +892,45 @@ describe("the turn's bubble", () => {
     pane().children[4]!.querySelector(".topic-tag")!.onclick?.(); // back to the silent reply before it
     expect(fold().getAttribute("aria-expanded")).toBe("true");
     expect(pane().children[3]!.hidden).toBe(false);
+  });
+
+  it("leaves a silent reply out of the fold while a cause of it failed or was cut short", () => {
+    chat.renderSnapshot([
+      { role: "assistant", text: "<silent>one</silent>" },
+      { role: "system", text: "x\n\nboom", origin: { kind: "task-callback", taskId: "t", runId: "r1", sourceSessionId: null, state: "failed" } },
+      { role: "assistant", text: "<silent>saw the failure</silent>" },
+      { role: "system", text: "x\n\ncut", origin: { kind: "task-callback", taskId: "t", runId: "r2", sourceSessionId: null, state: "interrupted" } },
+      { role: "assistant", text: "<silent>saw the cut</silent>" },
+      { role: "assistant", text: "<silent>two</silent>" },
+    ], "idle", []);
+    expect(kinds()).toEqual(["fold", "assistant", "assistant", "assistant", "fold", "assistant"]);
+    expect(pane().children.map((r) => r.hidden)).toEqual([false, true, false, false, false, true]);
+    expect(pane().children[2]!.textContent).toContain("Stayed silent — saw the failure");
+    expect(pane().children[4]!.querySelector("button")!.textContent).toBe("· 1 background update");
+  });
+
+  it("lets a folded reply go while a run it launched is in flight, and folds it again at the next reply", () => {
+    chat.completeTurn("<silent>launched</silent>");
+    expect(kinds()).toEqual(["fold", "assistant"]);
+    activity.renderBackgroundRun(run("r1"));
+    expect(kinds()).toEqual(["assistant"]);
+    expect(bubble().hidden).toBe(false);
+    expect(chips()).toEqual(["background-run"]);
+    activity.renderBackgroundRun(run("r1", { state: "succeeded", finishedAt: 2 }));
+    chat.completeTurn("<silent>it finished</silent>");
+    expect(kinds()).toEqual(["fold", "assistant", "assistant"]);
+    expect(pane().children[0]!.querySelector("button")!.textContent).toBe("· 2 background updates");
+  });
+
+  it("never groups a reply, streaming or final, with the folded reply above it", () => {
+    chat.completeTurn("Started.");
+    chat.completeTurn("<silent>quiet</silent>");
+    chat.appendDelta("Here it");
+    const tail = () => pane().children.at(-1)!;
+    expect("grouped" in tail().dataset).toBe(false);
+    chat.completeTurn("Here it is.");
+    expect(kinds()).toEqual(["assistant", "fold", "assistant", "assistant"]);
+    expect("grouped" in tail().dataset).toBe(false);
   });
 
   it("leaves an error reported mid-flight a bare row, never the turn's result", () => {

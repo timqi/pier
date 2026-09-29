@@ -74,7 +74,6 @@ import {
 import type {
   BackgroundRun,
   ChainMember,
-  ChainReason,
   ChatTurn,
   ContextUsage,
   ModelRef,
@@ -137,14 +136,6 @@ let openItems: OpenItems | null = null;
 const headId = (): string | null => chain[0]?.sessionId ?? null;
 const inConversation = (id: string): boolean => chain.some((m) => m.sessionId === id);
 const continuousOpen = (): boolean => unstarted || (currentId !== null && currentId === headId());
-
-const DIVIDER: Record<ChainReason, string> = {
-  first: "new session",
-  idle: "new session — idle 1h",
-  lost: "new session — the previous one was lost",
-  full: "new session — the previous one was full",
-  new: "new session — /new",
-};
 
 async function loadChain(): Promise<{ chain: ChainMember[]; rotateAt: number }> {
   const res = await fetch("/api/continuous");
@@ -254,7 +245,7 @@ function renderEarlier(): void {
     if (e.error) appendTurn("error", e.error);
     renderSnapshot(e.turns, "idle", e.runs, true);
     const next = earlier[i + 1]?.member ?? chain[0]!;
-    appendDivider(DIVIDER[next.reason], next.startedAt);
+    appendDivider(next.reason, next.startedAt);
   }
 }
 

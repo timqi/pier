@@ -306,7 +306,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   stands down meanwhile. Sends take the alias route; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
   the new head, the session just left paged in above. A seed is a system input card linking the previous session,
-  folded into the divider above it (`folds.ts` `foldSeed`; `new session · <reason>` where there is none);
+  folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
   a `/status` answer is a card of the same material whose every `run <id8>…`
   links that run's session, from the run → session map the answer carries in
   its origin (`sessions`), so a reloaded transcript links the same;
@@ -573,7 +573,9 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
 - A turn that says nothing still renders `Stayed silent — <reason>`, its
   bubble (`data-silent`) and the silent ones right after it folded under one
   `· N background updates` line (`folds.ts` `foldSilence`, recomputed from the
-  rows), closed until clicked; missing
+  rows), closed until clicked; a bubble whose chip is failed, interrupted,
+  queued or running stays out of the fold until the next recompute finds it
+  settled; missing
   replies and failures never look like blank content or deliberate silence
   (principle 5).
 - `overflow-hidden` on a card clips any popover inside it. The document never

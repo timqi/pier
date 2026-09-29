@@ -101,7 +101,8 @@ updates this document.
 - Consecutive silent replies fold under one grey line, `· N background
   updates`, no material of its own: closed by default and after the topic's
   final reply, opened and closed only by its click (`aria-expanded`, a 44px
-  touch hit area) or by a jump to a folded reply.
+  touch hit area) or by a jump to a folded reply. A silent reply with a
+  failed, interrupted or in-flight chip is not folded.
 - A chip is its fold: the button (`aria-expanded`, Enter/Space, a visible
   focus ring; on touch a 44px hit area that does not grow the chip) whose
   open state is a ring, laying its detail — the cause's neutral card, the
@@ -123,7 +124,7 @@ updates this document.
   separator naming the rotation; an earlier session reads like the head, less
   its edit and next-step controls. The divider is the session seed's fold,
   opening the seed's card under it; a session with no divider above draws
-  its own line for its seed.
+  its own, in the same words.
 
 ## Editing and forms
 

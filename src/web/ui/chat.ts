@@ -35,6 +35,7 @@ import { dividerLine, foldSeed, foldSilence, unfold } from "./folds.js";
 import { refreshTopicTags, tagReply } from "./topics.js";
 import type {
   BackgroundRun,
+  ChainReason,
   ChatTurn,
   SessionState,
   SystemInputOrigin,
@@ -134,6 +135,8 @@ function chipInto(el: HTMLElement, detail: HTMLElement | null, join = false): vo
   const [row, details] = chipSlots(bubble);
   row.append(el);
   if (detail) details.append(detail);
+  // A run joining a folded reply is in flight: the fold lets that row go.
+  if (!bulk && "silent" in bubble.dataset) foldSilence(turnsPane);
   trimRows();
 }
 
@@ -291,7 +294,8 @@ let readonlyRows = false;
 function trimRows(): void {
   if (turnsPane.querySelector("[data-readonly]")) return;
   let trimmed = false;
-  while (turnsPane.childElementCount > MAX_ROWS) {
+  // A seed card on top lost the divider that opens it (folds.ts foldSeed) and goes too.
+  while (turnsPane.childElementCount > MAX_ROWS || (turnsPane.firstElementChild as HTMLElement | null)?.dataset.seed !== undefined) {
     const row = turnsPane.firstElementChild as HTMLElement;
     row.remove();
     if (row === trimNotice) continue; // re-placed at the top below
@@ -931,8 +935,9 @@ export function chatLoading(on: boolean): void {
   turnsPane.append(box);
 }
 
-export function appendDivider(text: string, at: number): void {
-  const line = dividerLine(`${text} · ${stampTime(at).slice(0, 16)}`);
+/** The rotation that started the next session, and when. */
+export function appendDivider(reason: ChainReason, at: number): void {
+  const line = dividerLine(reason, stampTime(at).slice(0, 16));
   line.title = stampTime(at);
   turnsPane.append(line);
   lastStampAt = null; // the next session's first message gets its own clock
