@@ -33,8 +33,8 @@ type Params = Record<string, unknown>;
  *  command accepts are read off it, so the two cannot drift. */
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
-    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
-      "        [--thinking <level>] [--role lead [--design]] [--until merged [--rounds <n>] [--review-model <tier|model>]]\n" +
+    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --until reviewed]] [--task-id <id>] [--session <id>]\n" +
+      "        [--thinking <level>] [--role lead [--design]] [--until reviewed [--rounds <n>] [--review-model <tier|model>]]\n" +
       "        [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
@@ -234,11 +234,12 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
 
   if (values.run !== undefined) {
     if (members.length) refuse("--run addresses one existing run; --member starts new ones");
-    if (values.until !== undefined) refuse("--until applies to a new run; --run addresses an existing one");
-    const extra = flagsOf(values).find((flag) => !["run", "after", "prompt", "callback", "callback-session"].includes(flag));
+    // Beside --run, --until opens a new goal on an ended goal's root; its rounds and review model are the launch's.
+    if (values.until !== undefined && values.after) refuse("--until resumes an ended goal's root; --after queues behind a running turn");
+    const extra = flagsOf(values).find((flag) => !["run", "after", "until", "prompt", "callback", "callback-session"].includes(flag));
     if (extra) refuse(`--${extra} does not apply to an existing run (--run)`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");
-    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, ...delivery });
+    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, until: values.until, ...delivery });
   }
   if (values.after) refuse("--after applies to --run only");
   if (members.length) {

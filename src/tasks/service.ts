@@ -2,6 +2,8 @@
 // the tick and the boot pass over the runs the last process left in flight.
 // Decisions belong to the files beside it.
 
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
@@ -12,7 +14,7 @@ import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
-import { TaskGoals } from "./goals.js";
+import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
@@ -51,6 +53,27 @@ interface StatsRow {
   names: string[];
 }
 const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
+
+/** Never a shell; a failure throws git's own first line. */
+const git = (cwd: string, ...args: string[]): Promise<string> => new Promise((resolve, reject) => {
+  execFile("git", args, { cwd }, (err, stdout, stderr) => {
+    if (err) reject(new Error(`git ${args.join(" ")}: ${(stderr.trim() || err.message).split("\n")[0]!}`));
+    else resolve(stdout.trim());
+  });
+});
+
+/** What a goal's review is pinned to (goals.ts `GoalHost.worktree`). */
+async function worktree(cwd: string): Promise<Worktree> {
+  if (!(await stat(cwd).catch(() => null))?.isDirectory()) throw new Error(`worktree ${cwd} is gone`);
+  const head = await git(cwd, "rev-parse", "HEAD");
+  const branch = await git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+  // A repository with no origin HEAD is the ordinary local case, not a failure: its target is main.
+  const origin = await git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").catch(() => null);
+  const base = origin?.replace(/^origin\//, "") ?? "main";
+  const baseSha = await git(cwd, "merge-base", "HEAD", base);
+  const clean = (await git(cwd, "status", "--porcelain")) === "";
+  return { head, branch, base, baseSha, clean };
+}
 
 export class TaskService {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -134,6 +157,7 @@ export class TaskService {
       cancelRun: (id) => { this.execution.cancel(id); },
       models: () => this.models().then((listed) => listed.models),
       deliver: (run) => this.callbacks.deliver(run),
+      worktree,
     });
     router.onTurnEnd((sessionId, text) => {
       // Only the head's turns write the list.
@@ -410,7 +434,7 @@ export class TaskService {
     if (action.type !== "agent" || !action.launch?.until) return this.runs.prepare(task, input, source, parentRunId, provenance);
     // operations.ts refuses these first; a goal is one launched run's loop.
     if (action.session.mode !== "fresh" || trigger.type !== "manual" || provenance.groupId || parentRunId !== null) {
-      throw new Error("--until merged applies to one fresh --prompt run, not a reused session, a schedule, a batch member or a chained task");
+      throw new Error("--until reviewed applies to one fresh --prompt run, not a reused session, a schedule, a batch member or a chained task");
     }
     return this.store.transact(() => {
       const run = this.runs.prepare(task, input, source, parentRunId, provenance);
@@ -483,14 +507,35 @@ export class TaskService {
     return this.messages.control(run, fromSessionId, mode, message);
   }
 
+  /** `goal`: `--until reviewed` beside `--run` — the resumed run roots a new goal. */
   resume(
     id: string,
     message: string,
     provenance: ResumeProvenance = {},
+    goal = false,
   ): TaskRun {
-    const run = this.prepareResume(this.getRun(id), message, provenance);
+    const prior = this.getRun(id);
+    const run = goal
+      ? this.store.transact(() => {
+        this.goalAgain(prior);
+        const run = this.prepareResume(prior, message, provenance);
+        this.goals.open(run);
+        return run;
+      })
+      : this.prepareResume(prior, message, provenance);
     this.runs.start(run);
     return run;
+  }
+
+  /** The user's answer to an ended goal goes back through the loop, never around it. */
+  private goalAgain(prior: TaskRun): void {
+    const goal = prior.goalId ? this.store.getGoal(prior.goalId) : undefined;
+    if (goal?.rootRunId !== prior.id) throw new Error(`--until reviewed beside --run resumes a goal's root run; run ${prior.id} is not one`);
+    if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
+    const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
+    if (latest && latest.id !== goal.id) {
+      throw new Error(`run ${prior.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
+    }
   }
 
   private prepareResume(

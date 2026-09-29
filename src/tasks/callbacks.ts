@@ -61,7 +61,7 @@ export const LEAD_TURN = "a lead's turn, not a milestone";
 export const goalLine = (goal: Goal): string => {
   const rounds = `${String(goal.round)} review round${goal.round === 1 ? "" : "s"}`;
   if (goal.outcome === "done" && goal.step === "merge") return goal.round ? `Goal: merged after ${rounds}` : "Goal: merged, review clean";
-  if (goal.outcome === "done") return `Goal: review clean${goal.round ? ` after ${rounds}` : ""}, waiting on you to merge`;
+  if (goal.outcome === "done") return `Goal: review clean${goal.reviewed ? ` at ${goal.reviewed.slice(0, 7)}` : ""}${goal.round ? ` after ${rounds}` : ""}, waiting on you to merge`;
   if (goal.outcome === "decision") return `Goal: needs your decision${goal.round ? ` after ${rounds}` : ""}`;
   if (goal.outcome === "cap") return `Goal: ${rounds}, still findings`;
   return `Goal: failed at ${goal.step} — ${goal.reason ?? "unknown"}`;

@@ -25,9 +25,10 @@ export interface AgentLaunchPolicy {
   /** A lead for a product or architecture design the user finalizes with
    *  `Design final:`; with `role: "lead"` only. Any other lead builds. */
   design?: true;
-  /** `merged`: the run is the root of a goal (tasks/goals.ts) — reviewed and
-   *  fixed without a turn of its supervisor's until the end; the merge is the user's. */
-  until?: "merged";
+  /** `reviewed`: the run is the root of a goal (tasks/goals.ts) — reviewed and
+   *  fixed without a turn of its supervisor's until the end; the merge is the user's.
+   *  `merged`, the earlier word, is taken as it (definitions.ts) and means the same in a stored row. */
+  until?: "reviewed";
   /** Review rounds the goal allows (1–9) before it stops on the user; 3 when absent. */
   rounds?: number;
   /** The review's model as the dispatcher named it (a tier or a menu name);
@@ -254,11 +255,12 @@ export const createdPhase = (run: TaskRun): LeadPhase | undefined => {
 export type GoalStep = "work" | "review" | "merge";
 
 /** How a goal ended: `done` reviewed clean, the merge waiting on the user (merged, after a legacy `merge` step); `decision` a step's result carried `Needs
- *  your decision`; `cap` the last allowed review still found issues; `failed`
- *  a step failed, was cancelled, interrupted, timed out or gave no verdict. */
+ *  your decision` as its status line; `cap` the last allowed review still found issues; `failed`
+ *  a step failed, was cancelled, interrupted, timed out, answered `Verdict: blocked` or
+ *  several status lines, a review gave no verdict, or its worktree could not be pinned. */
 export type GoalOutcome = "done" | "decision" | "cap" | "failed";
 
-/** A `--until merged` loop (tasks/goals.ts, docs/plans/18-goal-runtime.md):
+/** A `--until reviewed` loop (tasks/goals.ts, docs/plans/18-goal-runtime.md):
  *  the root run's work, reviewed by a run Pier launches, fixed by resuming the
  *  worker, reviewed again up to `cap` rounds; it ends before the merge, the user's to confirm. */
 export interface Goal {
@@ -273,9 +275,12 @@ export interface Goal {
   step: GoalStep;
   currentRunId: string;
   outcome: GoalOutcome | null;
-  /** Why it ended, for `failed`; the cancelling session's word, a step's error, `no verdict`. */
+  /** Why it ended, for `failed`; the cancelling session's word, a step's error, `no verdict`, `blocked — <why>`. */
   reason: string | null;
   reviewModel: string | null;
+  /** The commit the last review ran on, set when that review is prepared; null
+   *  before the first, absent on a goal stored before reviews were pinned. */
+  reviewed?: string | null;
   createdAt: number;
   finishedAt: number | null;
 }
