@@ -129,7 +129,7 @@ exists to catch.
 | `channels/` | 4.6k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
 | `web/` | 14k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
 | `agent/` | 2.95k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
-| `tasks/` | 3.65k | one delivery engine, the scheduler, the owner seam and the goal loop run as code |
+| `tasks/` | 3.75k | one delivery engine, the scheduler, the owner seam and the goal loop run as code; `pier task finish` — the merge that four prose copies used to describe, now one operation with its refusals — and the `--worktree` seam are the lines past 3.65k |
 | root `src/*.ts` | 3.5k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK |

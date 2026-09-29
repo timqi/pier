@@ -166,9 +166,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
   it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
   `core/reply.ts`), a lead's ` · workers: <counts>` and a goal's root's
-  ` · review: <text>` — `working`, `fix round n/cap`, `review`,
-  `re-review n/cap` while live; `review clean, waiting on you`, `waiting on you`,
-  `cap/cap rounds, still findings`, `failed: <reason>` once ended; `Nothing open.` when
+  ` · review: <text>` — `working`, `review n/cap`, `fixing for review n/cap`,
+  `merging` while live; `review clean, waiting on you`, `waiting on you`,
+  `cap reviews, still findings`, `merged`, `failed: <reason>` once ended; `Nothing open.` when
   both are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
