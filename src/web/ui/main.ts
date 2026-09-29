@@ -51,7 +51,7 @@ import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
 import { refreshSuggestions } from "./suggestions.js";
-import { setTopicStages } from "./topics.js";
+import { setOpenTopics } from "./topics.js";
 import {
   activityThinking,
   activityToolEnd,
@@ -171,7 +171,7 @@ const refreshOpenItems = coalesce(async () => {
 /** The panel's rows, the chat's tags and its earlier options read the same items. */
 function commitOpenItems(open: OpenItems): void {
   openItems = open;
-  setTopicStages(open.items);
+  setOpenTopics(open.items);
   refreshSuggestions();
 }
 
@@ -398,6 +398,9 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       turnOpen = false;
       completeTurn(e.text, e.meta, e.error);
+      // A reply's topic asks again on items read after it (topics.ts); the
+      // head's `open-items-changed` may have been answered before it landed.
+      if (continuousOpen()) void refreshOpenItems();
       // meta carries the context size and the completion time — keep both live.
       if (e.meta) noteTurnMeta(e.meta);
       break;

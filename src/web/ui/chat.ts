@@ -31,7 +31,7 @@ import {
   STATE_STYLE,
   stateGlyph,
 } from "./turn-activity.js";
-import { tagReply } from "./topics.js";
+import { refreshTopicTags, tagReply } from "./topics.js";
 import type {
   BackgroundRun,
   ChatTurn,
@@ -361,7 +361,12 @@ export function appendTurn(
   if (markdown) renderMarkdown(node, text);
   if (at !== undefined) setRowTime(row, at);
   if (caption) row.append(speakerLine(caption));
-  if (quoted?.quote) row.append(quoteBlock(quoted.quote));
+  if (quoted?.quote) {
+    row.append(quoteBlock(quoted.quote));
+    // A Reply to a topic's row answers it (topics.ts refreshTopicTags), whatever came between.
+    const answers = quoteSource(quoted.quote)?.dataset.topic;
+    if (answers) row.dataset.answers = answers;
+  }
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
@@ -381,6 +386,7 @@ export function appendTurn(
   if (mid) mid.before(row);
   else if (!pending) turnsPane.append(row);
   trimRows();
+  if (kind === "user" && !bulk) refreshTopicTags();
   scrollBottom();
   return node;
 }
@@ -768,8 +774,11 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
 
 function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
   const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
-  tagReply(node.parentElement!, raw, jumpBack);
-  if (!bulk) refreshSuggestions();
+  tagReply(node.parentElement!, raw, jumpBack, !bulk);
+  if (!bulk) {
+    refreshSuggestions();
+    refreshTopicTags();
+  }
 }
 
 // --- streaming text ---------------------------------------------------------------
@@ -996,6 +1005,7 @@ export function renderSnapshot(
     readonlyRows = false;
   }
   refreshSuggestions();
+  refreshTopicTags();
   scrollBottom(true);
 }
 

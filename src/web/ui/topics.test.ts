@@ -1,5 +1,5 @@
 // Topics on index.html: the colour a problem hashes to, and the tag on a row
-// with its item's stage while the item is open.
+// dotted while its item waits on the user, until they answer.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
 
@@ -52,27 +52,91 @@ it("tags a row once: one label, under the speaker caption, updated in place, its
   expect(jump).toHaveBeenCalledWith(row);
 });
 
-it("names an open item's stage on its tags, repainted as it moves, and plain once done", () => {
+it("names only the problem, dotted while its item waits on the user and they have not answered", () => {
   const a = add("assistant");
-  const b = add("assistant");
   topics.tagRow(a, "auth", vi.fn());
-  topics.setTopicStages([{ problem: "auth", stage: "等你确认" }]);
   const tag = (row: HTMLElement) => fake(row).querySelector(".topic-tag")!;
-  expect(tag(a).textContent).toBe("auth \u00b7 等你确认");
-  expect(tag(a).title).toBe("auth \u00b7 等你确认");
-  expect(tag(a).getAttribute("aria-label")).toBe("auth \u00b7 等你确认 \u2014 previous message of this topic");
-  // A row tagged later reads the stages already known.
-  topics.tagRow(b, "auth", vi.fn());
-  expect(tag(b).textContent).toBe("auth \u00b7 等你确认");
-  topics.setTopicStages([{ problem: "auth", stage: "merged, restart pending" }]);
-  expect([tag(a), tag(b)].map((t) => t.textContent)).toEqual(["auth \u00b7 merged, restart pending", "auth \u00b7 merged, restart pending"]);
-  // The same stages again paint nothing: every items refresh calls this.
-  const painted = tag(a).children[0];
-  topics.setTopicStages([{ problem: "auth", stage: "merged, restart pending" }]);
-  expect(tag(a).children[0]).toBe(painted);
-  topics.setTopicStages([]);
+  const dotted = () => fake(turns()).querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
+  topics.setOpenTopics([{ problem: "auth", status: "running" }]);
   expect(tag(a).textContent).toBe("auth");
+  expect(dotted()).toEqual([false]);
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+  expect(tag(a).textContent).toBe("auth");
+  expect(tag(a).title).toBe("auth \u00b7 waiting on you");
+  expect(tag(a).getAttribute("aria-label")).toBe("auth \u00b7 waiting on you \u2014 previous message of this topic");
+  expect(dotted()).toEqual([true]);
+  // A row tagged later is dotted by the next refresh, the tag's owner (chat.ts) calling it.
+  const b = add("assistant");
+  topics.tagRow(b, "auth", vi.fn());
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([true, true]);
+  // No longer waiting, or done: gone at once.
+  topics.setOpenTopics([{ problem: "auth", status: "pending release" }]);
+  expect(dotted()).toEqual([false, false]);
   expect(tag(a).title).toBe("auth");
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+  topics.setOpenTopics([]);
+  expect(dotted()).toEqual([false, false]);
+});
+
+it("drops the dot once the user answers the topic's newest reply, and a later reply of it asks again", () => {
+  const dotted = () => fake(turns()).querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
+  const reply = (topic?: string) => {
+    const row = add("assistant");
+    if (topic) topics.tagRow(row, topic, vi.fn());
+    return row;
+  };
+  reply("auth");
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }, { problem: "ci", status: "waiting on you" }]);
+  expect(dotted()).toEqual([true]);
+  // The first thing said after the topic's reply answers it.
+  add("user");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false]);
+  // The topic asks again: every tag of it is the topic's, dotted alike.
+  reply("auth");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([true, true]);
+  // A message after another topic's reply answers that one, not this one...
+  reply("ci");
+  add("user");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([true, true, false]);
+  // ...unless it quotes a row of this one (a Reply, or an option pick).
+  reply();
+  add("user").dataset.answers = "auth";
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false, false, false]);
+  // The chain rotating in between does not: the answer after the divider still counts.
+  reply("auth");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([true, true, false, true]);
+  add("divider");
+  add("user");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false, false, false, false]);
+});
+
+it("keeps an answered topic's dot off through a live reply of it until the items read after that reply", () => {
+  const dotted = () => fake(turns()).querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
+  topics.tagReply(add("assistant"), "Which?\n<open>auth — waiting on you: 60K or 80K?</open>", vi.fn());
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+  add("user");
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false]);
+  // The reply lands before the items it changed: the old `waiting on you` is not it asking again.
+  topics.tagReply(add("assistant"), "On it.\n<open>auth — worker running</open>", vi.fn(), true);
+  // The user message it answers inherits the tag.
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false, false, false]);
+  topics.setOpenTopics([{ problem: "auth", status: "running" }]);
+  expect(dotted()).toEqual([false, false, false]);
+  // A live reply that does ask again is dotted by the items that say so.
+  topics.tagReply(add("assistant"), "Again?\n<open>auth — waiting on you: 70K?</open>", vi.fn(), true);
+  topics.refreshTopicTags();
+  expect(dotted()).toEqual([false, false, false, false]);
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+  expect(dotted()).toEqual([true, true, true, true]);
 });
 
 it("tags a reply by its marker and the user message it answers, and nothing past the reply before", () => {

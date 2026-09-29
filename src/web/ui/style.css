@@ -580,7 +580,8 @@ main {
 .topic-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-tag:hover { background: color-mix(in oklab, var(--topic) 20%, transparent); }
 .topic-tag:focus-visible { outline: 2px solid var(--color-indigo-400); outline-offset: 1px; }
-.topic-stage { opacity: 0.75; }
+/* Waiting on you, unanswered: the status panel's `waiting on you` amber-700, not the unread dot's. */
+.topic-tag[data-waiting]::after { content: ""; flex: none; width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: var(--color-amber-700); }
 #turns > [data-kind="user"]:has(textarea) { width: 88%; }
 /* The row toolbar (chat.ts rowTools): shown on hover, or always where there is none. */
 .message-tools { color: var(--color-neutral-500); opacity: 0; transition: opacity 160ms; }

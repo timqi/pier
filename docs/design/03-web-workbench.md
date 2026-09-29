@@ -266,9 +266,18 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`replyTopic`) is tagged with its problem — a label in a stable hash of the
   problem's colour (`topics.ts` `topicHue`), the only place the colour is on
   the row; the user message above it inherits; untagged rows carry nothing.
-  While the item is open the tag adds ` · <stage>` from `GET
-  /api/continuous/open`, repainted when the items change; a done topic's tag
-  is the problem alone. The tag truncates, its title the full text. A click
+  The tag is the problem alone; the stage is the status panel's. While the
+  item's status (`GET /api/continuous/open`) is `waiting on you` its tags
+  carry an amber-700 dot (the panel's `waiting on you`, not the unread
+  dot), until the user answers: a user message after the topic's newest
+  reply on screen that comes before any other reply, or Replies to a row of
+  it (a next-step pick included), a session divider between them or not. A
+  later reply of the topic dots it again only once the items read after it
+  still say `waiting on you` (every `<open>` emits `open-items-changed`, and
+  a head's turn end re-reads them). An item waiting on a child session's
+  design is answered there, yet a message in the main chat clears its dot.
+  Repainted when the items change and on every message. The tag truncates,
+  its title the full text. A click
   reveals the topic's previous reply on screen; the earliest one lights
   itself. On a coarse pointer the tag's hit area is 44px tall, like a chip's,
   without growing the tag.

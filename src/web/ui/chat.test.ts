@@ -226,28 +226,28 @@ describe("an earlier turn's next steps", () => {
   it("shows them muted while the topic is open, hides them once it is done, the last turn's live throughout", async () => {
     const topics = await import("./topics.js");
     const { refreshSuggestions } = await import("./suggestions.js");
-    topics.setTopicStages([{ problem: "auth", stage: "review" }]);
+    topics.setOpenTopics([{ problem: "auth", status: "running" }]);
     snapshot();
     expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
     const group = doc.querySelector(".earlier-options")!;
     expect(group.querySelectorAll("button")[0]!.className).toContain("text-neutral-500");
     expect(doc.querySelectorAll(".earlier-options")).toHaveLength(1);
-    topics.setTopicStages([]);
+    topics.setOpenTopics([]);
     refreshSuggestions();
     expect(labels()).toEqual(["Next"]);
-    topics.setTopicStages([{ problem: "auth", stage: "review" }]);
+    topics.setOpenTopics([{ problem: "auth", status: "running" }]);
     refreshSuggestions();
     expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
   });
 
   it("offers nothing on an earlier turn without a topic", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     snapshot("Review?\n\n---\n[Ship it] | [Wait]");
     expect(labels()).toEqual(["Next"]);
   });
 
   it("mutes the live group when a newer turn ends, and sends a pick as a reply to the turn that offered it", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     chat.appendTurn("user", "go", false, 1);
     chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
     expect(doc.querySelectorAll(".earlier-options")).toHaveLength(0);
@@ -261,7 +261,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("keeps a picked row away after a reload once the topic has a newer reply", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     const { withQuote } = await import("../../core/identity.js");
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },
@@ -273,7 +273,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("shows only the open topic's newest reply's row, none when that reply offers none", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     const reply = (at: number, text: string) => [
       { role: "user" as const, text: "go", at: at - 1 },
       { role: "assistant" as const, text, meta: { completedAt: at, durationMs: 1, tokens: 1 } },
@@ -286,7 +286,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("reads a running snapshot's last reply as earlier: muted while its topic's newest", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },
       { role: "assistant", text: earlier, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
@@ -298,7 +298,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("hides the muted row live once a newer reply of the same topic ends", async () => {
-    (await import("./topics.js")).setTopicStages([{ problem: "auth", stage: "review" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
     chat.appendTurn("user", "go", false, 1);
     chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
     chat.appendTurn("user", "else", false, 3);
@@ -619,6 +619,50 @@ describe("the turn's bubble", () => {
     expect(chat.revealTopic("auth review")).toBe(true);
     expect("reveal" in a2!.dataset).toBe(true);
     expect(chat.revealTopic("deploy")).toBe(false);
+  });
+
+  describe("a topic waiting on the user", () => {
+    const asks = "<open>auth — waiting on you: 60K or 80K?</open>\n60K or 80K?\n\n---\n[60K] | [80K]";
+    const dotted = () => pane().querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
+    const load = async () => {
+      const topics = await import("./topics.js");
+      topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+      chat.renderSnapshot([
+        { role: "user", text: "review auth", at: 1 },
+        { role: "assistant", text: asks, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
+        // A callback's turn: another reply the user said nothing to.
+        { role: "system", text: "done\n\nok", at: 3, origin: { kind: "task-callback", taskId: "t", runId: "r1", sourceSessionId: null, source: { taskName: "r1" }, state: "succeeded" } },
+        { role: "assistant", text: "Other.", meta: { completedAt: 4, durationMs: 1, tokens: 1 } },
+      ], "idle", []);
+      return { topics, withQuote: (await import("../../core/identity.js")).withQuote };
+    };
+
+    it("is dotted on its tags, which name the problem alone", async () => {
+      await load();
+      expect(dotted()).toEqual([true, true]);
+      expect(pane().querySelectorAll(".topic-tag").map((t) => t.textContent)).toEqual(["auth", "auth"]);
+    });
+
+    it("loses the dot to a pick of its option past another reply, and a live reply does not bring it back before the items do", async () => {
+      const { topics, withQuote } = await load();
+      doc.querySelector(".earlier-options")!.querySelectorAll("button")[1]!.onclick!();
+      const [, label, quote] = send.mock.lastCall as [string, string, { role: "assistant"; at: number; text: string }];
+      // What the composer renders for a pick (composer.ts send).
+      chat.appendTurn("user", withQuote(quote, label), false, 5);
+      expect(dotted()).toEqual([false, false]);
+      // Ends while the items on hand still say `waiting on you`: not asking again yet.
+      chat.completeTurn(asks, { completedAt: 6, durationMs: 1, tokens: 1 });
+      expect(dotted()).toEqual([false, false, false, false]);
+      topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+      expect(dotted()).toEqual([true, true, true, true]);
+    });
+
+    it("reads a quote whose words match no row as the first row of its minute", async () => {
+      const { withQuote } = await load();
+      chat.appendTurn("user", withQuote({ role: "assistant", at: 2, text: "words since edited away" }, "ok"), false, 5);
+      expect(pane().children.filter((r) => r.dataset.kind === "user").at(-1)!.dataset.answers).toBe("auth");
+      expect(dotted()).toEqual([false, false]);
+    });
   });
 
   it("puts the topic tag first in the chip row, whichever of tag and chip came first", () => {
