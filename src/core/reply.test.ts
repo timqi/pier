@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, originLabel, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -320,6 +320,19 @@ describe("open-item markers", () => {
     const holding = "<open>run `x` — stage</open>\nHi.";
     expect(openItemMarkers(holding).markers).toEqual([{ op: "open", problem: "run `x`", stage: "stage", runIds: [] }]);
     expect(streamBody(holding)).toBe("Hi.");
+  });
+
+  it("reads a reply's topic: the `<topic>` body, else the first item marker's problem", () => {
+    const tagged = "Still running.\n<topic>CI 修复</topic>";
+    expect(replyTopic(tagged)).toBe("CI 修复");
+    expect(openItemMarkers(tagged)).toEqual({ markers: [], notes: [], topic: "CI 修复", dropped: [] });
+    expect(streamBody(tagged)).toBe("Still running.");
+    expect(saidText(tagged)).toBe("Still running.");
+    expect(replyTopic("<done>60K rotation</done><open>menu — running</open>")).toBe("60K rotation");
+    expect(replyTopic("<open>menu — running</open><topic>60K rotation</topic>")).toBe("60K rotation");
+    expect(replyTopic("Hi.")).toBeUndefined();
+    expect(openItemMarkers("<topic> </topic>")).toEqual({ markers: [], notes: [], dropped: ["<topic> </topic>"] });
+    expect(replyTopic("Write `<topic>x</topic>` on it.")).toBeUndefined();
   });
 
   it("a lone tag in a code span does not pair with the real marker after it", () => {
