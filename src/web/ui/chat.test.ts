@@ -1,5 +1,5 @@
 // The turns pane on index.html: the `/status` card opens its runs' sessions;
-// seeds, callbacks, delegations and runs are chips of the reply's bubble, each
+// callbacks, delegations and runs are chips of the reply's bubble, each
 // opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemInputOrigin } from "../../core/types.js";
@@ -70,12 +70,30 @@ const detail = () => bubble().querySelector(".chip-details")!.children.at(-1)!;
 const body = () => detail().children.at(-1)!;
 const model = { provider: "anthropic", id: "claude-x" };
 
-it("folds a session seed to its reason and the previous session's id", () => {
+it("folds a session seed into the divider that opened its session, opening to its reason and the previous session's id", () => {
+  chat.appendDivider("new session — idle 1h", 5);
   chat.appendSystemInput("Memory\n\nlast exchanges…", { kind: "session-seed", reason: "idle", previousSessionId: "prev1234abcd" });
-  expect(toggle().classList.contains("chip")).toBe(true);
-  expect(line()).toBe("session seedidle");
-  expect(detail().querySelector(".run-session")!.textContent).toBe("prev1234");
-  expect(detail().hidden).toBe(true);
+  const rows = doc.querySelector("#turns")!.children;
+  expect(rows.map((r) => r.dataset.kind)).toEqual(["divider", "system"]);
+  const fold = rows[0]!.querySelector("button")!;
+  expect(fold.textContent).toMatch(/^new session — idle 1h · /);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(card().hidden).toBe(true);
+  expect(card().querySelector(".run-head")!.textContent).toContain("session seedidle");
+  expect(card().querySelector(".run-session")!.textContent).toBe("prev1234");
+  fold.onclick?.();
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(card().hidden).toBe(false);
+  fold.onclick?.();
+  expect(card().hidden).toBe(true);
+});
+
+it("draws a seed its own divider where none opened its session", () => {
+  chat.appendSystemInput("Memory", { kind: "session-seed", reason: "first", previousSessionId: null });
+  const rows = doc.querySelector("#turns")!.children;
+  expect(rows.map((r) => r.dataset.kind)).toEqual(["divider", "system"]);
+  expect(rows[0]!.textContent).toBe("new session · first");
+  expect(card().hidden).toBe(true);
 });
 
 it("shows a callback without the language stamp the model reads", () => {
@@ -799,7 +817,7 @@ describe("the turn's bubble", () => {
     expect(bubble().textContent).toContain("Stayed silent — nothing to add");
     activity.activityToolStart(1, "c1", "bash", {});
     chat.interruptTurn();
-    expect(kinds()).toEqual(["assistant", "assistant"]);
+    expect(kinds()).toEqual(["fold", "assistant", "assistant"]);
     expect(chips()).toEqual(["activity"]);
     expect(stepsChip().textContent).toMatch(/^interrupted · 1 step/);
     expect(stepsChip().classList.contains("text-amber-700")).toBe(true);
@@ -809,18 +827,60 @@ describe("the turn's bubble", () => {
     chat.completeTurn("", undefined, "provider 529");
     expect("pending" in bubble().dataset).toBe(true);
     chat.appendTurn("error", "provider 529");
-    expect(kinds()).toEqual(["assistant", "assistant", "error"]);
+    expect(kinds()).toEqual(["fold", "assistant", "assistant", "error"]);
     expect(chips()).toEqual(["activity"]);
     expect(stepsChip().textContent).toMatch(/^failed · 1 step/);
     expect(stepsChip().classList.contains("text-red-600")).toBe(true);
     // Nothing pending: a turn that ends with nothing draws nothing.
     chat.completeTurn(undefined);
-    expect(kinds()).toEqual(["assistant", "assistant", "error"]);
+    expect(kinds()).toEqual(["fold", "assistant", "assistant", "error"]);
     // A chat command's answer is Pier's, never a turn's.
     chat.appendSystemInput("ok", { kind: "chat-command", command: "new" });
     chat.completeTurn("Hi.");
-    expect(kinds()).toEqual(["assistant", "assistant", "error", "system", "assistant"]);
+    expect(kinds()).toEqual(["fold", "assistant", "assistant", "error", "system", "assistant"]);
     expect(chipRow()).toBeUndefined();
+  });
+
+  it("folds consecutive silent replies under one closed grey line that its click opens and closes", () => {
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: "<silent>progress: dispatched</silent>" },
+      { role: "assistant", text: "<silent>progress: sent back</silent>" },
+      { role: "assistant", text: "Done." },
+    ], "idle", []);
+    expect(kinds()).toEqual(["time", "user", "fold", "assistant", "assistant", "assistant"]);
+    const rows = pane().children;
+    const fold = rows[2]!.querySelector("button")!;
+    expect(fold.textContent).toBe("· 2 background updates");
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(rows.map((r) => r.hidden)).toEqual([false, false, false, true, true, false]);
+    // The final reply follows the line, not the hidden bubble it was grouped with.
+    expect("grouped" in rows[5]!.dataset).toBe(false);
+    fold.onclick?.();
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    expect(rows[3]!.hidden || rows[4]!.hidden).toBe(false);
+    expect(rows[3]!.textContent).toContain("Stayed silent — progress: dispatched");
+    fold.onclick?.();
+    expect(rows[3]!.hidden && rows[4]!.hidden).toBe(true);
+  });
+
+  it("grows a fold live, keeps it closed after the final reply, and opens it for a jump to a folded reply", () => {
+    chat.completeTurn("Started.");
+    chat.completeTurn("<silent>one</silent>");
+    const fold = () => pane().querySelector("[data-kind='fold']")!.querySelector("button")!;
+    expect(kinds()).toEqual(["assistant", "fold", "assistant"]);
+    expect(fold().textContent).toBe("· 1 background update");
+    chat.completeTurn("<silent>two</silent>\n<topic>t</topic>");
+    expect(kinds()).toEqual(["assistant", "fold", "assistant", "assistant"]);
+    expect(fold().textContent).toBe("· 2 background updates");
+    chat.completeTurn("All done.\n<topic>t</topic>");
+    expect(fold().getAttribute("aria-expanded")).toBe("false");
+    expect(pane().children.map((r) => r.hidden)).toEqual([false, false, true, true, false]);
+    expect(chat.revealTopic("t")).toBe(true); // the newest reply of the topic: the final one, already shown
+    expect(fold().getAttribute("aria-expanded")).toBe("false");
+    pane().children[4]!.querySelector(".topic-tag")!.onclick?.(); // back to the silent reply before it
+    expect(fold().getAttribute("aria-expanded")).toBe("true");
+    expect(pane().children[3]!.hidden).toBe(false);
   });
 
   it("leaves an error reported mid-flight a bare row, never the turn's result", () => {

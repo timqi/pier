@@ -210,7 +210,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `chipInto`, `data-pending` until its body lands). At its top, one **chip
   row** (`.chip-row`) — the topic tag first, then one chip per thing the turn
   did, in arrival order, no summary, no cap: a cause (a callback, delegation,
-  task message or seed — `data-cause`, never a user message), a steps group
+  task message — `data-cause`, never a user message), a steps group
   (`N steps · <secs>`, one per stretch of work, a steered input between two;
   live `⟳ N steps · <secs> · writing…`; `failed · …` red, `interrupted · …`
   amber), a launched run. Under the row the body: the reply, `Stayed silent
@@ -232,7 +232,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   the steps log, the run's head and prompt. Every chip starts closed and
   opens only by its click, closing the row's other open chip (one detail
   per bubble; other bubbles keep theirs); opened details persist across a
-  run's status updates. Cause chips: `↺ session seed · <reason>`, `↩ callback · <state> ·
+  run's status updates. Cause chips: `↩ callback · <state> ·
   <run name>`, `↗ delegation · <run name>` (the glyphs are `ui/icons.ts`
   icons), a failed callback red, an interrupted one amber. Run chips: `run ·
   <state> · <run name>`, live across states. Mode, duration, `N queued`
@@ -305,7 +305,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   the head's snapshot is back, and keyboard focus on the pager; the trim cap
   stands down meanwhile. Sends take the alias route; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
-  the new head, the session just left paged in above. A seed is a system input card linking the previous session;
+  the new head, the session just left paged in above. A seed is a system input card linking the previous session,
+  folded into the divider above it (`folds.ts` `foldSeed`; `new session · <reason>` where there is none);
   a `/status` answer is a card of the same material whose every `run <id8>…`
   links that run's session, from the run → session map the answer carries in
   its origin (`sessions`), so a reloaded transcript links the same;
@@ -569,7 +570,10 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   chevron is a CSS background from the same ChevronDown node.
 - `ui/dom.ts`: `h()`, `$()`, `detailsRow()`, `prose()` (inline markdown via the
   bundled `marked`/DOMPurify).
-- A turn that says nothing still renders `Stayed silent — <reason>`; missing
+- A turn that says nothing still renders `Stayed silent — <reason>`, its
+  bubble (`data-silent`) and the silent ones right after it folded under one
+  `· N background updates` line (`folds.ts` `foldSilence`, recomputed from the
+  rows), closed until clicked; missing
   replies and failures never look like blank content or deliberate silence
   (principle 5).
 - `overflow-hidden` on a card clips any popover inside it. The document never

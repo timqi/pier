@@ -90,7 +90,7 @@ updates this document.
   stay explicit. Nothing that happened may disappear.
 - Activity history limits never displace queued or running work.
 - A turn is its reply bubble. Its process is one row of chips at the top —
-  the topic tag, then a chip per cause (seed, callback, delegation), steps
+  the topic tag, then a chip per cause (callback, delegation), steps
   group and launched run, in arrival order — the text under it, next-step
   buttons at the bottom (an earlier turn's muted, on an open topic's newest
   reply only). A chip is the `.run-label` material in its state colour (a failed
@@ -98,6 +98,10 @@ updates this document.
   and the run's name in the bubble's type; the count of chips
   is the count of things that happened, and no chip summarises the others.
   An error or silent body carries the same row on its own material.
+- Consecutive silent replies fold under one grey line, `· N background
+  updates`, no material of its own: closed by default and after the topic's
+  final reply, opened and closed only by its click (`aria-expanded`, a 44px
+  touch hit area) or by a jump to a folded reply.
 - A chip is its fold: the button (`aria-expanded`, Enter/Space, a visible
   focus ring; on touch a 44px hit area that does not grow the chip) whose
   open state is a ring, laying its detail — the cause's neutral card, the
@@ -117,7 +121,9 @@ updates this document.
   dates; absolute plus relative. Essential context never depends on hover.
 - The head's divider between two sessions is a time
   separator naming the rotation; an earlier session reads like the head, less
-  its edit and next-step controls.
+  its edit and next-step controls. The divider is the session seed's fold,
+  opening the seed's card under it; a session with no divider above draws
+  its own line for its seed.
 
 ## Editing and forms
 

@@ -31,6 +31,7 @@ import {
   STATE_STYLE,
   stateGlyph,
 } from "./turn-activity.js";
+import { dividerLine, foldSeed, foldSilence, unfold } from "./folds.js";
 import { refreshTopicTags, tagReply } from "./topics.js";
 import type {
   BackgroundRun,
@@ -256,6 +257,7 @@ export function revealTopic(problem: string): boolean {
 const jumpBack = (row: HTMLElement): void => reveal(lastOfTopic(row.dataset.topic ?? "", row) ?? row);
 
 function reveal(row: HTMLElement): void {
+  unfold(row);
   follow = false; // walking back into history is leaving the tail
   // Centred, unless the row is taller than the pane: a long reply centred
   // opens on its middle, and reading starts at the top.
@@ -288,13 +290,16 @@ let readonlyRows = false;
  *  earlier sessions are paged in above: they are exactly what was asked for. */
 function trimRows(): void {
   if (turnsPane.querySelector("[data-readonly]")) return;
+  let trimmed = false;
   while (turnsPane.childElementCount > MAX_ROWS) {
     const row = turnsPane.firstElementChild as HTMLElement;
     row.remove();
     if (row === trimNotice) continue; // re-placed at the top below
     if (row.dataset.kind === "user") trimmedUserTurns++;
     trimmedRows++;
+    trimmed = true;
   }
+  if (trimmed) foldSilence(turnsPane); // the fold line may have gone off the top without its rows
   if (!trimmedRows) return;
   if (!trimNotice) {
     trimNotice = h("div", "px-5 py-2 text-center text-[11.5px] italic text-neutral-400");
@@ -490,10 +495,10 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
   return [meta, text.slice(at + 2)];
 }
 
-/** Session seeds, callbacks and delegations are a cause chip of the turn that
- *  answers them, opening to the exchange: the exchange is the reading, the
- *  chip its receipt. A chat command's answer is what the user asked to see,
- *  so it is a standalone open card and never a turn's. */
+/** Callbacks and delegations are a cause chip of the turn that answers them,
+ *  opening to the exchange: the exchange is the reading, the chip its receipt.
+ *  A seed folds into its session's divider. A chat command's answer is what
+ *  the user asked to see, so it is a standalone open card and never a turn's. */
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
@@ -536,6 +541,10 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     endTurn();
     card.dataset.kind = "system";
     turnsPane.append(card);
+    trimRows();
+  } else if (origin.kind === "session-seed") {
+    endTurn();
+    foldSeed(turnsPane, card, origin.reason);
     trimRows();
   } else {
     const cause = chip({ glyph: glyphEl(), label: state ? `${label} \u00b7 ${state}` : label, labelCls, ...(name ? { name } : {}) }, card);
@@ -660,6 +669,7 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   // and everything under it leaves".
   while (row.nextElementSibling) row.nextElementSibling.remove();
   row.remove();
+  foldSilence(turnsPane);
   deps.ownTurn(text);
   // The reconciling event never draws a second row, so this one needs its clock.
   appendTurn("user", text, false, Date.now());
@@ -751,7 +761,9 @@ function renderAssistant(
   const { text, suggestions } = splitReply(raw);
   node.dataset.raw = raw; // what a reply to this row quotes; appendTurn's "" is the placeholder's
   // An empty bubble reads as a bug; this is the view the operator debugs in.
-  if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
+  const silent = isSilentReply({ text, suggestions });
+  node.parentElement?.toggleAttribute("data-silent", silent);
+  if (silent) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
   if (!readonlyRows) {
     // A pick answers this reply: sent as a Reply to it, so the model reads which offer was taken.
@@ -776,6 +788,7 @@ function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
   const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
   tagReply(node.parentElement!, raw, jumpBack, !bulk);
   if (!bulk) {
+    foldSilence(turnsPane);
     refreshSuggestions();
     refreshTopicTags();
   }
@@ -918,10 +931,8 @@ export function chatLoading(on: boolean): void {
   turnsPane.append(box);
 }
 
-/** Where one session of the continuous conversation ends and the next begins. */
 export function appendDivider(text: string, at: number): void {
-  const line = h("div", "my-4 text-center text-[11px] text-neutral-400", `${text} · ${stampTime(at).slice(0, 16)}`);
-  line.dataset.kind = "divider";
+  const line = dividerLine(`${text} · ${stampTime(at).slice(0, 16)}`);
   line.title = stampTime(at);
   turnsPane.append(line);
   lastStampAt = null; // the next session's first message gets its own clock
@@ -1004,6 +1015,7 @@ export function renderSnapshot(
     bulk = false; // a row that threw must not leave the pane unable to scroll
     readonlyRows = false;
   }
+  foldSilence(turnsPane);
   refreshSuggestions();
   refreshTopicTags();
   scrollBottom(true);

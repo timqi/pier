@@ -432,7 +432,7 @@ main {
      floor, packed, and the log shows more of them, or a 256px box holds five
      rows of air. The row's own py-0.5 is outside the floor, so a row's pitch
      is 4px more than the floor says. */
-  .chip::before, .topic-tag::before { content: ""; position: absolute; inset-inline: 0; inset-block: calc((2.75rem - 100%) / 2); }
+  .chip::before, .topic-tag::before, .line-fold::before { content: ""; position: absolute; inset-inline: 0; inset-block: calc((2.75rem - 100%) / 2); }
   .activity-log details > summary { min-height: 28px; }
   .activity-log { gap: 0; max-height: 20rem; }
 }
@@ -567,6 +567,10 @@ main {
 .chip-details:has(> :not([hidden])) { margin-block: 0.375rem 0.75rem; }
 /* The words follow the row, whatever came between. */
 .chip-row ~ :is(.md, .stream) { margin-top: 0.25rem; }
+/* A grey line that opens to what it folds (folds.ts): no material of its own. */
+.line-fold { position: relative; cursor: pointer; transition: color 120ms; }
+.line-fold:hover, .line-fold[aria-expanded="true"] { color: var(--color-neutral-600); }
+.line-fold:focus-visible { outline: 2px solid var(--color-indigo-400); outline-offset: 2px; border-radius: 0.25rem; }
 /* A topic (topics.ts): its colour is the tag's `--topic` and nowhere else on the row. */
 .topic-tag {
   position: relative;
