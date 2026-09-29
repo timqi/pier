@@ -115,8 +115,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   both are stripped beside `<silent>` and never read inside a fence
   (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
 - A reply about an item names it: `<open>`/`<done>` does, any other reply ends
-  with `<topic>problem</topic>`, the same key; stripped like the rest, read by
-  `replyTopic` (`core/reply.ts`) — the tag the web chat colours rows by
+  with `<topic>problem</topic>`, the same key — one written like an `<open>`
+  line still keys on the problem, its stage and run tokens dropped; stripped like
+  the rest, never painted mid-stream (`streamTail`), read by `replyTopic` (`core/reply.ts`) — the tag the web chat colours rows by
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)); IM shows
   nothing of it.
 - The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`

@@ -207,8 +207,8 @@ function topicSwitch(problem: string): HTMLElement {
   return sw;
 }
 
-/** A topic the chat saw a `<done>` for: nothing to open, only its filter \u2014
- *  the name is a button too, so the arrows reach the row and \u21b5 flips it. */
+/** A topic the chat saw a `<done>` for: nothing to open, only its filter —
+ *  the name is a button too, so the arrows reach the row and ↵ flips it. */
 function doneRow(problem: string): HTMLElement {
   const on = deps.filter() === problem;
   const name = h("button", OPEN, topicDot(problem), h("span", "min-w-0 flex-1 truncate", problem));

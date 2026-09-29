@@ -335,6 +335,8 @@ describe("open-item markers", () => {
     expect(replyTopic("Write `<topic>x</topic>` on it.")).toBeUndefined();
     // Written like an `<open>`, it still keys on the problem; a stage alone is nothing.
     expect(replyTopic("<topic>CI \u4fee\u590d \u2014 worker running (run r1)</topic>")).toBe("CI \u4fee\u590d");
+    // A run token with no stage is not part of the key either.
+    expect(replyTopic("<topic>CI \u4fee\u590d (run r1) (run r2)</topic>")).toBe("CI \u4fee\u590d");
     expect(openItemMarkers("<topic> \u2014 stage</topic>").dropped).toEqual(["<topic> \u2014 stage</topic>"]);
   });
 
@@ -344,6 +346,9 @@ describe("open-item markers", () => {
     expect(streamTail("Done.\n<open>a \u2014 b</open>\nMore <sil")).toBe("Done.\n<open>a \u2014 b</open>\nMore <sil");
     expect(streamTail("<silent>why</silent> and <done>x")).toBe("<silent>why</silent> and ");
     expect(streamTail("plain")).toBe("plain");
+    // Talking about the syntax is prose: a tag in a code span or a fence cuts nothing.
+    expect(streamTail("End with `<topic>` on")).toBe("End with `<topic>` on");
+    expect(streamTail("```\n<topic>x\n```\nand")).toBe("```\n<topic>x\n```\nand");
   });
 
   it("a lone tag in a code span does not pair with the real marker after it", () => {

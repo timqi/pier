@@ -100,7 +100,7 @@ export function applyTopicFilterTo(row: HTMLElement): void {
 
 /** A row appended while the filter is on stays in view whatever its topic: the
  *  switch narrows what was there, and a message just sent, or the reply to it,
- *  must never look like nothing happened (\u00a75). */
+ *  must never look like nothing happened (§5). */
 export function arriveRow(row: HTMLElement): void {
   if (filter !== null) row.dataset.live = "";
   applyTopicFilterTo(row);

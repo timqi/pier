@@ -180,11 +180,18 @@ export type OpenItemMarker =
   | { op: "done"; problem: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-/** The key: what stands before the ` \u2014 stage`, or the whole line. */
-const problemOf = (line: string): string => {
-  const dash = line.indexOf("\u2014");
-  return (dash < 0 ? line : line.slice(0, dash)).trim();
-};
+/** An `<open>` line read apart: the `problem` key before the ` — stage`, the
+ *  `(run <id>)` tokens off its end — a `<topic>` written the same way keys the same. */
+function openLine(text: string): { problem: string; stage: string; runIds: string[] } {
+  let rest = oneLine(text);
+  const runIds: string[] = [];
+  for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
+    runIds.unshift(run[1]!);
+    rest = rest.slice(0, run.index);
+  }
+  const dash = rest.indexOf("\u2014");
+  return { problem: (dash < 0 ? rest : rest.slice(0, dash)).trim(), stage: dash < 0 ? "" : rest.slice(dash + 1).trim(), runIds };
+}
 
 /** The markers in reply order, `notes` the daily-note lines, `topic` the
  *  `<topic>` body; `dropped` holds the ones with no text, for the caller to log. */
@@ -195,23 +202,14 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
     if (m[1] === undefined) {
-      // A `<topic>` written like an `<open>` still keys on the problem.
-      const body = m[4] === undefined ? oneLine(m[2] ?? m[3] ?? "") : problemOf(oneLine(m[4]));
+      const body = m[4] === undefined ? oneLine(m[2] ?? m[3] ?? "") : openLine(m[4]).problem;
       if (!body) dropped.push(m[0].trim());
       else if (m[4] !== undefined) topic ??= body;
       else if (m[2] === undefined) notes.push(body);
       else markers.push({ op: "done", problem: body });
       return "";
     }
-    let rest = oneLine(m[1]);
-    const runIds: string[] = [];
-    for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
-      runIds.unshift(run[1]!);
-      rest = rest.slice(0, run.index);
-    }
-    const dash = rest.indexOf("\u2014");
-    const problem = problemOf(rest);
-    const stage = dash < 0 ? "" : rest.slice(dash + 1).trim();
+    const { problem, stage, runIds } = openLine(m[1]);
     if (problem) markers.push({ op: "open", problem, stage, runIds });
     else dropped.push(m[0].trim());
     return "";
@@ -255,16 +253,18 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
 export const streamBody = (markdown: string): string => cjkFriendly(unmarked(markdown));
 
 /** The streaming tail cut before a hiding tag still open: the marker's body
- *  would flash as prose until its closer arrives. Fences are not honoured
- *  here \u2014 a quoted tag hides for a paint and comes back with its block. */
+ *  would flash as prose until its closer arrives. Code is content here as in
+ *  `openItemMarkers`; a tag in a span still growing hides for a paint and
+ *  comes back with its closing backtick. */
 export function streamTail(markdown: string): string {
   let openAt = -1;
   let hidden = "";
-  for (const t of markdown.matchAll(HIDDEN_TAG)) {
+  replaceOutsideCode(markdown, HIDDEN_TAG, (t) => {
     const name = t[2]!.replace(ZW_CHARS, "").toLowerCase();
-    if (!t[1] && !hidden) { hidden = name; openAt = t.index; }
+    if (!t[1] && !hidden) { hidden = name; openAt = t.index!; }
     else if (t[1] && name === hidden) hidden = "";
-  }
+    return t[0];
+  });
   return hidden ? markdown.slice(0, openAt) : markdown;
 }
 
