@@ -127,6 +127,13 @@ describe("a --until merged goal", () => {
     service.stop();
   });
 
+  it("reads a verdict line case-insensitively, as VERDICT does", async () => {
+    const { launch, ended, service } = rig({ s1: ["built", "merged"], s2: ["verdict: clean"] });
+    const { goal } = await ended(await launch());
+    expect(goal).toMatchObject({ outcome: "done", step: "merge" });
+    service.stop();
+  });
+
   it("fixes on findings, re-reviews clean, then merges: merged after 1 review round", async () => {
     const { launch, ended, sessions, service } = rig({
       s1: ["built", "fixed", "merged"],

@@ -165,7 +165,7 @@ export class TaskGoals {
     if (DECISION.test(text)) return { outcome: "decision", reason: null };
     if (goal.step === "work") return { step: "review", round: goal.round };
     if (goal.step === "merge") return { outcome: "done", reason: null };
-    const verdict = [...text.matchAll(new RegExp(VERDICT.source, "gm"))].at(-1)?.[1];
+    const verdict = [...text.matchAll(new RegExp(VERDICT.source, VERDICT.flags + "g"))].at(-1)?.[1]?.toLowerCase();
     if (!verdict) return { outcome: "failed", reason: "no verdict" };
     if (verdict === "clean") return { step: "merge", round: goal.round };
     return goal.round >= goal.cap ? { outcome: "cap", reason: null } : { step: "work", round: goal.round + 1 };
