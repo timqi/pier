@@ -386,7 +386,7 @@ const MIGRATIONS: readonly string[] = [
   ))
   WHERE json_type(json, '$.chats') = 'array';
   `,
-  // 36 — goals: a `--until reviewed` run's review/fix loop (tasks/goals.ts);
+  // 36 — goals: a `--rounds` run's review/fix loop (tasks/goals.ts), its fields in json;
   // a run of one names it in json.goalId.
   `
   CREATE TABLE goals (

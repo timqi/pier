@@ -22,7 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
-  until: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" },
+  worktree: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" }, "remove-worktree": { type: "boolean" },
   days: { type: "string" }, state: { type: "string" }, since: { type: "string" }, limit: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
@@ -33,11 +33,15 @@ type Params = Record<string, unknown>;
  *  command accepts are read off it, so the two cannot drift. */
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
-    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --until reviewed]] [--task-id <id>] [--session <id>]\n" +
-      "        [--thinking <level>] [--role lead [--design]] [--until reviewed [--rounds <n>] [--review-model <tier|model>]]\n" +
-      "        [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
+    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>]] [--task-id <id>] [--session <id>]\n" +
+      "        [--thinking <level>] [--role lead [--design]] [--worktree <branch>] [--rounds <n>] [--review-model <tier|model>]\n" +
+      "        [--cwd <dir>] --name <text> [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
+  },
+  finish: {
+    usage: "finish --run <root> [--remove-worktree]",
+    help: "merge a reviewed goal's branch into its target as a cheap finishing run in the main repo; refused unless HEAD is the reviewed sha and the tree clean",
   },
   save: {
     usage: "save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)\n" +
@@ -91,14 +95,14 @@ const seconds = (flag: Flag, raw: string | boolean | undefined): number | undefi
 
 /** `launch` as the server takes it: `model` is a menu name it resolves. */
 const launchOf = (v: Values): Params | undefined => {
-  if (v.rounds !== undefined || v["review-model"] !== undefined) {
-    if (v.until === undefined) refuse("--rounds and --review-model apply beside --until");
-  }
-  const rounds = v.rounds === undefined ? undefined : Number(v.rounds);
-  if (rounds !== undefined && !Number.isInteger(rounds)) refuse("--rounds must be a whole number");
-  const launch = compact({ model: v.model, thinking: v.thinking, role: v.role, design: v.design, until: v.until, rounds, reviewModel: v["review-model"] });
+  if (v["review-model"] !== undefined && v.rounds === undefined && v.worktree === undefined) refuse("--review-model applies beside --rounds or --worktree");
+  const rounds = roundsOf(v);
+  const launch = compact({ model: v.model, thinking: v.thinking, role: v.role, design: v.design, worktree: v.worktree, rounds, reviewModel: v["review-model"] });
   return Object.keys(launch).length ? launch : undefined;
 };
+
+const roundsOf = (v: Values): number | undefined =>
+  v.rounds === undefined || Number.isInteger(Number(v.rounds)) ? (v.rounds === undefined ? undefined : Number(v.rounds)) : refuse("--rounds must be a whole number");
 
 /** Argv is split at each bare `--member`; a value equal to it is unreachable,
  *  since parseArgs (strict) refuses option-like values anyway. */
@@ -157,7 +161,7 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
   if (status === 200) {
     // Compact: the reader is a model, and the ids are what it keeps; an answer
     // the server already wrote in lines (`--model ?`) is printed as it came.
-    io.stdout(typeof body.result === "string" ? body.result : (name === "run" && !json && receiptLine(body.result)) || JSON.stringify(body.result));
+    io.stdout(typeof body.result === "string" ? body.result : ((name === "run" || name === "finish") && !json && receiptLine(body.result)) || JSON.stringify(body.result));
     // A full page looks the same as "that is all" unless it says otherwise.
     if (params.operation === "runs" && Array.isArray(body.result) && body.result.length === params.limit) {
       io.stderr(`task: ${String(params.limit)} shown, the --limit; there may be more (--state, --since, --limit)`);
@@ -195,6 +199,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     const days = Number(values.days ?? 30);
     return Number.isInteger(days) && days > 0 ? { operation: "stats", days } : refuse("--days must be a positive whole number");
   }
+  if (name === "finish") return compact({ operation: name, run_id: values.run ?? refuse("finish needs --run"), remove_worktree: values["remove-worktree"] || undefined });
   if (name === "cancel" || name === "recover") {
     if ((values.run === undefined) === (values.group === undefined)) refuse(`${name} takes exactly one of --run or --group`);
     if (name === "recover" && values.reason === undefined) refuse("recover needs --reason");
@@ -208,14 +213,15 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   /** One new run, in the three shapes `tasks[]` accepts. A saved
    *  definition runs as is: batch defaults pass it by, its own flags are refused. */
   const entry = (v: Values, own = v): Params => {
-    if (v.until !== undefined) {
+    const goal = (["worktree", "rounds"] as const).find((flag) => v[flag] !== undefined);
+    if (goal) {
       const beside = (["bash", "task-id", "session", "role"] as const).find((flag) => v[flag] !== undefined);
-      if (beside) refuse(`--until applies to a fresh --prompt run, not beside --${beside}`);
+      if (beside) refuse(`--${goal} applies to a fresh --prompt run, not beside --${beside}`);
     }
     const launch = launchOf(v);
     const timeoutSeconds = seconds("timeout", v.timeout);
     if (v["task-id"] !== undefined) {
-      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "role", "design", "until", "rounds", "review-model", "name", "timeout"].includes(flag));
+      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "role", "design", "worktree", "rounds", "review-model", "name", "timeout"].includes(flag));
       if (extra) refuse(`--${extra} does not apply to a saved definition (--task-id)`);
       return { task_id: v["task-id"] };
     }
@@ -226,7 +232,10 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
       return compact({ name: v.name, timeoutSeconds, action: compact({ type: "bash", script: v.bash, cwd: v.cwd }) });
     }
     const prompt = text(v.prompt) ?? refuse("a new run needs --prompt, --bash or --task-id");
-    if (v.session === undefined) return compact({ prompt, cwd: v.cwd, launch, name: v.name, timeoutSeconds });
+    if (v.session === undefined) {
+      if (v.name === undefined) refuse("a new run needs --name: the session's title, a few words in the user's language");
+      return compact({ prompt, cwd: v.cwd, launch, name: v.name, timeoutSeconds });
+    }
     if (v.cwd !== undefined) refuse("--cwd applies to a fresh session, not --session");
     return compact({ name: v.name, timeoutSeconds, action: compact({ type: "agent", session: { mode: "reuse", sessionId: v.session }, prompt, launch }) });
   };
@@ -234,12 +243,13 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
 
   if (values.run !== undefined) {
     if (members.length) refuse("--run addresses one existing run; --member starts new ones");
-    // Beside --run, --until opens a new goal on an ended goal's root; its rounds and review model are the launch's.
-    if (values.until !== undefined && values.after) refuse("--until resumes an ended goal's root; --after queues behind a running turn");
-    const extra = flagsOf(values).find((flag) => !["run", "after", "until", "prompt", "callback", "callback-session"].includes(flag));
+    // Beside --run, --rounds opens a new goal of that many reviews on an ended goal's root.
+    if (values.rounds !== undefined && values.after) refuse("--rounds resumes an ended goal's root; --after queues behind a running turn");
+    if (values["review-model"] !== undefined && values.rounds === undefined) refuse("--review-model beside --run applies with --rounds");
+    const extra = flagsOf(values).find((flag) => !["run", "after", "rounds", "review-model", "prompt", "callback", "callback-session"].includes(flag));
     if (extra) refuse(`--${extra} does not apply to an existing run (--run)`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");
-    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, until: values.until, ...delivery });
+    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, rounds: roundsOf(values), review_model: values["review-model"], ...delivery });
   }
   if (values.after) refuse("--after applies to --run only");
   if (members.length) {

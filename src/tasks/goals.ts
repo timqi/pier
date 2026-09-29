@@ -1,6 +1,6 @@
-// The `--until reviewed` loop (docs/plans/18-goal-runtime.md): a worker run's
-// work is reviewed by a run Pier launches and fixed by resuming the worker until
-// clean, driven from each step's settle with no model in the loop; the merge is the user's.
+// A goal's loop (docs/plans/18-goal-runtime.md): a worker run's work is
+// reviewed by a run Pier launches and fixed by resuming the worker until clean,
+// driven from each step's settle with no model in the loop; the merge is the user's.
 
 import { logger } from "../log.js";
 import { runCwd } from "./callbacks.js";
@@ -35,8 +35,8 @@ export function statusLine(text: string): Status | null {
   return { kind: blocked ? "blocked" : "decision", detail: (blocked ? m[2] : m[3])?.trim() || null };
 }
 
-export const fixPrompt = (round: number, cap: number, review: string): string =>
-  `[Pier: review round ${String(round)}/${String(cap)} found issues; fix them in this worktree and commit before you end your turn — an uncommitted change is not handed off. Do not merge.]\n\n${review}`;
+export const fixPrompt = (review: number, cap: number, text: string): string =>
+  `[Pier: review ${String(review)}/${String(cap)} found issues; fix them in this worktree and commit before you end your turn — an uncommitted change is not handed off. Do not merge.]\n\n${text}`;
 
 /** What a review is pinned to (`GoalHost.worktree`): `base` the target, origin's
  *  default branch else `main`; `baseSha` is `git merge-base HEAD <base>`. */
@@ -44,11 +44,11 @@ export type Worktree = { head: string; branch: string; base: string; baseSha: st
 
 /** `round` counts the fix rounds before this review, so the first reads as review 1. */
 export const reviewPrompt = (cwd: string, tree: Worktree, round: number, cap: number, task: string): string => [
-  `[Pier: a goal's review, review ${String(round + 1)} (up to ${String(cap)} fix rounds). Review only: do not edit, commit or merge.]`,
+  `[Pier: a goal's review, review ${String(round + 1)} of ${String(cap)}. Review only: do not edit, commit or merge.]`,
   "",
   `Worktree: ${cwd}\nBranch: ${tree.branch}\nTarget: ${tree.base}\nBase sha: ${tree.baseSha}\nReviewed sha: ${tree.head}`,
   "",
-  `Before reading anything, verify: \`git rev-parse HEAD\` is the reviewed sha, \`git status --porcelain\` is empty, the branch checked out is ${tree.branch}, and \`git diff ${tree.baseSha}..${tree.head}\` is not empty. If any of it differs, answer \`Verdict: blocked — <what differs>\` and nothing else.`,
+  `Before reading anything, verify in one call: \`git rev-parse HEAD && git status --porcelain && git branch --show-current && git diff --stat ${tree.baseSha}..${tree.head}\` — HEAD ${tree.head}, an empty status, branch ${tree.branch}, a non-empty diff. If any differs, answer \`Verdict: blocked — <what differs>\` and nothing else.`,
   "",
   "Then review that diff against the task below, reading the changed files where the diff is not enough.",
   "",
@@ -59,6 +59,16 @@ export const reviewPrompt = (cwd: string, tree: Worktree, round: number, cap: nu
   "List each issue worth a fix on one line: `file:line · issue · fix`.",
   "",
   "End your reply with one status line, plain text, the very last line and outside any code block: `Verdict: clean` when nothing needs fixing, else `Verdict: findings`.",
+].join("\n");
+
+/** A reviewed goal's merge, as the one run `pier task finish` launches in the main repo (operations.ts). */
+export const finishPrompt = (at: { branch: string; base: string; sha: string; path: string; main: string; remove: boolean }): string => [
+  `[Pier: a goal's finishing run. Merge only what the lines below approve.]\n\nApproved: merge ${at.branch} into ${at.base} at ${at.sha}`,
+  ...(at.remove ? [`Approved: remove worktree ${at.path}`] : []),
+  `\nWorktree: ${at.path}\nMain repo: ${at.main}\n`,
+  `Verify first, in one call: \`git -C ${at.path} rev-parse HEAD && git -C ${at.path} status --porcelain && git -C ${at.path} branch --show-current\` — HEAD must be the approved sha, the status empty, the branch ${at.branch}; if any differs, stop with \`Needs your decision — <what differs>\` and do nothing else.`,
+  `Then merge: \`wt -C ${at.path} merge ${at.base}\` when the worktree's removal is approved above, else \`git -C ${at.main} merge ${at.branch}\`. A conflict stops you the same way, the merge aborted.`,
+  `Then run the repo's checks on ${at.base} in ${at.main} (AGENTS.md names them; else \`npm run check && npm run lint && npm test\` where package.json has them) and report the final state: the merge commit on ${at.base}, whether the worktree was removed, what the checks said.`,
 ].join("\n");
 
 type MenuEntry = Parameters<typeof resolveModel>[1][number];
@@ -85,24 +95,24 @@ export class TaskGoals {
     private readonly host: GoalHost,
   ) {}
 
-  /** Inside the root run's prepare transaction. */
-  open(root: TaskRun): Goal {
+  /** Inside the root run's prepare transaction; `again` is a re-entry's own reviews and model, else the launch's. */
+  open(root: TaskRun, again?: { cap: number; reviewModel: string | null }): Goal {
     const { action } = root.context.definition;
     const launch = action.type === "agent" ? action.launch : undefined;
     // A goal with nobody to tell the end to would run to nothing.
-    if (!root.invokedBySessionId) throw new Error("--until reviewed needs a launching session");
-    if (root.callbackSessionId === null) throw new Error("--until reviewed reports its end as a callback; callback none has nobody to tell");
+    if (!root.invokedBySessionId) throw new Error("a goal needs a launching session");
+    if (root.callbackSessionId === null) throw new Error("a goal reports its end as a callback; callback none has nobody to tell");
     const goal: Goal = {
       id: newId(),
       rootRunId: root.id,
       supervisorSessionId: root.invokedBySessionId,
-      cap: launch?.rounds ?? 3,
+      cap: again?.cap ?? launch?.rounds ?? 3,
       round: 0,
       step: "work",
       currentRunId: root.id,
       outcome: null,
       reason: null,
-      reviewModel: launch?.reviewModel ?? null,
+      reviewModel: again ? again.reviewModel : launch?.reviewModel ?? null,
       reviewed: null,
       createdAt: Date.now(),
       finishedAt: null,
@@ -140,7 +150,7 @@ export class TaskGoals {
         const prepared = review
           ? this.host.prepare(review, "goal", this.provenance(current, root))
           : this.resumeWorker(current, root, fixPrompt(next.round, current.cap, text));
-        this.store.saveGoal({ ...current, step: next.step, round: next.round, currentRunId: prepared.id, ...(draft ? { reviewed: draft.head } : {}) });
+        this.store.saveGoal({ ...current, step: next.step, round: next.round, currentRunId: prepared.id, ...(draft ? { reviewed: draft.tree.head, branch: draft.tree.branch, base: draft.tree.base } : {}) });
         return prepared;
       });
       if (!started && review) this.definitions.archive(review.id);
@@ -197,7 +207,7 @@ export class TaskGoals {
     if (goal.step === "merge") return { outcome: "done", reason: null };
     if (!status) return { outcome: "failed", reason: "no verdict" };
     if (status.kind === "clean") return { outcome: "done", reason: null };
-    return goal.round >= goal.cap ? { outcome: "cap", reason: null } : { step: "work", round: goal.round + 1 };
+    return goal.round + 1 >= goal.cap ? { outcome: "cap", reason: null } : { step: "work", round: goal.round + 1 };
   }
 
   private finish(id: string, outcome: GoalOutcome, reason: string | null): boolean {
@@ -247,7 +257,7 @@ export class TaskGoals {
 
   /** A fresh worker in the root's worktree, pinned to its HEAD, on the model the
    *  dispatcher named, else the root's tier, else its model, with the root's timeout. */
-  private async reviewDraft(goal: Goal, root: TaskRun, round: number): Promise<{ definition: unknown; head: string }> {
+  private async reviewDraft(goal: Goal, root: TaskRun, round: number): Promise<{ definition: unknown; tree: Worktree }> {
     const cwd = runCwd(root);
     if (!cwd) throw new Error("the worker's worktree is unknown");
     const { action } = root.context.definition;
@@ -261,7 +271,7 @@ export class TaskGoals {
     // A root resumed into its goal was built for its first prompt and the answer it resumed with.
     const task = [action.type === "agent" ? action.prompt : "", ...(root.context.resumePrompt ? ["", "Then, resuming it:", "", root.context.resumePrompt] : [])].join("\n");
     return {
-      head: tree.head,
+      tree,
       definition: {
         name: `review ${String(round + 1)}: ${root.context.definition.name}`,
         trigger: { type: "manual" },

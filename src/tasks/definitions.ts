@@ -109,9 +109,12 @@ function parseThinking(raw: unknown): ThinkingLevel {
   return raw;
 }
 
-function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
+/** After it, `rounds !== undefined` ⇔ the run roots a goal: `--worktree` alone
+ *  means 3 reviews, `rounds: 0` none, a row stored with `until` 3 unless it named its rounds. */
+export function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
   if (raw === undefined) return undefined;
-  const value = record(raw);
+  const given = record(raw);
+  const value = given && (given.until !== undefined || given.worktree !== undefined) ? { ...given, rounds: given.rounds ?? 3 } : given;
   if (!value) throw new Error("agent launch policy must be an object");
   const launch: AgentLaunchPolicy = {};
   if (value.model !== undefined) launch.model = parseModel(value.model);
@@ -128,22 +131,18 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     if (value.design !== true || launch.role !== "lead") throw new Error("agent design must be true, on a lead");
     launch.design = true;
   }
-  if (value.until !== undefined) {
-    // `merged` is the stored and the typed alias: the loop ends at the review, never the merge.
-    if (value.until !== "reviewed" && value.until !== "merged") throw new Error("agent until must be reviewed");
-    if (launch.role) throw new Error("agent until applies to a worker, not a lead");
-    launch.until = "reviewed";
-  }
+  if (value.worktree !== undefined) launch.worktree = requiredString(value.worktree, "agent worktree");
   if (value.rounds !== undefined) {
     const rounds = value.rounds;
-    if (typeof rounds !== "number" || !Number.isInteger(rounds) || rounds < 1 || rounds > 9 || !launch.until) {
-      throw new Error("agent rounds must be a whole number from 1 to 9, beside until");
+    if (typeof rounds !== "number" || !Number.isInteger(rounds) || rounds < 0 || rounds > 9) {
+      throw new Error("agent rounds must be a whole number from 0 to 9");
     }
-    launch.rounds = rounds;
+    if (rounds) launch.rounds = rounds;
   }
+  if (launch.role && (launch.rounds !== undefined || launch.worktree)) throw new Error("agent rounds and worktree apply to a worker, not a lead");
   if (value.reviewModel !== undefined) {
-    if (typeof value.reviewModel !== "string" || !value.reviewModel.trim() || !launch.until) {
-      throw new Error("agent reviewModel must be a model name, beside until");
+    if (typeof value.reviewModel !== "string" || !value.reviewModel.trim() || launch.rounds === undefined) {
+      throw new Error("agent reviewModel must be a model name, beside rounds or worktree");
     }
     launch.reviewModel = value.reviewModel.trim();
   }

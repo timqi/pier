@@ -10,6 +10,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | Command | Does |
 | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
+| `finish` | `--run <root>`: a reviewed goal's (or a build lead's) branch merged by one cheap run in the main repo (§`finish`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
 | `list` | stored definitions, as JSON, each with `nextRun` and `lastRun` (§`list`) |
 | `pause` · `resume` · `archive` | `--task-id <id>`: a definition's schedule off, on, or retired (§Schedule verbs) |
@@ -19,7 +20,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
 Every command returns at once and prints the receipt as compact JSON on
-stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
+stdout, exit 0; `run`'s and `finish`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
 `<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
 a resume `resumed: …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
@@ -33,9 +34,9 @@ the one validator of the params object.
 ## `run`
 
 ```
-pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --until reviewed]] [--task-id <id>] [--session <id>]
-        [--thinking <level>] [--role lead [--design]] [--until reviewed [--rounds <n>] [--review-model <tier|model>]]
-        [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>]] [--task-id <id>] [--session <id>]
+        [--thinking <level>] [--role lead [--design]] [--worktree <branch>] [--rounds <n>] [--review-model <tier|model>]
+        [--cwd <dir>] --name <text> [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
@@ -44,7 +45,8 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   session and no model — `--prompt`, `--model`, `--thinking`, `--role`, `--design` and
   `--session` beside it are refused), or `--task-id` (a saved definition, as
   is), or `--session <id>` with `--prompt` (continue an idle session; `--cwd`
-  refused).
+  refused). A fresh `--prompt` run, top-level or a `--member`, needs `--name`
+  (`task: a new run needs --name: …`); the others keep a name drawn from the text.
 - **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
   session is a feature lead's for its life (§Two levels); any other value, and
   `--role` beside `--session`, is refused by the server; beside `--task-id` or
@@ -55,24 +57,27 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   coming to it, or a run that did not succeed; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a
   milestone".
-- **`--until reviewed`**: rides as `launch.until: "reviewed"` on a fresh
-  `--prompt` run, the root of a goal (`tasks/goals.ts`): reviewed by a run Pier
-  launches, fixed by resuming the worker, ended on a clean review with the
-  merge left to the user; a review ending `Verdict: blocked — <why>` ends the
-  goal `failed`. `--until merged` is an alias, normalized to `reviewed` at
-  `definitions.ts`, a stored `until: "merged"` included. Refused beside
-  `--bash`, `--task-id`, `--session`, `--role` (argv), in a `--member` or with
-  `--callback none` (server).
-- **`--run <root> --prompt … --until reviewed`**: accepted only when that run
-  is a goal's root whose goal has ended; the resume opens a new goal on the
-  resumed run, its cap and review model the original launch's (`--rounds`,
-  `--review-model` beside it refused). Beside any other `--run`, `--until` is
-  refused.
-- **`--rounds <n>`**: rides as `launch.rounds`, the fix rounds the goal allows
-  (1–9, default 3) before it ends on the user; refused without `--until`.
+- **`--rounds <n>`**: rides as `launch.rounds`, the reviews a goal allows
+  (0–9); present, the fresh `--prompt` run roots a goal (`tasks/goals.ts`):
+  reviewed by a run Pier launches, fixed by resuming the worker, ended on a
+  clean review with the merge left to `finish`; a findings review that is the
+  `n`th ends it `cap`, a review ending `Verdict: blocked — <why>` ends it
+  `failed`. `--rounds 0` is no goal. A stored `until` reads as `rounds` 3.
+  Refused beside `--bash`, `--task-id`, `--session`, `--role` (argv), in a
+  `--member`, on `save` or with `--callback none` (server).
+- **`--worktree <branch>`**: rides as `launch.worktree`; the server runs
+  `wt switch -c <branch> -b <--cwd's branch> --no-cd -y --format json` in
+  `--cwd` (never a shell) and starts the session in the worktree it prints,
+  after every other check passed; `wt`'s failure is the refusal
+  (`task: wt: …`). Alone it means `--rounds 3`; refused where `--rounds` is.
+- **`--run <root> --prompt … --rounds <n>`**: accepted only when that run is
+  a goal's root whose goal has ended; the resume opens a new goal of `n`
+  reviews (1–9) on the resumed run, on `--review-model` else the ended goal's.
+  Beside any other `--run`, `--rounds` is refused; without it `--run` is a
+  plain resume, out of the goal.
 - **`--review-model <tier|model>`**: rides as `launch.reviewModel`, the
   review's model; absent, the root's tier, else its model; refused without
-  `--until`.
+  `--rounds` or `--worktree`.
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
@@ -84,13 +89,35 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only; drop them to steer or follow up`). `--run` takes nothing
   but `--prompt`, `--after`, `--callback*` and, on an ended goal's root,
-  `--until reviewed`.
+  `--rounds` and `--review-model`.
 - **Batch**: the first `--member` switches `run` to a group. Flags before it
   are every member's defaults; each `--member` opens one member whose flags
   override them; a `--task-id` member takes no defaults and refuses its own
   run flags. `--join` (default `all`), `--callback`, `--callback-session`
   belong before the first `--member`. Members are ordinary argv; at most one
   may read `--prompt -`. Admission is all-or-nothing.
+
+## `finish`
+
+```
+pier task finish --run <root> [--remove-worktree]
+```
+
+- One `{operation: "finish", run_id, remove_worktree?}` request. `<root>` is
+  a goal's root whose goal ended clean (`done`, `reviewed` set), or a build
+  lead's run; else `task: run <id> is neither a reviewed goal's root nor a
+  build lead's run` / `task: run <id>'s goal ended <outcome>, nothing to merge`.
+- The worktree is the run's cwd; the approved sha is the goal's `reviewed`
+  (a lead's: the worktree's HEAD), the target the goal's `base` else the
+  worktree's. Refused unless HEAD is that sha (`task: <branch> moved past the
+  reviewed sha …; re-review with pier task run --run <root> --prompt "<what
+  changed>" --rounds 1`), the tree is clean, and a lead's session has no run
+  queued or running.
+- Launches one fresh `cheap`-tier worker run, `finish: <root's name>`, in the
+  main repo (the worktree's common git dir's parent), prompt `finishPrompt`
+  (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
+  `Approved: remove worktree <path>` line only with `--remove-worktree`, a
+  one-call verify, the merge and the repo's checks. Receipt and callback as `run`'s.
 
 ## `save`
 
@@ -216,6 +243,13 @@ goal's step, not its end", and the goal's end is one callback to the root
 run's target, headed by its `Goal:` line; `--run` on a goal's settled run
 while the goal is live is refused (`task: run <id> is in a goal (<step>);
 cancel it or wait for its end`), and `cancel --run` ends the goal.
+The `Goal:` line names the root, `(run <root>, <branch> in <worktree>)`; when
+a review ended the goal the body is the worker's latest result (3000
+characters), then `Review:` and the review's (1000).
+
+The merge is code, not prose: `finish` is the only path, launched by the head
+on the user's yes, the sha pinned to what the last review read; a goal never
+merges on its own.
 
 ## Two levels, no tree
 

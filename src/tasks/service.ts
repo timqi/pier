@@ -3,7 +3,8 @@
 // Decisions belong to the files beside it.
 
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
@@ -21,7 +22,7 @@ import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
-import type { CallbackMode, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { CallbackMode, Goal, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { createdRole, isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -54,13 +55,15 @@ interface StatsRow {
 }
 const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
 
-/** Never a shell; a failure throws git's own first line. */
-const git = (cwd: string, ...args: string[]): Promise<string> => new Promise((resolve, reject) => {
-  execFile("git", args, { cwd }, (err, stdout, stderr) => {
-    if (err) reject(new Error(`git ${args.join(" ")}: ${(stderr.trim() || err.message).split("\n")[0]!}`));
-    else resolve(stdout.trim());
+/** Never a shell; a failure throws the tool's own first line, `git <args>: …` or `wt: …`. */
+const exec = (tool: "git" | "wt", cwd: string, args: string[]): Promise<string> => new Promise((done, reject) => {
+  execFile(tool, args, { cwd }, (err, stdout, stderr) => {
+    const why = (stderr.trim() || err?.message || "").split("\n")[0]!;
+    if (err) reject(new Error(tool === "git" ? `git ${args.join(" ")}: ${why}` : `wt: ${why}`));
+    else done(stdout.trim());
   });
 });
+const git = (cwd: string, ...args: string[]): Promise<string> => exec("git", cwd, args);
 
 /** What a goal's review is pinned to (goals.ts `GoalHost.worktree`). */
 async function worktree(cwd: string): Promise<Worktree> {
@@ -73,6 +76,15 @@ async function worktree(cwd: string): Promise<Worktree> {
   const baseSha = await git(cwd, "merge-base", "HEAD", base);
   const clean = (await git(cwd, "status", "--porcelain")) === "";
   return { head, branch, base, baseSha, clean };
+}
+
+/** A fresh run's own worktree, `branch` off the one `cwd` has checked out: `.path` of `wt`'s JSON line. */
+async function addWorktree(cwd: string, branch: string): Promise<string> {
+  const from = await git(cwd, "branch", "--show-current");
+  const out = await exec("wt", cwd, ["switch", "-c", branch, "-b", from, "--no-cd", "-y", "--format", "json"]);
+  const path = (JSON.parse(out.split("\n")[0] || "null") as { path?: unknown } | null)?.path;
+  if (typeof path !== "string" || !path) throw new Error(`wt: no worktree path in ${JSON.stringify(out.slice(0, 200))}`);
+  return path;
 }
 
 export class TaskService {
@@ -89,6 +101,11 @@ export class TaskService {
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
   private readonly goals: TaskGoals;
+  /** Seams a test replaces: git and wt are never run by one. */
+  worktree = worktree;
+  addWorktree = addWorktree;
+  /** The repository a worktree belongs to: its common git dir's parent. */
+  mainRepo = async (cwd: string): Promise<string> => dirname(await realpath(resolve(cwd, await git(cwd, "rev-parse", "--git-common-dir"))));
 
   constructor(
     readonly store: TaskStore,
@@ -157,7 +174,7 @@ export class TaskService {
       cancelRun: (id) => { this.execution.cancel(id); },
       models: () => this.models().then((listed) => listed.models),
       deliver: (run) => this.callbacks.deliver(run),
-      worktree,
+      worktree: (cwd) => this.worktree(cwd),
     });
     router.onTurnEnd((sessionId, text) => {
       // Only the head's turns write the list.
@@ -431,10 +448,10 @@ export class TaskService {
     // run a paused task on demand. Archiving is the terminal state.
     if (task.archived) throw new Error("archived tasks cannot run");
     const { action, trigger } = task;
-    if (action.type !== "agent" || !action.launch?.until) return this.runs.prepare(task, input, source, parentRunId, provenance);
+    if (action.type !== "agent" || action.launch?.rounds === undefined) return this.runs.prepare(task, input, source, parentRunId, provenance);
     // operations.ts refuses these first; a goal is one launched run's loop.
     if (action.session.mode !== "fresh" || trigger.type !== "manual" || provenance.groupId || parentRunId !== null) {
-      throw new Error("--until reviewed applies to one fresh --prompt run, not a reused session, a schedule, a batch member or a chained task");
+      throw new Error("a goal (--rounds, --worktree) is one fresh --prompt run's, not a reused session's, a schedule's, a batch member's or a chained task's");
     }
     return this.store.transact(() => {
       const run = this.runs.prepare(task, input, source, parentRunId, provenance);
@@ -507,19 +524,20 @@ export class TaskService {
     return this.messages.control(run, fromSessionId, mode, message);
   }
 
-  /** `goal`: `--until reviewed` beside `--run` — the resumed run roots a new goal. */
+  /** `goal`: `--rounds` beside `--run` — the resumed run roots a new goal of `cap` reviews, on
+   *  `reviewModel`, else the ended goal's. */
   resume(
     id: string,
     message: string,
     provenance: ResumeProvenance = {},
-    goal = false,
+    goal?: { cap: number; reviewModel?: string },
   ): TaskRun {
     const prior = this.getRun(id);
     const run = goal
       ? this.store.transact(() => {
-        this.goalAgain(prior);
+        const ended = this.goalAgain(prior);
         const run = this.prepareResume(prior, message, provenance);
-        this.goals.open(run);
+        this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended.reviewModel });
         return run;
       })
       : this.prepareResume(prior, message, provenance);
@@ -528,14 +546,15 @@ export class TaskService {
   }
 
   /** The user's answer to an ended goal goes back through the loop, never around it. */
-  private goalAgain(prior: TaskRun): void {
+  private goalAgain(prior: TaskRun): Goal {
     const goal = prior.goalId ? this.store.getGoal(prior.goalId) : undefined;
-    if (goal?.rootRunId !== prior.id) throw new Error(`--until reviewed beside --run resumes a goal's root run; run ${prior.id} is not one${goal ? `; its root is run ${goal.rootRunId}` : ""}`);
+    if (goal?.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one${goal ? `; its root is run ${goal.rootRunId}` : ""}`);
     if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
     const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
     if (latest && latest.id !== goal.id) {
       throw new Error(`run ${prior.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
     }
+    return goal;
   }
 
   private prepareResume(

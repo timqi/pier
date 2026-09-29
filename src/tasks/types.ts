@@ -25,11 +25,11 @@ export interface AgentLaunchPolicy {
   /** A lead for a product or architecture design the user finalizes with
    *  `Design final:`; with `role: "lead"` only. Any other lead builds. */
   design?: true;
-  /** `reviewed`: the run is the root of a goal (tasks/goals.ts) — reviewed and
-   *  fixed without a turn of its supervisor's until the end; the merge is the user's.
-   *  `merged`, the earlier word, is taken as it (definitions.ts) and means the same in a stored row. */
-  until?: "reviewed";
-  /** Review rounds the goal allows (1–9) before it stops on the user; 3 when absent. */
+  /** The branch `wt switch -c` made for this run's fresh session, in its cwd's repository (operations.ts). */
+  worktree?: string;
+  /** Present exactly on a goal's root (tasks/goals.ts): the reviews the goal
+   *  allows (1–9), the work reviewed and fixed without a turn of its supervisor's
+   *  until the end; the merge is the user's (`pier task finish`). */
   rounds?: number;
   /** The review's model as the dispatcher named it (a tier or a menu name);
    *  the root run's tier, else its model, when absent. */
@@ -260,14 +260,15 @@ export type GoalStep = "work" | "review" | "merge";
  *  several status lines, a review gave no verdict, or its worktree could not be pinned. */
 export type GoalOutcome = "done" | "decision" | "cap" | "failed";
 
-/** A `--until reviewed` loop (tasks/goals.ts, docs/plans/18-goal-runtime.md):
- *  the root run's work, reviewed by a run Pier launches, fixed by resuming the
- *  worker, reviewed again up to `cap` rounds; it ends before the merge, the user's to confirm. */
+/** A goal (tasks/goals.ts, docs/plans/18-goal-runtime.md): the root run's
+ *  work, reviewed by a run Pier launches, fixed by resuming the worker, reviewed
+ *  again up to `cap` reviews; it ends before the merge, the user's to confirm. */
 export interface Goal {
   id: string;
   rootRunId: string;
   /** Who launched the root run: every step is owned and cancelled as theirs. */
   supervisorSessionId: string;
+  /** Reviews allowed: a findings review with `round + 1 >= cap` ends the goal `cap`. */
   cap: number;
   /** Fix rounds started — one findings → fix → re-review trip each; the
    *  first review counts nothing. */
@@ -281,6 +282,9 @@ export interface Goal {
   /** The commit the last review ran on, set when that review is prepared; null
    *  before the first, absent on a goal stored before reviews were pinned. */
   reviewed?: string | null;
+  /** The reviewed branch and its target, set beside `reviewed`; absent on older rows. */
+  branch?: string | null;
+  base?: string | null;
   createdAt: number;
   finishedAt: number | null;
 }

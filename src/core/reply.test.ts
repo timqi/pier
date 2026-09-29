@@ -369,14 +369,14 @@ describe("a goal on its run line", () => {
   const at = (step: "work" | "review" | "merge", round: number, outcome: "done" | "decision" | "cap" | "failed" | null = null, reason: string | null = null) =>
     openRunText({ runId: "r1", name: "r1", state: "succeeded", targetSessionId: "s", cwd: null, queuedAt: 0, finishedAt: 0, goal: { step, round, cap: 3, outcome, reason } }, 0);
   it("says where the loop stands after the run token, never past the cap", () => {
-    expect(at("work", 0)).toBe("run r1 succeeded just now · until reviewed: working");
+    expect(at("work", 0)).toBe("run r1 succeeded just now · review: working");
     expect([at("review", 0), at("work", 1), at("review", 1), at("work", 3), at("review", 3), at("merge", 2)].map((t) => t.split(": ")[1]))
-      .toEqual(["review", "fix round 1/3", "re-review 1/3", "fix round 3/3", "re-review 3/3", "merging"]);
+      .toEqual(["review 1/3", "fixing for review 2/3", "review 2/3", "fixing for review 3/3", "review 3/3", "merging"]);
   });
   it("names how it ended", () => {
     expect([at("merge", 1, "done"), at("review", 1, "done"), at("work", 1, "decision"), at("review", 3, "cap"), at("review", 0, "failed", "no verdict"), at("work", 0, "failed")]
-      .map((t) => t.split(" · until reviewed: ")[1]))
-      .toEqual(["merged", "review clean, waiting on you", "waiting on you", "3/3 rounds, still findings", "failed: no verdict", "failed"]);
+      .map((t) => t.split(" · review: ")[1]))
+      .toEqual(["merged", "review clean, waiting on you", "waiting on you", "3 reviews, still findings", "failed: no verdict", "failed"]);
   });
 });
 

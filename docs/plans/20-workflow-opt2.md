@@ -47,6 +47,13 @@ Then run the repo's checks on <base> in <main> (AGENTS.md names them; else `npm 
   The `Goal` gains `branch` and `base` (both `string | null`, set beside
   `reviewed` when a review is prepared; absent on older rows), so the
   finish reads its target off the record, not off the head's memory.
+- A build lead's run is accepted too (its target session a lead, phase
+  `build` — `store.leadPhaseOf`): the lead reviewed its own integrated branch,
+  so there is no goal to read; the worktree is `runCwd(run)`, the target
+  `tree.base`, the approved sha `tree.head`, refused unless `tree.clean` and
+  the lead's session is idle (no run of it queued or running). The receipt
+  and the finish prompt are the same. A run that is neither is refused:
+  `task: run <id> is neither a reviewed goal's root nor a build lead's run`.
 - Receipt: the run's receipt like `run`'s. `MODEL_TABLE` drops "a finishing
   run" from the `balanced` row; the finish's tier is code.
 - The four prose copies of the recipe go: `WORKER` (the "Only a finishing run
