@@ -432,7 +432,7 @@ main {
      lower floor, packed, and the log shows more of them, or a 256px box holds
      five rows of air. The row's own py-0.5 is outside the floor, so a row's
      pitch is 4px more than the floor says. */
-  #turns :is([data-kind="activity"], [data-kind="process"]) > summary { min-height: 44px; }
+  #turns [data-kind="activity"] > summary { min-height: 44px; }
   #turns [data-kind="activity"] details > summary { min-height: 28px; }
   #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
@@ -502,7 +502,7 @@ main {
      scroll edge effect smears into the status bar. */
   mask-image: linear-gradient(to bottom, transparent 8px, black 2.5rem, black calc(100% - 2rem), transparent);
 }
-:is(#turns, .process-body) > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
+:is(#turns, .turn-card) > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
   max-width: 88%;
   margin-block: 0.875rem;
@@ -518,21 +518,21 @@ main {
   color: var(--color-neutral-900);
   box-shadow: inset 0 0 0 1px var(--color-indigo-300);
 }
-#turns > [data-kind="assistant"] {
+:is(#turns, .turn-card) > [data-kind="assistant"] {
   margin-right: auto;
   border-bottom-left-radius: 0.375rem;
   background: var(--color-white);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
 }
-:is(#turns, .process-body) > :is([data-kind="system"], [data-kind="error"]) {
+:is(#turns, .turn-card) > :is([data-kind="system"], [data-kind="error"]) {
   border-left-width: 2px;
   max-width: 100%;
 }
-:is(#turns, .process-body) > :is([data-kind="activity"], [data-kind="background-run"]) {
+:is(#turns, .turn-card) > :is([data-kind="activity"], [data-kind="background-run"]) {
   margin-block: 0.75rem;
   border-radius: 1rem;
 }
-:is(#turns, .process-body) > .system-card { border-left-width: 0; }
+:is(#turns, .turn-card) > .system-card { border-left-width: 0; }
 .system-card::before {
   content: "";
   position: absolute;
@@ -552,24 +552,37 @@ main {
   padding: 0.125rem 0.375rem;
   background: color-mix(in oklab, currentColor 8%, transparent);
 }
-:is(#turns, .process-body) > [data-kind="system"].system-card {
+:is(#turns, .turn-card) > [data-kind="system"].system-card {
   width: auto;
   padding-block: 0.625rem;
   border-radius: 0.75rem;
 }
 /* Activity groups, system rows and run cards (turn-activity.ts FOLD_ROW): one
    inline padding, folded or open, so their chevrons share a column. */
-:is(#turns, .process-body) > .fold-row { padding-inline: 0.75rem; }
-/* The process line (turn-activity.ts intoProcess): the activity group's line;
-   its cards open under it on the same column. */
-#turns > [data-kind="process"] { margin-block: 0.25rem; border-radius: 1rem; }
-#turns > [data-kind="process"] > .process-body { margin-top: 0.25rem; margin-inline: -0.75rem; }
+:is(#turns, .turn-card) > .fold-row { padding-inline: 0.75rem; }
+/* The turn card (chat.ts closeCard): one framed row from a turn's cause lines
+   to the runs it launched, a hairline ring at the reply's radius around the
+   lines' own material; the reply inside keeps its reading surface. */
+#turns > [data-kind="turn"] {
+  margin-block: 0.875rem;
+  padding: 0.25rem 0.25rem;
+  border-radius: 1.375rem;
+  box-shadow: inset 0 0 0 1px var(--color-neutral-200);
+}
+.turn-card > :is([data-kind="assistant"], [data-kind="error"]) { margin-block: 0.375rem; }
+.turn-card > [data-kind="assistant"] { margin-left: 0.5rem; }
+.turn-card > :is([data-kind="activity"], [data-kind="background-run"], [data-kind="system"]) { margin-block: 0.125rem; }
+.turn-card > [data-kind="activity"] { max-width: none; }
+@keyframes frame-in { from { box-shadow: inset 0 0 0 1px transparent; } }
+#turns > [data-kind="turn"][data-frame] { animation: frame-in 320ms var(--ease-surface); }
 /* A topic (topics.ts): its colour is the row's `--topic`, the bar an inset edge
    beside the bubble's ring so the radii stay. */
 #turns > [data-kind="user"][data-topic] { box-shadow: inset 3px 0 0 var(--topic), inset 0 0 0 1px var(--color-indigo-300); }
 #turns > [data-kind="assistant"][data-topic] {
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 3px 0 0 var(--topic), inset 0 0 0 1px var(--color-neutral-200);
 }
+/* The card is one row: its bar runs the card's height and its lines hold the topic by containment. */
+#turns > [data-kind="turn"][data-topic] { box-shadow: inset 3px 0 0 var(--topic), inset 0 0 0 1px var(--color-neutral-200); }
 .topic-tag, .topic-filter {
   color: var(--topic);
   background: color-mix(in oklab, var(--topic) 12%, transparent);
@@ -583,22 +596,39 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#turns > [data-kind="activity"] {
-  max-width: 88%;
-  margin-bottom: 0;
-}
-#turns > [data-kind="activity"][data-adopted] + [data-kind="assistant"] { margin-top: 0.375rem; }
+#turns > [data-kind="activity"] { max-width: 88%; }
 #turns > [data-kind="user"]:has(textarea) { width: 88%; }
-.message-edit { color: var(--color-neutral-500); opacity: 0; transition: opacity 160ms; }
-[data-editing] > .message-edit { visibility: hidden; }
-[data-kind="user"]:hover .message-edit, .message-edit:focus-visible { opacity: 0.85; }
-.message-edit:hover { background: var(--color-indigo-100); opacity: 1; }
-@media (hover: none) { .message-edit { opacity: 0.85; } }
-@media (pointer: coarse) { .message-edit { min-width: 44px; min-height: 44px; } }
+/* The row toolbar (chat.ts rowTools): shown on hover, or always where there is none. */
+.message-tools { color: var(--color-neutral-500); opacity: 0; transition: opacity 160ms; }
+[data-editing] > .message-tools { visibility: hidden; }
+:is([data-kind="user"], [data-kind="assistant"]):hover > .message-tools, .message-tools:focus-within { opacity: 0.85; }
+.message-tools > button:hover { background: var(--color-indigo-100); }
+@media (hover: none) { .message-tools { opacity: 0.85; } }
+/* A thumb gets 44px targets, and two of them no longer fit the gutter beside
+   an 88%-wide bubble: they sit along the bubble's bottom edge instead. */
+@media (pointer: coarse) {
+  .message-tools { position: static; flex-direction: row; justify-content: flex-end; margin: 0 -0.5rem -0.625rem; }
+  .message-tools > button { min-width: 44px; min-height: 44px; }
+}
+/* The quote at the top of a user bubble (chat.ts quoteBlock): a bar in the
+   topic's colour when the excerpt names one, else the accent's. */
+.quote-block {
+  --topic: var(--color-indigo-300);
+  padding-left: 0.625rem;
+  border-left: 3px solid var(--topic);
+  border-radius: 2px;
+}
+.quote-excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
 /* A row's precise time (chat.ts data-time), in the gutter beside the bubble on
    hover — a native tooltip covered the message under the one being read. */
 @media (hover: hover) {
-  #turns > [data-time]::after {
+  :is(#turns, .turn-card) > [data-time]::after {
     content: attr(data-time);
     position: absolute;
     bottom: 0.5rem;
@@ -611,21 +641,21 @@ main {
     transition: opacity 160ms;
     pointer-events: none;
   }
-  #turns > [data-kind="user"][data-time]::after { right: calc(100% + 0.5rem); }
-  /* The pencil holds the same gutter on the latest user row. */
-  #turns > [data-kind="user"][data-time]:has(.message-edit)::after { right: calc(100% + 2.5rem); }
-  #turns > [data-kind="assistant"][data-time]::after { left: calc(100% + 0.5rem); }
+  /* The toolbar holds the gutter: one button on a read-only row, two on the head's. */
+  #turns > [data-kind="user"][data-time]::after { right: calc(100% + 2.5rem); }
+  #turns > [data-kind="user"][data-time]:not([data-readonly])::after { right: calc(100% + 4.5rem); }
+  :is(#turns, .turn-card) > [data-kind="assistant"][data-time]::after { left: calc(100% + 2.5rem); }
   /* Status rows run full width: no gutter, so the time tucks under their edge. */
   #turns > :is([data-kind="system"], [data-kind="error"])[data-time]::after {
     right: 0.25rem;
     bottom: -0.6rem;
   }
-  #turns > [data-time]:hover::after { opacity: 1; }
+  :is(#turns, .turn-card) > [data-time]:hover::after { opacity: 1; }
 }
 /* --- system rows (chat.ts appendSystemInput) ---------------------------------
    Folded, a line at the divider's weight; opened, the card it was. One id on
    the line: the session's link when there is one, else the run's. */
-:is(#turns, .process-body) > .system-row:not([data-expanded]) {
+:is(#turns, .turn-card) > .system-row:not([data-expanded]) {
   margin-block: 0.25rem;
   padding-block: 0.125rem;
   background: none;
@@ -683,7 +713,7 @@ main {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-#turns > [data-enter] {
+:is(#turns, .turn-card) > [data-enter] {
   animation: surface-in 240ms var(--ease-surface);
 }
 /* A transformed modal would rebase fixed menus positioned in viewport space. */
@@ -715,7 +745,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   from { outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   to { outline: 3px solid transparent; outline-offset: 3px; }
 }
-#turns > [data-reveal] { animation: turn-reveal 1.2s ease-out; }
+:is(#turns, .turn-card) > [data-reveal] { animation: turn-reveal 1.2s ease-out; }
 .glass-menu {
   --menu-shift: translateY(-4px) scale(0.97);
   transform-origin: top center;
@@ -784,20 +814,21 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* The conversation's one chip is the context, short enough to stay beside the title. */
   #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
   #turns { padding-inline: 0.625rem; }
-  #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
+  :is(#turns, .turn-card) > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
   /* The gutter is the pencil's here; a time in it would scroll the pane sideways. */
-  #turns > [data-time]::after { content: none; }
+  :is(#turns, .turn-card) > [data-time]::after { content: none; }
   #input { font-size: max(16px, 1rem); }
 }
 @keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  #turns > [data-enter], dialog[open]:not(#image-dialog) {
+  :is(#turns, .turn-card) > [data-enter], dialog[open]:not(#image-dialog) {
     animation: surface-fade 120ms ease-out;
   }
+  #turns > [data-kind="turn"][data-frame] { animation: none; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
-  #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
+  :is(#turns, .turn-card) > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
   :is(#turns, #files-dialog) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }

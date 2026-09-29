@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   observed: [] as (ResizeObserverOptions | undefined)[],
 }));
 vi.mock("./chat.js", () => ({
-  appendTurn: state.appendTurn, followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
+  appendTurn: state.appendTurn, excerptText: (t: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
 }));
 vi.mock("./attachments.js", () => ({ imageThumb: () => document.createElement("img") }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
@@ -395,6 +395,55 @@ describe("pending attachments", () => {
     expect(staged()).toBe(1);
     select("a");
     expect(staged()).toBe(2);
+  });
+});
+
+describe("the reply quote", () => {
+  const noon = new Date(2024, 5, 1, 12, 0, 0).getTime();
+  const source = { role: "assistant" as const, at: noon, text: "Merged.\n\n---\n[Deploy] | [Show diff]" };
+  const strip = () => node("#quote-strip");
+
+  it("shows the excerpt, buttons off, over the input until sent, and the send carries it", async () => {
+    composer.setQuote(source);
+    expect(strip().classList.contains("hidden")).toBe(false);
+    expect(strip().textContent).toBe("Merged.");
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    type("ship it");
+    await composer.send("auto");
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text)
+      .toBe("[re assistant 2024-06-01 12:00]\n> Merged.\n>\n> ---\n> [Deploy] | [Show diff]\n\nship it");
+    expect(strip().classList.contains("hidden")).toBe(true);
+  });
+
+  it("stays staged past a command, and Esc on an empty draft drops it", async () => {
+    composer.setQuote(source);
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    type("/status");
+    await composer.send("auto");
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("/status");
+    expect(strip().textContent).toBe("Merged.");
+    const esc = { key: "Escape", preventDefault: vi.fn() } as unknown as KeyboardEvent;
+    type("draft");
+    node("#input").onkeydown!(esc);
+    expect(strip().classList.contains("hidden")).toBe(false);
+    type("");
+    node("#input").onkeydown!(esc);
+    expect(strip().classList.contains("hidden")).toBe(true);
+    expect(esc.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("is the session's, like its files, and goes on × or a next-step button never takes it", async () => {
+    composer.setQuote(source);
+    select("b");
+    expect(strip().classList.contains("hidden")).toBe(true);
+    select("a");
+    expect(strip().textContent).toBe("Merged.");
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    await composer.send("auto", "Deploy");
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("Deploy");
+    expect(strip().textContent).toBe("Merged.");
+    fake(strip().querySelector("button")).onclick!();
+    expect(strip().classList.contains("hidden")).toBe(true);
   });
 });
 

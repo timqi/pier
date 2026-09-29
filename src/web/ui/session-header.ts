@@ -1,11 +1,12 @@
 // The bar: the way back, the title, the meta chips and the ⋯ menu. Owns the
 // model/context state the snapshot reports.
 
-import { ArrowLeft, ChevronLeft, X } from "lucide";
+import { ArrowLeft, ChevronLeft, ChevronsDownUp, ChevronsUpDown, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
+import { setWorkOpen, workOpen } from "./turn-activity.js";
 import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
@@ -41,6 +42,11 @@ export function initHeader(d: HeaderDeps): void {
   deps = d;
   back.onclick = () => deps.openContinuous();
   chatMenu.onclick = () => barMenu(chatMenu);
+  paintWorkToggle();
+  workToggle.onclick = () => {
+    setWorkOpen(!workOpen());
+    paintWorkToggle();
+  };
   // One of the ⋯ menu's actions is frequent enough to earn a chord; it acts on
   // the current session.
   chord(FILES_KEY, () => {
@@ -57,7 +63,18 @@ const back = $("#bar-back");
 const chatTitle = $<HTMLButtonElement>("#chat-title");
 const phase = $("#chat-phase");
 const chatMenu = $("#chat-menu");
+const workToggle = $("#work-toggle");
 const sessionMeta = $("#session-meta");
+
+/** The glyph is what a press does next; the pressed state says where the folds stand. */
+function paintWorkToggle(): void {
+  const open = workOpen();
+  const label = open ? "Hide work" : "Show work";
+  workToggle.title = label;
+  workToggle.setAttribute("aria-label", label);
+  workToggle.setAttribute("aria-pressed", String(open));
+  workToggle.replaceChildren(icon(open ? ChevronsDownUp : ChevronsUpDown, "h-4 w-4"));
+}
 
 /** Backend facts, not session facts, so the first read warms every later picker. */
 let catalog: ModelRef[] | null = null;

@@ -104,6 +104,14 @@ takes that platform's ids, the header carries neither and reads
 \`[name time platform]\`. \`lang=zh\` (or \`en\`, \`ja\`, …) is on every
 message, so a header may read only \`[lang=zh]\`; `;
 
+/** The quote a reply carries: the user's pointer, not their words. */
+const QUOTE_CHAT = `
+A message opening with \`[re assistant 2026-06-01 12:00]\` (or \`[re user …]\`)
+over a \`>\` block answers that earlier message, quoted back so you know which
+one; the quote is theirs to point with, never new content, and the reply is
+what follows the blank line.
+`;
+
 const HEADER_WORKER = `A message may start with \`[lang=zh]\` (or \`en\`, \`ja\`, …) — its language,
 added by Pier, not typed by the sender; `;
 
@@ -120,7 +128,7 @@ ${role === "worker" ? HEADER_WORKER : HEADER_CHAT}one too short to tell (\`ok\`,
 an emoji, a link) carries the one before it. Reply in the language of the
 most recent \`lang=\`, never the language of the context around it — seeded
 exchanges, English tool output or files, callbacks.
-`;
+${role === "worker" ? "" : QUOTE_CHAT}`;
 
 /** Deployment facts an agent cannot discover: a guessed path is wrong wherever
  *  `PIER_HOME` moved and fails as "nothing is configured"; GPT models carry

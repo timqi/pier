@@ -38,6 +38,7 @@ import {
   restoreDraft,
   saveDraft,
   send,
+  setQuote,
   setSkills,
   updateComposer,
 } from "./composer.js";
@@ -587,6 +588,7 @@ initChat({
     ownState("streaming"); // an edit resend starts a turn
   },
   reload: reloadIfCurrent,
+  quote: setQuote,
 });
 initComposer({
   sessionId: () => currentId,

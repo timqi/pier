@@ -71,6 +71,9 @@
         class="hidden max-w-[45vw] flex-none cursor-pointer truncate rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] font-medium text-neutral-600 hover:bg-neutral-200"></button>
       <!-- Inline session meta: model · reasoning · current context size. -->
       <div id="session-meta" class="hidden flex-none items-center gap-1 text-[11px]"></div>
+      <!-- Every line-level fold in the pane at once (turn-activity.ts setWorkOpen). -->
+      <button type="button" id="work-toggle" title="Show work" aria-label="Show work" aria-pressed="false"
+        class="icon-btn h-11 w-11"></button>
       <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
         class="icon-btn"><span data-icon="Ellipsis" class="h-3.5 w-3.5"></span></button>
     </header>
@@ -105,6 +108,8 @@
     <form id="composer" class="flex-none px-4 pb-4 pt-2">
       <div class="glass rounded-[1.75rem] border border-neutral-200 px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
+        <!-- The row the next send answers (composer.ts setQuote). -->
+        <div id="quote-strip" class="hidden px-1 pb-1.5 pt-1"></div>
         <!-- The chat commands and skills, offered while the draft is a `/` prefix
              of one (composer.ts): the input keeps the caret, ↑/↓ walk, Enter or Tab
              picks. Rows are subgrids of its two columns, so the lines align;

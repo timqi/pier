@@ -232,20 +232,46 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   message's creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs render as System input rows with a Session link and the run
   id as text, never as user messages.
-- **Process line**: run cards, delegations, task messages and callbacks fold
-  into one line (`N runs · <count> <state> · M callbacks`, a spinner while a run
-  moves, else the worst state's glyph) under the reply they follow, opening to
-  the cards, which fold as before; a run launched during a turn hangs under
-  that turn's reply, live and on replay.
+- **Turn card**: every agent turn ends as one framed row (`data-kind="turn"`,
+  `chat.ts` `closeCard`) holding, in order, the cause lines (callbacks,
+  delegations, task messages, a seed — `data-cause`, never a user message),
+  the steps lines (`N steps · <secs>`, one per stretch of work, a steered
+  input between two), the body (the reply, `Stayed silent — <reason>`, an
+  error, or for an interrupted turn the steps line reading `interrupted · N
+  steps` as the whole content), then the runs the turn launched. Lines draw at
+  the pane's tail live; the frame closes when the body lands (`data-frame`,
+  a fade the reduced-motion query removes) and a run launched after the reply
+  joins the footer; replay builds the same cards unanimated. A reply with no
+  lines to adopt stays a bare row; a chat command's answer never joins a card.
+  No summary line: each line is its own fold. The bar's **Show work**
+  (`#work-toggle`, `localStorage` `pier.work`) opens or closes every
+  line-level fold at once and a line that arrives follows it; a line's own
+  chevron overrides for that line alone; tool rows inside the log stay per
+  row. A replayed steps log whose detail is still on the server (`data-lazy`)
+  stays closed until the reader opens it, whatever the choice — Show work
+  never fetches every turn's detail — and follows the choice once fetched.
 - **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
   (`replyTopic`) is tagged with its problem — a colour bar and a label, the
   colour a stable hash of the problem (`topics.ts` `topicHue`); the user
-  message above it, its work group and the process line under it inherit;
-  untagged rows carry nothing.
+  message above it and its card inherit; untagged rows carry nothing.
 - **Edit**: any user message; sending rewinds the transcript to it and the
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
   session and an index the transcript no longer holds.
+- **Reply**: every user and assistant row has a Reply control in its gutter
+  (`.message-tools`, beside the pencil); pressing it stages that row over the
+  composer (`#quote-strip`, per session like the attachment strip, `×` drops
+  it) and the send wraps the text with `withQuote` (`core/identity.ts`): a
+  `[re <role> <yyyy-mm-dd hh:mm>]` line and a `>` block of the source's first
+  240 raw characters, under the speaker header and above the words — text,
+  so it survives reload, edit and rotation with no field, and reaches the
+  model as its own convention (`agent/roles.ts`). A next-step button never
+  takes it. A user bubble renders the quote as a block above its words — role
+  and minute, the excerpt clamped to two lines, a bar in the topic colour the
+  excerpt's `<topic>` names, else the accent — and a click reveals the source
+  (`quoteSource`: same role and minute, then the row whose text opens with
+  the excerpt); a source not on screen leaves the block inert with a title
+  saying so. Only user messages carry quotes.
 - **Pier**: the head's snapshot under earlier sessions
   paged in read-only (no pencil, no next-step buttons), each closed by a
   divider naming the rotation. **Earlier session**, or scrolling to the top,

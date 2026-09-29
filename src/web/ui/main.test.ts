@@ -36,7 +36,7 @@ vi.mock("./composer.js", () => ({
   clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
-  renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
+  renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./session-header.js", () => ({

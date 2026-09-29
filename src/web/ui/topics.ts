@@ -58,7 +58,8 @@ export function tagRow(row: HTMLElement, problem: string): void {
   applyTopicFilterTo(row);
 }
 
-/** A reply names its topic; the user message it answers and the work around it inherit. */
+/** A reply names its topic; its card holds it by containment, and the user
+ *  message it answers inherits. `row` is the reply's own bubble. */
 export function tagReply(row: HTMLElement, raw: string): void {
   const topic = replyTopic(raw);
   if (!topic) return;
@@ -67,15 +68,14 @@ export function tagReply(row: HTMLElement, raw: string): void {
   tagRow(row, topic);
   const inherit = (el: HTMLElement): void => {
     el.dataset.topic = topic;
+    el.style.setProperty("--topic", topicColour(topic));
     applyTopicFilterTo(el);
   };
-  const next = row.nextElementSibling as HTMLElement | null;
-  if (next?.dataset.kind === "process") inherit(next);
-  const above = row.previousElementSibling as HTMLElement | null;
-  if (above?.dataset.kind === "activity") inherit(above);
-  for (let el = above; el; el = el.previousElementSibling as HTMLElement | null) {
+  const card = row.parentElement?.dataset.kind === "turn" ? row.parentElement : null;
+  if (card) inherit(card);
+  for (let el = (card ?? row).previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
-    if (kind === "assistant" || kind === "divider" || kind === "pager") break;
+    if (kind === "assistant" || kind === "turn" || kind === "divider" || kind === "pager") break;
     if (kind !== "user") continue;
     if (el.dataset.topic) break;
     tagRow(el, topic);
@@ -88,13 +88,15 @@ export function tagReply(row: HTMLElement, raw: string): void {
 // --- the filter -------------------------------------------------------------------------
 
 /** Structure, not conversation: a filtered pane still says where sessions begin and end. */
-const FILTERED = new Set(["user", "assistant", "system", "activity", "background-run", "process", "error", "time"]);
+const FILTERED = new Set(["user", "assistant", "system", "activity", "background-run", "turn", "error", "time"]);
 let filter: string | null = null;
 let barChip: HTMLElement | null = null;
 
 export const topicFilter = (): string | null => filter;
 
 export function applyTopicFilterTo(row: HTMLElement): void {
+  // A card's rows go with the card: a reply hidden inside a visible card is a hole.
+  if (row.parentElement?.dataset.kind === "turn") return;
   row.hidden = filter !== null && !("live" in row.dataset) && FILTERED.has(row.dataset.kind ?? "") && row.dataset.topic !== filter;
 }
 

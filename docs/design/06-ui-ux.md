@@ -94,6 +94,16 @@ updates this document.
   happened. Chat command answers stay open. Steps groups, system rows and run
   cards share one chevron column — one inline padding, one chevron element —
   folded or open.
+- A turn is one card: a hairline ring at the reply's radius around its cause
+  lines, steps lines, body and launched runs, on the lines' own material, the
+  reply keeping its reading surface inside; the ring fades in as the body
+  lands, never before, and reduced motion draws it at once. A topic bar runs
+  the card's height. One bar control, Show work, opens or closes every line
+  fold; no line summarises the others.
+- A quote is a bar and two clamped lines at the top of the user's bubble, the
+  bar in the quoted topic's colour, the excerpt in the bubble's own type at a
+  step down; the row controls (Reply, Edit) share one gutter and one hover;
+  on touch they are always shown, 44px, along the bubble's bottom edge.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
   not yet landed), clear success/failure/interruption for results; running is
   neutral — the spinner carries the motion. Accents small.

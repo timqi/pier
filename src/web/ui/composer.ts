@@ -6,9 +6,10 @@ import { X } from "lucide";
 import { icon } from "./icons.js";
 import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
-import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
+import { appendTurn, excerptText, followTail, type QuoteSource, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
+import { QUOTE_CHARS, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
 import { CHAT_COMMANDS, type ChatCommand, type SessionState } from "../../core/types.js";
@@ -51,6 +52,7 @@ const queueRows = $("#queue-rows");
 const queueLabel = $("#queue-label");
 const queueActions = $("#queue-actions");
 const imageStrip = $("#image-strip");
+const quoteStrip = $("#quote-strip");
 const commandMenu = $("#command-menu");
 const attachInput = $<HTMLInputElement>("#attach-input");
 
@@ -62,6 +64,9 @@ let parked: ParkedMessage[] = [];
 let piQueue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
 const recalling = new Set<string>();
 let pendingFiles: PendingFile[] = [];
+// The row the next send answers; one per session, like the files.
+let pendingQuote: QuoteSource | null = null;
+const quoteBySession = new Map<string, QuoteSource>();
 // Texts already rendered optimistically, awaiting their user-message event so
 // the same turn isn't drawn twice.
 let optimisticUserTexts: string[] = [];
@@ -220,6 +225,31 @@ function renderFileStrip(): void {
       return h("div", "relative", body, remove);
     }),
   );
+}
+
+/** Reply pressed on a row: the excerpt shows over the input until sent or
+ *  dismissed; a second press replaces it. */
+export function setQuote(source: QuoteSource | null): void {
+  pendingQuote = source;
+  const id = deps.sessionId();
+  if (id && source) quoteBySession.set(id, source);
+  else if (id) quoteBySession.delete(id);
+  quoteStrip.classList.toggle("hidden", !source);
+  quoteStrip.classList.toggle("flex", !!source);
+  if (!source) {
+    quoteStrip.replaceChildren();
+    return;
+  }
+  const excerpt = h("div", "quote-excerpt min-w-0 flex-1 text-[12.5px] leading-snug text-neutral-600", excerptText(source.text.slice(0, QUOTE_CHARS)));
+  const remove = h("button", "flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(X, "h-3.5 w-3.5"));
+  remove.setAttribute("type", "button");
+  remove.setAttribute("aria-label", "Remove quote");
+  remove.onclick = () => {
+    setQuote(null);
+    focusInput();
+  };
+  quoteStrip.replaceChildren(h("div", "quote-block flex min-w-0 flex-1 items-start gap-1", excerpt, remove));
+  focusInput();
 }
 
 function addFile(file: File): void {
@@ -405,6 +435,7 @@ export function restoreDraft(id: string): void {
   renderCommandMenu();
   pendingFiles = pendingBySession.get(id) ?? [];
   renderFileStrip();
+  setQuote(quoteBySession.get(id) ?? null);
 }
 
 /** A changed height re-pins the tail in the same frame: left to the
@@ -442,6 +473,9 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     pendingFiles = [];
     renderFileStrip();
   }
+  // A command or skill ask is not a reply: the quote stays staged for the next message.
+  const quote = label === undefined && !/^[/%]/.test(typed) ? pendingQuote : null;
+  if (quote) setQuote(null);
   try {
     // Files first: their markers are part of the message text, so the upload
     // must land before the text exists.
@@ -456,11 +490,13 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
         saveDraft();
         pendingFiles = files.map(withUpload); // fresh uploads: the failed ones are spent
         renderFileStrip();
+        setQuote(quote);
         return;
       }
       markers = uploaded;
     }
-    const text = [typed, ...markers].filter(Boolean).join("\n");
+    const body = [typed, ...markers].filter(Boolean).join("\n");
+    const text = quote ? withQuote(quote, body) : body;
     const startsTurn = deps.sessionState() === "idle" && mode === "auto";
     if (startsTurn) deps.setState("streaming");
     else updateComposer();
@@ -583,6 +619,11 @@ export function initComposer(d: ComposerDeps): void {
     // (isComposing covers modern browsers; 229 covers stragglers).
     if (ev.isComposing || ev.keyCode === 229) return;
     if (commandMenuKey(ev)) return;
+    if (ev.key === "Escape" && pendingQuote && !input.value.trim()) {
+      ev.preventDefault();
+      setQuote(null);
+      return;
+    }
     if (enterSends && ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
       void send("auto");

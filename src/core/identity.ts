@@ -84,7 +84,8 @@ export class SenderPrefix {
   ): string {
     if (!sender?.id) return "";
     const last = this.seen.get(sessionId);
-    const lang = detectLanguage(text) ?? last?.lang;
+    // The quoted excerpt is someone else's words, in whatever language they wrote.
+    const lang = detectLanguage(splitQuote(text).text) ?? last?.lang;
     this.seen.set(sessionId, { senderId: sender.id, at, conversation, lang });
 
     const now = new Date(at);
@@ -126,7 +127,7 @@ export function userLanguage(turns: readonly ChatTurn[]): string | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i]!;
     const lang = turn.role === "user"
-      ? detectLanguage(splitSpeaker(turn.text).text)
+      ? detectLanguage(splitQuote(splitSpeaker(turn.text).text).text)
       : turn.role === "system" && turn.origin?.kind === "session-seed" ? LANG_STAMP.exec(turn.text)?.[1] : undefined;
     if (lang) return lang;
   }
@@ -185,13 +186,60 @@ export function splitSpeaker(text: string): Speaker {
   const { id, when, where, lang } = head?.groups ?? {};
   // A name on its own proves nothing: try the shape that requires a time.
   const m = id || when || where || lang ? head : NAMED.exec(text);
-  if (!m?.groups) return { text };
+  // `[re assistant 12:00]` fits the named shape; it is the quote line below.
+  if (!m?.groups || QUOTE.test(text)) return { text };
   return {
     ...(m.groups.name ? { name: m.groups.name } : {}),
     ...(m.groups.id ? { id: m.groups.id } : {}),
     ...(m.groups.when ? { when: m.groups.when } : {}),
     ...(m.groups.where ? { where: m.groups.where } : {}),
     ...(m.groups.lang ? { lang: m.groups.lang } : {}),
+    text: text.slice(m[0].length),
+  };
+}
+
+// --- the quote -----------------------------------------------------------------------
+// A reply to one message names it in the text, under the speaker header, so it
+// survives reload, edit and rotation with no field of its own:
+//   [re assistant 2026-06-01 12:00]
+//   > the first lines of what that message said
+//
+//   the user's reply
+
+/** The excerpt a quote keeps: enough to find the source again, not the message. */
+export const QUOTE_CHARS = 240;
+
+/** What a quote line said, read back off the message. */
+export interface Quote {
+  role: "user" | "assistant";
+  /** `2024-06-01 12:00`, the source's minute, exactly as written. */
+  when: string;
+  /** The source's opening text as written, markers included, cut at `QUOTE_CHARS`. */
+  excerpt: string;
+}
+
+const quoteWhen = (at: number): string => {
+  const d = new Date(at);
+  return `${day(d)} ${hhmm(d)}`;
+};
+
+/** `body` under a quote of `source`; a source that says nothing quotes nothing. */
+export function withQuote(source: { role: Quote["role"]; at: number; text: string }, body: string): string {
+  const excerpt = source.text.trim().slice(0, QUOTE_CHARS).trimEnd();
+  if (!excerpt) return body;
+  const lines = excerpt.split("\n").map((line) => (line ? `> ${line}` : ">"));
+  return `[re ${source.role} ${quoteWhen(source.at)}]\n${lines.join("\n")}\n\n${body}`;
+}
+
+const QUOTE = /^\[re (?<role>user|assistant) (?<when>\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\n(?<lines>(?:>[^\n]*\n)+)\n?/;
+
+/** Read back a quote this module wrote; anything else is the message as typed. */
+export function splitQuote(text: string): { quote?: Quote; text: string } {
+  const m = QUOTE.exec(text);
+  if (!m?.groups) return { text };
+  const excerpt = m.groups.lines!.trimEnd().split("\n").map((line) => line.replace(/^> ?/, "")).join("\n");
+  return {
+    quote: { role: m.groups.role as Quote["role"], when: m.groups.when!, excerpt },
     text: text.slice(m[0].length),
   };
 }
@@ -213,7 +261,7 @@ export function readableTitle(title: string | undefined): string | undefined {
   const { text } = splitSpeaker(title);
   // No header: reflowing what the person typed would change what search matches.
   if (text === title) return title;
-  const said = text
+  const said = splitQuote(text).text
     .replace(ATTACHMENT_LINES, "")
     .replace(LEADING_CODE_SPAN, "$1")
     .replace(/\s+/g, " ")

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectLanguage, projectCwds, readableTitle, SenderPrefix, sessionLabel, splitSpeaker, userLanguage, withLanguage,
-  withoutHeaderLanguage, withoutLanguage, withPrefix,
+  withoutHeaderLanguage, withoutLanguage, withPrefix, withQuote, splitQuote, QUOTE_CHARS,
 } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
@@ -339,4 +339,40 @@ it("offers a project but not its worktrees, and keeps a dotted name with no such
     { cwd: "/code/site.v2", createdAt: 1 }, // no /code/site here: a name, not a branch
     { cwd: "/home/me/.pier", createdAt: 0 }, // a leading dot names a directory
   ])).toEqual(["/code/pier", "/code/site.v2", "/home/me/.pier"]);
+});
+
+describe("a reply to one message", () => {
+  const source = { role: "assistant" as const, at: noon, text: "Merged.\n<topic>auth review</topic>\n\nNext: deploy." };
+
+  it("carries the source as a quote the message reads back, markers and all", () => {
+    const text = withQuote(source, "ship it");
+    expect(text).toBe("[re assistant 2024-06-01 12:00]\n> Merged.\n> <topic>auth review</topic>\n>\n> Next: deploy.\n\nship it");
+    expect(splitQuote(text)).toEqual({
+      quote: { role: "assistant", when: "2024-06-01 12:00", excerpt: source.text },
+      text: "ship it",
+    });
+    // Under the speaker header, the same as attachments: the header comes off first.
+    const stored = withPrefix(new SenderPrefix().next("s1", ada, noon), text);
+    expect(splitQuote(splitSpeaker(stored).text).quote?.when).toBe("2024-06-01 12:00");
+  });
+
+  it("keeps the excerpt short, and quotes nothing of a message that said nothing", () => {
+    const long = "x".repeat(QUOTE_CHARS + 50);
+    expect(splitQuote(withQuote({ ...source, text: long }, "ok")).quote?.excerpt).toHaveLength(QUOTE_CHARS);
+    expect(withQuote({ ...source, text: "  \n " }, "ok")).toBe("ok");
+    // A `>` line the user typed is a quote only under the `[re …]` line.
+    expect(splitQuote("> not a quote\n\nhi")).toEqual({ text: "> not a quote\n\nhi" });
+    expect(splitQuote("[re bot 2024-06-01 12:00]\n> x\n\nhi").quote).toBeUndefined();
+    // With no speaker header ahead of it the quote line comes first, and its
+    // `[re user <time>]` fits the named-speaker shape; it must not read as one.
+    expect(splitSpeaker("[re user 2024-06-01 12:00]\n> x\n\nhi")).toEqual({ text: "[re user 2024-06-01 12:00]\n> x\n\nhi" });
+  });
+
+  it("is the reply's language, not the quoted one's, and never the session's title", () => {
+    const p = new SenderPrefix();
+    const text = withQuote({ ...source, text: "the English reply the operator answers in Chinese" }, "好的，合并吧");
+    expect(p.next("s1", ada, noon, undefined, false, text)).toBe("[Ada<U1> 2024-06-01 12:00 lang=zh]");
+    expect(userLanguage([{ role: "user", text: withPrefix("[Ada<U1> 12:00]", text) }])).toBe("zh");
+    expect(readableTitle(withPrefix("[Ada<U1> 12:00]", text))).toBe("好的，合并吧");
+  });
 });

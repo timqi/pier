@@ -94,12 +94,14 @@ describe("the instance facts in the surface prompt", () => {
     const worker = surfacePrompt(instance, "worker");
     expect(worker).not.toContain("Next-step buttons");
     expect(worker).not.toContain("file://");
+    expect(worker).not.toContain("[re assistant"); // no human quotes a worker
     expect(worker).toContain("One optional markdown\nconvention");
     for (const kept of ["Staying silent", "lang=zh", "apply_patch", "/home/q/.pier/boards/<slug>/"]) expect(worker).toContain(kept);
     for (const role of [undefined, "lead"] as const) {
       const prompt = surfacePrompt(instance, role);
       expect(prompt).toContain("Next-step buttons");
       expect(prompt).toContain("file:///abs/path/report.md");
+      expect(prompt).toContain("callbacks.\n\nA message opening with `[re assistant 2026-06-01 12:00]`");
     }
   });
 });

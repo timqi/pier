@@ -1,13 +1,14 @@
-// The turns pane: chat rows, markdown, streaming text, system-input rows and
-// inline user-message edit. Renders into #turns only.
+// The turns pane: chat rows, markdown, streaming text, system-input rows, the
+// turn card a reply closes around its lines, and inline user-message edit.
+// Renders into #turns only.
 
-import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, SquareSlash, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
+import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
-import { splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Speaker } from "../../core/identity.js";
+import { splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
@@ -18,7 +19,7 @@ import {
   finishActivity,
   FOLD_ROW,
   initTurnActivity,
-  intoProcess,
+  isLiveGroup,
   linkRuns,
   renderBackgroundRun,
   replayActivity,
@@ -29,10 +30,8 @@ import {
   sealActivity,
   STATE_STYLE,
   stateGlyph,
-  takeActivityGroup,
-  takeProcessFold,
 } from "./turn-activity.js";
-import { arriveRow, resetTopics, tagReply } from "./topics.js";
+import { arriveRow, resetTopics, tagReply, topicColour } from "./topics.js";
 import type {
   BackgroundRun,
   ChatTurn,
@@ -56,6 +55,15 @@ export interface ChatDeps {
   ownTurn: (text: string) => void;
   /** Reload the session snapshot if `id` is still the selected session. */
   reload: (id: string) => Promise<void>;
+  /** Reply pressed on a row: the composer takes the source to quote. */
+  quote: (source: QuoteSource) => void;
+}
+
+/** The row a reply answers, as `withQuote` (core/identity.ts) needs it. */
+export interface QuoteSource {
+  role: Quote["role"];
+  at: number;
+  text: string;
 }
 
 let deps: ChatDeps;
@@ -65,7 +73,78 @@ export const turnsPane = $("#turns");
 export function initChat(d: ChatDeps): void {
   deps = d;
   // The pane is handed over rather than imported back: see TurnsPane there.
-  initTurnActivity(d, { el: turnsPane, scroll: scrollBottom, bulk: () => bulk });
+  initTurnActivity(d, { el: turnsPane, scroll: scrollBottom, bulk: () => bulk, intoCard });
+}
+
+// --- the turn card ---------------------------------------------------------------------
+// One framed row per agent turn: its cause lines and steps lines, the body, the
+// runs it launched. Lines are drawn at the tail as they happen; the frame
+// closes when the turn ends.
+
+/** What a body adopts: contiguous lines directly above it, back to the previous
+ *  body or user bubble. A user message is never a cause line. */
+const adoptable = (el: Element): boolean => {
+  const kind = (el as HTMLElement).dataset.kind;
+  return (kind === "activity" && !isLiveGroup(el)) || kind === "background-run" || "cause" in (el as HTMLElement).dataset;
+};
+
+/** The card at the tail, or the tail as a card when it is a bare body. */
+function tailCard(): HTMLElement | null {
+  const tail = turnsPane.lastElementChild as HTMLElement | null;
+  if (!tail) return null;
+  if (tail.dataset.kind === "turn") return tail;
+  if (tail.dataset.kind !== "assistant" && tail.dataset.kind !== "error") return null;
+  return closeCard(null, [tail]);
+}
+
+function closeCard(body: HTMLElement | null, lines: HTMLElement[]): HTMLElement {
+  const card = h("div", "turn-card relative");
+  card.dataset.kind = "turn";
+  if (!bulk) card.dataset.frame = ""; // the frame fades in around lines already drawn
+  if (readonlyRows) card.dataset.readonly = "";
+  const runs = lines.filter((el) => el.dataset.kind === "background-run");
+  card.append(...lines.filter((el) => !runs.includes(el)), ...(body ? [body] : []), ...runs);
+  // The card is the filtered unit from here: a line a mid-turn filter hid stays visible with it.
+  for (const el of card.children as Iterable<HTMLElement>) {
+    delete el.dataset.live;
+    el.hidden = false;
+  }
+  // A reply tagged before its card closed hands the topic up (tagReply covers the other order).
+  const topic = [...card.children].map((el) => (el as HTMLElement).dataset.topic).find(Boolean);
+  if (topic) {
+    card.dataset.topic = topic;
+    card.style.setProperty("--topic", topicColour(topic));
+  }
+  turnsPane.append(card);
+  arriveRow(card);
+  return card;
+}
+
+/** Where a turn's result lands: framed with the lines it adopts, or bare when
+ *  it adopts nothing. `body` null is a turn that ended without one. */
+function endTurn(body: HTMLElement | null): HTMLElement | null {
+  const lines: HTMLElement[] = [];
+  for (let el = turnsPane.lastElementChild; el && adoptable(el); el = el.previousElementSibling) lines.unshift(el as HTMLElement);
+  if (!lines.length) {
+    if (body) {
+      turnsPane.append(body);
+      arriveRow(body);
+    }
+    return body;
+  }
+  return closeCard(body, lines);
+}
+
+/** A run line: the footer of the card at the tail, or the tail until a body adopts it. */
+function intoCard(line: HTMLElement): void {
+  line.dataset.kind = "background-run";
+  const card = tailCard();
+  if (card) card.append(line);
+  else {
+    turnsPane.append(line);
+    arriveRow(line);
+  }
+  trimRows();
 }
 
 // --- scrolling -------------------------------------------------------------------
@@ -218,9 +297,6 @@ export function appendTurn(
   at?: number,
 ): HTMLElement {
   sealActivity();
-  // Keep the completed work beside its reply, outside the reading bubble.
-  const launched = kind === "assistant" ? takeProcessFold() : null;
-  const steps = kind === "assistant" ? takeActivityGroup() : null;
   const s = ROW_STYLE[kind];
   // Only user messages introduce a clock separator after a conversation gap.
   const stamp = kind === "user" && at !== undefined && stampDue(at) ? at : undefined;
@@ -239,33 +315,26 @@ export function appendTurn(
   // text it buries the message under a raw platform id.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when || speaker?.where || speaker?.lang ? speaker : null;
+  const quoted = kind === "user" ? splitQuote(named?.text ?? body) : null;
   // Here the operator is the reader; their own name over every message is noise.
   // A platform with opaque ids names the speaker and nothing else, so the
   // caption cannot be gated on the id.
   const caption = named && (named.id ? named.id !== "web" : !!named.name) ? named : null;
-  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
-  // Editing resends the raw text, markers and header included — stripping them
-  // from the bubble must not detach the files, or drop who was speaking.
-  if (files?.paths.length || named) node.dataset.raw = text;
+  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, quoted?.text ?? named?.text ?? body);
+  // Editing resends the raw text, markers, header and quote included — stripping
+  // them from the bubble must not detach the files, or drop who was speaking.
+  if (files?.paths.length || named || quoted?.quote || kind === "assistant") node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
   if (at !== undefined) setRowTime(row, at);
   if (caption) row.append(speakerLine(caption));
+  if (quoted?.quote) row.append(quoteBlock(quoted.quote));
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
-  if (kind === "user" && !readonlyRows) {
-    cancelEdit?.();
-    const edit = h("button", "message-edit absolute right-full top-1 flex h-8 w-8 items-center justify-center rounded-full");
-    edit.title = "Edit message — resends it and drops everything after it";
-    edit.setAttribute("type", "button");
-    edit.setAttribute("aria-label", "Edit message");
-    edit.append(icon(Pencil));
-    edit.onclick = () => startEdit(row, node);
-    row.append(edit);
-  }
+  if (kind === "user" || kind === "assistant") row.append(rowTools(kind, row, node));
   if (stamp !== undefined) {
     const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
     time.dataset.kind = "time";
@@ -276,9 +345,12 @@ export function appendTurn(
     turnsPane.append(time);
     arriveRow(time);
   }
-  if (steps) turnsPane.append(steps);
-  turnsPane.append(row, ...(launched ? [launched] : []));
-  for (const el of [steps, row]) if (el) arriveRow(el);
+  // A reply or a failed turn is a turn's result; a user bubble or a status line is not.
+  if (kind === "assistant" || kind === "error") endTurn(row);
+  else {
+    turnsPane.append(row);
+    arriveRow(row);
+  }
   trimRows();
   scrollBottom();
   return node;
@@ -302,6 +374,70 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
   return line;
 }
 
+/** The row's toolbar in the gutter beside it: Reply on every chat row, Edit on
+ *  a user row that is the head's (an earlier session is read-only). */
+function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElement): HTMLElement {
+  const tools = h("div", `message-tools absolute top-1 flex ${kind === "user" ? "right-full flex-row-reverse" : "left-full"}`);
+  const tool = (glyph: IconNode, label: string, title: string, onclick: () => void): HTMLElement => {
+    const b = h("button", "flex h-8 w-8 items-center justify-center rounded-full", icon(glyph));
+    b.setAttribute("type", "button");
+    b.setAttribute("aria-label", label);
+    b.title = title;
+    b.onclick = onclick;
+    return b;
+  };
+  if (kind === "user" && !readonlyRows) {
+    cancelEdit?.();
+    tools.append(tool(Pencil, "Edit message", "Edit message — resends it and drops everything after it", () => startEdit(row, node)));
+  }
+  // What the bubble shows: a user row's header and markers are not its words.
+  const reply = tool(Reply, "Reply to this message", "Reply — quotes this message under yours", () =>
+    deps.quote({ role: kind, at: Number(row.dataset.at), text: shownText(kind, node) }));
+  reply.dataset.reply = "";
+  reply.hidden = !("at" in row.dataset); // a streaming reply has no time yet: setRowTime shows it
+  tools.append(reply);
+  return tools;
+}
+
+/** The text a quote of this row carries, and what `quoteSource` matches on. */
+const shownText = (kind: "user" | "assistant", node: HTMLElement): string =>
+  (kind === "assistant" ? node.dataset.raw : undefined) ?? node.textContent ?? "";
+
+/** Two clamped lines, so a blank line in the source must not be one of them. */
+export const excerptText = (excerpt: string): string => splitReply(excerpt).text.replace(/\n{2,}/g, "\n").trim();
+
+/** The quote at the top of a user bubble: `role · time` and the excerpt as the
+ *  source showed it; a click jumps to the source when it is on screen. */
+function quoteBlock(quote: Quote): HTMLElement {
+  const block = h("button", "quote-block mb-1.5 block w-full cursor-pointer text-left");
+  block.setAttribute("type", "button");
+  // The marker may sit past the excerpt's cut; the source row on screen still knows.
+  const topic = replyTopic(quote.excerpt) ?? quoteSource(quote)?.dataset.topic;
+  if (topic) block.style.setProperty("--topic", topicColour(topic));
+  block.append(
+    h("div", "font-mono text-[10.5px] leading-tight opacity-70", `${quote.role} · ${quote.when.slice(11)}`),
+    h("div", "quote-excerpt text-[12.5px] leading-snug opacity-85", excerptText(quote.excerpt)),
+  );
+  block.onclick = () => {
+    const source = quoteSource(quote);
+    if (source) reveal(source);
+    else block.title = "Not on this screen — an earlier session, or a message trimmed off the top";
+  };
+  return block;
+}
+
+/** The row a quote names: same role and minute, then the one whose text opens
+ *  with the excerpt — two replies in one minute are told apart by their words. */
+function quoteSource(quote: Quote): HTMLElement | null {
+  const rows = [...turnsPane.querySelectorAll<HTMLElement>(`[data-kind="${quote.role}"][data-at]`)]
+    .filter((row) => stampTime(Number(row.dataset.at)).slice(0, 16) === quote.when);
+  const head = quote.excerpt.slice(0, 40);
+  return rows.find((row) => {
+    const node = [...row.children].find((c) => c.classList.contains("md") || c.classList.contains("whitespace-pre-wrap")) as HTMLElement | undefined;
+    return !!node && shownText(quote.role, node).trim().startsWith(head);
+  }) ?? rows[0] ?? null;
+}
+
 /** Glyph and caption per input kind. */
 const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> = {
   "task-delegation": [ArrowUpRight, "delegation", "text-cyan-700"],
@@ -323,9 +459,9 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
 }
 
 /** Session seeds, callbacks and delegations are one line until opened: the
- *  exchange is the reading, the line its receipt. A chat command's answer is
- *  what the user asked to see, so it is never folded. Task inputs join the
- *  process line (turn-activity.ts). */
+ *  exchange is the reading, the line its receipt, and the cause line of the
+ *  turn that answers it. A chat command's answer is what the user asked to
+ *  see, so it is never folded and no turn adopts it. */
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
@@ -364,15 +500,12 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
   }
   row.append(head, content);
-  const task = origin.kind === "task-delegation" ? "delegation" : origin.kind === "task-callback" ? "callback" : origin.kind === "task-message" ? "message" : null;
-  if (task) {
-    row.dataset.process = task;
+  if (origin.kind !== "chat-command") {
+    row.dataset.cause = "";
     if (state) row.dataset.state = state;
-    intoProcess(row);
-  } else {
-    turnsPane.append(row);
-    arriveRow(row);
   }
+  turnsPane.append(row);
+  arriveRow(row);
   trimRows();
   scrollBottom();
 }
@@ -391,7 +524,7 @@ function droppedAfter(row: HTMLElement): number {
   for (let el = row.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
     if (kind === "user" || kind === "assistant" || kind === "system") n++;
-    if (kind === "process") n += el.querySelectorAll('[data-kind="system"]').length;
+    if (kind === "turn") n += el.querySelectorAll('[data-kind="system"], [data-kind="assistant"]').length;
   }
   return n;
 }
@@ -446,7 +579,7 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
   cancelEdit = cancel;
   dismiss.onclick = () => {
     cancel();
-    row.querySelector<HTMLButtonElement>(".message-edit")?.focus({ preventScroll: true });
+    row.querySelector<HTMLButtonElement>(".message-tools button")?.focus({ preventScroll: true });
   };
   submit.onclick = () => {
     const text = area.value.trim();
@@ -537,6 +670,8 @@ function stampDue(at: number): boolean {
 function setRowTime(row: HTMLElement, at: number): void {
   row.dataset.at = String(at);
   row.dataset.time = stampTime(at).slice(11);
+  const reply = row.querySelector<HTMLElement>("[data-reply]");
+  if (reply) reply.hidden = false;
 }
 
 /** Attachment links are rewritten to the files route first: the sanitizer
@@ -574,6 +709,7 @@ function renderAssistant(
   offer = false,
 ): HTMLElement {
   const { text, suggestions } = splitReply(raw);
+  node.dataset.raw = raw; // what a reply to this row quotes; appendTurn's "" is the placeholder's
   // An empty bubble reads as a bug; this is the view the operator debugs in.
   if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
@@ -689,13 +825,16 @@ export function completeTurn(text: string | undefined, meta?: TurnMeta): void {
   finishActivity("done");
   const answer = text ?? pending;
   if (answer) appendAssistant(answer, meta, true);
+  else endTurn(null);
 }
 
-/** An interrupted partial answer stays readable instead of disappearing. */
+/** An interrupted partial answer stays readable instead of disappearing; a
+ *  turn cut short before it spoke still closes as a card of its steps. */
 export function interruptTurn(): void {
   const partial = takeStreaming();
   finishActivity("interrupted");
   if (partial) appendAssistant(partial);
+  else endTurn(null);
 }
 
 /** Reset everything before a session snapshot re-render. */
@@ -790,8 +929,10 @@ export function renderSnapshot(
       const steps = t.steps;
       if (steps?.length) {
         replayActivity(steps, t.meta?.durationMs, live, i);
-        // Between the steps and the answer: where the live stream put the card.
+        // Launched during the turn: the card's footer once the answer closes it.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
+        // Cut short before it spoke: the steps line is the card's whole content.
+        if (!live && !t.text && !t.error) endTurn(null);
       }
       if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
