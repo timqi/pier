@@ -197,6 +197,23 @@ it("keeps the prior answer's buttons when the turn after it failed", () => {
   expect(buttons).toEqual(["Ship it", "Wait"]);
 });
 
+// A snapshot re-arms tail follow; a page of history above the reader must not
+// leave it armed, or the next repin takes them to the newest row.
+it("keeps a reader put above the tail after a re-render, and follows one who was at it", () => {
+  const pane = doc.querySelector("#turns")!;
+  Object.defineProperties(pane, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
+  chat.renderSnapshot([{ role: "user", text: "hello" }], "idle", []);
+  expect(pane.scrollTop).toBe(2000);
+  chat.keepScroll(1990);
+  expect(pane.scrollTop).toBe(10);
+  chat.scrollBottom();
+  expect(pane.scrollTop).toBe(10);
+  chat.keepScroll(500);
+  pane.scrollTop = 1500;
+  chat.scrollBottom();
+  expect(pane.scrollTop).toBe(2000);
+});
+
 describe("file references", () => {
   /** Answers the existence check from `onDisk`, recording every path asked. */
   const disk = (onDisk: string[]): string[][] => {

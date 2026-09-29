@@ -126,6 +126,14 @@ export function followTail(): void {
   if (atBottom()) follow = true;
 }
 
+/** A re-render with rows added above the reader puts them back `fromBottom`
+ *  px above the end; follow stays armed only if that is the end, or the next
+ *  repin would take them to the tail. */
+export function keepScroll(fromBottom: number): void {
+  turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
+  follow = atBottom();
+}
+
 export function scrollBottom(force = false): void {
   if (bulk) return;
   if (force) follow = true;

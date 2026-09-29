@@ -21,6 +21,7 @@ import {
   finalizeStreaming,
   initChat,
   interruptTurn,
+  keepScroll,
   renderSnapshot,
   resetChat,
   scrollBottom,
@@ -213,15 +214,7 @@ async function page(): Promise<void> {
     earlier.unshift(got.ok
       ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
       : { member, turns: [], runs: [], error: got.error });
-    const fromBottom = turnsPane.scrollHeight - turnsPane.scrollTop;
-    // A keyboard page keeps the keyboard on the pager, which the reload replaced.
-    const focused = document.activeElement?.id === "chain-pager";
-    // The reload resets the pane's view state; a filter is the reader's, and stays.
-    const filter = topicFilter();
     await loadSession(head, true);
-    setTopicFilter(filter);
-    turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
-    if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
     pagedAt = Date.now();
   } finally {
     paging = false;
@@ -527,6 +520,12 @@ async function loadSession(id: string, keep = false): Promise<void> {
   const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
+  // Measured here, not before the fetch: the reader may scroll, an image load or a resize move the pane meanwhile.
+  const fromBottom = keep ? turnsPane.scrollHeight - turnsPane.scrollTop : 0;
+  // A keyboard page keeps the keyboard on the pager, which the reload replaced.
+  const focused = keep && document.activeElement?.id === "chain-pager";
+  // The reload resets the pane's view state; a filter is the reader's, and stays.
+  const filter = topicFilter();
   if (keep) resetPane();
   if (!got.ok) {
     chatLoading(false);
@@ -536,6 +535,11 @@ async function loadSession(id: string, keep = false): Promise<void> {
   const snap = got.value;
   if (continuousOpen()) renderEarlier();
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
+  if (keep) {
+    setTopicFilter(filter);
+    keepScroll(fromBottom);
+    if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
+  }
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
   // run state (composer buttons) and the pending queue panel.

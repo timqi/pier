@@ -18,16 +18,19 @@ const h = vi.hoisted(() => ({
   appendDivider: vi.fn(),
   appendPager: vi.fn(),
   paneListen: vi.fn<(name: string, fn: () => void) => void>(),
+  pane: { scrollHeight: 0, scrollTop: 0 },
+  keepScroll: vi.fn(),
+  resetChat: vi.fn(),
   content: [] as string[],
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
   appendDivider: h.appendDivider, appendPager: h.appendPager,
-  turnsPane: { scrollHeight: 0, scrollTop: 0, addEventListener: h.paneListen },
+  turnsPane: Object.assign(h.pane, { addEventListener: h.paneListen }), keepScroll: h.keepScroll,
   appendDelta: vi.fn(), appendSystemInput: vi.fn(), appendTurn: h.appendTurn,
   chatLoading: vi.fn(), completeTurn: vi.fn(), finalizeStreaming: vi.fn(),
   initChat: vi.fn(), interruptTurn: vi.fn(), renderSnapshot: h.renderSnapshot,
-  resetChat: () => { h.content = []; }, scrollBottom: vi.fn(),
+  resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
   clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
@@ -411,7 +414,7 @@ describe("the continuous conversation", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const topics = await import("./topics.js");
     // The real reset drops the filter with the pane (chat.ts resetChat); the page must put it back.
-    h.history.mockImplementation((url: string) => { if (url.includes("/h2/")) topics.resetTopics(); return Promise.resolve(url.includes("/h2/") ? snapshot("head") : earlier(url.split("/")[3]!)); });
+    h.resetChat.mockImplementation(() => topics.resetTopics());
     const onScroll = h.paneListen.mock.calls.filter(([name]) => name === "scroll").at(-1)![1];
     topics.setTopicFilter("CI");
     onScroll();
@@ -426,6 +429,7 @@ describe("the continuous conversation", () => {
     onScroll();
     await settled();
     expect(historyCalls().slice(3)).toEqual(["/api/sessions/h0/history", "/api/sessions/h2/history"]);
+    h.resetChat.mockReset();
     vi.useRealTimers();
   });
 
@@ -439,6 +443,22 @@ describe("the continuous conversation", () => {
     head.resolve(snapshot("head"));
     await settled();
     expect(h.content).toEqual(["said in h0", "head"]);
+  });
+
+  // Measured once the head is in hand: the reader scrolling, an image loading or a resize moves the pane while it is on its way.
+  it("puts the reader back where they were once the page is drawn", async () => {
+    await boot([member("h1", "idle", 5), member("h0", "first")]);
+    expect(h.keepScroll).not.toHaveBeenCalled();
+    const head = deferred();
+    h.history.mockImplementation((url: string) => Promise.resolve(url.includes("/h0/") ? earlier("h0") : head.promise));
+    Object.assign(h.pane, { scrollHeight: 1000, scrollTop: 10 });
+    (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+    await settled();
+    h.pane.scrollHeight = 1200;
+    head.resolve(snapshot("head"));
+    await settled();
+    expect(h.keepScroll).toHaveBeenCalledExactlyOnceWith(1190);
+    expect(h.keepScroll.mock.invocationCallOrder[0]).toBeGreaterThan(h.renderSnapshot.mock.invocationCallOrder.at(-1)!);
   });
 
   it("follows a send that landed on a new head, keeping the session just left in view", async () => {
