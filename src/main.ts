@@ -193,6 +193,23 @@ const control = createControl({
   modelMenu: () => settings.get().modelMenu,
 });
 const channels = new ChannelRuntime(channelStore, router, chain, control, conversations);
+/** The home chat's status message follows every event that can move an open
+ *  item, coalesced: one turn end fires several. */
+const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state"]);
+let statusTimer: NodeJS.Timeout | undefined;
+hub.subscribeWorkspace((e) => {
+  if (!STATUS_EVENTS.has(e.type) || statusTimer) return;
+  statusTimer = setTimeout(() => {
+    statusTimer = undefined;
+    try {
+      const open = tasks.openItems();
+      const items = open.items.map(({ problem, status }) => ({ problem, status }));
+      void channels.openItems({ text: openItemsStatus(open, Date.now()).text, items });
+    } catch (err) {
+      log.error("status: the open items could not be read", err);
+    }
+  }, 1500);
+});
 /** The head answers in the home chat while its adapter runs (docs/design/11), else on
  *  the web with Web Push; an older member gets no home key, or an adapter's start
  *  would re-key it over the head. Any other session: its conversations row. */

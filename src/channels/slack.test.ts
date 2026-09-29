@@ -1283,6 +1283,69 @@ describe("the home chat", () => {
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "1900.000100", text: "▸ Finalize design" });
     expect(inbound.at(-1)).toMatchObject({ key: child, text: "Finalize design" });
   });
+
+  // docs/design/11-im-conversation.md §Status
+  describe("status", () => {
+    const meta = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 10, model: "m" };
+    const view = (text: string, items: [string, string][] = []) =>
+      ({ text, items: items.map(([problem, status]) => ({ problem, status })) });
+
+    it("keeps one labelled message below the main flow's last post, and only in the home chat", async () => {
+      await channel.status(HOME, view("storage — running"));
+      expect(client.sent.at(-1)).toEqual({ channel: HOME, text: "_▤ open items_\nstorage — running" });
+      await channel.status(HOME, view("storage — waiting on you"));
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — waiting on you" });
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.status(HOME, view("storage — waiting on you"));
+      expect(client.deleted).toEqual(["900.000100"]);
+      expect(client.sent.map((p) => p.text.split("\n")[0])).toEqual(["_▤ open items_", "done", "_▤ open items_"]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.deleted).toEqual(["900.000100", "902.000100"]);
+      await expect(channel.status(CHANNEL, view("x"))).rejects.toThrow(/not the home DM/);
+    });
+
+    it("a turn that opened an item keeps the message's 👀, then ❓ and ✅ as the item moves", async () => {
+      await feed(dm({ text: "design storage", ts: "2000.000100" }));
+      await channel.send(HOME, { text: "on it", suggestions: [], meta, opened: ["storage", "cache"] });
+      expect(client.reactions).toEqual([{ channel: HOME, ts: "2000.000100", name: "eyes", add: true }]);
+      // A view read in the join's millisecond may predate the marker; only a later one says gone.
+      await new Promise((r) => setTimeout(r, 2));
+      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
+      expect(client.reactions.slice(1)).toEqual([
+        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
+        { channel: HOME, ts: "2000.000100", name: "question", add: true },
+      ]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.reactions.slice(3)).toEqual([
+        { channel: HOME, ts: "2000.000100", name: "question", add: false },
+        { channel: HOME, ts: "2000.000100", name: "white_check_mark", add: true },
+      ]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.reactions).toHaveLength(5);
+    });
+
+    it("a quiet main-flow turn posts its footer only for a settled message that opened nothing", async () => {
+      await channel.send(HOME, { text: "", suggestions: [], meta });
+      expect(client.sent).toEqual([]);
+      await feed(dm({ text: "ok", ts: "2001.000100" }));
+      await channel.send(HOME, { text: "", suggestions: [], meta, opened: ["storage"] });
+      expect(client.sent).toEqual([]);
+      await feed(dm({ text: "thanks", ts: "2001.000200" }));
+      await channel.send(HOME, { text: "", suggestions: [], meta });
+      expect(client.sent).toHaveLength(1);
+      expect(client.reactions.at(-1)).toEqual({ channel: HOME, ts: "2001.000200", name: "eyes", add: false });
+    });
+
+    it("task delegation and callback notes skip the home main flow; its threads still post them", async () => {
+      const callback = { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+      const delegation = { kind: "task-delegation" as const, taskId: "t", runId: "r", sourceSessionId: "lead" };
+      await channel.notify(HOME, { text: "▷ storage", origin: delegation });
+      await channel.notify(HOME, { text: "✓ storage", origin: callback });
+      expect(client.sent).toEqual([]);
+      await channel.notify(`${HOME}/1900.000100`, { text: "✓ storage", origin: callback });
+      expect(client.sent.map((p) => p.thread_ts)).toEqual(["1900.000100"]);
+    });
+  });
 });
 
 describe("settings panel", () => {

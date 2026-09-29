@@ -4,7 +4,7 @@
 
 import { openItemMarkers, openRunText, waitsOnYou } from "../core/reply.js";
 import type { Router } from "../core/router.js";
-import { NOT_IN_LEDGER, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
+import { NOT_IN_LEDGER, NOTHING_OPEN, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
 import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
@@ -122,7 +122,7 @@ const itemLine = (i: Omit<OpenItem, "status"> & { status: string }, now: number)
  *  Grouped as the status panel groups them (web/ui/drawer.ts): what waits on the user first,
  *  then everything else. */
 function renderOpenItems({ items, unlisted }: OpenItems, now: number): string {
-  if (!items.length && !unlisted.length) return "Nothing open.";
+  if (!items.length && !unlisted.length) return NOTHING_OPEN;
   const waiting = items.filter((i) => waitsOnYou(i.status)).map((i) => itemLine(i, now));
   const running = [
     ...items.filter((i) => !waitsOnYou(i.status)).map((i) => itemLine(i, now)),

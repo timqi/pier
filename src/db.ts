@@ -399,6 +399,27 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX goals_live ON goals(finished_at) WHERE finished_at IS NULL;
   `,
+  // 37 — the home chat's status (docs/design/11-im-conversation.md §Status):
+  // a message's reaction per open item, and the one status message per chat.
+  `
+  CREATE TABLE item_receipts (
+    platform TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    problem TEXT NOT NULL,
+    reaction TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (platform, chat_id, message_id)
+  );
+  CREATE TABLE status_messages (
+    platform TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    behind INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (platform, chat_id)
+  );
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

@@ -28,6 +28,21 @@ export interface AgentReply {
   /** Completion stats of the turn. Surfaces that cannot hover (IM) render
    * them as a footer; the web shows them on the bubble. */
   meta?: TurnMeta;
+  /** The problems the reply's `<open>` markers named, in reply order; absent
+   * when none. The home chat keeps the turn's receipts on the first one's item
+   * (docs/design/11 §Status). */
+  opened?: string[];
+}
+
+/** What `openItemsStatus` answers when nothing is open or running. */
+export const NOTHING_OPEN = "Nothing open.";
+
+/** The continuous conversation's open items as a chat's status message shows
+ *  them: `text` is `/status`'s one string (`NOTHING_OPEN` when empty), `items`
+ *  each item's `problem` key and its status (tasks/types.ts `OpenStatus`). */
+export interface OpenItemsView {
+  text: string;
+  items: { problem: string; status: string }[];
 }
 
 export interface InboundMessage {
@@ -86,6 +101,13 @@ export interface Channel {
   openThread(chatId: string, note: { text: string; origin: NoteOrigin }): Promise<string>;
   /** Replace the text of the root `openThread` posted: the thread's state, shown where it was opened. */
   editRoot(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
+  /**
+   * Show the open items in the chat's one status message, kept below the
+   * adapter's last main-flow post and removed at `NOTHING_OPEN`, and move each
+   * message that opened an item to that item's reaction (docs/design/11
+   * §Status). Only the home chat has one; any other chat rejects.
+   */
+  status(chatId: string, view: OpenItemsView): Promise<void>;
   stop(): Promise<void>;
 }
 

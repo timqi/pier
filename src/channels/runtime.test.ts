@@ -41,6 +41,10 @@ vi.mock("./slack.js", () => ({
       if (openFails) throw openFails;
       events.push(`edit ${conversationId}: ${note.text}`);
     }
+    async status(chatId: string, view: { text: string }): Promise<void> {
+      if (openFails) throw openFails;
+      events.push(`status ${chatId}: ${view.text}`);
+    }
   },
 }));
 vi.mock("./lark.js", () => ({
@@ -267,5 +271,29 @@ describe("ChannelRuntime", () => {
       await rt.designLead(lead(), "waiting");
       expect(events).toEqual([]);
     });
+  });
+
+  // docs/design/11-im-conversation.md §Status
+  it("open items go to the live home adapter only; a refusal is logged", async () => {
+    events.length = 0; openFails = undefined; startGate = Promise.resolve();
+    const logged: string[] = [];
+    const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } }, (m) => logged.push(m));
+    const view = { text: "storage — running", items: [{ problem: "storage", status: "running" }] };
+    home = { platform: "slack", chatId: "D1" };
+    await rt.openItems(view);
+    expect(events).toEqual([]);
+    await rt.reload();
+    home = undefined;
+    await rt.openItems(view);
+    home = { platform: "slack", chatId: "D1" };
+    await rt.openItems(view);
+    expect(events.filter((e) => e.startsWith("status"))).toEqual(["status D1: storage — running"]);
+    openFails = new Error("ratelimited");
+    await rt.openItems(view);
+    expect(logged.at(-1)).toBe("status: slack did not take the open items: Error: ratelimited");
+    openFails = undefined;
+    await rt.stop();
+    await rt.openItems(view);
+    expect(events.filter((e) => e.startsWith("status"))).toHaveLength(1);
   });
 });

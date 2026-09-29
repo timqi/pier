@@ -10,7 +10,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Session per conversation | One chat (or thread) is one persisted Pi session, stable across restarts | shared (`conversations.ts`) | ✅ | ✅ |
 | Thread-per-request | A message in the parent chat opens a native thread and its own session; replies and commands stay put | shared policy, adapter creates the thread | ✅ | ✅ |
 | Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | ✅ |
-| Progress receipts | Every message that entered a turn wears 👀 until it settles; no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ |
+| Progress receipts | Every message that entered a turn wears 👀 until it settles; in the home chat a message that opened an item wears its state (👀 / ❓ / ✅) under one status message ([11 §Status](11-im-conversation.md#status)); no intermediate reasoning is ever posted | shared ledger and status row, adapter calls the reaction and message APIs | ✅ | ✅ turn receipts; — status |
 | Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ |
 | Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as an ordinary message | shared parse, adapter renders + feeds back | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ |
@@ -68,6 +68,9 @@ buttons. Kept apart: the renderers, the user-name memos, the `discovered` sets.
   `system-input` (task delegation, callback, supervisor message) and
   `{kind:"error"}`. Sent *before* the turn it triggers; never rendered as an
   assistant turn; must not retire the receipts.
+- `status(chatId, view)` — the home chat's status message and item reactions
+  ([11 §Status](11-im-conversation.md#status)); any other chat rejects, and
+  failures inside are logged, never thrown.
 - `stop()` must **drain in-flight work**: `runtime.reload()` starts a
   replacement immediately.
 - `meta` (`TurnMeta`) renders as a footer via `formatTurnMeta()` from
@@ -321,7 +324,11 @@ and `sweep`:
 
 - Book the receipt **synchronously, before dispatching** the message.
 - Clear only what the ending turn was working on: pass `reply.meta` to
-  `settle`/`settleAfter` (one Pi run can end several turns).
+  `settle`/`settleAfter` (one Pi run can end several turns); a `joinTo`
+  problem keeps them on as item receipts instead, which `items(view)` moves
+  between the platform's working / waiting / done reactions and no sweep
+  touches ([11 §Status](11-im-conversation.md#status)).
+- The reaction API is `addReaction` / `removeReaction`, each naming the emoji.
 - Await the in-flight "add" before issuing the "clear".
 - On `start()`, clear every receipt on the books; an inbound event sweeps, at
   most once a minute, receipts past 10 minutes whose conversation is not working.

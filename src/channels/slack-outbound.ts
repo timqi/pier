@@ -29,8 +29,9 @@ export class SlackOutbound {
     private readonly log: (message: string) => void,
   ) {}
 
-  /** No `threadTs` is the home DM's main flow (slack.ts target). */
-  async reply(channel: string, threadTs: string | undefined, reply: AgentReply): Promise<void> {
+  /** No `threadTs` is the home DM's main flow (slack.ts target). Answers
+   *  whether anything was posted. */
+  async reply(channel: string, threadTs: string | undefined, reply: AgentReply): Promise<boolean> {
     // A local file link is dead in Slack: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
@@ -40,7 +41,7 @@ export class SlackOutbound {
     const quiet = isSilentReply(reply)
       ? `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`
       : "";
-    if (!(text || row || footer || quiet || paths.length)) return;
+    if (!(text || row || footer || quiet || paths.length)) return false;
     const parts = text ? chunk(text, this.budget()) : [""];
     for (const [i, part] of parts.entries()) {
       const last = i === parts.length - 1;
@@ -57,6 +58,7 @@ export class SlackOutbound {
       this.log,
     );
     if (lost) await this.post(channel, threadTs, lost, []);
+    return true;
   }
 
   /** No footer: the turn this input triggers has not ended. Answers with the

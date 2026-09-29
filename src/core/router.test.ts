@@ -43,6 +43,7 @@ function fakeChannel(id: string) {
     },
     openThread: () => Promise.resolve(""),
     editRoot: () => Promise.resolve(),
+    status: () => Promise.resolve(),
     stop: () => Promise.resolve(),
   };
   return { channel, sent, notes };
@@ -120,6 +121,7 @@ describe("channel fan-out", () => {
       notify: () => Promise.resolve(),
       openThread: () => Promise.resolve(""),
       editRoot: () => Promise.resolve(),
+      status: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);
@@ -149,6 +151,7 @@ describe("channel fan-out", () => {
       notify: () => Promise.resolve(),
       openThread: () => Promise.resolve(""),
       editRoot: () => Promise.resolve(),
+      status: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);

@@ -129,7 +129,7 @@ thread half only for the home chat; any other is refused.
 | --- | --- |
 | the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, 👀 on the echo, the row retired (Lark: button value `root: ""` names the home) |
-| a task callback / delegation | the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
+| a task callback / delegation | main flow: nothing (logged at debug); the status message and the web timeline carry it. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | a failure | `⚠ failed` note |
@@ -141,10 +141,48 @@ thread half only for the home chat; any other is refused.
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
-  comes off with the head's turn-end, as any conversation's. A chat command
+  comes off with the head's turn-end, as any conversation's — unless that turn
+  opened an item, when it stays as the item's reaction (§Status). A chat command
   wears none — its answer is a note, and no turn would take it off — and
   neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
   message that caused a seed already wears its own.
+
+## Status
+
+The home chat's main flow shows the open items in one status message and on
+the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
+
+- `AgentReply.opened` is the problems the reply's `<open>` markers named, in
+  order (`splitReply`). A home main-flow reply with `opened` moves the
+  receipts its turn settles to item receipts under the first problem; the 👀
+  stays. Anything else clears them.
+- An item receipt wears its item's `OpenStatus`: `running` → 👀, `waiting on
+  you` → ❓, gone from the list → ✅ and forgotten; `stopped` and `pending
+  release` keep what they wear. A change removes the old reaction and adds the
+  new one; no change, no call. At most 20 messages per item; the oldest past
+  that is cleared and forgotten. The stale and startup sweeps skip them.
+- main.ts coalesces `open-items-changed`, `task-run-changed`,
+  `task-group-changed` and `session-state` on a 1.5 s timer into an
+  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`) and hands it to
+  `ChannelRuntime.openItems`, which calls `Channel.status` on the home
+  platform's live adapter; nothing otherwise.
+- The status message is `▤ open items` in the platform's emphasis over the
+  view's text, one per home chat. Same text as last posted → nothing;
+  `Nothing open.` → deleted; otherwise edited in place, or deleted and posted
+  anew when the adapter has posted a reply, note or thread root into the main
+  flow since. A user's own message never moves it. One refresh runs at a time;
+  the newest waiting view replaces the older.
+- A silent head reply in the main flow posts its `stayed silent — <reason>`
+  footer only when its turn settled a message and opened no item; otherwise
+  nothing — the reaction or the status message is the trace.
+- Every platform failure is logged with a `status:` or `reaction` prefix and
+  never thrown into the hub. Lark's `status()` rejects: not built yet.
+
+| Emoji | Slack | Lark |
+| --- | --- | --- |
+| working | `eyes` | `OnIt` |
+| waiting on you | `question` | `WHAT` |
+| done | `white_check_mark` | `DONE` |
 
 ## Chat commands
 
@@ -231,9 +269,12 @@ through what the head launches (`pier task`), never by a group's message.
 ## Storage
 
 - `ChatConfig.home?: true` in the channel document, one across both
-  platforms; no new table. `PUT /api/channels/:platform` with a `home` row
+  platforms. `PUT /api/channels/:platform` with a `home` row
   clears the other platform's.
 - No `conversations` row, no `main_chain` change.
+- `item_receipts(platform, chat_id, message_id, problem, reaction,
+  created_at)` beside `receipts`; `status_messages(platform, chat_id,
+  message_id, text, behind)`, one row per home chat (db.ts, migration 37).
 
 ## Not built
 
@@ -272,6 +313,11 @@ through what the head launches (`pier task`), never by a group's message.
   fires `waiting` on `LEAD_TURN`, `final`, `failed`, for a design lead only.
   `tasks/service.test.ts` (§abnormal-end notice): which ends owe a notice, the
   cancel's asker, the boot write-off, a throwing reporter.
+- §Status: `core/reply.test.ts` `opened`; `channels/receipts.test.ts` the
+  join, the state diff, the sweeps, the cap; `channels/status.test.ts` edit,
+  re-post, delete, failures; `channels/slack.test.ts` the join at send,
+  quiet notes and replies, `status()`; `channels/runtime.test.ts`
+  `openItems` to the live home adapter only.
 
 ## Acceptance
 

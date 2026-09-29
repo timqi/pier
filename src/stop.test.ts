@@ -33,6 +33,7 @@ function rig() {
     notify: () => Promise.resolve(),
     openThread: () => Promise.resolve(""),
     editRoot: () => Promise.resolve(),
+    status: () => Promise.resolve(),
     stop: () => Promise.resolve(),
   };
   router.registerChannel(channel);
@@ -313,7 +314,7 @@ function routedRig(onDisk: Record<string, FakeSession>, { adapterUp = true } = {
   if (adapterUp) {
     router.registerChannel({
       id: "slack", start: () => Promise.resolve(), send: () => Promise.resolve(), notify: () => Promise.resolve(),
-      openThread: () => Promise.resolve(""), editRoot: () => Promise.resolve(), stop: () => Promise.resolve(),
+      openThread: () => Promise.resolve(""), editRoot: () => Promise.resolve(), status: () => Promise.resolve(), stop: () => Promise.resolve(),
     });
   }
   const turns = new TurnsInFlight(db);

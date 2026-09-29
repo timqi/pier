@@ -12,12 +12,13 @@ import type {
   ConversationKey,
   InboundMessage,
   NoteOrigin,
+  OpenItemsView,
 } from "../core/types.js";
 import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
-import { awaitsTurn } from "../core/reply.js";
+import { awaitsTurn, isSilentReply } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -27,6 +28,7 @@ import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
+import { StatusMessage } from "./status.js";
 import { SlackDirectory } from "./slack-directory.js";
 import {
   SlackApi,
@@ -45,7 +47,7 @@ import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
-const WORKING = "eyes";
+const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
 // The envelope is already acked, so this bounds concurrency (sockets,
 // downloads), not the backlog.
 const MAX_ACTIVE_CHATS = 16;
@@ -112,6 +114,7 @@ export class SlackChannel implements Channel {
   private me = "";
   private mention?: { leading: RegExp; any: RegExp };
   private readonly out: SlackOutbound;
+  private readonly statusLine: StatusMessage;
   private socket?: SlackSocket;
   private running = false;
 
@@ -124,20 +127,20 @@ export class SlackChannel implements Channel {
     this.seen = new Dedup(this.log, DEDUP_TTL_MS, DEDUP_MAX);
     this.api = deps.client ?? new SlackApi(config.token, config.appToken, this.log);
     this.out = new SlackOutbound(this.api, this.log);
+    const ledger = deps.receipts ?? new ReceiptLedger("slack");
     this.receipts = new Receipts(
-      // The clear needs the reaction's name back.
-      {
-        setReaction: (channel, ts, emoji) =>
-          emoji
-            ? this.api.addReaction(channel, ts, emoji)
-            : this.api.removeReaction(channel, ts, WORKING),
-      },
-      deps.receipts ?? new ReceiptLedger("slack"),
+      this.api,
+      ledger,
       this.log,
-      WORKING,
+      REACTIONS,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
+    this.statusLine = new StatusMessage("slack", ledger.db, {
+      post: async (channel, text) => (await this.api.postMessage({ channel, text })).ts,
+      edit: (channel, ts, text) => this.api.updateMessage({ channel, ts, text }),
+      delete: (channel, ts) => this.api.deleteMessage(channel, ts),
+    }, this.receipts, this.log, (text) => `_▤ open items_\n${escapeMrkdwn(text)}`);
     if (deps.control) {
       this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -485,12 +488,15 @@ export class SlackChannel implements Channel {
       await this.receipts.settle(conversation);
       return;
     }
+    // The home's main flow keeps a turn that opened an item wearing its state.
+    const main = !to.threadTs;
+    const opened = main ? reply.opened?.[0] : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
-    await this.receipts.settleAfter(
-      conversation,
-      () => this.out.reply(to.channel, to.threadTs, reply),
-      reply.meta,
-    );
+    await this.receipts.settleAfter(conversation, async (settles) => {
+      // The home's quiet turn says so only to a message nothing else answers.
+      if (main && isSilentReply(reply) && (opened || !settles)) return;
+      if ((await this.out.reply(to.channel, to.threadTs, reply)) && main) this.statusLine.behind(to.channel);
+    }, reply.meta, opened);
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of
@@ -504,7 +510,12 @@ export class SlackChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread in the conversation id`);
       return;
     }
+    // The home's main flow shows task progress in the status message; the web keeps the cards.
+    if (!to.threadTs && (note.origin.kind === "task-delegation" || note.origin.kind === "task-callback")) {
+      return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
+    }
     const ts = await this.out.note(to.channel, to.threadTs, note);
+    if (ts && !to.threadTs) this.statusLine.behind(to.channel);
     if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
   }
 
@@ -512,7 +523,13 @@ export class SlackChannel implements Channel {
     if (!this.isHome(channel)) throw new Error(`refusing to open a thread in ${channel}: not the home DM`);
     const ts = await this.out.note(channel, undefined, note);
     if (!ts) throw new Error(`Slack returned no ts for the root in ${channel}`);
+    this.statusLine.behind(channel);
     return conversationId(channel, ts);
+  }
+
+  async status(channel: string, view: OpenItemsView): Promise<void> {
+    if (!this.isHome(channel)) throw new Error(`refusing a status message in ${channel}: not the home DM`);
+    await this.statusLine.show(channel, view);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

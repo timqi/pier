@@ -42,7 +42,7 @@ import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 
-const WORKING = "OnIt";
+const REACTIONS = { working: "OnIt", waiting: "WHAT", done: "DONE" };
 // The event is already acked, so this bounds concurrency, not the backlog.
 const MAX_ACTIVE_CHATS = 16;
 /** Only an idle conversation ages out, so this need not cover a long turn. */
@@ -112,16 +112,13 @@ export class LarkChannel implements Channel {
     this.api = deps.client ?? new LarkApi(config.token, config.appToken, this.log);
     this.out = new LarkOutbound(this.api, this.log);
     this.receipts = new Receipts(
-      // Removal needs the emoji key back.
       {
-        setReaction: (_chatId, messageId, emoji) =>
-          emoji
-            ? this.api.addReaction(messageId, emoji)
-            : this.api.removeReaction(messageId, WORKING),
+        addReaction: (_chatId, messageId, emoji) => this.api.addReaction(messageId, emoji),
+        removeReaction: (_chatId, messageId, emoji) => this.api.removeReaction(messageId, emoji),
       },
       deps.receipts ?? new ReceiptLedger("lark"),
       this.log,
-      WORKING,
+      REACTIONS,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
@@ -531,6 +528,10 @@ export class LarkChannel implements Channel {
     const messageId = await this.out.note({ chatId }, note);
     if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
     return conversationId(chatId, messageId);
+  }
+
+  async status(chatId: string): Promise<void> {
+    throw new Error(`refusing a status message in ${chatId}: not built yet on Lark`);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

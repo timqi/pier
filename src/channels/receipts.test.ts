@@ -24,22 +24,32 @@ const receipt = (conversationId: string, messageId: string) => ({
 
 /** A ledger and a `Receipts` over it whose platform double records only the
  *  messages it cleared — which receipt came off is what settling is about. */
+const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
+
 const recording = () => {
   const ledger = new ReceiptLedger("slack", db);
   const cleared: string[] = [];
+  /** Every platform call, `+name:id` or `-name:id`. */
+  const calls: string[] = [];
+  const logged: string[] = [];
   const receipts = new Receipts(
     {
-      setReaction: (_chatId, messageId, emoji) => {
-        if (!emoji) cleared.push(messageId);
+      addReaction: (_chatId, messageId, emoji) => {
+        calls.push(`+${emoji}:${messageId}`);
+        return Promise.resolve();
+      },
+      removeReaction: (_chatId, messageId, emoji) => {
+        calls.push(`-${emoji}:${messageId}`);
+        cleared.push(messageId);
         return Promise.resolve();
       },
     },
     ledger,
-    () => {},
-    "eyes",
+    (m) => logged.push(m),
+    REACTIONS,
     60_000,
   );
-  return { receipts, cleared };
+  return { receipts, cleared, calls, ledger, logged };
 };
 
 describe("receipt ledger", () => {
@@ -100,10 +110,10 @@ describe("receipt ledger", () => {
     const ledger = new ReceiptLedger("slack", db);
     const cleared: string[] = [];
     const receipts = new Receipts(
-      { setReaction: (_chatId, messageId) => (cleared.push(messageId), Promise.resolve()) },
+      { addReaction: () => Promise.resolve(), removeReaction: (_chatId, messageId) => (cleared.push(messageId), Promise.resolve()) },
       ledger,
       () => {},
-      "👀",
+      REACTIONS,
       0,
     );
     ledger.add(receipt("C100", "1"));
@@ -124,14 +134,15 @@ describe("receipt ledger", () => {
     const firstApplied = new Promise<void>((resolve) => { release = resolve; });
     const receipts = new Receipts(
       {
-        setReaction: (_chatId, messageId, emoji) => {
-          calls.push(`${emoji ? "apply" : "clear"}:${messageId}`);
-          return emoji && messageId === "1" ? firstApplied : Promise.resolve();
+        addReaction: (_chatId, messageId) => {
+          calls.push(`apply:${messageId}`);
+          return messageId === "1" ? firstApplied : Promise.resolve();
         },
+        removeReaction: (_chatId, messageId) => (calls.push(`clear:${messageId}`), Promise.resolve()),
       },
       ledger,
       () => {},
-      "eyes",
+      REACTIONS,
       60_000,
     );
     receipts.mark("C100", "C100", "1");
@@ -179,6 +190,77 @@ describe("receipt ledger", () => {
     receipts.mark("C100", "C100", "2");
     await receipts.settle("C100");
     expect(cleared).toEqual(["1", "2"]);
+  });
+
+  // docs/design/11-im-conversation.md §Status
+  describe("item receipts", () => {
+    // Began after every mark in these tests: its scope takes them all.
+    const turn = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 1 };
+    const view = (items: [string, string][]) => ({ text: "x", items: items.map(([problem, status]) => ({ problem, status })) });
+
+    it("a turn that opened an item keeps its 👀 and books it under the problem", async () => {
+      const { receipts, calls, ledger } = recording();
+      receipts.mark("D1", "D1", "1");
+      let settles: boolean | undefined;
+      await receipts.settleAfter("D1", async (s) => void (settles = s), turn, "storage");
+      expect(settles).toBe(true);
+      expect(calls).toEqual(["+eyes:1"]);
+      expect(ledger.items().map((i) => [i.messageId, i.problem, i.reaction])).toEqual([["1", "storage", "eyes"]]);
+      expect(ledger.take("D1")).toEqual([]);
+      // A turn with nothing on the books is told so.
+      await receipts.settleAfter("D1", async (s) => void (settles = s), turn);
+      expect(settles).toBe(false);
+    });
+
+    it("moves each message to its item's state, and ✅ forgets a gone problem", async () => {
+      const { receipts, calls, ledger } = recording();
+      for (const [id, problem] of [["1", "a"], ["2", "b"], ["3", "c"]] as const) {
+        receipts.mark("D1", "D1", id);
+        await receipts.settle("D1", undefined, problem);
+      }
+      calls.length = 0;
+      const later = Date.now() + 1000;
+      await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "stopped"]]), later);
+      expect(calls).toEqual(["-eyes:2", "+question:2"]);
+      // No change, no call.
+      await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "pending release"]]), later);
+      expect(calls).toHaveLength(2);
+      await receipts.items(view([["a", "running"], ["c", "stopped"]]), later);
+      expect(calls.slice(2)).toEqual(["-question:2", "+white_check_mark:2"]);
+      expect(ledger.items().map((i) => i.messageId)).toEqual(["1", "3"]);
+    });
+
+    it("a receipt joined after the view was read is not taken for a gone problem", async () => {
+      const { receipts, calls, ledger } = recording();
+      const seen = Date.now() - 1000;
+      receipts.mark("D1", "D1", "1");
+      await receipts.settle("D1", undefined, "new");
+      await receipts.items(view([]), seen);
+      expect(calls).toEqual(["+eyes:1"]);
+      expect(ledger.items()).toHaveLength(1);
+    });
+
+    it("sweeps never touch item receipts", async () => {
+      const { receipts, calls, ledger } = recording();
+      receipts.mark("D1", "D1", "1");
+      await receipts.settle("D1", undefined, "a");
+      await receipts.sweep(true);
+      expect(calls).toEqual(["+eyes:1"]);
+      expect(ledger.takeStale(0)).toEqual([]);
+      expect(ledger.items()).toHaveLength(1);
+    });
+
+    it("an item wears its state on at most 20 messages; the oldest comes clear", async () => {
+      const { receipts, calls, ledger } = recording();
+      for (let i = 0; i < 21; i++) {
+        receipts.mark("D1", "D1", String(i));
+        await receipts.settle("D1", undefined, "a");
+        await new Promise((r) => setTimeout(r, 1));
+      }
+      expect(calls.filter((c) => c.startsWith("-"))).toEqual(["-eyes:0"]);
+      expect(ledger.items()).toHaveLength(20);
+      expect(ledger.items()[0]!.messageId).toBe("1");
+    });
   });
 
   it("survives a restart and keeps platforms apart", () => {

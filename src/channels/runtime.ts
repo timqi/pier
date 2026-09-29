@@ -4,7 +4,7 @@
 import type { MainChain } from "../core/chain.js";
 import { splitReply } from "../core/reply.js";
 import { Refused, type Router } from "../core/router.js";
-import type { Channel, InboundMessage, NoteOrigin } from "../core/types.js";
+import type { Channel, InboundMessage, NoteOrigin, OpenItemsView } from "../core/types.js";
 import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -162,6 +162,16 @@ export class ChannelRuntime {
     if (!bound || bound.channelId !== home.platform || chatOf(bound.conversationId) !== home.chatId) return;
     await channel.editRoot(bound.conversationId, note).catch((err: unknown) =>
       this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`));
+  }
+
+  /** The home chat's status message (docs/design/11 §Status), while its adapter
+   *  is live; nothing otherwise. A failure is logged, never thrown. */
+  async openItems(view: OpenItemsView): Promise<void> {
+    const home = this.store.home();
+    const channel = home && this.running.get(home.platform);
+    if (!home || !channel) return;
+    await channel.status(home.chatId, view).catch((err: unknown) =>
+      this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
   }
 
   private async report(channel: Channel, conversationId: string, text: string): Promise<void> {

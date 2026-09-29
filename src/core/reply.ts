@@ -263,14 +263,16 @@ export function silentReason(markdown: string): string | undefined {
 export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   const markdown = streamBody(rawMarkdown);
   const silence = silentReason(rawMarkdown);
+  const opened = openItemMarkers(rawMarkdown).markers.flatMap((o) => (o.op === "open" ? [o.problem] : []));
+  const tags = { meta, silence, ...(opened.length ? { opened } : {}) };
   const m = BLOCK.exec(markdown);
-  if (!m?.[1]) return { text: markdown, suggestions: [], meta, silence };
+  if (!m?.[1]) return { text: markdown, suggestions: [], ...tags };
   const suggestions = [...m[1].matchAll(TOKEN)]
     .map((t) => (t[1] ?? "").trim())
     .filter(Boolean)
     .slice(0, MAX_SUGGESTIONS);
-  if (!suggestions.length) return { text: markdown, suggestions: [], meta, silence };
-  return { text: markdown.slice(0, m.index).trimEnd(), suggestions, meta, silence };
+  if (!suggestions.length) return { text: markdown, suggestions: [], ...tags };
+  return { text: markdown.slice(0, m.index).trimEnd(), suggestions, ...tags };
 }
 
 /** For rendering mid-turn: everything `splitReply` repairs, minus the
