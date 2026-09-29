@@ -39,22 +39,25 @@ describe("pier task", () => {
       [["runs", "--since", "2h"], { operation: "runs", since_ms: 2 * 3_600_000, limit: 20 }],
       [["stats"], { operation: "stats", days: 30 }],
       [["stats", "--days", "7"], { operation: "stats", days: 7 }],
-      [["run", "--prompt", "design it", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", launch: { model: "opus", role: "lead" } }],
-      [["run", "--prompt", "design it", "--role", "lead", "--design"], { operation: "run", prompt: "design it", launch: { role: "lead", design: true } }],
-      [["run", "--prompt", "fix it", "--model", "balanced", "--until", "reviewed"], { operation: "run", prompt: "fix it", launch: { model: "balanced", until: "reviewed" } }],
-      // The alias passes as typed; definitions.ts stores it as reviewed.
-      [["run", "--prompt", "fix it", "--model", "balanced", "--until", "merged"], { operation: "run", prompt: "fix it", launch: { model: "balanced", until: "merged" } }],
-      [["run", "--prompt", "fix it", "--model", "balanced", "--until", "reviewed", "--rounds", "5", "--review-model", "hardest"],
-        { operation: "run", prompt: "fix it", launch: { model: "balanced", until: "reviewed", rounds: 5, reviewModel: "hardest" } }],
-      [["run", "--run", "r1", "--prompt", "keep it", "--until", "reviewed"], { operation: "message", run_id: "r1", message: "keep it", until: "reviewed" }],
+      [["run", "--prompt", "design it", "--name", "d", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", name: "d", launch: { model: "opus", role: "lead" } }],
+      [["run", "--prompt", "design it", "--name", "d", "--role", "lead", "--design"], { operation: "run", prompt: "design it", name: "d", launch: { role: "lead", design: true } }],
+      [["run", "--prompt", "fix it", "--name", "f", "--model", "balanced", "--worktree", "fix-x"], { operation: "run", prompt: "fix it", name: "f", launch: { model: "balanced", worktree: "fix-x" } }],
+      // 0 passes as typed; definitions.ts drops the key, and with it the goal.
+      [["run", "--prompt", "fix it", "--name", "f", "--model", "balanced", "--rounds", "0"], { operation: "run", prompt: "fix it", name: "f", launch: { model: "balanced", rounds: 0 } }],
+      [["run", "--prompt", "fix it", "--name", "f", "--model", "balanced", "--worktree", "fix-x", "--rounds", "5", "--review-model", "hardest"],
+        { operation: "run", prompt: "fix it", name: "f", launch: { model: "balanced", worktree: "fix-x", rounds: 5, reviewModel: "hardest" } }],
+      [["run", "--run", "r1", "--prompt", "keep it", "--rounds", "2"], { operation: "message", run_id: "r1", message: "keep it", rounds: 2 }],
+      [["run", "--run", "r1", "--prompt", "keep it", "--rounds", "1", "--review-model", "hardest"], { operation: "message", run_id: "r1", message: "keep it", rounds: 1, review_model: "hardest" }],
+      [["finish", "--run", "r1"], { operation: "finish", run_id: "r1" }],
+      [["finish", "--run", "r1", "--remove-worktree"], { operation: "finish", run_id: "r1", remove_worktree: true }],
       [["cancel", "--run", "r1"], { operation: "cancel", run_id: "r1" }],
       [["cancel", "--group", "g1"], { operation: "cancel", group_id: "g1" }],
       [["recover", "--run", "r1", "--reason", "truncated"], { operation: "recover", run_id: "r1", reason: "truncated" }],
       [["recover", "--group", "g1", "--reason", "lost"], { operation: "recover", group_id: "g1", reason: "lost" }],
       [["run", "--prompt", "Review", "--cwd", "/repo", "--name", "rev", "--timeout", "600", "--callback", "none"],
         { operation: "run", prompt: "Review", cwd: "/repo", name: "rev", timeoutSeconds: 600, callback: "none" }],
-      [["run", "--prompt", "Review", "--model", "gpt", "--thinking", "high", "--callback-session", "s9"],
-        { operation: "run", prompt: "Review", launch: { model: "gpt", thinking: "high" }, callback_session_id: "s9" }],
+      [["run", "--prompt", "Review", "--name", "r", "--model", "gpt", "--thinking", "high", "--callback-session", "s9"],
+        { operation: "run", prompt: "Review", name: "r", launch: { model: "gpt", thinking: "high" }, callback_session_id: "s9" }],
       [["run", "--task-id", "t1", "--callback", "steer"], { operation: "run", task_id: "t1", callback: "steer" }],
       [["run", "--session", "s2", "--prompt", "Check the result", "--timeout", "60"],
         { operation: "run", task: { timeoutSeconds: 60, action: { type: "agent", session: { mode: "reuse", sessionId: "s2" }, prompt: "Check the result" } } }],
@@ -91,8 +94,8 @@ describe("pier task", () => {
     ];
     for (const [result, line] of receipts) {
       const { run, out, posted } = rig({ status: 200, body: { result } });
-      expect(await run("run", "--prompt", "go", "--model", "balanced")).toBe(0);
-      expect(await run("run", "--prompt", "go", "--json", "--model", "balanced")).toBe(0);
+      expect(await run("run", "--prompt", "go", "--name", "go", "--model", "balanced")).toBe(0);
+      expect(await run("run", "--prompt", "go", "--name", "go", "--json", "--model", "balanced")).toBe(0);
       expect(out).toEqual([line, JSON.stringify(result)]);
       expect(posted[1]).toEqual(posted[0]);
     }
@@ -103,7 +106,7 @@ describe("pier task", () => {
 
   it("turns --member into tasks[]: flags before the first are every member's defaults, each member overrides them", async () => {
     const { run, posted } = rig();
-    expect(await run("run", "--cwd", "/repo", "--model", "gpt", "--join", "first", "--callback", "steer",
+    expect(await run("run", "--cwd", "/repo", "--model", "gpt", "--join", "first", "--callback", "steer", "--name", "review",
       "--member", "--prompt", "Review correctness",
       "--member", "--prompt", "Review tests", "--cwd", "/repo/tests", "--thinking", "low", "--name", "tests",
       "--member", "--task-id", "t1")).toBe(0);
@@ -112,7 +115,7 @@ describe("pier task", () => {
       join: "first",
       callback: "steer",
       tasks: [
-        { prompt: "Review correctness", cwd: "/repo", launch: { model: "gpt" } },
+        { prompt: "Review correctness", cwd: "/repo", launch: { model: "gpt" }, name: "review" },
         { prompt: "Review tests", cwd: "/repo/tests", launch: { model: "gpt", thinking: "low" }, name: "tests" },
         { task_id: "t1" },
       ],
@@ -152,22 +155,22 @@ describe("pier task", () => {
   it("reads `-` from stdin for --prompt, once per command", async () => {
     const { run, posted, reads } = rig(undefined, "multi\nline\n");
     expect(await run("run", "--run", "r1", "--prompt", "-")).toBe(0);
-    expect(await run("run", "--prompt", "-")).toBe(0);
+    expect(await run("run", "--prompt", "-", "--name", "n")).toBe(0);
     expect(await run("save", "--name", "n", "--prompt", "-")).toBe(0);
-    expect(await run("run", "--member", "--prompt", "a", "--member", "--prompt", "-")).toBe(0);
+    expect(await run("run", "--name", "n", "--member", "--prompt", "a", "--member", "--prompt", "-")).toBe(0);
     expect(posted).toEqual([
       { operation: "message", run_id: "r1", message: "multi\nline\n" },
-      { operation: "run", prompt: "multi\nline\n" },
+      { operation: "run", prompt: "multi\nline\n", name: "n" },
       { operation: "save", task: { name: "n", trigger: { type: "manual" }, callback: { type: "conversation" }, prompt: "multi\nline\n" } },
-      { operation: "run", tasks: [{ prompt: "a" }, { prompt: "multi\nline\n" }] },
+      { operation: "run", tasks: [{ prompt: "a", name: "n" }, { prompt: "multi\nline\n", name: "n" }] },
     ]);
     expect(reads()).toBe(4);
     const twice = rig(undefined, "x");
-    expect(await twice.run("run", "--member", "--prompt", "-", "--member", "--prompt", "-")).toBe(2);
+    expect(await twice.run("run", "--name", "n", "--member", "--prompt", "-", "--member", "--prompt", "-")).toBe(2);
     expect(twice.err[0]).toMatch(/^task: only one --prompt may read stdin/);
     expect(twice.posted).toEqual([]);
     const empty = rig(undefined, "");
-    expect(await empty.run("run", "--prompt", "-")).toBe(2);
+    expect(await empty.run("run", "--prompt", "-", "--name", "n")).toBe(2);
     expect(empty.err[0]).toMatch(/^task: --prompt - read nothing from stdin/);
     expect(empty.posted).toEqual([]);
   });
@@ -219,17 +222,18 @@ describe("pier task", () => {
       [["run", "--member", "--prompt", "x"], "task: a batch needs at least two --member"],
       [["run", "--task-id", "t1", "--member", "--prompt", "x", "--member", "--prompt", "y"], "task: --task-id names one member's definition; put it after a --member"],
       [["run", "--member", "--prompt", "x", "--member", "--prompt", "y", "--join", "all"], "task: --join belongs before the first --member"],
-      [["run", "--prompt", "x", "--rounds", "2"], "task: --rounds and --review-model apply beside --until"],
-      [["run", "--prompt", "x", "--review-model", "hardest"], "task: --rounds and --review-model apply beside --until"],
-      [["run", "--prompt", "x", "--until", "reviewed", "--rounds", "two"], "task: --rounds must be a whole number"],
-      [["run", "--bash", "x", "--until", "reviewed"], "task: --until applies to a fresh --prompt run, not beside --bash"],
-      [["run", "--task-id", "t1", "--until", "reviewed"], "task: --until applies to a fresh --prompt run, not beside --task-id"],
-      [["run", "--session", "s1", "--prompt", "x", "--until", "reviewed"], "task: --until applies to a fresh --prompt run, not beside --session"],
-      [["run", "--prompt", "x", "--role", "lead", "--until", "reviewed"], "task: --until applies to a fresh --prompt run, not beside --role"],
-      [["run", "--run", "r1", "--prompt", "x", "--until", "reviewed", "--after"], "task: --until resumes an ended goal's root; --after queues behind a running turn"],
-      [["run", "--run", "r1", "--prompt", "x", "--until", "reviewed", "--rounds", "2"], "task: --rounds does not apply to an existing run (--run)"],
-      [["run", "--run", "r1", "--prompt", "x", "--until", "reviewed", "--review-model", "hardest"], "task: --review-model does not apply to an existing run (--run)"],
-      [["run", "--task-id", "t1", "--rounds", "2"], "task: --rounds and --review-model apply beside --until"],
+      [["run", "--prompt", "x"], "task: a new run needs --name: the session's title, a few words in the user's language"],
+      [["run", "--member", "--prompt", "x", "--name", "a", "--member", "--prompt", "y"], "task: a new run needs --name: the session's title, a few words in the user's language"],
+      [["run", "--prompt", "x", "--name", "n", "--review-model", "hardest"], "task: --review-model applies beside --rounds or --worktree"],
+      [["run", "--prompt", "x", "--name", "n", "--rounds", "two"], "task: --rounds must be a whole number"],
+      [["run", "--bash", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --bash"],
+      [["run", "--task-id", "t1", "--rounds", "2"], "task: --rounds applies to a fresh --prompt run, not beside --task-id"],
+      [["run", "--session", "s1", "--prompt", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --session"],
+      [["run", "--prompt", "x", "--name", "n", "--role", "lead", "--rounds", "2"], "task: --rounds applies to a fresh --prompt run, not beside --role"],
+      [["run", "--run", "r1", "--prompt", "x", "--rounds", "2", "--after"], "task: --rounds resumes an ended goal's root; --after queues behind a running turn"],
+      [["run", "--run", "r1", "--prompt", "x", "--review-model", "hardest"], "task: --review-model beside --run applies with --rounds"],
+      [["run", "--run", "r1", "--prompt", "x", "--worktree", "b"], "task: --worktree does not apply to an existing run (--run)"],
+      [["finish"], "task: finish needs --run"],
       [["save", "--name", "n"], "task: save takes exactly one of --prompt or --bash"],
       [["save", "--name", "n", "--prompt", "x", "--bash", "y"], "task: save takes exactly one of --prompt or --bash"],
       [["save", "--name", "n", "--prompt", "x", "--cron", "* * * * *"], "task: --cron and --tz go together"],

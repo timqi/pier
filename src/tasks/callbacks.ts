@@ -57,14 +57,19 @@ export const DESIGN_FINAL = /^Design final:/m;
 /** On the record of a lead run that owed its supervisor nothing, so the run says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
-/** What heads a goal's end callback: the head reads it without parsing the result. */
-export const goalLine = (goal: Goal): string => {
-  const rounds = `${String(goal.round)} review round${goal.round === 1 ? "" : "s"}`;
-  if (goal.outcome === "done" && goal.step === "merge") return goal.round ? `Goal: merged after ${rounds}` : "Goal: merged, review clean";
-  if (goal.outcome === "done") return `Goal: review clean${goal.reviewed ? ` at ${goal.reviewed.slice(0, 7)}` : ""}${goal.round ? ` after ${rounds}` : ""}, waiting on you to merge`;
-  if (goal.outcome === "decision") return `Goal: needs your decision${goal.round ? ` after ${rounds}` : ""}`;
-  if (goal.outcome === "cap") return `Goal: ${rounds}, still findings`;
-  return `Goal: failed at ${goal.step} — ${goal.reason ?? "unknown"}`;
+/** What heads a goal's end callback: the head reads it without parsing the result;
+ *  `cwd` is the root run's, the worktree `pier task finish` merges from. */
+export const goalLine = (goal: Goal, cwd: string | null): string => {
+  if (goal.outcome === "done" && goal.step === "merge") {
+    return goal.round ? `Goal: merged after ${String(goal.round)} review round${goal.round === 1 ? "" : "s"}` : "Goal: merged, review clean";
+  }
+  const n = goal.round + (goal.step === "review" ? 1 : 0);
+  const reviews = `${String(n)} review${n === 1 ? "" : "s"}`;
+  const root = `(run ${goal.rootRunId}${goal.branch && cwd ? `, ${goal.branch} in ${cwd}` : ""})`;
+  if (goal.outcome === "done") return `Goal: review clean${goal.reviewed ? ` at ${goal.reviewed.slice(0, 7)}` : ""}${n > 1 ? ` after ${reviews}` : ""} ${root}, waiting on you to merge`;
+  if (goal.outcome === "decision") return `Goal: needs your decision${n ? ` after ${reviews}` : ""} ${root}`;
+  if (goal.outcome === "cap") return `Goal: ${reviews}, still findings ${root}`;
+  return `Goal: failed at ${goal.step} — ${goal.reason ?? "unknown"} ${root}`;
 };
 
 /** Decided once, as the run finishes. A live goal's step calls nobody back:
@@ -91,13 +96,13 @@ export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf
   else run.callbackState = "pending";
 }
 
-export function runResultText(run: TaskRun): string {
+export function runResultText(run: TaskRun, max = 8000): string {
   let result = run.error ?? "No result";
   if (run.result?.type === "agent" || run.result?.type === "system") result = run.result.text;
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";
-  return clipResult(result, 8000, run.id);
+  return clipResult(result, max, run.id);
 }
 
 /** A result over `max` keeps its head and its tail — the contract puts the
@@ -171,19 +176,26 @@ export class TaskCallbacks {
   }
 
   private text(runs: TaskRun[]): string {
-    const sections = runs.map((run) => [
-      ...this.goalHead(run),
-      `Task "${run.context.definition.name}" finished with state: ${run.state}`,
-      runRef(run),
-      "",
-      runResultText(run),
-    ].join("\n"));
+    const sections = runs.map((run) => {
+      const goal = run.goalId ? this.store.getGoal(run.goalId) : undefined;
+      const root = goal?.outcome ? this.store.getRun(goal.rootRunId) : undefined;
+      return [
+        ...(goal?.outcome ? [goalLine(goal, root ? runCwd(root) : null)] : []),
+        `Task "${run.context.definition.name}" finished with state: ${run.state}`,
+        runRef(run),
+        "",
+        this.goalBody(run, root) ?? runResultText(run),
+      ].join("\n");
+    });
     if (sections.length === 1) return sections[0]!;
     return [`${String(sections.length)} task callbacks`, "", sections.join("\n\n---\n\n")].join("\n");
   }
 
-  private goalHead(run: TaskRun): string[] {
-    const goal = run.goalId ? this.store.getGoal(run.goalId) : undefined;
-    return goal?.outcome ? [goalLine(goal)] : [];
+  /** A goal a review ended: the worker's conclusion is what the head relays, the review beneath it. */
+  private goalBody(run: TaskRun, root: TaskRun | undefined): string | undefined {
+    const worker = root?.targetSessionId;
+    if (!worker || run.targetSessionId === worker) return undefined;
+    const latest = this.store.latestRunForTarget(worker);
+    return latest ? `${runResultText(latest, 3000)}\n\nReview:\n${runResultText(run, 1000)}` : undefined;
   }
 }
