@@ -230,8 +230,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Chips** (`turn-activity.ts` `chip`): each is the button (`aria-expanded`)
   over its own detail, laid under the row in chip order — the cause's card,
   the steps log, the run's head and prompt. Every chip starts closed and
-  opens only by its click; opened details persist across a run's status
-  updates. Cause chips: `↺ session seed · <reason>`, `↩ callback · <state> ·
+  opens only by its click, closing the row's other open chip (one detail
+  per bubble; other bubbles keep theirs); opened details persist across a
+  run's status updates. Cause chips: `↺ session seed · <reason>`, `↩ callback · <state> ·
   <run name>`, `↗ delegation · <run name>` (the glyphs are `ui/icons.ts`
   icons), a failed callback red, an interrupted one amber. Run chips: `run ·
   <state> · <run name>`, live across states. Mode, duration, `N queued`

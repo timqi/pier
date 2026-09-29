@@ -101,8 +101,9 @@ updates this document.
   open state is a ring, laying its detail — the cause's neutral card, the
   steps log, the run's head and prompt — under the row, at the bubble's
   width, in chip order. Every chip starts closed and opens only by its own
-  click; there is no global open. Mode, model, duration and ids are the
-  opened head's, never the chip's. Chat command answers stay open cards.
+  click, closing any other open chip in its row — one detail per bubble,
+  other bubbles untouched; there is no global open. Mode, model, duration
+  and ids are the opened head's, never the chip's. Chat command answers stay open cards.
 - A quote is a bar and two clamped lines at the top of the user's bubble, the
   bar in the quoted topic's colour, the excerpt in the bubble's own type at a
   step down; the row controls (Reply, Edit) share one gutter and one hover;

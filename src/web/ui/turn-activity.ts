@@ -125,7 +125,8 @@ export function runHead(o: RunHead): HTMLElement {
 // --- chips ------------------------------------------------------------------------
 // A chip is its fold: the button naming one thing the turn did, and while open
 // its detail lies under the chip row. Every chip starts closed and opens only
-// by its own click; a replayed steps log fetches its detail on the first one.
+// by its own click, closing any other open chip in its row: one detail per bubble.
+// A replayed steps log fetches its detail on the first one.
 
 /** What a chip says; a chip re-painted keeps its element, detail and state. */
 interface ChipSpec {
@@ -165,6 +166,9 @@ export function paintChip(el: HTMLElement, o: ChipSpec): void {
 export function setChipOpen(el: HTMLElement, open: boolean): void {
   const detail = chipDetails.get(el);
   if (!detail) return;
+  if (open) for (const other of el.parentElement?.children ?? []) {
+    if (other !== el && other.hasAttribute("data-open")) setChipOpen(other as HTMLElement, false);
+  }
   detail.hidden = !open;
   el.setAttribute("aria-expanded", String(open));
   el.toggleAttribute("data-open", open);

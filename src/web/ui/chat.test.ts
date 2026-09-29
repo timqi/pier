@@ -515,6 +515,38 @@ describe("the turn's bubble", () => {
     expect(details().map((d) => d.className.split(" ")[0])).toEqual(["activity-log", "system-card", "system-card", "activity-log", "system-card"]);
   });
 
+  it("opens one chip's detail per bubble: another chip in its row closes, another bubble's stays", () => {
+    callback("r1");
+    activity.renderBackgroundRun(run("r2"));
+    chat.completeTurn("First.");
+    const firstDetails = details();
+    const [cause, launched] = chipRow().children.filter((c) => c.classList.contains("chip"));
+    chat.appendTurn("user", "more", false, 1);
+    callback("r3");
+    const other = chipRow().children.at(-1)!;
+    cause!.onclick?.();
+    launched!.onclick?.();
+    expect([cause, launched].map((c) => c!.getAttribute("aria-expanded"))).toEqual(["false", "true"]);
+    expect(firstDetails.map((d) => d.hidden)).toEqual([true, false]);
+    other.onclick?.();
+    expect([launched, other].map((c) => c!.hasAttribute("data-open"))).toEqual([true, true]);
+    launched!.onclick?.();
+    expect(firstDetails.map((d) => d.hidden)).toEqual([true, true]);
+  });
+
+  it("keeps the open run chip the row's one open detail through a status update", () => {
+    callback("r1");
+    activity.renderBackgroundRun(run("r2"));
+    const [cause, launched] = chipRow().children.filter((c) => c.classList.contains("chip"));
+    launched!.onclick?.();
+    activity.renderBackgroundRun(run("r2", { state: "succeeded", finishedAt: 9 }));
+    expect(launched!.dataset.state).toBe("succeeded");
+    expect([cause, launched].map((c) => c!.getAttribute("aria-expanded"))).toEqual(["false", "true"]);
+    expect(details().map((d) => d.hidden)).toEqual([true, false]);
+    cause!.onclick?.();
+    expect(details().map((d) => d.hidden)).toEqual([false, true]);
+  });
+
   it("leaves a chip-row-only bubble when a user bubble separates it from the reply", () => {
     callback("r1");
     chat.appendTurn("user", "and this", false, 1);
