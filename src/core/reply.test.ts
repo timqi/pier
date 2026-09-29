@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -333,6 +333,17 @@ describe("open-item markers", () => {
     expect(replyTopic("Hi.")).toBeUndefined();
     expect(openItemMarkers("<topic> </topic>")).toEqual({ markers: [], notes: [], dropped: ["<topic> </topic>"] });
     expect(replyTopic("Write `<topic>x</topic>` on it.")).toBeUndefined();
+    // Written like an `<open>`, it still keys on the problem; a stage alone is nothing.
+    expect(replyTopic("<topic>CI \u4fee\u590d \u2014 worker running (run r1)</topic>")).toBe("CI \u4fee\u590d");
+    expect(openItemMarkers("<topic> \u2014 stage</topic>").dropped).toEqual(["<topic> \u2014 stage</topic>"]);
+  });
+
+  it("cuts a streaming tail before a hiding tag still open, and leaves a closed one to the stripper", () => {
+    expect(streamTail("Done.\n<topic>CI \u4fee")).toBe("Done.\n");
+    expect(streamTail("Done.\n<to\u200bpic>CI")).toBe("Done.\n");
+    expect(streamTail("Done.\n<open>a \u2014 b</open>\nMore <sil")).toBe("Done.\n<open>a \u2014 b</open>\nMore <sil");
+    expect(streamTail("<silent>why</silent> and <done>x")).toBe("<silent>why</silent> and ");
+    expect(streamTail("plain")).toBe("plain");
   });
 
   it("a lone tag in a code span does not pair with the real marker after it", () => {

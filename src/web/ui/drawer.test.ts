@@ -295,8 +295,18 @@ it("lists the last done topics not open under Recently done, and keeps the chip 
   // Most recently done first, of the last five; one still open stays in its own group.
   expect(done.children.map((r) => r.textContent)).toEqual(["f", "e", "d", "c"]);
   expect(done.previousElementSibling!.classList.contains("hidden")).toBe(false);
-  expect(done.querySelector(".session-open")).toBeNull();
   expect(done.querySelectorAll("input")).toHaveLength(4);
+  // The name is a button the arrows reach and \u21b5 flips; the whole panel is one walk.
+  const first = done.querySelector("button")!;
+  expect(first.getAttribute("aria-label")).toBe("f \u2014 done; only this topic in the chat");
+  first.onclick?.();
+  expect(setFilter).toHaveBeenLastCalledWith("f");
+  expect(done.closest("[data-list]")!.getAttribute("data-list")).toBe("done");
+  expect(done.parentElement!.getAttribute("data-list")).toBe("status");
+  // An item's status sits beside its button and still describes it.
+  const running = doc.querySelector("[data-list='running']")!;
+  const item = running.querySelector(".session-open")!;
+  expect(running.querySelector(".row-status")!.getAttribute("id")).toBe(item.getAttribute("aria-describedby"));
 
   open = { items: [], unlisted: [] };
   topics = [{ problem: "x", done: true }];

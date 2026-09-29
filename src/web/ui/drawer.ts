@@ -168,6 +168,8 @@ interface PanelRow {
   topic?: string;
 }
 
+let rowSeq = 0;
+
 function row(r: PanelRow): HTMLElement {
   const li = h("li", ROW);
   const name = h("span", "min-w-0 flex-1 py-1",
@@ -176,6 +178,9 @@ function row(r: PanelRow): HTMLElement {
   const status = h("span", `row-status flex-none rounded px-1.5 text-[0.6875rem] font-medium leading-5 ${STATUS_TONE[r.status]}`, r.status);
   const button = h("button", OPEN, ...(r.topic ? [topicDot(r.topic)] : []), name);
   button.setAttribute("type", "button");
+  // The status sits beside the button, not in it: it is still the button's description.
+  status.id = `status-row-${String(++rowSeq)}`;
+  button.setAttribute("aria-describedby", status.id);
   button.onclick = () => {
     closeMenu();
     r.open();
@@ -202,9 +207,16 @@ function topicSwitch(problem: string): HTMLElement {
   return sw;
 }
 
-/** A topic the chat saw a `<done>` for: nothing to open, only its filter. */
+/** A topic the chat saw a `<done>` for: nothing to open, only its filter \u2014
+ *  the name is a button too, so the arrows reach the row and \u21b5 flips it. */
 function doneRow(problem: string): HTMLElement {
-  const li = h("li", `${ROW} min-h-10`, topicDot(problem), h("span", "min-w-0 flex-1 truncate", problem), topicSwitch(problem));
+  const on = deps.filter() === problem;
+  const name = h("button", OPEN, topicDot(problem), h("span", "min-w-0 flex-1 truncate", problem));
+  name.setAttribute("type", "button");
+  name.setAttribute("aria-pressed", String(on));
+  name.setAttribute("aria-label", `${problem} \u2014 done; only this topic in the chat`);
+  name.onclick = () => deps.setFilter(on ? null : problem);
+  const li = h("li", ROW, name, topicSwitch(problem));
   li.dataset.sessionId = `topic:${problem}`;
   li.title = problem;
   return li;
@@ -345,6 +357,7 @@ export function openDrawer(): void {
   done.dataset.list = "done";
   const panel = h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm",
     h("div", HEAD, "Waiting on you"), waiting, h("div", HEAD, "In progress"), running, h("div", HEAD, "Recently done"), done);
+  panel.dataset.list = "status"; // one walk over all three groups (menu.ts listIn)
   lists = [waiting, running, done];
   fill(lists);
   openPanel(chip, panel).setAttribute("aria-label", "Status");

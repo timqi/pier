@@ -3,7 +3,7 @@
 
 import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
+import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
@@ -614,7 +614,7 @@ function paintStreamText(node: HTMLElement): void {
     streamStable = cut;
     streamNodes = node.childNodes.length;
   }
-  node.append(...mdBox(splitReply(raw.slice(streamStable)).text).childNodes);
+  node.append(...mdBox(splitReply(streamTail(raw.slice(streamStable))).text).childNodes);
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
 }

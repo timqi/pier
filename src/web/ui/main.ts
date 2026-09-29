@@ -216,7 +216,10 @@ async function page(): Promise<void> {
     const fromBottom = turnsPane.scrollHeight - turnsPane.scrollTop;
     // A keyboard page keeps the keyboard on the pager, which the reload replaced.
     const focused = document.activeElement?.id === "chain-pager";
+    // The reload resets the pane's view state; a filter is the reader's, and stays.
+    const filter = topicFilter();
     await loadSession(head, true);
+    setTopicFilter(filter);
     turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
     if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
     pagedAt = Date.now();
@@ -236,9 +239,10 @@ function renderEarlier(): void {
   }
 }
 
-/** Scrolling to the top pages; not right after a page, whose restore may itself land there. */
+/** Scrolling to the top pages; not right after a page, whose restore may itself
+ *  land there, and not under a topic filter, whose hidden rows put the top in reach. */
 turnsPane.addEventListener("scroll", () => {
-  if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && Date.now() - pagedAt > 500) void page();
+  if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && topicFilter() === null && Date.now() - pagedAt > 500) void page();
 }, { passive: true });
 
 // --- sessions --------------------------------------------------------------------

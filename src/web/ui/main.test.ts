@@ -17,12 +17,13 @@ const h = vi.hoisted(() => ({
   setSkills: vi.fn(),
   appendDivider: vi.fn(),
   appendPager: vi.fn(),
+  paneListen: vi.fn<(name: string, fn: () => void) => void>(),
   content: [] as string[],
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
   appendDivider: h.appendDivider, appendPager: h.appendPager,
-  turnsPane: { scrollHeight: 0, scrollTop: 0, addEventListener: vi.fn() },
+  turnsPane: { scrollHeight: 0, scrollTop: 0, addEventListener: h.paneListen },
   appendDelta: vi.fn(), appendSystemInput: vi.fn(), appendTurn: h.appendTurn,
   chatLoading: vi.fn(), completeTurn: vi.fn(), finalizeStreaming: vi.fn(),
   initChat: vi.fn(), interruptTurn: vi.fn(), renderSnapshot: h.renderSnapshot,
@@ -403,6 +404,29 @@ describe("the continuous conversation", () => {
     expect(h.appendDivider).toHaveBeenCalledWith("new session — idle 1h", 5);
     // Everything is paged in: no pager is drawn over the first session.
     expect(h.appendPager).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the topic filter across a page, and does not page from the top under one", async () => {
+    await boot([member("h2", "idle", 5), member("h1", "idle", 3), member("h0", "first")]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const topics = await import("./topics.js");
+    // The real reset drops the filter with the pane (chat.ts resetChat); the page must put it back.
+    h.history.mockImplementation((url: string) => { if (url.includes("/h2/")) topics.resetTopics(); return Promise.resolve(url.includes("/h2/") ? snapshot("head") : earlier(url.split("/")[3]!)); });
+    const onScroll = h.paneListen.mock.calls.filter(([name]) => name === "scroll").at(-1)![1];
+    topics.setTopicFilter("CI");
+    onScroll();
+    await settled();
+    expect(historyCalls()).toEqual(["/api/sessions/h2/history"]);
+    (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+    await settled();
+    expect(historyCalls()).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
+    expect(topics.topicFilter()).toBe("CI");
+    topics.setTopicFilter(null);
+    vi.setSystemTime(Date.now() + 1000);
+    onScroll();
+    await settled();
+    expect(historyCalls().slice(3)).toEqual(["/api/sessions/h0/history", "/api/sessions/h2/history"]);
+    vi.useRealTimers();
   });
 
   it("keeps the pane as it is while a page's head snapshot is on its way", async () => {

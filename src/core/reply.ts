@@ -180,6 +180,11 @@ export type OpenItemMarker =
   | { op: "done"; problem: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+/** The key: what stands before the ` \u2014 stage`, or the whole line. */
+const problemOf = (line: string): string => {
+  const dash = line.indexOf("\u2014");
+  return (dash < 0 ? line : line.slice(0, dash)).trim();
+};
 
 /** The markers in reply order, `notes` the daily-note lines, `topic` the
  *  `<topic>` body; `dropped` holds the ones with no text, for the caller to log. */
@@ -190,7 +195,8 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
     if (m[1] === undefined) {
-      const body = oneLine(m[2] ?? m[3] ?? m[4] ?? "");
+      // A `<topic>` written like an `<open>` still keys on the problem.
+      const body = m[4] === undefined ? oneLine(m[2] ?? m[3] ?? "") : problemOf(oneLine(m[4]));
       if (!body) dropped.push(m[0].trim());
       else if (m[4] !== undefined) topic ??= body;
       else if (m[2] === undefined) notes.push(body);
@@ -204,7 +210,7 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
       rest = rest.slice(0, run.index);
     }
     const dash = rest.indexOf("\u2014");
-    const problem = (dash < 0 ? rest : rest.slice(0, dash)).trim();
+    const problem = problemOf(rest);
     const stage = dash < 0 ? "" : rest.slice(dash + 1).trim();
     if (problem) markers.push({ op: "open", problem, stage, runIds });
     else dropped.push(m[0].trim());
@@ -247,6 +253,20 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
 /** For rendering mid-turn: everything `splitReply` repairs, minus the
  *  next-step block, which is only one at the very end of a turn. */
 export const streamBody = (markdown: string): string => cjkFriendly(unmarked(markdown));
+
+/** The streaming tail cut before a hiding tag still open: the marker's body
+ *  would flash as prose until its closer arrives. Fences are not honoured
+ *  here \u2014 a quoted tag hides for a paint and comes back with its block. */
+export function streamTail(markdown: string): string {
+  let openAt = -1;
+  let hidden = "";
+  for (const t of markdown.matchAll(HIDDEN_TAG)) {
+    const name = t[2]!.replace(ZW_CHARS, "").toLowerCase();
+    if (!t[1] && !hidden) { hidden = name; openAt = t.index; }
+    else if (t[1] && name === hidden) hidden = "";
+  }
+  return hidden ? markdown.slice(0, openAt) : markdown;
+}
 
 const unmarked = (markdown: string): string =>
   replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim();
