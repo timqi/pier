@@ -266,6 +266,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`replyTopic`) is tagged with its problem — a label in a stable hash of the
   problem's colour (`topics.ts` `topicHue`), the only place the colour is on
   the row; the user message above it inherits; untagged rows carry nothing.
+  A reply naming none is tagged by the open item holding a run of the
+  nearest callback in its bubble or above it (`data-runs`), a user row or
+  another reply ending the search; nothing inherits it.
   The tag is the problem alone; the stage is the status panel's. While the
   item's status (`GET /api/continuous/open`) is `waiting on you` its tags
   carry an amber-700 dot (the panel's `waiting on you`, not the unread

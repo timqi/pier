@@ -18,6 +18,9 @@ let open = new Map<string, boolean>();
 
 export const topicOpen = (problem: string): boolean => open.has(problem);
 
+/** Each open item's runs, to the item: a callback's reply is about the item holding its run. */
+let runTopics = new Map<string, string>();
+
 /** A tag's click: the row it sits on, to jump back from (chat.ts). */
 type Jump = (row: HTMLElement) => void;
 
@@ -55,8 +58,9 @@ export function refreshTopicTags(): void {
   }
 }
 
-export function setOpenTopics(items: { problem: string; status: string }[]): void {
+export function setOpenTopics(items: { problem: string; status: string; runs: { runId: string }[] }[]): void {
   open = new Map(items.map((i) => [i.problem, waitsOnYou(i.status)]));
+  runTopics = new Map(items.flatMap((i) => i.runs.map((r) => [r.runId, i.problem] as const)));
   for (const row of document.querySelector("#turns")?.querySelectorAll<HTMLElement>("[data-topic-fresh]") ?? []) delete row.dataset.topicFresh;
   refreshTopicTags();
 }
@@ -84,16 +88,37 @@ export function tagRow(row: HTMLElement, problem: string, jump: Jump): void {
   paintTag(label, problem, false);
 }
 
-/** A reply names its topic, and the user message it answers inherits. `row`
- *  is the reply's bubble; `live`, one that just ended, newer than the items on hand. */
+const stops = (kind: string | undefined): boolean => kind === "assistant" || kind === "divider" || kind === "pager";
+
+/** The open item holding a run of the callback a reply answers: the nearest
+ *  callback (chat.ts `data-runs`) in its bubble or above it, up to a user row or another reply. */
+function callbackTopic(row: HTMLElement): string | undefined {
+  for (let el: HTMLElement | null = row; el; el = el.previousElementSibling as HTMLElement | null) {
+    if (el !== row && (el.dataset.kind === "user" || stops(el.dataset.kind))) return undefined;
+    const callback = el.dataset.runs !== undefined ? el : [...el.querySelectorAll<HTMLElement>("[data-runs]")].at(-1);
+    if (!callback) continue;
+    for (const id of callback.dataset.runs!.split(",")) {
+      const topic = runTopics.get(id);
+      if (topic) return topic;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+/** A reply names its topic, and the user message it answers inherits; one
+ *  naming none is its callback's. `row` is the reply's bubble; `live`, one
+ *  that just ended, newer than the items on hand. */
 export function tagReply(row: HTMLElement, raw: string, jump: Jump, live = false): void {
-  const topic = replyTopic(raw);
+  const marked = replyTopic(raw);
+  const topic = marked ?? callbackTopic(row);
   if (!topic) return;
   tagRow(row, topic, jump);
   if (live) row.dataset.topicFresh = "";
+  if (!marked) return;
   for (let el = row.previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
-    if (kind === "assistant" || kind === "divider" || kind === "pager") break;
+    if (stops(kind)) break;
     if (kind !== "user") continue;
     if (!el.dataset.topic) tagRow(el, topic, jump);
     break;

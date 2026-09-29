@@ -255,7 +255,7 @@ describe("an earlier turn's next steps", () => {
   it("shows them muted while the topic is open, hides them once it is done, the last turn's live throughout", async () => {
     const topics = await import("./topics.js");
     const { refreshSuggestions } = await import("./suggestions.js");
-    topics.setOpenTopics([{ problem: "auth", status: "running" }]);
+    topics.setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     snapshot();
     expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
     const group = doc.querySelector(".earlier-options")!;
@@ -264,19 +264,19 @@ describe("an earlier turn's next steps", () => {
     topics.setOpenTopics([]);
     refreshSuggestions();
     expect(labels()).toEqual(["Next"]);
-    topics.setOpenTopics([{ problem: "auth", status: "running" }]);
+    topics.setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     refreshSuggestions();
     expect(labels()).toEqual(["Ship it", "Wait", "Next"]);
   });
 
   it("offers nothing on an earlier turn without a topic", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     snapshot("Review?\n\n---\n[Ship it] | [Wait]");
     expect(labels()).toEqual(["Next"]);
   });
 
   it("mutes the live group when a newer turn ends, and sends a pick as a reply to the turn that offered it", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     chat.appendTurn("user", "go", false, 1);
     chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
     expect(doc.querySelectorAll(".earlier-options")).toHaveLength(0);
@@ -290,7 +290,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("keeps a picked row away after a reload once the topic has a newer reply", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     const { withQuote } = await import("../../core/identity.js");
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },
@@ -302,7 +302,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("shows only the open topic's newest reply's row, none when that reply offers none", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     const reply = (at: number, text: string) => [
       { role: "user" as const, text: "go", at: at - 1 },
       { role: "assistant" as const, text, meta: { completedAt: at, durationMs: 1, tokens: 1 } },
@@ -315,7 +315,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("reads a running snapshot's last reply as earlier: muted while its topic's newest", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },
       { role: "assistant", text: earlier, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
@@ -327,7 +327,7 @@ describe("an earlier turn's next steps", () => {
   });
 
   it("hides the muted row live once a newer reply of the same topic ends", async () => {
-    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running" }]);
+    (await import("./topics.js")).setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
     chat.appendTurn("user", "go", false, 1);
     chat.completeTurn(earlier, { completedAt: 2, durationMs: 1, tokens: 1 });
     chat.appendTurn("user", "else", false, 3);
@@ -829,7 +829,7 @@ describe("the turn's bubble", () => {
     const dotted = () => pane().querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
     const load = async () => {
       const topics = await import("./topics.js");
-      topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+      topics.setOpenTopics([{ problem: "auth", status: "waiting on you", runs: [] }]);
       chat.renderSnapshot([
         { role: "user", text: "review auth", at: 1 },
         { role: "assistant", text: asks, meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
@@ -856,7 +856,7 @@ describe("the turn's bubble", () => {
       // Ends while the items on hand still say `waiting on you`: not asking again yet.
       chat.completeTurn(asks, { completedAt: 6, durationMs: 1, tokens: 1 });
       expect(dotted()).toEqual([false, false, false, false]);
-      topics.setOpenTopics([{ problem: "auth", status: "waiting on you" }]);
+      topics.setOpenTopics([{ problem: "auth", status: "waiting on you", runs: [] }]);
       expect(dotted()).toEqual([true, true, true, true]);
     });
 
@@ -884,6 +884,21 @@ describe("the turn's bubble", () => {
     expect(chips()).toEqual(["topic-tag", "background-run"]);
     expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
     expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
+  });
+
+  it("tags a reply naming no topic by the open item holding the run its callback is about", async () => {
+    (await import("./topics.js")).setOpenTopics([
+      { problem: "auth", status: "running", runs: [{ runId: "r2" }] },
+    ]);
+    chat.appendSystemInput("2 task callbacks\n\nok", { kind: "task-callback", taskId: "t", runId: "r1", sourceSessionId: null, runIds: ["r1", "r2"] });
+    expect(chipRow().querySelector("[data-cause]")!.dataset.runs).toBe("r1,r2");
+    chat.completeTurn("Both green.", { completedAt: 4, durationMs: 1, tokens: 1 });
+    expect(bubble().dataset.topic).toBe("auth");
+    expect(chips()).toEqual(["topic-tag", "system"]);
+    // A reply to the user, not to the callback, stays untagged.
+    chat.appendTurn("user", "thanks", false, 5);
+    chat.completeTurn("Sure.", { completedAt: 6, durationMs: 1, tokens: 1 });
+    expect(bubble().dataset.topic).toBeUndefined();
   });
 
   it("opens the bubble with its first chip and fills it with the reply; a plain reply has no chip row", () => {

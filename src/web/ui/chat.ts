@@ -554,9 +554,10 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     trimRows();
   } else {
     const cause = chip({ glyph: glyphEl(), label: state ? `${label} \u00b7 ${state}` : label, labelCls, ...(name ? { name } : {}) }, card);
-    cause.dataset.kind = "system";
-    cause.dataset.cause = "";
+    Object.assign(cause.dataset, { kind: "system", cause: "" });
     if (state) cause.dataset.state = state;
+    // The reply's topic when it names none (topics.ts `tagReply`).
+    if (origin.kind === "task-callback") cause.dataset.runs = (origin.runIds ?? [origin.runId]).join(",");
     chipInto(cause, card);
   }
   scrollBottom();
