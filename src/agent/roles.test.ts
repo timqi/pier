@@ -29,7 +29,7 @@ describe("the dispatcher contract", () => {
 
   it("merges through `pier task finish` on the user's yes, a button being one, the removal only when they said so", () => {
     expect(DISPATCHER).toContain("`[Merge] | [Merge, remove worktree] | [Show the review]`");
-    expect(DISPATCHER).toContain("a click on the first two is one — `pier task finish --run <root>`, `--remove-worktree` only when they said so");
+    expect(DISPATCHER).toContain("a click on the first two is one — `pier task finish --run <root>` — or `--run <lead run>` for a lead's milestone — `--remove-worktree` only when they said so");
     expect(DISPATCHER).toContain("build → review → wait for the user → finish");
     // The finish is assembled in code; no contract carries its recipe.
     for (const contract of [DISPATCHER, WORKER, lead("build")]) {

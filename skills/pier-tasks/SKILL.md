@@ -55,7 +55,7 @@ result; one of `Verdict: clean` · `Verdict: findings` ·
 
 A goal callback opens with one of four lines, each naming its root `(run <root>, <branch> in <worktree>)`: `Goal: review clean at <sha7> …, waiting on you to merge` means ready, unmerged; `Goal: needs your decision …` asks you to decide; `Goal: … still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure, a `Verdict: blocked` review included. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; once ended, `pier task run --run <root> --prompt "<answer>" --rounds <n>` opens a new goal on that root with n reviews (`--rounds` beside `--after` refused), and `--run` without `--rounds` is a plain resume, out of the goal; `pier task cancel --run <root>` cancels the goal.
 
-`pier task finish --run <root> [--remove-worktree]` merges a reviewed goal's branch into its target: a `cheap` run in the main repo, its callback like `run`'s, the worktree removed only with the flag. Refused unless the root's goal ended review clean and the worktree's HEAD is the reviewed sha with a clean tree; a moved branch is re-reviewed first with `--run <root> --prompt "<what changed>" --rounds 1`.
+`pier task finish --run <root> [--remove-worktree]` merges a reviewed goal's branch into its target: a `cheap` run in the main repo, its callback like `run`'s, the worktree removed only with the flag; `--run <lead run>` merges an idle build lead's branch at its clean HEAD the same way. Refused unless the root's goal ended review clean and the worktree's HEAD is the reviewed sha with a clean tree; a moved branch is re-reviewed first with `--run <root> --prompt "<what changed>" --rounds 1`.
 
 ## Model choice
 
