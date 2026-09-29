@@ -18,6 +18,16 @@ Pier owns the record and the resumption. No caller can wait on its own restart.
   callback; a queued run stays queued. The one who asked for the restart is a
   session like any other: its turn resumes and reads "restart done" in its
   transcript.
+- **An agent restarts Pier only with the user's approval**, and then as
+  `systemctl --user restart --no-block pier` alone, the last command of its
+  turn — nothing chained after it, no `sleep`, no verification in the same
+  command (skills/pier-help §Service restart).
+- **The resume restores the session, not the shell.** A tool that was running
+  is cut and `restartInput` (`core/reply.ts`) tells the resumed turn to check
+  its outcome; the turn verifies what landed before continuing and never
+  replays the last step blindly.
+- **Work that must complete across a restart runs outside `pier.service`** —
+  an install, a verification — the way `pier update`'s updater does.
 - **The stop writes nothing the boot requires.** In-flight state is recorded
   as it happens (turn start, run start), so a SIGKILL or a power loss resumes
   the same way a clean stop does. What only a clean stop can add — the
@@ -53,7 +63,7 @@ The unit is unchanged: systemd's default `KillMode=control-group` sends
 SIGTERM to a tool's child as well, which is the abort Pi would have sent it;
 the default `TimeoutStopSec` never matters for a 3-second exit. A tool that
 blocks on `systemctl --user restart pier` without `--no-block` is cut like any
-other; with `--no-block` the issuer's turn ends cleanly.
+other; a turn racing the shutdown after `--no-block` is resumed like any other.
 
 ## Records
 

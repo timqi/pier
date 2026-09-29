@@ -151,16 +151,26 @@ truth.
 
 - Restart: Pier has no restart command; the supervisor that started it
   restarts it (`systemctl --user restart --no-block pier` for the installed
-  service). Running turns and agent runs resume after a few seconds; there is
-  nothing to wait for.
+  service). Running turns and agent runs resume after a few seconds.
+- No restart without the user's approval. An approved restart is
+  `systemctl --user restart --no-block pier` alone, the last command of the
+  turn: nothing chained after it, no `sleep`, no verification in the same
+  command.
+- The restart resumes the session, not the shell: a tool that was running is
+  cut, and the resumed turn is told to check its outcome. After the resume,
+  verify what landed and what did not before continuing; never replay the
+  last step blindly.
+- Work that must complete across the restart — an install, a verification —
+  runs in a process outside `pier.service`, the way `pier update`'s updater
+  does.
 - `pier reload`: channel adapters re-read configuration and idle, unwatched
   sessions reopen with current agent files on their next message. Streaming or
   watched sessions are not interrupted.
 - `pier update`: a separate updater backs up the database and installs the new
   package, then stops and starts the service. Running turns and agent runs
   resume after it comes back. All three are the operator's: `pier` and
-  `systemctl` on your PATH run them too, so never type one yourself — point
-  the user at them.
+  `systemctl` on your PATH run them too, so never run one without the user's
+  approval — point the user at them.
 
 ## Only the Console can change
 

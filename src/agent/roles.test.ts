@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DISPATCHER, lead, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
+import { DISPATCHER, lead, MODEL_TABLE, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
 
 describe("the dispatcher contract", () => {
   it("defaults code workers to goals and leaves the stage uncounted", () => {
-    expect(DISPATCHER).toContain("`--until merged`");
+    expect(DISPATCHER).toContain("`--until reviewed`");
+    expect(DISPATCHER).not.toContain("until merged");
     expect(DISPATCHER).not.toContain("· auto");
     expect(DISPATCHER).toContain("callback opens with a `Goal:` line");
     expect(DISPATCHER).toContain("stage is written once at dispatch with nothing to count");
@@ -11,15 +12,35 @@ describe("the dispatcher contract", () => {
 
   it("leaves the merge and the worktree's removal to the user, and asks first beyond it only for a seam or design", () => {
     expect(DISPATCHER).toContain("The merge and the worktree's removal are the user's decision, never yours or a child's");
-    expect(DISPATCHER).toContain("`review clean, waiting on you to merge`");
+    expect(DISPATCHER).toContain("`review clean at <sha7>, waiting on you to merge`");
     expect(DISPATCHER).toContain("Beyond the merge, ask the user first only for a seam or a design");
     expect(DISPATCHER).toContain("restart after the merge is still theirs");
   });
 
-  it("names the three tiers once, in one line, and leaves the skill's prose to the skill", () => {
+  it("sends a decision or leftover findings back through the loop, and a doubtful result to a child", () => {
+    expect(DISPATCHER).toContain('`pier task run --run <root> --prompt "<answer>" --until reviewed`, never a review by hand');
+    expect(DISPATCHER).toContain("goes to a child to check, never re-run by you");
+    expect(DISPATCHER).toContain("A child does: any edit outside this directory, any implementation, any review of a diff");
+  });
+
+  it("merges through a finishing run from the main repo, the removal approved only when the user said so", () => {
+    expect(DISPATCHER).toContain("launch a finishing run — fresh, `--model balanced --cwd <main repo>`");
+    expect(DISPATCHER).toContain("`Approved: merge <branch> into <target> at <reviewed sha>`");
+    expect(DISPATCHER).toContain("`Approved: remove worktree <path>` only when the user said so");
+    expect(DISPATCHER).toContain("build → review → wait for the user → finishing run");
+  });
+
+  it("carries the one model table in both launching contracts, and leaves the skill's prose to the skill", () => {
     // The skill is read on demand only, so the table the head fills every dispatch is here.
-    const line = DISPATCHER.split("\n").filter((l) => l.includes("`hardest`") && l.includes("`cheap`"));
-    expect(line).toHaveLength(1);
+    for (const contract of [DISPATCHER, lead("build")]) {
+      expect(contract).toContain(MODEL_TABLE);
+      expect(contract.split(MODEL_TABLE)).toHaveLength(2);
+    }
+    expect(MODEL_TABLE).toContain("A model the user names wins over the table");
+    for (const gone of ["`--thinking high` for", "the lead's own, never a worker's"]) {
+      expect(DISPATCHER).not.toContain(gone);
+      expect(lead("build")).not.toContain(gone);
+    }
     for (const owned of ["follows the change's difficulty", "for orientation, never for waiting", "substring of provider"]) {
       expect(DISPATCHER).not.toContain(owned);
     }
@@ -31,10 +52,8 @@ describe("the dispatcher contract", () => {
     expect(RUN_RESULT).toContain("`Approved:` line");
     expect(DISPATCHER).toContain("skills/pier-tasks: flags, callbacks, approvals");
     expect(lead("build")).toContain("in the same two parts as a worker's result (skills/pier-tasks)");
-    for (const contract of [DISPATCHER, lead("build")]) {
-      expect(contract).not.toContain("Approved:");
-      expect(contract).not.toContain("Needs your decision");
-    }
+    expect(lead("build")).not.toContain("Approved:");
+    for (const contract of [DISPATCHER, lead("build")]) expect(contract).not.toContain("Needs your decision");
     expect(DISPATCHER).toContain("never re-check it with your own commands");
   });
 
@@ -52,11 +71,12 @@ describe("the role contracts", () => {
     expect(lead("build")).toContain("## Build");
     expect(lead("build")).not.toContain("## Design");
     expect(lead("build")).toContain("Before the milestone that declares the build done");
-    expect(lead("build")).toContain("review worker of the integrated branch (`--model balanced`, `hardest` for a seam)");
+    expect(lead("build")).toContain("one review worker (`--model balanced`, `hardest` for a seam or a risk)");
     expect(lead("build")).toContain("its end arriving as a callback counted among the results owed");
-    expect(lead("build")).toContain("`--until merged`");
-    expect(lead("build")).toContain("never `wt merge`, so its worktree stays");
-    expect(lead("build")).toContain("Merging your branch into its target and removing any worktree are the user's decision, never yours");
+    expect(lead("build")).toContain("`--until reviewed`");
+    expect(lead("build")).toContain("`git merge <branch>` in this worktree, never into the target, so its worktree stays");
+    expect(lead("build")).toContain("carried out by a finishing run your supervisor launches from the main repo: you never run `wt merge` or `wt remove`");
+    expect(lead("build")).toContain("names the worktrees left for the user to decide on");
     expect(lead("build")).not.toContain("[Finalize design]");
     for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
   });
@@ -64,7 +84,16 @@ describe("the role contracts", () => {
   it("gives a worker the run contract for its life, and the refusal it would otherwise learn from the CLI", () => {
     expect(WORKER).toContain(RUN_RESULT);
     expect(WORKER).toContain("`pier task` is refused");
-    expect(WORKER).toContain("Never merge or remove a worktree on your own");
+    expect(WORKER).toContain("never merges into the target branch, never removes a worktree, and is never resumed to do either");
+    expect(WORKER).toContain("commit before you end your turn");
+    expect(WORKER).toContain("`wt -C <worktree> merge <target>`");
+    expect(WORKER).not.toContain("is the last command run in the worktree");
+  });
+
+  it("ends a result on one plain status line, a review on its verdict", () => {
+    expect(RUN_RESULT).toContain("the status line `Needs your decision — <the question, one line>` as the very last line, its details above it");
+    expect(RUN_RESULT).toContain("`Verdict: clean`, `Verdict: findings` or `Verdict: blocked — <why>`");
+    expect(RUN_RESULT).toContain("never inside a code block");
     expect(WORKER).not.toContain("Next-step buttons");
   });
 });

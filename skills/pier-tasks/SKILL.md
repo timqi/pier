@@ -13,7 +13,7 @@ receipt); the others one line of JSON; exit 0; a refusal is a `task:` line, exit
 ## Delegate, then end your turn
 
 ```sh
-pier task run --model balanced --prompt "Review src/auth/*.ts. Return file:line, issue, fix."
+pier task run --name "auth review" --model balanced --prompt "Review src/auth/*.ts. Return file:line, issue, fix."
 ```
 
 The prompt is the whole handoff (goal, constraints, absolute paths, output
@@ -33,7 +33,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
 | `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--role`/`--design`/`--session` beside it are refused |
-| `--until merged [--rounds <n>] [--review-model <tier|model>]` | a code worker's default: reviewed, fixed up to n rounds, stopped short of the merge, one callback opening `Goal:` |
+| `--until reviewed [--rounds <n>] [--review-model <tier|model>]` | a code worker's default: reviewed, fixed up to n rounds, stopped short of the merge, one callback opening `Goal:`; `--until merged` is an alias |
 
 `--bash` is for a command whose output needs no model **and** runs too long to
 hold your turn; a quick one belongs in your own shell, where `&` and `wait`
@@ -43,12 +43,19 @@ it printed.
 
 A child's result follows the worker contract — conclusion (paths, risks,
 unverified points, ending with the final state it verified, which you trust),
-then `Needs your decision` only when something does; it stops only on a
+then a status line only when something needs one; it stops only on a
 destructive step or a question only you can answer — answer with
 `--run <id> --prompt`; a step the user approved goes in the prompt as
 `Approved: <step>`. Core owns the join: never aggregate members by hand.
-A goal callback opens with one of four lines: `Goal: review clean, waiting on you to merge` or `Goal: review clean after N review rounds, waiting on you to merge` means ready, unmerged; `Goal: needs your decision` or `Goal: needs your decision after N review rounds` asks you to decide; `Goal: N review rounds, still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure. The cap defaults to 3 rounds and `--rounds` accepts 1–9. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; `pier task cancel --run <root>` cancels the goal.
-The merge and the worktree's removal are the user's decision, never a worker's or a lead's own: a prompt never tells a child to merge until the user said yes, and then `--run <id> --prompt` carries it as `Approved: merge into <target> and remove the worktree`.
+
+A result's status line is its last non-blank line, plain text (no bold,
+bullet or heading), never inside a code block, in English, at most one per
+result; one of `Verdict: clean` · `Verdict: findings` ·
+`Verdict: blocked — <why>` (a review's) · `Needs your decision — <the question, one line>`.
+
+A goal callback opens with one of four lines: `Goal: review clean at <sha7>, waiting on you to merge` (or `… after N review rounds, …`) means ready, unmerged; `Goal: needs your decision` (or `… after N review rounds`) asks you to decide; `Goal: N review rounds, still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure, a `Verdict: blocked` review included. The cap defaults to 3 rounds and `--rounds` accepts 1–9. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; once ended, the user's answer goes back through the loop with `pier task run --run <root> --prompt "<answer>" --until reviewed` (cap and review model the original launch's; `--rounds`/`--review-model` beside it refused); `pier task cancel --run <root>` cancels the goal.
+
+The merge and the worktree's removal are the user's decision, never a worker's or a lead's own, and no build session is resumed to do either: on the user's yes, a finishing run — fresh, `--model balanced --cwd <main repo>` — gets `Approved: merge <branch> into <target> at <reviewed sha>`, and `Approved: remove worktree <path>` only when the user said so: approval to merge is not approval to remove worktrees.
 
 ## Model choice
 
@@ -57,15 +64,17 @@ The merge and the worktree's removal are the user's decision, never a worker's o
 operator pinned on the menu; thinking follows the pin, `--thinking`
 overrides (`off/minimal/low/medium/high/xhigh/max`).
 
-| Work | `--model` |
-| --- | --- |
-| lead; design, architecture | `hardest` |
-| coding a feature or a fix; integration | `balanced` |
-| research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
+| Work | `--model` | `--thinking` |
+| --- | --- | --- |
+| design lead | `hardest` | `high` |
+| build lead | `hardest` | `medium` |
+| a feature, a fix, integration, a finishing run | `balanced` | the pin |
+| a review | the builder's tier; `hardest` when the change touches a seam or looks risky | the pin |
+| research, summaries, lookups, mechanical edits | `cheap` | the pin |
 
-A review takes the builder's tier, `hardest` when the change touches a seam
-or looks risky — `--review-model` on a goal, `--model` on a review you launch
-yourself; it is your judgement of the task, the loop reads no diffs.
+A model the user names wins over the table. A review's model is
+`--review-model` on a goal, `--model` on a review you launch yourself; it is
+your judgement of the task, the loop reads no diffs.
 
 Any other name is a substring of provider or id ("let gpt review it" is
 `--model gpt`); none or several hits lists the pins. `--model ?` prints the

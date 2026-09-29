@@ -34,7 +34,7 @@ the one validator of the params object.
 
 ```
 pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
-        [--thinking <level>] [--role lead [--design]] [--until merged [--rounds <n>] [--review-model <tier|model>]]
+        [--thinking <level>] [--role lead [--design]] [--until reviewed [--rounds <n>] [--review-model <tier|model>]]
         [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
@@ -55,12 +55,19 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   coming to it, or a run that did not succeed; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a
   milestone".
-- **`--until merged`**: rides as `launch.until` on a fresh `--prompt` run,
-  the root of a goal (`tasks/goals.ts`): reviewed by a run Pier launches,
-  fixed by resuming the worker, ended on a clean review with the merge left
-  to the user; refused beside `--bash`,
-  `--task-id`, `--session`, `--run`, `--role` (argv), in a `--member` or with
+- **`--until reviewed`**: rides as `launch.until: "reviewed"` on a fresh
+  `--prompt` run, the root of a goal (`tasks/goals.ts`): reviewed by a run Pier
+  launches, fixed by resuming the worker, ended on a clean review with the
+  merge left to the user; a review ending `Verdict: blocked — <why>` ends the
+  goal `failed`. `--until merged` is an alias, normalized to `reviewed` at
+  `definitions.ts`, a stored `until: "merged"` included. Refused beside
+  `--bash`, `--task-id`, `--session`, `--role` (argv), in a `--member` or with
   `--callback none` (server).
+- **`--run <root> --prompt … --until reviewed`**: accepted only when that run
+  is a goal's root whose goal has ended; the resume opens a new goal on the
+  resumed run, its cap and review model the original launch's (`--rounds`,
+  `--review-model` beside it refused). Beside any other `--run`, `--until` is
+  refused.
 - **`--rounds <n>`**: rides as `launch.rounds`, the fix rounds the goal allows
   (1–9, default 3) before it ends on the user; refused without `--until`.
 - **`--review-model <tier|model>`**: rides as `launch.reviewModel`, the
@@ -76,7 +83,8 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only; drop them to steer or follow up`). `--run` takes nothing
-  but `--prompt`, `--after` and `--callback*`.
+  but `--prompt`, `--after`, `--callback*` and, on an ended goal's root,
+  `--until reviewed`.
 - **Batch**: the first `--member` switches `run` to a group. Flags before it
   are every member's defaults; each `--member` opens one member whose flags
   override them; a `--task-id` member takes no defaults and refuses its own
@@ -229,7 +237,7 @@ A session's role is fixed by the run that made it, for the session's life
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session represented in the head's history counts as the one
 that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
-`parentRunId` links only a `task` action's child, which a cancel walks. The run contract (`RUN_RESULT`, `agent/roles.ts`) fixes the result's shape — the conclusion, then `Needs your decision` only when something does — and the stop rule: reversible choices are the run's own, named in the result; a destructive or irreversible step, or a question only the reader can answer, ends the turn with it, unless the prompt names the step on an `Approved:` line; the conclusion ends with the verified final state. A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
+`parentRunId` links only a `task` action's child, which a cancel walks. The run contract (`RUN_RESULT`, `agent/roles.ts`) fixes the result's shape — the conclusion, then only when something needs one the status line `Needs your decision — <question>` as the last line, plain text, outside code blocks, a review's `Verdict: clean|findings|blocked — <why>` in its place — and the stop rule: reversible choices are the run's own, named in the result; a destructive or irreversible step, or a question only the reader can answer, ends the turn with it, unless the prompt names the step on an `Approved:` line; the conclusion ends with the verified final state. A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
 
 ## Skill
 

@@ -38,11 +38,11 @@ delivery.
   phase (`TaskStore.leads`): `design` when its creating run carries
   `launch.design` (`--design`, set by the head only for a product or architecture
   design the user finalizes), `build` for any other lead.
-- A worker launched `--until merged` is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead may launch one too and reviews its own integrated branch before its done milestone.
-- The merge into the target and every worktree's removal are the user's decision: a goal ends on a clean review, a lead integrates workers with `git merge` and its done milestone ends on the branch ready, and a worker or lead runs `wt merge`/`wt remove` only when resumed with the user's yes as an `Approved:` step.
-- Models are the tiers of [pier-tasks §Model
-  choice](../../skills/pier-tasks/SKILL.md#model-choice); a lead is `hardest`,
-  `--thinking high` to design and `medium` to build.
+- A code change runs build → review → wait for the user → finishing run.
+- A worker launched `--until reviewed` is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead may launch one too and reviews its own integrated branch before its done milestone.
+- A lead integrates workers into its own branch (`git merge <branch>` in its worktree, their worktrees kept) and never merges into the target; its done milestone ends on the branch ready and names the worktrees left.
+- The merge into the target and every worktree's removal are the user's decision; no build session runs `wt merge`/`wt remove` or is resumed to. On the user's yes the head launches a finishing run, `--model balanced --cwd <main repo>`, carrying `Approved: merge <branch> into <target> at <reviewed sha>` and, only when the user said so, `Approved: remove worktree <path>`.
+- Models are `MODEL_TABLE` (`agent/roles.ts`), carried by `DISPATCHER` and `lead("build")`.
 
 ### Milestones
 
@@ -154,7 +154,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
   backlog in MEMORY.md.
-- A `--until merged` run's goal is read from the ledger (`TaskStore.goalOf`,
+- A `--until reviewed` run's goal is read from the ledger (`TaskStore.goalOf`,
   by the run's session), never from the stage; a run queued in that session
   after the goal ended (the user's answer, the merge) carries it no more.
 - Every design lead not closed whose runs have not reported `Design final:`
@@ -166,7 +166,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
   it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
   `core/reply.ts`), a lead's ` · workers: <counts>` and a goal's root's
-  ` · until merged: <text>` — `working`, `fix round n/cap`, `review`,
+  ` · until reviewed: <text>` — `working`, `fix round n/cap`, `review`,
   `re-review n/cap` while live; `review clean, waiting on you`, `waiting on you`,
   `cap/cap rounds, still findings`, `failed: <reason>` once ended; `Nothing open.` when
   both are empty.

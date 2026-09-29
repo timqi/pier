@@ -13,10 +13,11 @@ lives in prompt text the head must copy forward, so it drifts.
 
 ## Decisions
 
-- **One goal kind, in code.** A worker run launched `--until merged` is the
-  root of a *goal*: a deterministic loop in `tasks/goals.ts`, driven from
-  `TaskService.settled`, no model in the loop. There is no goal language —
-  `merged` is the only end today, and a second kind is a second design.
+- **One goal kind, in code.** A worker run launched `--until reviewed`
+  (`--until merged` an alias) is the root of a *goal*: a deterministic loop in
+  `tasks/goals.ts`, driven from `TaskService.settled`, no model in the loop.
+  There is no goal language — `reviewed` is the only end today, and a second
+  kind is a second design.
 
 - **The loop.**
 
@@ -26,8 +27,9 @@ lives in prompt text the head must copy forward, so it drifts.
   | `review` | `Verdict: clean` | end `done`: the merge and the worktree's removal wait on the user |
   | `review` | `Verdict: findings`, round < cap | `work` again: resume the worker with the findings, round + 1 |
   | `review` | `Verdict: findings`, round = cap | end `cap` |
-  | any | `Needs your decision` in the result | end `decision` |
-  | any | failed · cancelled · interrupted · timed out · no verdict | end `failed` |
+  | `review` | `Verdict: blocked — <why>` | end `failed`, reason `blocked — <why>` |
+  | any | status line `Needs your decision — …` | end `decision` |
+  | any | failed · cancelled · interrupted · timed out · no verdict · several status lines | end `failed` |
 
   A round is one findings → fix → re-review trip; the first review counts
   nothing. Cap 3, `--rounds <n>` overrides (1–9). No time or
@@ -39,21 +41,25 @@ lives in prompt text the head must copy forward, so it drifts.
   lead's turns do (`LEAD_TURN`). The end delivers one callback to the root
   run's callback target, the head's usual card: the last run's result, headed
   by a line the head reads without parsing —
-  `Goal: review clean after 1 review round, waiting on you to merge` · `Goal: needs your decision after 2 review rounds` ·
+  `Goal: review clean at <sha7> after 1 review round, waiting on you to merge` · `Goal: needs your decision after 2 review rounds` ·
   `Goal: 3 review rounds, still findings` · `Goal: failed at review — <why>`.
   The runs in between are ordinary ledger rows: the status panel, the run
   chips and `pier task runs` show each as it happens, so nothing that
   happened looks like nothing happening; the chat is quiet until the end.
 
-- **The verdict is a line.** The review run is a fresh worker Pier launches
-  itself (`triggerSource: "goal"`, `invokedBySessionId` the goal's
+- **The verdict is a status line.** The review run is a fresh worker Pier
+  launches itself (`triggerSource: "goal"`, `invokedBySessionId` the goal's
   supervisor, so ownership and cancel hold), in the worker's worktree, prompt
   rendered by `goals.ts`: review the branch's diff against its base, output
-  `file:line · issue · fix`, and **end with one line `Verdict: clean` or
-  `Verdict: findings`** (`VERDICT = /^Verdict: (clean|findings)$/m`, last
-  match wins). No such line is `failed` with reason `no verdict`, reported,
-  never guessed. `Needs your decision` is already the run contract's heading
-  (`RUN_RESULT`); the goal reads it with `/^Needs your decision/m`.
+  `file:line · issue · fix`, and end on the status line. Every run result and
+  review follows one protocol (`RUN_RESULT`), parsed only by `goals.ts`
+  (`statusLine(text)`): the status line is the last non-blank line outside
+  fenced code blocks, plain text, English, one of `Verdict: clean` ·
+  `Verdict: findings` · `Verdict: blocked — <why>` ·
+  `Needs your decision — <the question, one line>`. A second line outside
+  fences matching the same pattern → `failed`, `several status lines`; a
+  review with none → `failed`, `no verdict`, reported, never guessed; a work
+  step with none proceeds to review.
 
 - **The review's model** is named at dispatch, by difficulty: the head sets
   `--review-model <tier|model>` per the skill's rule (the builder's tier;
@@ -69,13 +75,16 @@ lives in prompt text the head must copy forward, so it drifts.
   - review: the branch, base and worktree, the output shape, the verdict line.
   The root prompt is still the head's; it names the merge target and stops
   short of merging, as `WORKER` already says. The merge runs only on the
-  user's yes: the head resumes the worker `--run <root>` out of the goal with
-  the merge and the worktree's removal as an `Approved:` step.
+  user's yes, as a finishing run the head launches fresh,
+  `--model balanced --cwd <main repo>`, carrying
+  `Approved: merge <branch> into <target> at <reviewed sha>` and, only when
+  the user said so, `Approved: remove worktree <path>`; no build session is
+  resumed to merge.
 
 - **Open items derive the stage from the goal, not from the head.** The head
   writes `<open>problem — <stage> (run <root>)</open>` once, at dispatch, with
   nothing to count. `openItems()` finds the goal by the run's session
-  (`TaskStore.goalOf`) and renders it on the run line: ` · until merged:
+  (`TaskStore.goalOf`) and renders it on the run line: ` · until reviewed:
   review round 2/3` while live, `review clean, waiting on you`, `waiting on you`, `3/3 rounds`,
   `failed: <why>` when ended. `openStatus` reads the goal before the stage:
   live → `running`; `decision`, `cap` or `done` → `waiting on you`; `failed` →
@@ -104,7 +113,7 @@ lives in prompt text the head must copy forward, so it drifts.
 
 - **Leads own their loop.** A build lead keeps reviewing its workers' branches
   itself (`LEAD_BUILD` unchanged there) and may launch a worker `--until
-  merged` like the head can — the goal's end reaches the lead as a callback,
+  reviewed` like the head can — the goal's end reaches the lead as a callback,
   counted as a result owed for the milestone. Its own branch: `LEAD_BUILD`
   gains one line — before the milestone that declares the build done, launch
   one review worker of the integrated branch and act on its findings. No
@@ -114,7 +123,9 @@ lives in prompt text the head must copy forward, so it drifts.
 - **Control while live.** `pier task run --run <root>` addresses the goal:
   the worker running → steer, as today; a review or a fix resume in flight →
   refused (`task: run <id> is in a goal (review round 2/3); cancel it or wait
-  for its end`); ended → resume, out of the goal. `pier task cancel --run
+  for its end`); ended → resume, out of the goal, or, with `--until reviewed`
+  beside it, a new goal on the resumed run (cap and review model the
+  original launch's). `pier task cancel --run
   <root>` cancels the goal: its current run and the record, end `failed` with
   reason `cancelled by <session>`. A restart resumes the current agent run on
   its id; on boot `goals.recover()` advances any goal whose current run is
@@ -126,7 +137,7 @@ lives in prompt text the head must copy forward, so it drifts.
   supervisorSessionId, cap, round, step, outcome, reason, reviewModel), the
   store's document pattern. A run of a goal carries `goalId` in its `json`
   (no column) so the ledger links each step; the root
-  run's `launch` carries `until: "merged"`, `rounds`, `reviewModel` as the
+  run's `launch` carries `until: "reviewed"`, `rounds`, `reviewModel` as the
   record of what was asked (`AgentLaunchPolicy`, a seam change).
 
 ## Changes
@@ -170,8 +181,8 @@ lives in prompt text the head must copy forward, so it drifts.
   change, and the list would be one more thing to maintain.
 - The generic auto-continue is dropped (above).
 - A user asking for a review of a branch is an ordinary worker; the loop is
-  only `--until merged`.
+  only `--until reviewed`.
 
 ## Open
 
-- Flag names: `--until merged --rounds 3 --review-model hardest`?
+- Flag names: `--until reviewed --rounds 3 --review-model hardest`?
