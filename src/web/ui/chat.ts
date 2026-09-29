@@ -4,7 +4,7 @@
 
 import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
+import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
@@ -31,7 +31,7 @@ import {
   STATE_STYLE,
   stateGlyph,
 } from "./turn-activity.js";
-import { arriveRow, resetTopics, tagReply, topicColour } from "./topics.js";
+import { tagReply } from "./topics.js";
 import type {
   BackgroundRun,
   ChatTurn,
@@ -100,7 +100,6 @@ function openBubble(): HTMLElement {
   if (readonlyRows) bubble.dataset.readonly = "";
   if (!bulk) bubble.dataset.enter = "";
   turnsPane.append(bubble);
-  arriveRow(bubble);
   return bubble;
 }
 
@@ -228,6 +227,26 @@ export function revealTurn(role: "user" | "assistant", at: number): boolean {
   return true;
 }
 
+/** A topic's newest reply on screen, or the newest above `from`. */
+function lastOfTopic(problem: string, from?: HTMLElement): HTMLElement | null {
+  const rows = [...turnsPane.children] as HTMLElement[];
+  for (let i = (from ? rows.indexOf(from) : rows.length) - 1; i >= 0; i--) {
+    if (rows[i]!.dataset.kind === "assistant" && rows[i]!.dataset.topic === problem) return rows[i]!;
+  }
+  return null;
+}
+
+/** How a status panel row lands (ui/drawer.ts). `false` when no reply of the topic is on screen. */
+export function revealTopic(problem: string): boolean {
+  const row = lastOfTopic(problem);
+  if (!row) return false;
+  reveal(row);
+  return true;
+}
+
+/** A tag's click: the topic's previous reply; the earliest on screen lights itself. */
+const jumpBack = (row: HTMLElement): void => reveal(lastOfTopic(row.dataset.topic ?? "", row) ?? row);
+
 function reveal(row: HTMLElement): void {
   follow = false; // walking back into history is leaving the tail
   // Centred, unless the row is taller than the pane: a long reply centred
@@ -350,11 +369,9 @@ export function appendTurn(
     timeTimer ??= setInterval(paintTimes, 60_000);
     time.title = stampTime(stamp);
     turnsPane.append(time);
-    arriveRow(time);
   }
   if (mid) mid.before(row);
   else if (!pending) turnsPane.append(row);
-  arriveRow(row); // a filter set mid-turn hid the pending bubble; its result shows it
   trimRows();
   scrollBottom();
   return node;
@@ -415,9 +432,6 @@ export const excerptText = (excerpt: string): string => splitReply(excerpt).text
 function quoteBlock(quote: Quote): HTMLElement {
   const block = h("button", "quote-block mb-1.5 block w-full cursor-pointer text-left");
   block.setAttribute("type", "button");
-  // The marker may sit past the excerpt's cut; the source row on screen still knows.
-  const topic = replyTopic(quote.excerpt) ?? quoteSource(quote)?.dataset.topic;
-  if (topic) block.style.setProperty("--topic", topicColour(topic));
   block.append(
     h("div", "font-mono text-[10.5px] leading-tight opacity-70", `${quote.role} · ${quote.when.slice(11)}`),
     h("div", "quote-excerpt text-[12.5px] leading-snug opacity-85", excerptText(quote.excerpt)),
@@ -508,7 +522,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     endTurn();
     card.dataset.kind = "system";
     turnsPane.append(card);
-    arriveRow(card);
     trimRows();
   } else {
     const cause = chip({ glyph: glyphEl(), label: state ? `${label} \u00b7 ${state}` : label, labelCls, ...(name ? { name } : {}) }, card);
@@ -746,7 +759,7 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
 
 function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
   const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
-  tagReply(node.parentElement!, raw);
+  tagReply(node.parentElement!, raw, jumpBack);
 }
 
 // --- streaming text ---------------------------------------------------------------
@@ -868,7 +881,6 @@ export function resetChat(): void {
   stopStreamPaint();
   resetActivity();
   resetSuggestions();
-  resetTopics();
 }
 
 /** An empty pane while the snapshot loads is indistinguishable from an empty session (§5). */

@@ -319,7 +319,7 @@ describe("the reply quote", () => {
     expect(tools(user)).toEqual(["Edit message", "Reply to this message"]);
     expect(tools(reply)).toEqual(["Reply to this message"]);
     fake(reply.querySelector(".message-tools")!.querySelector("button")).onclick!();
-    // The raw text, marker and all: the source's topic paints the quote.
+    // The raw text, marker and all.
     expect(quote).toHaveBeenCalledWith({ role: "assistant", at: noon + 1000, text: "Merged.\n<topic>auth</topic>" });
     chat.renderSnapshot([{ role: "user", text: "old", at: noon }], "idle", [], true);
     expect(tools(fake(pane().querySelectorAll("[data-kind='user']").at(-1)))).toEqual(["Reply to this message"]);
@@ -331,7 +331,8 @@ describe("the reply quote", () => {
     const user = fake(chat.appendTurn("user", stored, false, noon + 60_000).parentElement);
     const block = fake(user.querySelector(".quote-block"));
     expect(block.textContent).toBe("assistant · 12:00Merged.\nNext: deploy.");
-    expect(block.style.getPropertyValue("--topic")).toMatch(/^oklch/);
+    // The bar is neutral: a topic's colour lives on its tag alone.
+    expect(block.style.getPropertyValue("--topic")).toBe("");
     expect(fake(user.querySelector(".whitespace-pre-wrap")).textContent).toBe("ship it");
     // Editing resends the quote with the words.
     expect(fake(user.querySelector(".whitespace-pre-wrap")).dataset.raw).toBe(stored);
@@ -391,8 +392,7 @@ describe("the turn's bubble", () => {
     activity = await import("./turn-activity.js");
   });
 
-  it("tags an `<open>` reply and the user message above it; a `<done>` marks the topic done", async () => {
-    const topics = await import("./topics.js");
+  it("tags an `<open>` reply and the user message above it; a tag jumps to the topic's reply before", () => {
     chat.renderSnapshot([
       { role: "user", text: "review auth please", at: 1 },
       { role: "assistant", text: "On it.\n<open>auth review — worker running</open>" },
@@ -406,27 +406,29 @@ describe("the turn's bubble", () => {
     expect(a1!.querySelector(".topic-tag")!.textContent).toBe("auth review");
     expect(a1!.textContent).not.toContain("<open>");
     for (const r of [u3, a3]) expect(r!.dataset.topic).toBeUndefined();
-    expect(topics.seenTopics()).toEqual([{ problem: "auth review", done: true }]);
-    // The filter keeps the topic's rows and hides the rest.
-    topics.setTopicFilter("auth review");
-    expect([u1, a1, u2, a2, u3, a3].map((r) => r!.hidden)).toEqual([false, false, false, false, true, true]);
-    chat.resetChat();
-    expect(topics.topicFilter()).toBeNull();
-    expect(topics.seenTopics()).toEqual([]);
+    a2!.querySelector(".topic-tag")!.onclick!();
+    expect("reveal" in a1!.dataset).toBe(true);
+    // The user message's tag jumps past its own reply's exchange, to the reply before it.
+    delete a1!.dataset.reveal;
+    u2!.querySelector(".topic-tag")!.onclick!();
+    expect("reveal" in a1!.dataset).toBe(true);
+    // The earliest on screen lights itself: the jump happened, there is nothing above.
+    a1!.querySelector(".topic-tag")!.onclick!();
+    expect("reveal" in a1!.dataset).toBe(true);
+    expect("reveal" in u1!.dataset).toBe(false);
+    // The status panel's landing: the newest reply of the topic, or false.
+    expect(chat.revealTopic("auth review")).toBe(true);
+    expect("reveal" in a2!.dataset).toBe(true);
+    expect(chat.revealTopic("deploy")).toBe(false);
   });
 
-  it("puts the topic tag first in the chip row, whichever of tag and chip came first", async () => {
-    const topics = await import("./topics.js");
+  it("puts the topic tag first in the chip row, whichever of tag and chip came first", () => {
     chat.appendTurn("user", "go", false, 1);
     callback("r1");
     chat.completeTurn("Other.\n<topic>deploy</topic>", { completedAt: 4, durationMs: 1, tokens: 1 });
     expect(chips()).toEqual(["topic-tag", "system"]);
     expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
     expect(bubble().dataset.topic).toBe("deploy");
-    expect(bubble().style.getPropertyValue("--topic")).toMatch(/^oklch/);
-    topics.setTopicFilter("auth");
-    expect(bubble().hidden).toBe(true);
-    topics.setTopicFilter(null);
     // A bare tagged reply grows its chip row when a run lands after it.
     chat.appendTurn("user", "more", false, 5);
     chat.completeTurn("Later.\n<topic>docs</topic>", { completedAt: 6, durationMs: 1, tokens: 1 });
@@ -436,21 +438,6 @@ describe("the turn's bubble", () => {
     expect(chips()).toEqual(["topic-tag", "background-run"]);
     expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
     expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
-  });
-
-  it("shows the bubble a mid-turn filter change hid once its reply lands", async () => {
-    const topics = await import("./topics.js");
-    chat.appendTurn("user", "go", false, 1);
-    chat.completeTurn("On it.\n<open>auth</open>", { completedAt: 2, durationMs: 1, tokens: 1 });
-    callback("r1");
-    activity.activityToolStart(1, "c1", "bash", {});
-    topics.setTopicFilter("auth");
-    expect(bubble().hidden).toBe(true);
-    activity.activityToolEnd("c1", false, "ok");
-    chat.completeTurn("Other.\n<topic>deploy</topic>", { completedAt: 3, durationMs: 1, tokens: 1 });
-    expect(chips()).toEqual(["topic-tag", "system", "activity"]);
-    expect(bubble().hidden).toBe(false);
-    expect("live" in bubble().dataset).toBe(true);
   });
 
   it("opens the bubble with its first chip and fills it with the reply; a plain reply has no chip row", () => {
@@ -639,7 +626,7 @@ describe("the turn's bubble", () => {
     chat.appendTurn("error", "overloaded");
     const live = shape();
     expect(live).toEqual([
-      ["time", "deploy", [], undefined], ["user", "deploy", [], undefined],
+      ["time", undefined, [], undefined], ["user", "deploy", [], undefined],
       ["assistant", "deploy", ["topic-tag", "system", "activity", "background-run"], "done"],
       ["assistant", undefined, ["activity"], "interrupted"],
       ["error", undefined, ["activity"], "failed"],

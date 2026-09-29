@@ -35,11 +35,8 @@ let sessions: Row[] = [];
 let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
-let topics: { problem: string; done: boolean }[] = [];
-let filter: string | null = null;
 const select = vi.fn();
-// As main.ts wires it: the filter moves, and the panel redraws from it.
-const setFilter = vi.fn((p: string | null) => { filter = p; drawer.renderDrawer(); });
+const showTopic = vi.fn(async (_problem: string, _elsewhere: boolean) => true);
 
 beforeEach(async () => {
   vi.resetModules();
@@ -51,24 +48,21 @@ beforeEach(async () => {
   chain = [];
   current = null;
   open = null;
-  topics = [];
-  filter = null;
   drawer.initDrawer({
-    sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open,
-    topics: () => topics, filter: () => filter, setFilter,
+    sessions: () => sessions, currentId: () => current, select, chain: () => chain, openContinuous: vi.fn(), open: () => open, showTopic,
   });
 });
 afterEach(() => vi.restoreAllMocks());
 
 const chip = () => doc.querySelector("#status-chip")!;
 const panelRows = () => doc.querySelectorAll(".session-open");
-/** A row as it reads: label, who, second line, status. */
+/** A row as it reads: label, who, second line, status (none while running). */
 const cells = (b: import("./dom.testkit.js").FakeElement): string[] => {
   const name = b.children.at(-1);
   const status = b.parentElement!.querySelector(".row-status");
   const [line, detail] = name!.children;
   const [label, who] = line!.children;
-  return [label!.textContent, who?.textContent ?? "", detail!.textContent, status!.textContent];
+  return [label!.textContent, who?.textContent ?? "", detail!.textContent, status?.textContent ?? ""];
 };
 const labels = () => panelRows().map((b) => cells(b)[0]);
 
@@ -159,7 +153,7 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   drawer.renderDrawer();
   chip().onclick?.();
   expect(menu.openPanel).toHaveBeenCalledOnce();
-  const list = doc.querySelector("[data-list='running']")!;
+  const list = doc.querySelector("[data-list='status']")!;
   expect(labels()).toEqual(["b", "a"]);
   expect(panelRows()[0]!.getAttribute("aria-current")).toBe("page");
 
@@ -176,7 +170,7 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   sessions = [row("c", { activeRuns: 1, createdAt: 3 }), ...sessions];
   drawer.renderDrawer();
   expect(labels()).toEqual(["b", "c", "a"]);
-  expect(list.querySelectorAll(".session-open").map((b) => cells(b)[0])).toEqual(["c", "a"]);
+  expect(list.querySelectorAll(".session-open").map((b) => cells(b)[0])).toEqual(["b", "c", "a"]);
 });
 
 it("does not open with nothing to show, and closes when it runs out", () => {
@@ -200,9 +194,9 @@ it("does not open with nothing to show, and closes when it runs out", () => {
   expect(menu.closeMenu).toHaveBeenCalledOnce();
 });
 
-// One row per session, grouped by who acts next: an item names its status in
-// words, its stage and runs as the second line, and opens its run's session.
-it("groups the rows waiting on you over in progress, each session once, an item as problem · who · detail · status", () => {
+// One row per session, grouped by who acts next: an item is its problem and its
+// stage (its runs where it has none), with its status in words unless running.
+it("lists what waits on you first, in one list, each session once, an item as problem · stage · status", () => {
   vi.spyOn(Date, "now").mockReturnValue(10 * 60_000);
   const run = (runId: string, over: Partial<import("../../tasks/types.js").OpenRun> = {}) =>
     ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
@@ -223,97 +217,88 @@ it("groups the rows waiting on you over in progress, each session once, an item 
   };
   drawer.renderDrawer();
   drawer.openDrawer();
-  const group = (name: string) => doc.querySelector(`[data-list='${name}']`)!.querySelectorAll(".session-open").map(cells);
-  expect(group("waiting")).toEqual([
-    ["子任务 thread", "lead · design", "run lead1abc… succeeded 10m ago · design lead narrowing scope (running)", "waiting on you"],
+  expect(doc.querySelectorAll("[data-list]").length).toBe(1);
+  expect(doc.querySelector("[data-list='status']")!.querySelectorAll(".session-open").map(cells)).toEqual([
+    ["子任务 thread", "", "design lead narrowing scope (running)", "waiting on you"],
     ["free", "", "turn finished — not viewed yet · active 10m ago", "waiting on you"],
-  ]);
-  // Done or stopped asks nothing of the user: it waits on nobody, so it is in progress.
-  expect(group("running")).toEqual([
+    // Done or stopped asks nothing of the user: it sorts below.
     ["0.2.1 清理上线", "", "merged", "pending release"],
     ["gone", "", "", "stopped"],
-    ["auth review", "worker", "run w1 running 5m · worker running", "running"],
+    ["auth review", "", "worker running", ""],
     ["Queued one", "", "run q1 queued 1m", "queued"],
     ["queued lead", "lead · build", "run queued · active 10m ago", "queued"],
   ]);
   expect(chip().textContent).toBe("1 running · 2 needs you");
+  // The status that asks something of the reader is the solid one.
+  const tag = (label: string) => doc.querySelectorAll(".row-status").find((t) => t.textContent === label)!;
+  expect(tag("waiting on you").classList.contains("bg-amber-700")).toBe(true);
+  expect(tag("queued").classList.contains("bg-amber-700")).toBe(false);
   // The lead's session is the item's row, not a row of its own.
   expect(labels()).not.toContain("多入口统一对话");
-  panelRows()[0]!.onclick?.();
-  expect(select).toHaveBeenLastCalledWith("s-lead1abcdef");
+  // The runs and who runs them are the tooltip's.
+  expect(doc.querySelector("[data-session-id='s-w1']")!.title).toBe("auth review\nworker running\nrun w1 running 5m\nworker");
 });
 
-it("hides a group's head while it has no rows", () => {
-  sessions = [row("a", { state: "streaming" })];
-  drawer.renderDrawer();
-  drawer.openDrawer();
-  const head = (name: string) => doc.querySelector(`[data-list='${name}']`)!.previousElementSibling!;
-  expect(head("waiting").classList.contains("hidden")).toBe(true);
-  expect(head("running").classList.contains("hidden")).toBe(false);
-  expect(head("running").classList.contains("mt-2")).toBe(false);
-  sessions = [...sessions, row("b", { unread: true })];
-  drawer.renderDrawer();
-  expect(head("waiting").classList.contains("hidden")).toBe(false);
-  expect(head("running").classList.contains("mt-2")).toBe(true);
-});
-
-it("gives each item row its topic's dot and an only-this-topic switch, one on at a time", async () => {
+it("gives each item its topic's dot, pulsing while a run of it is live, and a session its mark", async () => {
   const { topicColour } = await import("./topics.js");
-  open = { items: [{ problem: "a", stage: "", runs: [], status: "running" }, { problem: "b", stage: "", runs: [], status: "waiting on you" }], unlisted: [] };
+  const run = (state: "running" | "queued") =>
+    ({ runId: `r-${state}`, name: state, state, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null });
+  open = {
+    items: [{ problem: "a", stage: "", runs: [run("running")], status: "running" }, { problem: "b", stage: "", runs: [], status: "waiting on you" }],
+    unlisted: [run("queued")],
+  };
   sessions = [row("s", { state: "streaming" })];
   drawer.renderDrawer();
   drawer.openDrawer();
-  const li = (id: string) => doc.querySelector(`[data-session-id='${id}']`)!;
-  const box = (id: string) => li(id).querySelector("input")!;
-  expect(li("item:a").querySelector(".session-open")!.children[0]!.style.background).toBe(topicColour("a"));
-  const sw = li("item:a").querySelector(".topic-switch")!;
-  expect(sw.getAttribute("aria-label")).toBe("Only this topic in the chat");
-  // Beside the open button, never inside it, and before the status.
-  expect(sw.closest("button")).toBeNull();
-  expect(sw.nextElementSibling!.classList.contains("row-status")).toBe(true);
-  // A session row has no topic to filter by.
-  expect(li("s").querySelector("input")).toBeNull();
-
-  box("item:a").checked = true;
-  box("item:a").onchange?.();
-  expect(setFilter).toHaveBeenLastCalledWith("a");
-  box("item:b").checked = true;
-  box("item:b").onchange?.();
-  expect(setFilter).toHaveBeenLastCalledWith("b");
-  expect([box("item:a").checked, box("item:b").checked]).toEqual([false, true]);
-  box("item:b").checked = false;
-  box("item:b").onchange?.();
-  expect(setFilter).toHaveBeenLastCalledWith(null);
+  const dot = (id: string) => doc.querySelector(`[data-session-id='${id}']`)!.querySelector(".session-open")!.children[0]!;
+  expect(dot("item:a").style.background).toBe(topicColour("a"));
+  expect(dot("item:a").classList.contains("animate-pulse")).toBe(true);
+  expect(dot("item:b").classList.contains("animate-pulse")).toBe(false);
+  expect(dot("item:queued").classList.contains("bg-neutral-400")).toBe(true);
+  expect(dot("item:queued").classList.contains("animate-pulse")).toBe(false);
+  expect(dot("s").classList.contains("bg-green-500")).toBe(true);
+  // No green `running` word: only a row that is not running says its status, and it still describes the row.
+  expect(doc.querySelectorAll(".row-status").map((t) => t.textContent)).toEqual(["waiting on you", "queued"]);
+  const b = doc.querySelector("[data-session-id='item:b']")!;
+  expect(b.querySelector(".row-status")!.getAttribute("id")).toBe(b.querySelector(".session-open")!.getAttribute("aria-describedby"));
+  expect(doc.querySelector("[data-session-id='item:a']")!.querySelector(".session-open")!.getAttribute("aria-describedby")).toBeNull();
 });
 
-it("lists the last done topics not open under Recently done, and keeps the chip for them", () => {
-  topics = ["a", "b", "c", "d", "e", "f", "g"].map((problem) => ({ problem, done: problem !== "a" }));
-  open = { items: [{ problem: "g", stage: "", runs: [], status: "running" }], unlisted: [] };
+it("lands an item on its topic's latest reply, else on its run's session, else stays where showTopic left it", async () => {
+  open = { items: [{ problem: "a", stage: "", runs: [{ runId: "w1", name: "w1", state: "running", targetSessionId: "s-w1", cwd: null, queuedAt: 0, finishedAt: null }], status: "running" }], unlisted: [] };
   drawer.renderDrawer();
   drawer.openDrawer();
-  const done = doc.querySelector("[data-list='done']")!;
-  // Most recently done first, of the last five; one still open stays in its own group.
-  expect(done.children.map((r) => r.textContent)).toEqual(["f", "e", "d", "c"]);
-  expect(done.previousElementSibling!.classList.contains("hidden")).toBe(false);
-  expect(done.querySelectorAll("input")).toHaveLength(4);
-  // The name is a button the arrows reach and \u21b5 flips; the whole panel is one walk.
-  const first = done.querySelector("button")!;
-  expect(first.getAttribute("aria-label")).toBe("f \u2014 done; only this topic in the chat");
-  first.onclick?.();
-  expect(setFilter).toHaveBeenLastCalledWith("f");
-  expect(done.closest("[data-list]")!.getAttribute("data-list")).toBe("done");
-  expect(done.parentElement!.getAttribute("data-list")).toBe("status");
-  // An item's status sits beside its button and still describes it.
-  const running = doc.querySelector("[data-list='running']")!;
-  const item = running.querySelector(".session-open")!;
-  expect(running.querySelector(".row-status")!.getAttribute("id")).toBe(item.getAttribute("aria-describedby"));
-
-  open = { items: [], unlisted: [] };
-  topics = [{ problem: "x", done: true }];
+  panelRows()[0]!.onclick?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(menu.closeMenu).toHaveBeenCalled();
+  // It has a session to fall back to, so no tail scroll first.
+  expect(showTopic).toHaveBeenLastCalledWith("a", true);
+  expect(select).not.toHaveBeenCalled();
+  showTopic.mockResolvedValueOnce(false);
+  panelRows()[0]!.onclick?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(select).toHaveBeenLastCalledWith("s-w1");
+  // No session to fall back to: the conversation's tail, which showTopic scrolled to, is the landing.
+  select.mockClear();
+  open = { items: [{ problem: "b", stage: "", runs: [], status: "waiting on you" }], unlisted: [] };
   drawer.renderDrawer();
-  expect(chip().textContent).toBe("topics");
-  expect(chip().classList.contains("hidden")).toBe(false);
-  topics = [];
+  drawer.openDrawer();
+  showTopic.mockResolvedValueOnce(false);
+  panelRows()[0]!.onclick?.();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(showTopic).toHaveBeenLastCalledWith("b", false);
+  expect(select).not.toHaveBeenCalled();
+});
+
+it("has no Recently done group, and no chip without a row", () => {
+  open = { items: [{ problem: "a", stage: "", runs: [], status: "running" }], unlisted: [] };
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  expect(doc.querySelector("[data-list='done']")).toBeNull();
+  open = { items: [], unlisted: [] };
   drawer.renderDrawer();
   expect(chip().classList.contains("hidden")).toBe(true);
 });

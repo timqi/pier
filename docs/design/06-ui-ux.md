@@ -36,13 +36,14 @@ updates this document.
   `<html data-accent>`; the manifest and icon take the preset's 600 step from
   the server's table. No colour math at runtime, no second palette; the one
   exception is a topic's colour (`topics.ts` `topicHue`), a hue hashed from
-  the open item's key so it holds across sessions and reloads without a table.
+  the open item's key so it holds across sessions and reloads without a table;
+  it paints the topic tag and the status panel's dot, never a bubble's edge.
 
 ## Layout
 
 - **One column**: the conversation fills the width without a permanent rail.
-- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's Waiting on you rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
-- **Status panel**: Waiting on you over In progress, one row per session — name and who, a second line for where it stands, one worded status tag — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
+- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's `waiting on you` rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
+- **Status panel**: one flat list, one row per session, what waits on you first — a dot (a topic's colour, pulsing while its run is live), the name, a second line for where it stands, and a worded status tag unless it is running, `waiting on you` the one solid tag, white on amber-700 — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
 - **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.
 - **Palette**: solid panel with floating-chrome edge and raised shadow; flat
@@ -104,8 +105,8 @@ updates this document.
   click, closing any other open chip in its row — one detail per bubble,
   other bubbles untouched; there is no global open. Mode, model, duration
   and ids are the opened head's, never the chip's. Chat command answers stay open cards.
-- A quote is a bar and two clamped lines at the top of the user's bubble, the
-  bar in the quoted topic's colour, the excerpt in the bubble's own type at a
+- A quote is a neutral grey bar and two clamped lines at the top of the
+  user's bubble, the excerpt in the bubble's own type at a
   step down; the row controls (Reply, Edit) share one gutter and one hover;
   on touch they are always shown, 44px, along the bubble's bottom edge.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback

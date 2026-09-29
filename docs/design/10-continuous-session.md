@@ -19,7 +19,7 @@ delivery.
 | worker | any other run's launched from a session | never |
 
 - The run that made a session fixes its role for the session's life
-  (`createdRole`, `TaskStore.roleOf`); when its session appears in In progress is
+  (`createdRole`, `TaskStore.roleOf`); when its session appears in the status panel is
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 - A worker opens without the `pier-tasks` skill and with `<pier>/worker.md`
   (`WORKER`), its chat surface without buttons and attachments; a lead with
@@ -117,7 +117,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - A reply about an item names it: `<open>`/`<done>` does, any other reply ends
   with `<topic>problem</topic>`, the same key — one written like an `<open>`
   line still keys on the problem, its stage and run tokens dropped; stripped like
-  the rest, never painted mid-stream (`streamTail`), read by `replyTopic` (`core/reply.ts`) — the tag the web chat colours rows by
+  the rest, never painted mid-stream (`streamTail`), read by `replyTopic` (`core/reply.ts`) — the tag the web chat labels rows with
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)); IM shows
   nothing of it.
 - The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`
@@ -175,7 +175,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   carrying `sessions`, run id → session id for every run it names that has one; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card, and the web's status panel, opened by the bar's
-  status chip — the same groups and statuses as rows (`GET /api/continuous/open`),
+  status chip — the same statuses as rows, `waiting on you` first in one list (`GET /api/continuous/open`),
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 
 ## Chat commands
@@ -224,7 +224,7 @@ The routes (`/api/continuous*`), the status panel, the pane and its
 composer are [03](03-web-workbench.md)'s. An earlier member is read off disk,
 never opened.
 
-- In progress is the live sessions less the sessions making up the head;
+- The status panel's sessions are the live ones less the sessions making up the head;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
 - The head's ⋯ menu is Search, Session info, Browse files, Model & reasoning,
   Settings; no Rename or New session here.

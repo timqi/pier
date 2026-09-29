@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   pane: { scrollHeight: 0, scrollTop: 0 },
   keepScroll: vi.fn(),
   resetChat: vi.fn(),
+  revealTopic: vi.fn(() => true),
   content: [] as string[],
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
@@ -29,7 +30,7 @@ vi.mock("./chat.js", () => ({
   turnsPane: Object.assign(h.pane, { addEventListener: h.paneListen }), keepScroll: h.keepScroll,
   appendDelta: vi.fn(), appendSystemInput: vi.fn(), appendTurn: h.appendTurn,
   chatLoading: vi.fn(), completeTurn: vi.fn(), finalizeStreaming: vi.fn(),
-  initChat: vi.fn(), interruptTurn: vi.fn(), renderSnapshot: h.renderSnapshot,
+  initChat: vi.fn(), interruptTurn: vi.fn(), renderSnapshot: h.renderSnapshot, revealTopic: h.revealTopic,
   resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
@@ -358,6 +359,7 @@ describe("the continuous conversation", () => {
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
     const fetcher = vi.fn((url: string) => {
       if (url === "/api/continuous") return Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
+      if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
       if (url.endsWith("/history")) return h.history(url);
       return Promise.resolve(Response.json(rows));
     });
@@ -409,28 +411,73 @@ describe("the continuous conversation", () => {
     expect(h.appendPager).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the topic filter across a page, and does not page from the top under one", async () => {
+  it("pages from the top on scroll, but not right after a page", async () => {
     await boot([member("h2", "idle", 5), member("h1", "idle", 3), member("h0", "first")]);
     vi.useFakeTimers({ toFake: ["Date"] });
-    const topics = await import("./topics.js");
-    // The real reset drops the filter with the pane (chat.ts resetChat); the page must put it back.
-    h.resetChat.mockImplementation(() => topics.resetTopics());
     const onScroll = h.paneListen.mock.calls.filter(([name]) => name === "scroll").at(-1)![1];
-    topics.setTopicFilter("CI");
     onScroll();
     await settled();
-    expect(historyCalls()).toEqual(["/api/sessions/h2/history"]);
-    (h.appendPager.mock.calls.at(-1)![0] as () => void)();
-    await settled();
     expect(historyCalls()).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
-    expect(topics.topicFilter()).toBe("CI");
-    topics.setTopicFilter(null);
+    onScroll();
+    await settled();
+    expect(historyCalls()).toHaveLength(3);
     vi.setSystemTime(Date.now() + 1000);
     onScroll();
     await settled();
     expect(historyCalls().slice(3)).toEqual(["/api/sessions/h0/history", "/api/sessions/h2/history"]);
-    h.resetChat.mockReset();
     vi.useRealTimers();
+  });
+
+  // A status panel row lands on its topic in the conversation, from wherever the reader is.
+  it("opens the conversation at a topic's latest reply, and says when none is on screen", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    h.history.mockImplementation((url: string) => Promise.resolve(snapshot(url.includes("/h1/") ? "head" : "child")));
+    h.drawer.select("other");
+    await settled();
+    expect(await h.drawer.showTopic("auth", false)).toBe(true);
+    expect(h.header.continuousOpen()).toBe(true);
+    expect(historyCalls().at(-1)).toBe("/api/sessions/h1/history");
+    expect(h.revealTopic).toHaveBeenLastCalledWith("auth");
+    // None on screen: the conversation's tail is the landing, not the old scroll.
+    const { scrollBottom } = await import("./chat.js");
+    vi.mocked(scrollBottom).mockClear();
+    h.revealTopic.mockReturnValueOnce(false);
+    expect(await h.drawer.showTopic("gone", false)).toBe(false);
+    expect(scrollBottom).toHaveBeenCalledWith(true);
+    // A row about to open its run's session skips the tail it would leave at once.
+    vi.mocked(scrollBottom).mockClear();
+    h.revealTopic.mockReturnValueOnce(false);
+    expect(await h.drawer.showTopic("gone", true)).toBe(false);
+    expect(scrollBottom).not.toHaveBeenCalled();
+  });
+
+  // The reveal waits for the rows a load already on its way brings, and a reader who left is left alone.
+  it("reveals a topic only once the conversation's load lands, and not after the reader moved on", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    let head = deferred();
+    h.history.mockImplementation((url: string) => (url.includes("/h1/") ? head.promise : Promise.resolve(snapshot("child"))));
+    h.drawer.select("other");
+    await settled();
+    void h.drawer.select("h1");
+    h.revealTopic.mockClear();
+    const shown = h.drawer.showTopic("auth", false);
+    await settled();
+    expect(h.revealTopic).not.toHaveBeenCalled();
+    head.resolve(snapshot("head"));
+    expect(await shown).toBe(true);
+    expect(h.revealTopic).toHaveBeenCalledOnce();
+
+    h.drawer.select("other");
+    await settled();
+    head = deferred();
+    h.revealTopic.mockClear();
+    const left = h.drawer.showTopic("auth", false);
+    await settled();
+    h.drawer.select("other");
+    head.resolve(snapshot("head"));
+    expect(await left).toBe(true);
+    expect(h.revealTopic).not.toHaveBeenCalled();
+    expect(h.header.continuousOpen()).toBe(false);
   });
 
   it("keeps the pane as it is while a page's head snapshot is on its way", async () => {

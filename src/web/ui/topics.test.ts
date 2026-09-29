@@ -1,5 +1,5 @@
-// Topics on index.html: the colour a problem hashes to, the tag on a row, the
-// filter over the pane's kinds, and the registry the status panel reads.
+// Topics on index.html: the colour a problem hashes to, and the tag on a row
+// with its item's stage while the item is open.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
 
@@ -32,69 +32,56 @@ it("hashes a problem to one hue in range, the same every time", () => {
   expect(topics.topicHue("a")).not.toBe(topics.topicHue("b"));
 });
 
-it("tags a row once: one label, under the speaker caption, updated in place", () => {
+it("tags a row once: one label, under the speaker caption, updated in place, its colour on the tag alone", () => {
   const row = add("user");
   const caption = document.createElement("div");
   caption.className = "speaker-line";
   row.append(caption, document.createElement("div"));
-  topics.tagRow(row, "auth");
-  topics.tagRow(row, "auth review");
+  const jump = vi.fn();
+  topics.tagRow(row, "auth", jump);
+  topics.tagRow(row, "auth review", jump);
   const tags = fake(row).querySelectorAll(".topic-tag");
   expect(tags).toHaveLength(1);
   expect(fake(row).children.indexOf(tags[0]!)).toBe(1);
   expect(tags[0]!.textContent).toBe("auth review");
   expect(tags[0]!.title).toBe("auth review");
   expect(row.dataset.topic).toBe("auth review");
-  expect(row.style.getPropertyValue("--topic")).toBe(`oklch(0.62 0.15 ${topics.topicHue("auth review")})`);
+  expect(tags[0]!.style.getPropertyValue("--topic")).toBe(`oklch(0.62 0.15 ${topics.topicHue("auth review")})`);
+  expect(row.style.getPropertyValue("--topic")).toBe("");
+  tags[0]!.onclick!();
+  expect(jump).toHaveBeenCalledWith(row);
 });
 
-it("filters the conversation's kinds to one topic and keeps the structure; off shows all", () => {
-  const rows = {
-    user: add("user", "a"), assistant: add("assistant", "b"), process: add("process", "a"), error: add("error"),
-    time: add("time"), divider: add("divider"), pager: add("pager"), trim: add("trim"),
-  };
-  topics.setTopicFilter("a");
-  const hidden = () => Object.entries(rows).filter(([, r]) => r.hidden).map(([k]) => k);
-  expect(hidden()).toEqual(["assistant", "error", "time"]);
-  expect(turns().dataset.topicFilter).toBe("a");
-  // A row that arrives under the filter stays in view, tagged elsewhere or
-  // not, until the switch is flipped again; a re-tag alone never hides it.
-  const late = add("user");
-  topics.arriveRow(late);
-  expect(late.hidden).toBe(false);
-  topics.tagRow(late, "b");
-  expect(late.hidden).toBe(false);
-  topics.setTopicFilter("b");
-  topics.setTopicFilter("a");
-  expect(late.hidden).toBe(true);
-  // The bar says so, and its × clears it.
-  const chip = doc.querySelector(".topic-filter")!;
-  expect(chip.nextElementSibling).toBe(doc.querySelector("#status-chip"));
-  expect(chip.textContent).toBe("a");
-  expect(chip.hidden).toBe(false);
-  chip.onclick?.();
-  expect(topics.topicFilter()).toBeNull();
-  expect(hidden()).toEqual([]);
-  expect(chip.hidden).toBe(true);
+it("names an open item's stage on its tags, repainted as it moves, and plain once done", () => {
+  const a = add("assistant");
+  const b = add("assistant");
+  topics.tagRow(a, "auth", vi.fn());
+  topics.setTopicStages([{ problem: "auth", stage: "等你确认" }]);
+  const tag = (row: HTMLElement) => fake(row).querySelector(".topic-tag")!;
+  expect(tag(a).textContent).toBe("auth \u00b7 等你确认");
+  expect(tag(a).title).toBe("auth \u00b7 等你确认");
+  expect(tag(a).getAttribute("aria-label")).toBe("auth \u00b7 等你确认 \u2014 previous message of this topic");
+  // A row tagged later reads the stages already known.
+  topics.tagRow(b, "auth", vi.fn());
+  expect(tag(b).textContent).toBe("auth \u00b7 等你确认");
+  topics.setTopicStages([{ problem: "auth", stage: "merged, restart pending" }]);
+  expect([tag(a), tag(b)].map((t) => t.textContent)).toEqual(["auth \u00b7 merged, restart pending", "auth \u00b7 merged, restart pending"]);
+  // The same stages again paint nothing: every items refresh calls this.
+  const painted = tag(a).children[0];
+  topics.setTopicStages([{ problem: "auth", stage: "merged, restart pending" }]);
+  expect(tag(a).children[0]).toBe(painted);
+  topics.setTopicStages([]);
+  expect(tag(a).textContent).toBe("auth");
+  expect(tag(a).title).toBe("auth");
 });
 
-it("records topics in order, the done ones most recently done first, and tells its listener", () => {
-  const changed = vi.fn();
-  topics.onTopicsChanged(changed);
-  for (const p of ["a", "b", "c", "d"]) topics.noteTopic(p);
-  topics.noteTopic("c", { done: true });
-  topics.noteTopic("a", { done: true });
-  topics.noteTopic("a", { done: true });
-  expect(changed).toHaveBeenCalledTimes(6);
-  expect(topics.seenTopics()).toEqual([
-    { problem: "b", done: false }, { problem: "d", done: false }, { problem: "c", done: true }, { problem: "a", done: true },
-  ]);
-  expect(topics.recentDone()).toEqual(["a", "c"]);
-  // Reopened is open again.
-  topics.noteTopic("a", { done: false });
-  expect(topics.recentDone()).toEqual(["c"]);
-  topics.setTopicFilter("c");
-  topics.resetTopics();
-  expect(topics.seenTopics()).toEqual([]);
-  expect(topics.topicFilter()).toBeNull();
+it("tags a reply by its marker and the user message it answers, and nothing past the reply before", () => {
+  const u0 = add("user");
+  const a0 = add("assistant");
+  const u1 = add("user");
+  const a1 = add("assistant");
+  topics.tagReply(a1, "Merged.\n<done>auth</done>", vi.fn());
+  expect([u0, a0, u1, a1].map((r) => r.dataset.topic)).toEqual([undefined, undefined, "auth", "auth"]);
+  topics.tagReply(a0, "Plain.", vi.fn());
+  expect(a0.dataset.topic).toBeUndefined();
 });

@@ -23,6 +23,7 @@ import {
   interruptTurn,
   keepScroll,
   renderSnapshot,
+  revealTopic,
   resetChat,
   scrollBottom,
   turnsPane,
@@ -49,7 +50,7 @@ import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderStat
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
-import { onTopicsChanged, seenTopics, setTopicFilter, topicFilter } from "./topics.js";
+import { setTopicStages } from "./topics.js";
 import {
   activityThinking,
   activityToolEnd,
@@ -162,9 +163,32 @@ async function loadOpenItems(): Promise<OpenItems> {
 
 // Thrown like refreshSessions', for the same reason.
 const refreshOpenItems = coalesce(async () => {
-  openItems = await loadOpenItems();
+  commitOpenItems(await loadOpenItems());
   renderDrawer();
 });
+
+/** The panel's rows and the chat's tags read the same items. */
+function commitOpenItems(open: OpenItems): void {
+  openItems = open;
+  setTopicStages(open.items);
+}
+
+/** A status panel row: the conversation, at the topic's latest reply, or —
+ *  none on screen, and nowhere `elsewhere` to go — at its tail; `false` then.
+ *  A reader who moved on meanwhile is left where they went: `true`. */
+async function showTopic(problem: string, elsewhere: boolean): Promise<boolean> {
+  if (!continuousOpen()) {
+    const head = headId();
+    if (!head) return false;
+    await select(head);
+  }
+  // `select` returns early while a load is already on its way; the reveal needs its rows.
+  while (inFlight) await inFlight;
+  if (!continuousOpen()) return true;
+  if (revealTopic(problem)) return true;
+  if (!elsewhere) scrollBottom(true);
+  return false;
+}
 
 function openContinuous(): void {
   const head = headId();
@@ -232,10 +256,9 @@ function renderEarlier(): void {
   }
 }
 
-/** Scrolling to the top pages; not right after a page, whose restore may itself
- *  land there, and not under a topic filter, whose hidden rows put the top in reach. */
+/** Scrolling to the top pages; not right after a page, whose restore may itself land there. */
 turnsPane.addEventListener("scroll", () => {
-  if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && topicFilter() === null && Date.now() - pagedAt > 500) void page();
+  if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && Date.now() - pagedAt > 500) void page();
 }, { passive: true });
 
 // --- sessions --------------------------------------------------------------------
@@ -267,7 +290,7 @@ const refreshSessions = coalesce(async () => {
   const was = headId();
   chain = next.chain;
   rotateAt = next.rotateAt;
-  openItems = open;
+  commitOpenItems(open);
   commitSessions(rows);
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   const head = headId();
@@ -502,9 +525,21 @@ function resetPane(): void {
   lastSeq = 0;
 }
 
-/** (Re)load the current session's snapshot and reconnect its event stream. */
-async function loadSession(id: string, keep = false): Promise<void> {
-  if (currentId !== id) return;
+/** The latest load while one runs: its superseded predecessors return early. */
+let inFlight: Promise<void> | null = null;
+
+/** (Re)load the current session, the load kept as `inFlight` for a caller that needs its rows. */
+function loadSession(id: string, keep = false): Promise<void> {
+  if (currentId !== id) return Promise.resolve();
+  const load = drawSession(id, keep).finally(() => {
+    if (inFlight === load) inFlight = null;
+  });
+  inFlight = load;
+  return load;
+}
+
+/** Fetch the snapshot, paint it and reconnect the event stream. */
+async function drawSession(id: string, keep: boolean): Promise<void> {
   const generation = ++loadSeq;
   source?.close();
   source = null;
@@ -523,8 +558,6 @@ async function loadSession(id: string, keep = false): Promise<void> {
   const fromBottom = keep ? turnsPane.scrollHeight - turnsPane.scrollTop : 0;
   // A keyboard page keeps the keyboard on the pager, which the reload replaced.
   const focused = keep && document.activeElement?.id === "chain-pager";
-  // The reload resets the pane's view state; a filter is the reader's, and stays.
-  const filter = topicFilter();
   if (keep) resetPane();
   if (!got.ok) {
     chatLoading(false);
@@ -535,7 +568,6 @@ async function loadSession(id: string, keep = false): Promise<void> {
   if (continuousOpen()) renderEarlier();
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
   if (keep) {
-    setTopicFilter(filter);
     keepScroll(fromBottom);
     if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
   }
@@ -605,11 +637,8 @@ initDrawer({
   chain: () => chain,
   openContinuous,
   open: () => openItems,
-  topics: seenTopics,
-  filter: topicFilter,
-  setFilter: setTopicFilter,
+  showTopic,
 });
-onTopicsChanged(renderDrawer);
 initPalette({
   sessions: () => sessions,
   loadSessions: refreshSessions,

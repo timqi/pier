@@ -28,6 +28,7 @@ let drawer: typeof import("./drawer.js");
 const state = { chain: [] as ChainMember[], current: null as string | null, items: null as OpenItems | null };
 const openContinuous = vi.fn();
 const select = vi.fn();
+const showTopic = vi.fn(async (_problem: string, _elsewhere: boolean) => true);
 let sessions: Row[] = [];
 
 beforeEach(async () => {
@@ -37,7 +38,7 @@ beforeEach(async () => {
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
     sessions: () => sessions, currentId: () => state.current, select, chain: () => state.chain, openContinuous, open: () => state.items,
-    topics: () => [], filter: () => null, setFilter: vi.fn(),
+    showTopic,
   });
 });
 
@@ -71,7 +72,7 @@ const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
 
 // The item is the row: a lead it names is not a session row beside it, and a
 // failed unlisted run is not in progress.
-it("lists each open item once, in its group, with who runs it and where it stands", () => {
+it("lists each open item once, what waits on you first, with who runs it and where it stands", () => {
   state.chain = [member("h1")];
   sessions = [row("h1"), row("s-lead1abcdef", { phase: "design", runLive: true })];
   state.items = {
@@ -85,16 +86,16 @@ it("lists each open item once, in its group, with who runs it and where it stand
     unlisted: [ledgerRun("q1", { name: "Queued one", state: "queued", targetSessionId: null })],
   };
   open();
-  const ids = (name: string) => doc.querySelector(`[data-list='${name}']`)!.querySelectorAll("[data-session-id]").map((el) => el.dataset.sessionId);
-  expect(ids("waiting")).toEqual(["item:model menu"]);
-  expect(ids("running")).toEqual(["s-lead1abcdef", "s-w1", "item:Queued one"]);
-  const text = doc.querySelector("[data-list='running']")!.textContent;
-  expect(text).toContain("lead · design");
-  expect(text).toContain("workers: 1 running, 1 succeeded");
-  expect(doc.querySelector("[data-list='waiting']")!.textContent).toContain("run gone1 — not in the ledger");
+  const ids = doc.querySelector("[data-list='status']")!.querySelectorAll("[data-session-id]").map((el) => el.dataset.sessionId);
+  expect(ids).toEqual(["item:model menu", "s-lead1abcdef", "s-w1", "item:Queued one"]);
   const byId = (id: string) => doc.querySelectorAll("[data-session-id]").find((el) => el.dataset.sessionId === id)!;
+  // The row is its stage; who runs it and its runs are the tooltip's.
+  expect(byId("s-lead1abcdef").textContent).toBe("open items 视图lead designing");
+  expect(byId("s-lead1abcdef").title).toContain("lead · design");
+  expect(byId("s-lead1abcdef").title).toContain("workers: 1 running, 1 succeeded");
+  expect(byId("item:model menu").title).toContain("run gone1 — not in the ledger");
   byId("s-w1").querySelector("button")!.onclick?.();
-  expect(select).toHaveBeenLastCalledWith("s-w1");
+  expect(showTopic).toHaveBeenLastCalledWith("auth review", true);
   openContinuous.mockClear();
   byId("item:Queued one").querySelector("button")!.onclick?.();
   expect(openContinuous).toHaveBeenCalledOnce();

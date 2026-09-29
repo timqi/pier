@@ -1,10 +1,8 @@
-// Which open item a chat row belongs to: its colour, its tag, the filter and
-// the topics the pane has seen — read off each reply's markers, never stored.
+// Which open item a chat row belongs to: its colour and its tag, which names
+// the item's stage while it is open — read off each reply's markers, never stored.
 
-import { X } from "lucide";
-import { icon } from "./icons.js";
 import { h } from "./dom.js";
-import { openItemMarkers, replyTopic } from "../../core/reply.js";
+import { replyTopic } from "../../core/reply.js";
 
 /** FNV-1a: the same problem is the same colour in the chat, the panel and after a reload. */
 export function topicHue(problem: string): number {
@@ -15,140 +13,62 @@ export function topicHue(problem: string): number {
 
 export const topicColour = (problem: string): string => `oklch(0.62 0.15 ${topicHue(problem)})`;
 
-// --- the registry ---------------------------------------------------------------------
+/** The open items' stages (`GET /api/continuous/open`); a topic not here is done. */
+let stages = new Map<string, string>();
 
-/** Map order is done order for done topics: marking one done re-inserts it. */
-const seen = new Map<string, boolean>();
-let listener: (() => void) | null = null;
+/** A tag's click: the row it sits on, to jump back from (chat.ts). */
+type Jump = (row: HTMLElement) => void;
 
-/** The one reader, the status panel: redrawn when a topic or the filter changes. */
-export function onTopicsChanged(cb: () => void): void {
-  listener = cb;
+function paintTag(label: HTMLElement, problem: string): void {
+  const stage = stages.get(problem);
+  // The text truncates inside the button, so the button's touch area (style.css) is not clipped with it.
+  label.replaceChildren(h("span", "topic-text", problem, ...(stage ? [h("span", "topic-stage", ` \u00b7 ${stage}`)] : [])));
+  label.title = stage ? `${problem} \u00b7 ${stage}` : problem;
+  label.setAttribute("aria-label", `${label.title} \u2014 previous message of this topic`);
 }
 
-export function noteTopic(problem: string, o: { done?: boolean } = {}): void {
-  const done = o.done ?? seen.get(problem) ?? false;
-  if (seen.get(problem) === done) return;
-  if (done) seen.delete(problem);
-  seen.set(problem, done);
-  listener?.();
+/** Repaints every tag on screen: an item's stage moves without its replies. */
+export function setTopicStages(items: { problem: string; stage: string }[]): void {
+  const next = new Map(items.map((i) => [i.problem, i.stage]));
+  if (next.size === stages.size && [...next].every(([p, stage]) => stages.get(p) === stage)) return;
+  stages = next;
+  for (const label of document.querySelector("#turns")?.querySelectorAll<HTMLElement>(".topic-tag") ?? []) {
+    const problem = label.closest<HTMLElement>("[data-topic]")?.dataset.topic;
+    if (problem) paintTag(label, problem);
+  }
 }
-
-export const seenTopics = (): { problem: string; done: boolean }[] =>
-  [...seen].map(([problem, done]) => ({ problem, done }));
-
-/** Most recently done first. */
-export const recentDone = (list = seenTopics(), n = 5): string[] =>
-  list.filter((t) => t.done).map((t) => t.problem).reverse().slice(0, n);
-
-// --- tagging ----------------------------------------------------------------------------
 
 /** The tag is the first chip of a reply's chip row (chat.ts chipSlots), or
  *  the bubble's first line where there is no row. */
-export function tagRow(row: HTMLElement, problem: string): void {
+export function tagRow(row: HTMLElement, problem: string, jump: Jump): void {
   row.dataset.topic = problem;
-  row.style.setProperty("--topic", topicColour(problem));
   let label = row.querySelector<HTMLElement>(".topic-tag");
   if (!label) {
     const kids = [...row.children];
     const chipRow = kids.find((el) => el.classList.contains("chip-row"));
     // In a chip row the row's gap spaces it; alone, its own margin does.
-    label = h("div", `topic-tag text-[11px] leading-tight ${chipRow ? "" : "mb-1"}`);
+    label = h("button", `topic-tag block cursor-pointer text-left text-[11px] leading-tight ${chipRow ? "" : "mb-1"}`);
+    label.setAttribute("type", "button");
     const caption = kids.find((el) => el.classList.contains("speaker-line"));
     if (caption) caption.after(label);
     else (chipRow ?? row).prepend(label);
   }
-  label.textContent = problem;
-  label.title = problem;
-  applyTopicFilterTo(row);
+  label.style.setProperty("--topic", topicColour(problem));
+  label.onclick = () => jump(row);
+  paintTag(label, problem);
 }
 
 /** A reply names its topic, and the user message it answers inherits. `row`
  *  is the reply's bubble. */
-export function tagReply(row: HTMLElement, raw: string): void {
+export function tagReply(row: HTMLElement, raw: string, jump: Jump): void {
   const topic = replyTopic(raw);
   if (!topic) return;
-  noteTopic(topic);
-  for (const m of openItemMarkers(raw).markers) noteTopic(m.problem, { done: m.op === "done" });
-  tagRow(row, topic);
-  const inherit = (el: HTMLElement): void => {
-    el.dataset.topic = topic;
-    el.style.setProperty("--topic", topicColour(topic));
-    applyTopicFilterTo(el);
-  };
+  tagRow(row, topic, jump);
   for (let el = row.previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
     if (kind === "assistant" || kind === "divider" || kind === "pager") break;
     if (kind !== "user") continue;
-    if (el.dataset.topic) break;
-    tagRow(el, topic);
-    const time = el.previousElementSibling as HTMLElement | null;
-    if (time?.dataset.kind === "time") inherit(time);
+    if (!el.dataset.topic) tagRow(el, topic, jump);
     break;
   }
-}
-
-// --- the filter -------------------------------------------------------------------------
-
-/** Structure, not conversation: a filtered pane still says where sessions begin and end. */
-const FILTERED = new Set(["user", "assistant", "system", "error", "time"]);
-let filter: string | null = null;
-let barChip: HTMLElement | null = null;
-
-export const topicFilter = (): string | null => filter;
-
-export function applyTopicFilterTo(row: HTMLElement): void {
-  row.hidden = filter !== null && !("live" in row.dataset) && FILTERED.has(row.dataset.kind ?? "") && row.dataset.topic !== filter;
-}
-
-/** A row appended while the filter is on stays in view whatever its topic: the
- *  switch narrows what was there, and a message just sent, or the reply to it,
- *  must never look like nothing happened (§5). */
-export function arriveRow(row: HTMLElement): void {
-  if (filter !== null) row.dataset.live = "";
-  applyTopicFilterTo(row);
-}
-
-export function applyTopicFilter(): void {
-  const turns = document.querySelector<HTMLElement>("#turns");
-  if (!turns) return;
-  if (filter === null) delete turns.dataset.topicFilter;
-  else turns.dataset.topicFilter = filter;
-  for (const row of turns.children) {
-    delete (row as HTMLElement).dataset.live;
-    applyTopicFilterTo(row as HTMLElement);
-  }
-}
-
-export function setTopicFilter(problem: string | null): void {
-  if (problem === filter) return;
-  filter = problem;
-  applyTopicFilter();
-  paintBarChip();
-  listener?.();
-}
-
-/** The filter's state from the chat itself, beside the status chip; its × is the way out. */
-function paintBarChip(): void {
-  if (!barChip) {
-    const status = document.querySelector("#status-chip");
-    if (!status) return;
-    barChip = h("button", "topic-filter flex max-w-[35vw] flex-none cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium pointer-coarse:min-h-11");
-    barChip.setAttribute("type", "button");
-    barChip.onclick = () => setTopicFilter(null);
-    status.before(barChip);
-  }
-  barChip.hidden = filter === null;
-  if (filter === null) return;
-  barChip.style.setProperty("--topic", topicColour(filter));
-  barChip.title = `Only “${filter}” in the chat — show every topic`;
-  barChip.setAttribute("aria-label", barChip.title);
-  barChip.replaceChildren(h("span", "min-w-0 truncate", filter), icon(X, "h-3 w-3 flex-none"));
-}
-
-/** A new transcript: the filter is view state, and the registry is read off this one. */
-export function resetTopics(): void {
-  seen.clear();
-  setTopicFilter(null);
-  listener?.();
 }

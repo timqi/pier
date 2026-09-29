@@ -170,15 +170,15 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 ### Bar and status panel (`session-header.ts`, `drawer.ts`)
 
 - The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
-- The status chip reads `N running · M needs you`, the panel's two groups counted, and opens the status panel; with rows but neither count (only `pending release`, `stopped` or `queued`) it reads `K open`, the row count; with no rows it is absent and the panel cannot open. The app icon badge counts only a turn to look at — a design not yet reported final and an unread turn (**Unread** above) outside the conversation — plus the conversation's own unread reply.
+- The status chip reads `N running · M needs you`, the panel's `running` and `waiting on you` rows counted, and opens the status panel; with rows but neither count (only `pending release`, `stopped` or `queued`) it reads `K open`, the row count; with no rows it is absent and the panel cannot open. The app icon badge counts only a turn to look at — a design not yet reported final and an unread turn (**Unread** above) outside the conversation — plus the conversation's own unread reply.
 - Context chip: Pier shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
 - The ⋯ menu contains Search ⌘K, Session info, System prompt, Browse files, Model & reasoning…, and Settings; Search is shown on Pier only. Session info, System prompt and model actions are disabled before the first reply.
-- The status panel is the one place the web shows what is going on: **Waiting on you** over **In progress**, grouped as `/status` groups them ([10 §Open items](10-continuous-session.md#open-items)); a group's head is hidden while it has no rows.
+- The status panel is the one place the web shows what is going on: one flat list, no group heads, the rows `waiting on you` first and the rest after in `/status`'s order ([10 §Open items](10-continuous-session.md#open-items)).
 - One row per session: the open items (`GET /api/continuous/open`), then its unlisted runs, then the live sessions outside Pier none of them holds. A session is live while streaming, while a run targets it or while runs it launched are in flight, while its last turn is unread, or while its design waits on Finalize. A failed run's callback reaches the head, so a failure is the head's unread, never a row.
-- Every row reads the same: the name (an item's problem, a run's or session's title) with who works it (`lead · <phase>`, `worker`, or an IM session's channel) as a tag, a second line with where it stands — an item's `run <id8>… <state> <age>` per run, then its stage, a session's `working`, `N subagents running`, `run queued`, `turn finished — not viewed yet` or `design — finalize when it is ready` with `active <age>` — and one status tag on the right: `waiting on you` (amber), `pending release`, `stopped`, `running` (green) or `queued`; a row is in Waiting on you only with `waiting on you` (`waitsOnYou`, a session's by its mark), and the chip and badge count by the same predicate. An item's status is the server's (`openStatus`, [10 §Open items](10-continuous-session.md#open-items)).
-- An item row carries its topic's dot and an "only this topic" switch that filters the chat pane to that topic's rows (the conversation's kinds; dividers and the pager stay; a row that arrives while the switch is on stays in view whatever its topic, so a message just sent never looks lost); one switch is on at a time, and the bar shows the active topic beside the status chip, its × clearing it. Paging keeps the filter, and scrolling to the top does not page while one is on. **Recently done** lists the last five topics the pane saw a `<done>` for that are no longer open, each a row the arrows reach whose name (↵) or switch flips its filter; the chip stays, reading `topics`, while any exist. Topics and the filter are the pane's, reset with its transcript.
+- Every row reads the same: a dot, the name (an item's problem, a run's or session's title) and one second line with where it stands, then a status tag on the right unless the row is `running`: `waiting on you` (white on amber-700, the one solid tag, the one that asks something), `pending release`, `stopped` or `queued`. A row sorts first only with `waiting on you` (`waitsOnYou`, a session's by its mark), and the chip and badge count by the same predicate. An item's status is the server's (`openStatus`, [10 §Open items](10-continuous-session.md#open-items)).
+- An item's dot is its topic's colour and an unlisted run's grey, pulsing while one of its runs is `running`; its second line is its stage, or its runs (`run <id8>… <state> <age>`) when it names none; the runs, who works them and their cwd are the row's tooltip. A session's dot is its mark (`stateDot`), its who (`lead · <phase>`, an IM session's channel) a tag, its second line `working`, `N subagents running`, `run queued`, `turn finished — not viewed yet` or `design — finalize when it is ready` with `active <age>`.
 - Re-read on `sessions-changed`, `task-run-changed`, `open-items-changed`, and a state change of a session an item holds.
-- A row opens its session — an item its first run's, else the conversation — in the column (`#/session/<id>`) and closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
+- An item row opens the conversation, waits for a load already on its way, and reveals its topic's latest reply on screen (`revealTopic`, the search hit's ring); with none on screen the row opens its first run's session, or with none the pane scrolls to its tail. A reader who opened another session meanwhile is left there. Any other row opens its session in the column (`#/session/<id>`), an unlisted run with no session the conversation. Either closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
 - The panel is a 32rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
 - Counts and rows share `drawer.ts` state; session and open-item changes refresh the panel and the palette's dots.
 
@@ -248,7 +248,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   system line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` are run chips of
   the bubble that launched them, updated from `task-status` events; the
-  status panel's In progress lists the runs still in flight. The message's
+  status panel lists the runs still in flight. The message's
   creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs are cause chips with a Session link in the head, never
   user messages.
@@ -257,9 +257,15 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   a Reply to that bubble (`withQuote`), the composer's own staged quote
   untouched.
 - **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
-  (`replyTopic`) is tagged with its problem — a colour bar and a label, the
-  colour a stable hash of the problem (`topics.ts` `topicHue`); the user
-  message above it inherits; untagged rows carry nothing.
+  (`replyTopic`) is tagged with its problem — a label in a stable hash of the
+  problem's colour (`topics.ts` `topicHue`), the only place the colour is on
+  the row; the user message above it inherits; untagged rows carry nothing.
+  While the item is open the tag adds ` · <stage>` from `GET
+  /api/continuous/open`, repainted when the items change; a done topic's tag
+  is the problem alone. The tag truncates, its title the full text. A click
+  reveals the topic's previous reply on screen; the earliest one lights
+  itself. On a coarse pointer the tag's hit area is 44px tall, like a chip's,
+  without growing the tag.
 - **Edit**: any user message; sending rewinds the transcript to it and the
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
@@ -273,8 +279,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   so it survives reload, edit and rotation with no field, and reaches the
   model as its own convention (`agent/roles.ts`). A next-step button never
   takes it. A user bubble renders the quote as a block above its words — role
-  and minute, the excerpt clamped to two lines, a bar in the topic colour the
-  excerpt's `<topic>` names, else the accent — and a click reveals the source
+  and minute, the excerpt clamped to two lines, a neutral grey bar — and a click reveals the source
   (`quoteSource`: same role and minute, then the row whose text opens with
   the excerpt); a source not on screen leaves the block inert with a title
   saying so. Only user messages carry quotes.
