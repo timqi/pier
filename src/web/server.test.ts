@@ -596,6 +596,32 @@ describe("workbench server", () => {
     expect(state.unread("head")).toBe(true);
   });
 
+  // A dispatch or a moved stage is traced by the status line; a mark would
+  // ask the operator to read a turn that said nothing.
+  it("leaves a head turn that stayed silent unmarked, and marks one that spoke", async () => {
+    const { app, router, state, continuous } = setup();
+    const head = fakeSession("head");
+    router.attach({ channelId: "web", conversationId: "head" }, head);
+    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? ["head"] : undefined));
+    const turn = (...texts: string[]) => {
+      head.emit({ type: "state", state: "streaming" });
+      for (const text of texts) head.emit({ type: "turn-end", text });
+      head.emit({ type: "state", state: "idle" });
+    };
+
+    turn("<silent>dispatched</silent>\n<open>fix the parser — build</open>", "");
+    expect(state.unread("head")).toBe(false);
+
+    turn("<done>fix the parser</done>\nMerged — restart when you like.");
+    expect(state.unread("head")).toBe(true);
+
+    // The operator typed: their turn is theirs to read, silent or not.
+    await app.request("/api/sessions/head/read", { method: "POST" });
+    await app.request("/api/sessions/head/messages", { method: "POST", body: JSON.stringify({ text: "ok", mode: "steer" }) });
+    turn("<silent>acknowledged</silent>");
+    expect(state.unread("head")).toBe(true);
+  });
+
   it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {
     const { app, session, router, reload } = setup();
     // The fixture's standing queue would pin it (core/router.ts); a real idle one is empty.

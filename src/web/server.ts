@@ -13,6 +13,7 @@ import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { ChatCommandRefused, type MainChain } from "../core/chain.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
+import { isSilentReply, splitReply } from "../core/reply.js";
 import { QueueOperationError, Router, SkillAmbiguous } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
@@ -246,14 +247,24 @@ export function createServer(
   const operatorSent = new Set<string>();
   const sentByOperator = (id: string): void => void operatorSent.add(id);
   const runningNow = new Set<string>();
+  // The run's last turn that said something; turn-end precedes the idle state.
+  // A head's silent turn (a dispatch, a stage moved) is traced by the stage, not a mark.
+  const silentLast = new Map<string, boolean>();
+  router.onTurnEnd((id, text) => {
+    if (text.trim()) silentLast.set(id, isSilentReply(splitReply(text)));
+  });
   hub.subscribeWorkspace((e) => {
     if (e.type !== "session-state") return;
     if (e.state === "streaming") {
       runningNow.add(e.sessionId);
+      silentLast.delete(e.sessionId);
       return;
     }
+    const silent = silentLast.get(e.sessionId) ?? false;
+    silentLast.delete(e.sessionId);
     if (!runningNow.delete(e.sessionId)) return;
-    const theirs = operatorSent.delete(e.sessionId) || continuous.chainOf(e.sessionId) !== undefined;
+    const theirs = operatorSent.delete(e.sessionId)
+      || (continuous.chainOf(e.sessionId) !== undefined && !silent);
     if (!theirs || !workbenchOwn(e.sessionId)) return;
     state.setUnread(e.sessionId, true);
     hub.emitWorkspace({ type: "sessions-changed" });

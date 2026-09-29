@@ -421,13 +421,22 @@ describe("the finished-turn trigger", () => {
     expect(payload.body).toBe("the answer");
   });
 
-  it("still says a turn that only stayed silent finished", async () => {
+  it("stays quiet for a turn that stayed silent", async () => {
+    // A dispatch or a moved stage: the status line is its trace, not the phone.
+    const { app, hub, sent, cookie } = setup(6_000);
+    await subscribe(app, cookie);
+    finishTurn(hub, "<silent>dispatched</silent>\n<open>fix the parser</open>");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("previews the spoken text, never Pier's markers", async () => {
     const { app, hub, sent, cookie } = setup(6_000);
     const sub = await subscribe(app, cookie);
-    finishTurn(hub, "");
+    finishTurn(hub, "<done>fix the parser</done>\n<silent>aside</silent>Merged — restart when you like.");
     await vi.advanceTimersByTimeAsync(6_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
-    expect(payload.body).toBe("Turn finished.");
+    expect(payload.body).toBe("Merged — restart when you like.");
   });
 
   it("names the session without the speaker header its title carries", async () => {

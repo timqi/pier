@@ -60,6 +60,8 @@ surface owns its routes and is mounted beside it.
   session for itself, and only for a turn of the head or
   one the operator sent into (a message, an edit, a queue delivery); a lead's
   dispatch or callback turn finishing reports through the head and marks nothing.
+  A head turn whose last non-empty text stayed silent (`isSilentReply`) marks
+  nothing unless the operator sent into it.
   One flag, read by the dot, the badges and Web Push.
 
 Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
@@ -118,7 +120,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 - `streaming → idle` starts a 6s settle window; a session *still* unread when
   it closes is notified. Sessions answering an IM conversation
-  (`router.conversationOf(id)`) are not.
+  (`router.conversationOf(id)`) are not, nor is a turn whose last non-empty
+  text stayed silent; the body is that text's `splitReply(text).text`, markers off.
 - `webpush.ts` is the wire format — RFC 8291 `aes128gcm` and RFC 8292 VAPID on
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the

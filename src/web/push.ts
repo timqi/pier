@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Hono } from "hono";
 import type { EventHub } from "../core/hub.js";
 import { sessionLabel } from "../core/identity.js";
-import { cut } from "../core/reply.js";
+import { cut, isSilentReply, splitReply } from "../core/reply.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 import { isSealed, type Secrets } from "../secrets.js";
@@ -221,12 +221,17 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     if (!finish) return;
     watching.delete(e.sessionId);
     const text = finish();
+    const reply = splitReply(text);
     // An IM turn was already delivered to its chat. Read now, not in the
     // timer: this is the state that produced the turn. Every outcome is logged:
     // "why did my phone stay quiet" is the only question this is asked (§5).
     const channel = channelOf(e.sessionId);
     if (channel !== "web") {
       log.debug(`no push for ${e.sessionId}: answering ${channel ?? "nothing"}, not the workbench`);
+      return;
+    }
+    if (text.trim() && isSilentReply(reply)) {
+      log.debug(`no push for ${e.sessionId}: the turn stayed silent (${reply.silence ?? "no reason"})`);
       return;
     }
     const timer = setTimeout(() => {
@@ -238,7 +243,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
       void (async () => {
         await deliver({
           title: sessionLabel(await summary(e.sessionId)),
-          body: preview(text) || "Turn finished.",
+          body: preview(reply.text) || "Turn finished.",
           url: `/app/#/session/${encodeURIComponent(e.sessionId)}`,
           tag: e.sessionId,
         });
