@@ -125,15 +125,15 @@ exists to catch.
 
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
-| `core/` | 1.8k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, the continuous conversation's chain (its store, the lazy rotation, the seed, and the chat commands `/status`, `/new`, `/stop`, `/skills` with the one table the composer lists, and the skill-prefix rewrite), and `pier search`'s host and verb on the search seam core declares |
-| `channels/` | 4.6k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds what would otherwise be copied: the panel's two states and its draft, the launch record a lost session is re-created from, the bot-identity claim that keeps a swapped bot's unreachable DMs out of the Console's chat list |
-| `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
-| `agent/` | 2.95k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry; the Console's config seams are declared on the side that answers them; the system prompt replayed off the transcript and split by source is the lines past 2.8k; the one model table both launching roles carry is the lines past 2.9k |
-| `tasks/` | 3.65k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam; the goal loop (`goals.ts`: review → fix → re-review as code, stopping short of the user's merge, its refusals and its end's one callback) is the lines past 3.2k, the loop the head's prompt used to run by hand; the review pinned to the sha it reads, the one trailing status line and a decision's re-entry into the same loop are the lines past 3.6k |
-| root `src/*.ts` | 3.5k | one reason per file: credentials, service/update ops, the stop and its in-flight ledger, managed CLI tools via ubix, the vault — store, socket and injector; the vault, the CLI socket and `pier task`'s dispatch are the right things in there, as is the accent preset table, the one server-side copy of what the stylesheet paints; the row a failed tool install explains itself on, and `pier search`'s dispatch, are the lines past 3.35k; the rtk exclusions merged into the operator's own rtk config, proven by asking rtk, are the lines past 3.4k |
-| `websearch/` | 1.2k | two hosted tools on two wire formats, the language audit, the fetched copy on disk, the `/web` validator and `pier web`'s argv |
-| one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
-| channel adapter file | 450 | transport, render and panel counted separately; the home chat gives each adapter a second target (the main flow beside the thread) on every inbound and outbound path |
+| `core/` | 1.8k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
+| `channels/` | 4.6k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
+| `web/` | 14k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
+| `agent/` | 2.95k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
+| `tasks/` | 3.65k | one delivery engine, the scheduler, the owner seam and the goal loop run as code |
+| root `src/*.ts` | 3.5k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |
+| `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
+| one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK |
+| channel adapter file | 450 | transport, render and panel counted separately, each serving the thread and the home chat's main flow |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
 

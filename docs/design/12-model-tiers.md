@@ -12,8 +12,8 @@ A tier is a work class the dispatcher names instead of a model
 (`core/types.ts` `MODEL_TIERS`). The definition is `MODEL_TABLE`
 (`agent/roles.ts`) — which tier and thinking level each kind of run takes, a
 model the user names winning — carried verbatim by `DISPATCHER` and
-`lead("build")`; `skills/pier-tasks/SKILL.md` §Model choice keeps the same
-rows; this file points, never copies.
+`lead("build")`; `skills/pier-tasks/SKILL.md` §Model choice and this file
+point, never copy.
 
 Unspecified `--model`: today the caller's live model (`tasks/agent.ts:164`, a
 rule from before tiers existed, when naming a model meant knowing its id). A
