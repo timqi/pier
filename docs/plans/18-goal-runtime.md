@@ -27,7 +27,7 @@ lives in prompt text the head must copy forward, so it drifts.
   | `review` | `Verdict: clean` | end `done`: the merge and the worktree's removal wait on the user |
   | `review` | `Verdict: findings`, round < cap | `work` again: resume the worker with the findings, round + 1 |
   | `review` | `Verdict: findings`, round = cap | end `cap` |
-  | `review` | `Verdict: blocked — <why>` | end `failed`, reason `blocked — <why>` |
+  | any | `Verdict: blocked — <why>` | end `failed`, reason `blocked — <why>` |
   | any | status line `Needs your decision — …` | end `decision` |
   | any | failed · cancelled · interrupted · timed out · no verdict · several status lines | end `failed` |
 
@@ -134,7 +134,8 @@ lives in prompt text the head must copy forward, so it drifts.
 
 - **Storage.** Table `goals` (migration 36): `id, root_run_id, current_run_id,
   created_at, finished_at` as columns and the record as `json` (`Goal`:
-  supervisorSessionId, cap, round, step, outcome, reason, reviewModel), the
+  supervisorSessionId, cap, round, step, outcome, reason, reviewModel,
+  reviewed), the
   store's document pattern. A run of a goal carries `goalId` in its `json`
   (no column) so the ledger links each step; the root
   run's `launch` carries `until: "reviewed"`, `rounds`, `reviewModel` as the

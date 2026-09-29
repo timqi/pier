@@ -33,7 +33,7 @@ the one validator of the params object.
 ## `run`
 
 ```
-pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
+pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --until reviewed]] [--task-id <id>] [--session <id>]
         [--thinking <level>] [--role lead [--design]] [--until reviewed [--rounds <n>] [--review-model <tier|model>]]
         [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…

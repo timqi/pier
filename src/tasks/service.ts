@@ -530,7 +530,7 @@ export class TaskService {
   /** The user's answer to an ended goal goes back through the loop, never around it. */
   private goalAgain(prior: TaskRun): void {
     const goal = prior.goalId ? this.store.getGoal(prior.goalId) : undefined;
-    if (goal?.rootRunId !== prior.id) throw new Error(`--until reviewed beside --run resumes a goal's root run; run ${prior.id} is not one`);
+    if (goal?.rootRunId !== prior.id) throw new Error(`--until reviewed beside --run resumes a goal's root run; run ${prior.id} is not one${goal ? `; its root is run ${goal.rootRunId}` : ""}`);
     if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
     const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
     if (latest && latest.id !== goal.id) {

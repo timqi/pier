@@ -363,7 +363,7 @@ describe("a --until reviewed goal", () => {
     // The earlier root is no longer the session's goal; a run no goal roots, none at all.
     await expect(answer(root.id)).rejects.toThrow(`run ${root.id}'s session is in a later goal, rooted at run ${resumed.id}; --run that one`);
     const review = first.runs[1]!;
-    await expect(answer(review.id)).rejects.toThrow(`--until reviewed beside --run resumes a goal's root run; run ${review.id} is not one`);
+    await expect(answer(review.id)).rejects.toThrow(`--until reviewed beside --run resumes a goal's root run; run ${review.id} is not one; its root is run ${root.id}`);
     await expect(answer(resumed.id, { until: "later" })).rejects.toThrow("until must be reviewed");
     service.stop();
   });
