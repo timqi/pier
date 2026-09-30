@@ -112,18 +112,19 @@ export class TaskStore {
     `).run(taskId, taskId, KEPT_PROBES);
   }
 
-  /** Runs launched by any of `sessionIds`: in flight, or finished at or after
-   *  `since`; only those in `states` when given. In flight first, so the cap
+  /** Runs launched by any of `sessionIds` (every run, when null): in flight, or
+   *  finished at or after `since`; only those in `states` when given. In flight first, so the cap
    *  never drops a run still owed a result; then newest first. */
-  ledgerRuns(sessionIds: string[], since: number, states?: readonly TaskRunState[]): TaskRun[] {
+  ledgerRuns(sessionIds: string[] | null, since: number, states?: readonly TaskRunState[]): TaskRun[] {
+    const launchers = sessionIds ? JSON.stringify(sessionIds) : "";
     return this.#many(`
       SELECT json FROM task_runs
-      WHERE json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?))
+      WHERE (? = '' OR json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?)))
         AND (state IN ('queued', 'running') OR json_extract(json, '$.finishedAt') >= ?)
         AND state IN (SELECT value FROM json_each(?))
         AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
       ORDER BY state IN ('queued', 'running') DESC, queued_at DESC, id DESC LIMIT 200
-    `, JSON.stringify(sessionIds), since, JSON.stringify(states ?? TASK_RUN_STATES));
+    `, launchers, launchers, since, JSON.stringify(states ?? TASK_RUN_STATES));
   }
 
   /** Each lead's launches by state over its whole life, in one statement: a

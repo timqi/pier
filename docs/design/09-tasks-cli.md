@@ -204,8 +204,10 @@ definition still runs on demand, an archived one never.
 pier task runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]
 ```
 
-Any session. Receipt: a JSON array of `LedgerRun` (`core/types.ts`), the runs
-the caller launched — every chain member's, for a member of the head — in
+Any session, a delegated run's included (§Two levels, no tree). Receipt: a
+JSON array of `LedgerRun` (`core/types.ts`), the runs the caller launched —
+every chain member's, for a member of the head; every run, for a delegated
+run's — in
 flight plus finished within `--since` (default 24h), only the `--state`s given,
 in flight first then newest first, at most `--limit` (default 20, max 200); a
 full page adds a `task:` line on stderr that there may be more.
@@ -218,7 +220,7 @@ on the same id; a non-agent run cut by the restart ends `interrupted`.
 pier task stats [--days <n>]
 ```
 
-Any session. Receipt: `{ days, rows }`, `days` a positive whole number
+Any session, a delegated run's included, over the whole instance. Receipt: `{ days, rows }`, `days` a positive whole number
 (default 30; else an argv error, and the server refuses it again). One row
 per (tier, role, provider, id, thinking) over the agent-action runs a
 session or the user fired (`triggerSource` agent/manual) that opened a
@@ -296,6 +298,10 @@ Who may call `pier task`, by the caller's session; each refusal exits 1:
   delegate; …`); a queued run gates nothing;
 - otherwise — a top-level session, a cron or watch run's — may.
 
+`runs` and `stats` are read-only and open to a worker's session and a
+supervised run too, both over the whole instance: `runs` lists every run,
+whoever launched it, cron and watch runs included.
+
 A session's role is fixed by the run that made it, for the session's life
 ([10 §Roles](10-continuous-session.md#roles)).
 
@@ -324,5 +330,5 @@ many, full id, `?`), the schedule verbs, `list`'s two fields.
 over a seeded ledger.
 `tasks/continuous.test.ts`: the chain's callbacks, a saved definition's
 default reaching the current head, `none` and a head-less conversation silent, ownership,
-`runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,
+`runs`, a delegated run's `runs` and `stats`, the children's cap. `tasks/lead.test.ts`: roles, depth,
 the milestone flow.

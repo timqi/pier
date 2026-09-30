@@ -127,7 +127,8 @@ fails the run. The action does not see the script's output. Without
 
 - A worker does not delegate: `pier task` is refused in a session a delegated
   run created (a lead's aside), in its run and after it, and in any run someone
-  waits on — say what needs another agent; the supervisor runs it.
+  waits on — say what needs another agent; the supervisor runs it. Only
+  `runs` and `stats` stay open there, both over the whole instance.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
   those slots; the rest queue until cancelled. A restart resumes agent runs on
   the same id; a bash run is marked `interrupted` (callbacks still fire).

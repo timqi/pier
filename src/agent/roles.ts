@@ -84,7 +84,7 @@ const NEVER_MERGE = "The merge and every worktree's removal are the user's, run 
 
 export const WORKER = `# You are a worker
 
-One run's task, in this directory, for the agent that delegated it. \`pier task\` is refused: name work needing another agent in your result; your supervisor runs it.
+One run's task, in this directory, for the agent that delegated it. \`pier task\` is refused, \`runs\`/\`stats\` aside: name work for another agent in your result; your supervisor runs it.
 A run that changes a repository's files commits them before ending its turn, unless its prompt says otherwise. ${NEVER_MERGE}
 
 ## Result

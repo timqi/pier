@@ -128,6 +128,37 @@ describe("tasks under the continuous conversation", () => {
     await expect(service.handle({ operation: "runs" }, "child")).resolves.toEqual([]);
   });
 
+  it("lets a delegated run read runs and stats over the whole instance, and nothing else", async () => {
+    const { service, store, bash, cwd } = rig();
+    const task = await bash();
+    const agent = (name: string): TaskDefinition => ({ ...task, name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch: { tier: "cheap" } } });
+    const model = { provider: "anthropic", id: "opus" };
+    store.saveRun(stored("ours", agent("ours"), { invokedBySessionId: "h0", sessionMode: "fresh", targetSessionId: "o1", context: { definition: agent("ours"), model } }));
+    store.saveRun(stored("theirs", agent("theirs"), { invokedBySessionId: "stranger", sessionMode: "fresh", targetSessionId: "t1", context: { definition: agent("theirs"), model } }));
+    // A cron run whose result goes to the head, running; a worker of the chain, after its run; a worker of a stranger's.
+    store.saveRun(stored("weekly", task, { triggerSource: "cron", callbackSessionId: "h1", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "cron" }));
+    store.saveRun(stored("w", agent("w"), { context: { definition: agent("w"), model }, invokedBySessionId: "h1", sessionMode: "fresh", targetSessionId: "worker" }));
+    store.saveRun(stored("x", agent("x"), { context: { definition: agent("x"), model }, invokedBySessionId: "stranger", sessionMode: "fresh", targetSessionId: "xworker" }));
+    const runIds = async (caller: string) => (await service.handle({ operation: "runs" }, caller) as { runId: string }[]).map((r) => r.runId).sort();
+    const names = async (caller: string) => (await service.handle({ operation: "stats", days: 1 }, caller) as { rows: { names: string[] }[] }).rows.flatMap((r) => r.names).sort();
+    // A top-level session keeps its own ledger; a delegated run's is every run, the launcher-less cron one included.
+    expect(await runIds("h1")).toEqual(["ours", "w"]);
+    for (const caller of ["cron", "worker", "xworker"]) expect(await runIds(caller)).toEqual(["ours", "theirs", "w", "weekly", "x"]);
+    for (const caller of ["h1", "cron", "worker", "xworker"]) expect(await names(caller)).toEqual(["ours", "theirs", "w", "x"]);
+    for (const input of [
+      { operation: "run", prompt: "Work", launch: { model: "test/model" } },
+      { operation: "save", task: { name: "n", action: { type: "bash", script: "true", cwd } } },
+      { operation: "list" },
+      { operation: "cancel", run_id: "ours" },
+      { operation: "recover", run_id: "ours", reason: "x" },
+      { operation: "finish", run_id: "ours" },
+    ]) {
+      await expect(service.handle(input, "cron")).rejects.toThrow(/a delegated run cannot delegate/);
+      await expect(service.handle(input, "worker")).rejects.toThrow(/a worker's session never delegates/);
+    }
+    await expect(service.handle({ operation: "stats", days: 0 }, "cron")).rejects.toThrow(/days must be/);
+  });
+
   it("answers the newest 20 unless asked, in flight first, filtered by state and window", async () => {
     const { service, store, bash } = rig();
     const task = await bash();

@@ -384,8 +384,8 @@ export class TaskService {
     }));
   }
 
-  /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
-  ledger(sessionIds: string[], since: number, states?: readonly TaskRunState[]): LedgerRun[] {
+  /** The run ledger: runs any of `sessionIds` launched (every run, when null), in flight or finished since `since`, at most 200. */
+  ledger(sessionIds: string[] | null, since: number, states?: readonly TaskRunState[]): LedgerRun[] {
     return this.store.ledgerRuns(sessionIds, since, states).map(ledgerRun);
   }
 

@@ -72,7 +72,7 @@ const RUNS_MAX = 200;
 const isState = (value: unknown): value is TaskRunState => (TASK_RUN_STATES as readonly unknown[]).includes(value);
 
 /** The ledger's order is in flight first, so a limit never hides a run still owed a result. */
-function runsOf(host: TaskService, launchers: string[], input: Record<string, unknown>): LedgerRun[] {
+function runsOf(host: TaskService, launchers: string[] | null, input: Record<string, unknown>): LedgerRun[] {
   const { states, since_ms: sinceMs = LEDGER_WINDOW_MS, limit = RUNS_LIMIT } = input;
   if (states !== undefined && !(Array.isArray(states) && states.length && states.every(isState))) {
     throw new Error(`states must be some of ${TASK_RUN_STATES.join(", ")}`);
@@ -80,6 +80,13 @@ function runsOf(host: TaskService, launchers: string[], input: Record<string, un
   if (typeof sinceMs !== "number" || !Number.isInteger(sinceMs) || sinceMs < 1) throw new Error("since_ms must be a positive whole number");
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > RUNS_MAX) throw new Error(`limit must be a whole number from 1 to ${String(RUNS_MAX)}`);
   return host.ledger(launchers, Date.now() - sinceMs, states).slice(0, limit);
+}
+
+/** `runs` over `launchers`, every run's when null; `stats` is instance-wide for every caller. */
+function readLedger(host: TaskService, launchers: string[] | null, input: Record<string, unknown>): unknown {
+  if (input.operation === "runs") return runsOf(host, launchers, input);
+  if (typeof input.days !== "number" || !Number.isInteger(input.days) || input.days < 1) throw new Error("days must be a positive whole number");
+  return host.stats(input.days);
 }
 
 /** Absent instead of `null`: a model reads both the same way, and on a group
@@ -210,7 +217,11 @@ export async function handleTask(
   const role = store.roleOf(callerSessionId);
   const lead = role === "lead";
   const active = store.findActiveRunForTarget(callerSessionId);
-  if (active?.state === "running" && store.supervised(active) && !lead) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
+  const delegated = active?.state === "running" && store.supervised(active) && !lead ? active : undefined;
+  const gate = delegated ?? (role === "worker" ? store.creatorOf(callerSessionId) : undefined);
+  // Read-only, so a delegated run reads the whole instance's ledger: it launches nothing of its own.
+  if (gate && (input.operation === "runs" || input.operation === "stats")) return readLedger(host, null, input);
+  if (delegated) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
   if (role === "worker") throw new Error("a worker's session never delegates, in a run or after it; say what needs another agent and let the session that launched it run it");
   // Read off a draft before it is filed; a saved definition has the same shape under `action`.
   const notLead = <T>(draft: T): T => {
@@ -234,11 +245,7 @@ export async function handleTask(
       return { ...task, nextRun: nextRunAt, lastRun: last ? defined<LastRun>({ runId: last.id, state: last.state, startedAt: last.startedAt, finishedAt: last.finishedAt }) : null };
     });
   }
-  if (input.operation === "runs") return runsOf(host, launchers(), input);
-  if (input.operation === "stats") {
-    if (typeof input.days !== "number" || !Number.isInteger(input.days) || input.days < 1) throw new Error("days must be a positive whole number");
-    return host.stats(input.days);
-  }
+  if (input.operation === "runs" || input.operation === "stats") return readLedger(host, launchers(), input);
   // A one-shot's hidden definition is a run's record, not a task anyone filed.
   const filed = (): string => {
     const id = requiredString(input.task_id, "task_id");
