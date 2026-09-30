@@ -392,7 +392,8 @@ export async function handleTask(
 /** A reviewed goal's merge, or a build lead's integrated branch (the lead reviewed
  *  it), as a cheap worker's run in the main repo, refused unless the worktree is
  *  still exactly what the last review read. A branch whose content is already on
- *  its target is never merged: with `remove` its worktree and branch go, reviewed or not. */
+ *  its target is never merged: with `remove` its worktree and branch go, reviewed or
+ *  not; one that is neither mergeable nor found on its target goes to a line check. */
 async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, remove: boolean): Promise<unknown> {
   const goal = root.goalId ? store.getGoal(root.goalId) : undefined;
   const path = runCwd(root);
@@ -413,10 +414,15 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   const again = `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1`;
   if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed && !tree.merged ? `, then ${again}` : ""}`);
   if (tree.merged && !remove) throw new Error(`${branch}'s content is already on ${base}; nothing to merge — --remove-worktree removes its worktree and branch`);
-  if (unmergeable && !tree.merged) throw new Error(unmergeable);
-  if (!tree.merged && tree.head !== sha) throw new Error(`${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
+  const refused = unmergeable ?? (tree.head === sha ? null
+    : `${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
+  if (refused && !remove) throw new Error(refused);
   const main = await host.mainRepo(path);
-  const prompt = tree.merged ? removePrompt({ branch, base, path, main }) : finishPrompt({ branch, base, sha, path, main, remove });
+  const removal = tree.merged !== null || refused !== null;
+  // The tip before any removal, so a wrong one is `git branch <branch> <tip>` away.
+  if (remove) log.info(`finish ${root.id}: ${branch} at ${tree.head} in ${path} to be removed, ${removal ? `on ${base} by ${tree.merged ?? "line check"}` : `merged into ${base}`}`);
+  const prompt = removal ? removePrompt({ branch, base, path, main, tip: tree.head, by: tree.merged })
+    : finishPrompt({ branch, base, sha, path, main, remove });
   // The tier by name: `expandDraft` resolves it on the menu like any draft's.
   const action = { type: "agent", session: { mode: "fresh", cwd: main }, prompt, launch: { model: "cheap" } };
   return { name: `finish: ${root.context.definition.name}`, action };

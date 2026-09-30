@@ -125,14 +125,21 @@ pier task finish --run <root> [--remove-worktree]
   (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
   `Approved: remove worktree <path>` line only with `--remove-worktree`, a
   one-call verify, the merge and the repo's checks. Receipt and callback as `run`'s.
-- Merged is by content, not ancestry: a branch whose `git merge-tree
-  --write-tree <base> <branch>` is `<base>`'s tree is already on its target
-  (`Worktree.merged`). Without the flag it is refused (`task: <branch>'s content
-  is already on <base>; nothing to merge — …`); with it the goal's outcome and
-  the reviewed sha are not required, only a clean tree and an idle session, and
-  the run's prompt is `removePrompt` (`goals.ts`): re-check the trees, `wt
-  remove <branch>`, `wt remove -D <branch>` when wt keeps it as unmerged, never
-  `--force`.
+- Merged is by content, not ancestry (`Worktree.merged`): `tree` when `git
+  merge-tree --write-tree <base> <branch>` is `<base>`'s tree, else `patches`
+  when `git cherry <base> <branch>` marks every commit `-`. Such a branch
+  without the flag is refused (`task: <branch>'s content is already on <base>;
+  nothing to merge — …`); with it the run's prompt is `removePrompt`
+  (`goals.ts`), the goal's outcome and the reviewed sha not required.
+- With the flag, a branch neither found on its target nor mergeable (goal not
+  clean, HEAD past the reviewed sha) also gets `removePrompt`, `by` null: the
+  run reads each `+` commit's diff against `<base>`'s files and removes only
+  when every changed line is there, else lists the missing lines and ends on
+  `Needs your decision — <branch> has changes not on <base>: …`.
+- A removal re-verifies HEAD (the tip), a clean status and the branch, then
+  `wt remove <branch>`, `-D` when wt keeps it as unmerged, never `--force`;
+  the tip is logged (`finish <root>: <branch> at <tip> …`) and named first in
+  the result with the `git branch <branch> <tip>` that restores it.
 
 ## `save`
 

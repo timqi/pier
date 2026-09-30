@@ -76,10 +76,12 @@ async function worktree(cwd: string): Promise<Worktree> {
   const baseSha = await git(cwd, "merge-base", "HEAD", base);
   const clean = (await git(cwd, "status", "--porcelain")) === "";
   // Exit 1 is merge-tree's conflict: HEAD's content is not on base, a verdict rather than a failure.
-  const merged = await git(cwd, "merge-tree", "--write-tree", base, "HEAD").then(
+  const byTree = await git(cwd, "merge-tree", "--write-tree", base, "HEAD").then(
     async (tree) => tree.split("\n")[0] === await git(cwd, "rev-parse", `${base}^{tree}`),
     (err: unknown) => { if ((err as { status?: unknown }).status === 1) return false; throw err; },
   );
+  const merged = byTree ? "tree" as const
+    : (await git(cwd, "cherry", base, "HEAD")).split("\n").every((line) => line.startsWith("-")) ? "patches" as const : null;
   return { head, branch, base, baseSha, clean, merged };
 }
 

@@ -602,23 +602,52 @@ describe("pier task finish", () => {
     const prompt = action.type === "agent" ? action.prompt : "";
     const main = realpathSync(r.cwd);
     expect(prompt).toContain(`Approved: remove worktree ${r.cwd} and branch feature, its content already on main\n\nWorktree: ${r.cwd}\nMain repo: ${main}\n`);
-    expect(prompt).toContain(`git -C ${main} merge-tree --write-tree main feature && git -C ${main} rev-parse main^{tree}`);
+    expect(prompt).toContain(`git -C ${main} merge-tree --write-tree main feature && git -C ${main} rev-parse main^{tree}\` — HEAD the tip`);
+    expect(prompt).toContain(`\nTip: ${git("rev-parse", "feature")}\n`);
+    expect(prompt).not.toContain("Then check each commit");
     expect(prompt).toContain(`\`wt -C ${main} remove -D feature -y --foreground\``);
     expect(prompt).not.toContain("Approved: merge");
     r.service.stop();
   });
 
-  it("reads a branch that conflicts with its target as not on it", async () => {
+  it("finds a branch on its target by tree, else by patches, else not at all", async () => {
     const r = rig({});
     const git = (...args: string[]): string =>
       execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: false });
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: null });
     git("checkout", "-q", "main");
+    git("cherry-pick", "-x", "feature");
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "main", merged: "tree" });
+    // main edits the picked lines: merge-tree conflicts (exit 1), the patch still matches.
+    writeFileSync(join(r.cwd, "a.ts"), "export const later = 1;\n");
+    git("commit", "-qam", "later");
+    git("checkout", "-q", "feature");
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: "patches" });
+    git("checkout", "-q", "main");
+    git("reset", "-q", "--hard", "main~2");
     writeFileSync(join(r.cwd, "a.ts"), "export const other = 1;\n");
     git("add", "a.ts");
     git("commit", "-qm", "conflicting");
     git("checkout", "-q", "feature");
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: false });
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: null });
+    r.service.stop();
+  });
+
+  it("sends a branch it can neither merge nor find on its target to a line check, removing it only then", async () => {
+    const r = rig({ s1: ["built"], s2: ["Verdict: findings"], s3: ["checked"] }, cheap);
+    const root = await r.launch({ rounds: 1 });
+    await r.ended(root);
+    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s goal ended cap, nothing to merge`);
+    const run = r.store.getRun((await finish(r, root.id, { remove_worktree: true })).runId)!;
+    const { action } = run.context.definition;
+    const prompt = action.type === "agent" ? action.prompt : "";
+    const main = realpathSync(r.cwd);
+    expect(prompt).toContain(`Approved: remove worktree ${r.cwd} and branch feature, only if every line it changes is already on main\n\nWorktree: ${r.cwd}\nMain repo: ${main}\nTip: ${r.head}\n`);
+    expect(prompt).toContain(`\`git -C ${r.cwd} rev-parse HEAD && git -C ${r.cwd} status --porcelain && git -C ${r.cwd} branch --show-current\` — HEAD the tip`);
+    expect(prompt).toContain(`Then check each commit \`git -C ${main} cherry main feature\` marks \`+\``);
+    expect(prompt).toContain("end on `Needs your decision — feature has changes not on main: merge, keep or remove it anyway?`");
+    expect(prompt).toContain(`the tip ${r.head} first, with \`git -C ${main} branch feature ${r.head}\` to restore it`);
+    expect(prompt).not.toContain("Approved: merge");
     r.service.stop();
   });
 

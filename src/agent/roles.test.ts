@@ -32,7 +32,7 @@ describe("the dispatcher contract", () => {
 
   it("merges through `pier task finish` on the user's yes, a button being one, the removal only when they said so", () => {
     expect(DISPATCHER).toContain("`[Merge] | [Merge, remove worktree] | [Show the review]`");
-    expect(DISPATCHER).toContain("also removes, without a merge, a branch whose content is already on its target (`git merge-tree --write-tree <target> <branch>` is the target's tree) though its commits are not");
+    expect(DISPATCHER).toContain("also removes, without a merge, a branch whose content is already on its target though its commits are not — same tree after `git merge-tree`, patches all `-` in `git cherry`, else every changed line checked by the run");
     expect(DISPATCHER).toContain("a click on the first two is one — `pier task finish --run <root>` — or `--run <lead run>` for a lead's milestone — `--remove-worktree` only when they said so");
     expect(DISPATCHER).toContain("build → review → wait for the user → finish");
     // The finish is assembled in code; no contract carries its recipe.
