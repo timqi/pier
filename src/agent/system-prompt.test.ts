@@ -15,6 +15,8 @@ import { replaySystemPrompt } from "./system-prompt.js";
 
 /** The `system` text of every request, in order. */
 const sent: string[] = [];
+/** The `messages` of every request, as JSON. */
+const wire: string[] = [];
 let factory: PiAgentFactory;
 
 beforeAll(async () => {
@@ -25,7 +27,8 @@ beforeAll(async () => {
   }
   vi.stubEnv("ANTHROPIC_API_KEY", "sk-test");
   vi.stubGlobal("fetch", async (_url: unknown, init?: { body?: string }) => {
-    const body = JSON.parse(init?.body ?? "{}") as { system?: { text: string }[] };
+    const body = JSON.parse(init?.body ?? "{}") as { system?: { text: string }[]; messages?: unknown[] };
+    wire.push(JSON.stringify(body.messages ?? []));
     sent.push((body.system ?? []).map((part) => part.text).join("\n\n"));
     return Response.json({ type: "error", error: { type: "invalid_request_error", message: "stubbed" } }, { status: 400 });
   });
@@ -92,6 +95,25 @@ describe("a session's system prompt", () => {
     expect((await factory.readSystemPrompt(session.id))?.text).toBe(sent[before]);
     // The timeline row the run's input renders as is still the custom message.
     expect((await session.history())[0]).toMatchObject({ role: "system", text: "do the task", origin: { kind: "task-delegation", runId: "r" } });
+    await session.dispose();
+  });
+});
+
+describe("a chat command's answer", () => {
+  it("is shown in the transcript and never reaches the model; a seed does", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pier-chat-command-"));
+    const session = await factory.create({ cwd, model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+    await session.systemInput("seed digest", { kind: "session-seed", reason: "first", previousSessionId: null }, "append");
+    await session.systemInput("Waiting on you\n- storage", { kind: "chat-command", command: "status" }, "append");
+    await session.systemInput("nothing running", { kind: "chat-command", command: "stop" }, "append");
+    await session.prompt("hello").catch(() => {});
+    const request = wire.at(-1)!;
+    expect(request).toContain("seed digest");
+    expect(request).toContain("hello");
+    expect(request).not.toContain("Waiting on you");
+    expect(request).not.toContain("nothing running");
+    // The last turn is the stubbed provider's refusal.
+    expect((await session.history()).map((t) => t.text).slice(0, 4)).toEqual(["seed digest", "Waiting on you\n- storage", "nothing running", "hello"]);
     await session.dispose();
   });
 });

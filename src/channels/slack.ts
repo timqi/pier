@@ -495,7 +495,7 @@ export class SlackChannel implements Channel {
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only to a message nothing else answers.
       if (main && isSilentReply(reply) && (opened || !settles)) return;
-      if ((await this.out.reply(to.channel, to.threadTs, reply)) && main) this.statusLine.behind(to.channel);
+      await this.out.reply(to.channel, to.threadTs, reply);
     }, reply.meta, opened);
   }
 
@@ -514,8 +514,9 @@ export class SlackChannel implements Channel {
     if (!to.threadTs && shownByStatus(note.origin)) {
       return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
+    // `/status`'s answer is the status message re-posted, never a copy beside it.
+    if (!to.threadTs && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.channel, note.text))) return;
     const ts = await this.out.note(to.channel, to.threadTs, note);
-    if (ts && !to.threadTs) this.statusLine.behind(to.channel);
     if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
   }
 
@@ -523,7 +524,6 @@ export class SlackChannel implements Channel {
     if (!this.isHome(channel)) throw new Error(`refusing to open a thread in ${channel}: not the home DM`);
     const ts = await this.out.note(channel, undefined, note);
     if (!ts) throw new Error(`Slack returned no ts for the root in ${channel}`);
-    this.statusLine.behind(channel);
     return conversationId(channel, ts);
   }
 

@@ -198,14 +198,14 @@ describe("receipt ledger", () => {
     const turn = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 1 };
     const view = (items: [string, string][]) => ({ text: "x", items: items.map(([problem, status]) => ({ problem, status })) });
 
-    it("a turn that opened an item keeps its 👀 and books it under the problem", async () => {
+    it("a turn that opened an item takes its 👀 off and books it under the problem, wearing nothing", async () => {
       const { receipts, calls, ledger } = recording();
       receipts.mark("D1", "D1", "1");
       let settles: boolean | undefined;
       await receipts.settleAfter("D1", async (s) => void (settles = s), turn, "storage");
       expect(settles).toBe(true);
-      expect(calls).toEqual(["+eyes:1"]);
-      expect(ledger.items().map((i) => [i.messageId, i.problem, i.reaction])).toEqual([["1", "storage", "eyes"]]);
+      expect(calls).toEqual(["+eyes:1", "-eyes:1"]);
+      expect(ledger.items().map((i) => [i.messageId, i.problem, i.reaction])).toEqual([["1", "storage", ""]]);
       expect(ledger.take("D1")).toEqual([]);
       // A turn with nothing on the books is told so.
       await receipts.settleAfter("D1", async (s) => void (settles = s), turn);
@@ -221,13 +221,25 @@ describe("receipt ledger", () => {
       calls.length = 0;
       const later = Date.now() + 1000;
       await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "stopped"]]), later);
-      expect(calls).toEqual(["-eyes:2", "+question:2"]);
+      expect(calls).toEqual(["+question:2"]);
       // No change, no call.
       await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "pending release"]]), later);
-      expect(calls).toHaveLength(2);
+      expect(calls).toHaveLength(1);
+      // Running again: the ❓ comes off and nothing goes on.
+      await receipts.items(view([["a", "running"], ["b", "running"], ["c", "stopped"]]), later);
+      expect(calls.slice(1)).toEqual(["-question:2"]);
       await receipts.items(view([["a", "running"], ["c", "stopped"]]), later);
-      expect(calls.slice(2)).toEqual(["-question:2", "+white_check_mark:2"]);
+      expect(calls.slice(2)).toEqual(["+white_check_mark:2"]);
       expect(ledger.items().map((i) => i.messageId)).toEqual(["1", "3"]);
+    });
+
+    it("a 👀 an older release left on an item comes off, even while the item is stopped", async () => {
+      const { receipts, calls, ledger } = recording();
+      ledger.join([{ conversationId: "D1", chatId: "D1", messageId: "1" }], "a", "eyes");
+      ledger.join([{ conversationId: "D1", chatId: "D1", messageId: "2" }], "b", "eyes");
+      await receipts.items(view([["a", "stopped"], ["b", "waiting on you"]]), Date.now() + 1000);
+      expect(calls.sort()).toEqual(["+question:2", "-eyes:1", "-eyes:2"]);
+      expect(ledger.items().map((i) => i.reaction)).toEqual(["", "question"]);
     });
 
     it("a receipt joined after the view was read is not taken for a gone problem", async () => {
@@ -236,7 +248,7 @@ describe("receipt ledger", () => {
       receipts.mark("D1", "D1", "1");
       await receipts.settle("D1", undefined, "new");
       await receipts.items(view([]), seen);
-      expect(calls).toEqual(["+eyes:1"]);
+      expect(calls).toEqual(["+eyes:1", "-eyes:1"]);
       expect(ledger.items()).toHaveLength(1);
     });
 
@@ -245,7 +257,7 @@ describe("receipt ledger", () => {
       receipts.mark("D1", "D1", "1");
       await receipts.settle("D1", undefined, "a");
       await receipts.sweep(true);
-      expect(calls).toEqual(["+eyes:1"]);
+      expect(calls).toEqual(["+eyes:1", "-eyes:1"]);
       expect(ledger.takeStale(0)).toEqual([]);
       expect(ledger.items()).toHaveLength(1);
     });
@@ -256,8 +268,9 @@ describe("receipt ledger", () => {
         receipts.mark("D1", "D1", String(i));
         await receipts.settle("D1", undefined, "a");
         await new Promise((r) => setTimeout(r, 1));
+        if (i === 19) await receipts.items(view([["a", "waiting on you"]]), Date.now() + 1000);
       }
-      expect(calls.filter((c) => c.startsWith("-"))).toEqual(["-eyes:0"]);
+      expect(calls.filter((c) => c.startsWith("-") && !c.startsWith("-eyes"))).toEqual(["-question:0"]);
       expect(ledger.items()).toHaveLength(20);
       expect(ledger.items()[0]!.messageId).toBe("1");
     });

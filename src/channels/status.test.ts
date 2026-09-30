@@ -52,12 +52,34 @@ describe("the status message", () => {
     expect(handed).toHaveLength(3);
   });
 
-  it("re-posts below a later main-flow post and deletes the old one", async () => {
+  it("/status re-posts it at the bottom with the answer's text, as the one reply", async () => {
     const { status, calls } = rig();
     await status.show("D1", view("a"));
-    status.behind("D1");
+    expect(await status.answer("D1", "b")).toBe(true);
+    expect(calls).toEqual(["post D1 > a", "delete m1", "post D1 > b"]);
+    // Nothing open, another chat, or no view yet: the note answers.
+    expect(await status.answer("D1", NOTHING_OPEN)).toBe(false);
+    expect(await status.answer("D2", "b")).toBe(false);
+    expect(await rig().status.answer("D1", "b")).toBe(false);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("/status during a running refresh still re-posts at the bottom", async () => {
+    const { status, calls } = rig();
     await status.show("D1", view("a"));
-    expect(calls).toEqual(["post D1 > a", "delete m1", "post D1 > a"]);
+    const running = status.show("D1", view("b"));
+    await Promise.resolve();
+    const [, answered] = await Promise.all([running, status.answer("D1", "c"), status.show("D1", view("d"))]);
+    expect(answered).toBe(true);
+    expect(calls).toEqual(["post D1 > a", "edit m1 > b", "delete m1", "post D1 > d"]);
+  });
+
+  it("/status whose re-post fails leaves the answer to the note", async () => {
+    const { status, calls, logged } = rig({ post: true });
+    await status.show("D1", view("a"));
+    expect(await status.answer("D1", "a")).toBe(false);
+    expect(calls).toEqual(["post D1 > a", "post D1 > a"]);
+    expect(logged).toHaveLength(2);
   });
 
   it("is deleted when nothing is open, and not posted for nothing", async () => {
@@ -89,14 +111,6 @@ describe("the status message", () => {
     await status.show("D1", view("a"));
     await status.show("D2", view("a"));
     expect(calls).toEqual(["post D1 > a", "delete m1", "post D2 > a"]);
-  });
-
-  it("a main-flow post after a shown view re-posts it at once", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a"));
-    status.behind("D1");
-    await status.show("D1", view("a"));
-    expect(calls).toEqual(["post D1 > a", "delete m1", "post D1 > a"]);
   });
 
   it("a burst runs one refresh at a time and ends on the newest view", async () => {

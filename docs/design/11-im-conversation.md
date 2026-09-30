@@ -141,8 +141,8 @@ thread half only for the home chat; any other is refused.
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
-  comes off with the head's turn-end, as any conversation's — unless that turn
-  opened an item, when it stays as the item's reaction (§Status). A chat command
+  comes off with the head's turn-end, as any conversation's; a message whose
+  turn opened an item then wears that item's state (§Status). A chat command
   wears none — its answer is a note, and no turn would take it off — and
   neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
   message that caused a seed already wears its own.
@@ -155,10 +155,10 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
 - `AgentReply.opened` is the problems the reply's `<open>` markers named, in
   order (`splitReply`). A home main-flow reply with `opened` moves the
   receipts its turn settles to item receipts under the first problem; the 👀
-  stays. Anything else clears them.
-- An item receipt wears its item's `OpenStatus`: `running` → 👀, `waiting on
+  comes off either way.
+- An item receipt wears its item's `OpenStatus`: `running` → nothing, `waiting on
   you` → ❓, gone from the list → ✅ and forgotten; `stopped` and `pending
-  release` keep what they wear. A change removes the old reaction and adds the
+  release` keep what they wear, except a 👀 an older release booked, which comes off. A change removes the old reaction and adds the
   new one; no change, no call. At most 20 messages per item; the oldest past
   that is cleared and forgotten. The stale and startup sweeps skip them.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
@@ -168,11 +168,11 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   platform's live adapter; nothing otherwise.
 - The status message is `▤ open items` in the platform's emphasis over the
   view's text, one per home chat. Same text as last posted → nothing;
-  `Nothing open.` → deleted; otherwise edited in place, or deleted and posted
-  anew when the adapter has posted a reply, note or thread root into the main
-  flow since — at once when a view has been shown, else on the next refresh;
-  `startChannels` refreshes once, after the restart note. A user's own message
-  never moves it. One refresh runs at a time; the newest waiting view replaces
+  `Nothing open.` → deleted; otherwise edited in place (posted when there is
+  none). Replies, notes and thread roots never move it; only `/status` in the
+  main flow deletes it and posts it anew at the bottom, with the answer's text
+  (`StatusMessage.answer`); `startChannels` refreshes once, after the restart
+  note. One refresh runs at a time; the newest waiting view replaces
   the older. A home moved within the platform loses the old chat's card on the
   next refresh; moved across platforms, the old card stays until that adapter
   refreshes.
@@ -202,7 +202,7 @@ empty) is dropped with a log line, never a command.
 
 | Command | The head (home chat, web) | A thread of any other chat |
 | --- | --- | --- |
-| `/status` | the head's open items (`MainChain.send`) | prose |
+| `/status` | the head's open items (`MainChain.send`); in the home chat's main flow the status message re-posted at the bottom is the one answer, the note only when nothing is open or the re-post failed | prose |
 | `/new` | the next head now; a streaming head refuses (`the conversation is replying — /stop first`) | prose |
 | `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running` | aborts the thread's session: `⏹ Stopped.` |
 | `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
@@ -211,7 +211,7 @@ empty) is dropped with a log line, never a command.
 | `/bind <code>` (a DM) | bind | bind |
 
 - A head command's answer is the `chat-command` note above; the transcript
-  records it as a web-sent command does.
+  records it as a web-sent command does, and it never enters the model's context.
 - An unknown `/word` or `%word` is a message, never an error, on every
   surface ([10](10-continuous-session.md#chat-commands)).
 - `skills/pier-help/SKILL.md` (§In-chat commands and the settings panel) carries a one-line copy of
@@ -321,7 +321,7 @@ through what the head launches (`pier task`), never by a group's message.
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `core/reply.test.ts` `opened`; `channels/receipts.test.ts` the
   join, the state diff, the sweeps, the cap; `channels/status.test.ts` edit,
-  re-post, delete, failures; `channels/slack.test.ts` the join at send,
+  `/status`'s re-post, delete, failures; `channels/slack.test.ts` the join at send,
   quiet notes and replies, `status()`; `channels/runtime.test.ts`
   `openItems` to the live home adapter only.
 
@@ -329,8 +329,8 @@ through what the head launches (`pier task`), never by a group's message.
 
 - A day of use from the phone: every spoken reply, seed and `/status` answer
   of the head appears in the DM's main flow in order, a message wears its
-  item's state until it is done, one status message shows what is open, and a
-  callback shows only as that message moving unless a run failed or the head
+  item's ❓ / ✅ once its turn is done, one status message shows what is open, and a
+  callback shows only as that message changing in place unless a run failed or the head
   speaks (§Status); nothing appears twice on the phone (no push beside
   the DM); the web timeline matches.
 - Disabling the platform in the Console returns the head to the web with

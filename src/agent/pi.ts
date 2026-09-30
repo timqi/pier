@@ -187,6 +187,21 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
   });
 };
 
+/** A chat command's answer is the user's to read, not the model's: shown and
+ *  kept in the transcript, never sent — neither in a turn's request nor in the
+ *  messages compaction summarizes. */
+export const chatCommandsOffContext = (pi: ExtensionAPI) => {
+  const sent = <T extends { role: string }>(messages: T[]): T[] => messages.filter((m) => !(m.role === "custom"
+    && (m as { customType?: unknown }).customType === "pier.system-input"
+    && ((m as { details?: unknown }).details as { kind?: unknown } | undefined)?.kind === "chat-command"));
+  pi.on("context", (event) => ({ messages: sent(event.messages) }));
+  // Pi summarizes the very `preparation` it handed the event, so narrowing it in place is the filter.
+  pi.on("session_before_compact", ({ preparation }) => {
+    preparation.messagesToSummarize = sent(preparation.messagesToSummarize);
+    preparation.turnPrefixMessages = sent(preparation.turnPrefixMessages);
+  });
+};
+
 /** The transcript's current branch in order, compacted entries included. */
 const branchMessages = (sessionManager: SessionManager): PiMessage[] =>
   sessionManager.getBranch().flatMap((entry) => sessionEntryToContextMessages(entry)) as PiMessage[];
@@ -772,7 +787,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
         skills: base.skills.filter((skill) =>
           !skillsOff.includes(skill.name) || !this.skillPaths.some((dir) => skill.filePath.startsWith(dir + sep))),
       }),
-      extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
+      extensionFactories: [
+        { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
+        { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
+      ],
       agentsFilesOverride: (current) => {
         const content = this.instructions(role);
         return {

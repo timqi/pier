@@ -73,7 +73,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   },
 }));
 
-const { PiAgentFactory, PiSession, titleFromAnswer } = await import("./pi.js");
+const { PiAgentFactory, PiSession, chatCommandsOffContext, titleFromAnswer } = await import("./pi.js");
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
@@ -162,6 +162,20 @@ function session() {
   // The seam is typed against the SDK's session; a full double would be noise.
   return { fake, session: new PiSession(fake.pi as never) };
 }
+
+describe("a chat command's answer", () => {
+  it("is left out of the turn's request and of what compaction summarizes", async () => {
+    const handlers = new Map<string, (event: unknown) => unknown>();
+    chatCommandsOffContext({ on: (name: string, fn: (event: unknown) => unknown) => void handlers.set(name, fn) } as never);
+    const input = (kind: string) => ({ role: "custom", customType: "pier.system-input", content: kind, details: { kind } });
+    const messages = [input("chat-command"), input("session-seed"), { role: "user", content: "hi" }];
+    const kept = [messages[1], messages[2]];
+    expect(await handlers.get("context")!({ type: "context", messages })).toEqual({ messages: kept });
+    const preparation = { messagesToSummarize: messages, turnPrefixMessages: [input("chat-command")] };
+    await handlers.get("session_before_compact")!({ type: "session_before_compact", preparation });
+    expect(preparation).toEqual({ messagesToSummarize: kept, turnPrefixMessages: [] });
+  });
+});
 
 describe("session model runtimes", () => {
   it("keeps extension providers and cache retention private to one session", async () => {

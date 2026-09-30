@@ -182,7 +182,8 @@ export type SystemInputOrigin = {
   source?: SystemInputSource;
 } | {
   /** The answer to a chat command the conversation took instead of the model
-   *  (core/chain.ts), appended without a turn so the model sees what the user saw. */
+   *  (core/chain.ts), appended without a turn: the transcript shows it, and it
+   *  never reaches the model's context. */
   kind: "chat-command";
   command: ChatCommand;
   /** `/status`'s named runs that have a session, run id → session id: the

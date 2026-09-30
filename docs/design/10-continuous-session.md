@@ -172,7 +172,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   both are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
-  text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, its origin
+  text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, kept out of the model's context (`agent/pi.ts`), its origin
   carrying `sessions`, run id → session id for every run it names that has one; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card, and the web's status panel, opened by the bar's

@@ -519,7 +519,7 @@ export class LarkChannel implements Channel {
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only to a message nothing else answers.
       if (main && isSilentReply(reply) && (opened || !settles)) return;
-      if ((await this.out.reply(to, reply)) && main) this.statusLine.behind(to.chatId);
+      await this.out.reply(to, reply);
     }, reply.meta, opened);
   }
 
@@ -538,8 +538,9 @@ export class LarkChannel implements Channel {
     if ("chatId" in to && shownByStatus(note.origin)) {
       return logger("lark").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
+    // `/status`'s answer is the status message re-posted, never a copy beside it.
+    if ("chatId" in to && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.chatId, note.text))) return;
     const messageId = await this.out.note(to, note);
-    if (messageId && "chatId" in to) this.statusLine.behind(to.chatId);
     if (messageId && awaitsTurn(note.origin)) {
       this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);
     }
@@ -549,7 +550,6 @@ export class LarkChannel implements Channel {
     if (!this.isHome(chatId)) throw new Error(`refusing to open a topic in ${chatId}: not the home chat`);
     const messageId = await this.out.note({ chatId }, note);
     if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
-    this.statusLine.behind(chatId);
     return conversationId(chatId, messageId);
   }
 

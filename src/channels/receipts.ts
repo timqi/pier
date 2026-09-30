@@ -1,7 +1,8 @@
 // Reaction receipts: a 👀 goes on an inbound message and comes off when its
-// turn settles, or stays on as its open item's state when the turn opened one
-// (docs/design/11 §Status). Durable, because the emoji lives on the platform: a
-// process ending between the two halves would leave it with nobody to clear it.
+// turn settles; a message whose turn opened an open item then wears that
+// item's ❓ / ✅ (docs/design/11 §Status). Durable, because the emoji lives on
+// the platform: a process ending between the two halves would leave it with
+// nobody to clear it.
 
 import type { DatabaseSync } from "node:sqlite";
 import { waitsOnYou } from "../core/reply.js";
@@ -13,6 +14,8 @@ import type { ChannelPlatform } from "./types.js";
 const SWEEP_EVERY_MS = 60_000;
 /** Messages one item wears its state on; the oldest past it comes clear. */
 const ITEM_CAP = 20;
+/** An item receipt's reaction while its item runs: the turn's 👀 is gone, and nothing replaces it. */
+const NONE = "";
 
 interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
@@ -28,7 +31,7 @@ interface ReceiptRow {
   message_id: string;
 }
 
-/** A message that opened an open item, wearing `reaction` until the item is done. */
+/** A message that opened an open item, wearing `reaction` (`NONE` while it runs) until the item is done. */
 type ItemReceipt = { chatId: string; messageId: string; problem: string; reaction: string; createdAt: number };
 
 const toReceipt = (row: ReceiptRow): Receipt => ({
@@ -134,7 +137,7 @@ interface ReactionApi {
   removeReaction(chatId: string, messageId: string, emoji: string): Promise<void>;
 }
 
-/** The platform's names for a message's three states; `working` is a turn receipt's too. */
+/** The platform's names for a message's states: `working` a turn's, the other two an item's. */
 type Reactions = Record<"working" | "waiting" | "done", string>;
 
 /** A receipt is booked synchronously (an instant turn must not clear an
@@ -201,10 +204,12 @@ export class Receipts {
     await Promise.all(this.ledger.items().map(async (item) => {
       const now = status.get(item.problem);
       if (now === undefined && item.createdAt >= seen) return;
-      // `stopped` and `pending release` wait for the head's next marker.
+      // `stopped` and `pending release` wait for the head's next marker; an item
+      // never wears the turn's 👀, so one booked by an older release comes off.
       const want = now === undefined ? this.emoji.done
-        : now === "running" ? this.emoji.working
-        : waitsOnYou(now) ? this.emoji.waiting : item.reaction;
+        : now === "running" ? NONE
+        : waitsOnYou(now) ? this.emoji.waiting
+        : item.reaction === this.emoji.working ? NONE : item.reaction;
       this.ledger.setItem(item, now === undefined ? null : want);
       if (want !== item.reaction) await this.swap(item.chatId, item.messageId, item.reaction, want);
     }));
@@ -219,15 +224,15 @@ export class Receipts {
     return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working));
   }
 
-  /** The 👀 stays on; only the books move, and an item past its cap comes clear. */
+  /** The 👀 comes off as for any turn; the books move, and an item past its cap comes clear. */
   private async join(receipts: Receipt[], problem: string): Promise<void> {
-    await this.landed(receipts);
-    await this.clear(this.ledger.join(receipts, problem, this.emoji.working));
+    await this.clear(receipts);
+    await this.clear(this.ledger.join(receipts, problem, NONE));
   }
 
   private async swap(chatId: string, messageId: string, from: string, to: string): Promise<void> {
-    await this.api.removeReaction(chatId, messageId, from).catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`));
-    await this.api.addReaction(chatId, messageId, to).catch((err: unknown) => this.log(`reaction failed: ${String(err)}`));
+    if (from !== NONE) await this.api.removeReaction(chatId, messageId, from).catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`));
+    if (to !== NONE) await this.api.addReaction(chatId, messageId, to).catch((err: unknown) => this.log(`reaction failed: ${String(err)}`));
   }
 
   /** A slow apply must not let a later receipt clear first. */
@@ -239,9 +244,11 @@ export class Receipts {
 
   private async clear(receipts: (Receipt | ItemReceipt)[]): Promise<void> {
     await this.landed(receipts);
-    await Promise.all(receipts.map((r) =>
-      this.api.removeReaction(r.chatId, r.messageId, "reaction" in r ? r.reaction : this.emoji.working)
-        .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`))));
+    await Promise.all(receipts.map((r) => {
+      const emoji = "reaction" in r ? r.reaction : this.emoji.working;
+      return emoji === NONE ? undefined : this.api.removeReaction(r.chatId, r.messageId, emoji)
+        .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`));
+    }));
   }
 }
 

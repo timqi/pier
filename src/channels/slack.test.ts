@@ -1290,29 +1290,48 @@ describe("the home chat", () => {
     const view = (text: string, items: [string, string][] = []) =>
       ({ text, items: items.map(([problem, status]) => ({ problem, status })) });
 
-    it("keeps one labelled message below the main flow's last post, and only in the home chat", async () => {
+    it("keeps one labelled message, edited in place under later posts, and only in the home chat", async () => {
       await channel.status(HOME, view("storage — running"));
       expect(client.sent.at(-1)).toEqual({ channel: HOME, text: "_▤ open items_\nstorage — running" });
       await channel.status(HOME, view("storage — waiting on you"));
       expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — waiting on you" });
+      // A reply or a note never moves it: no status after every turn.
       await channel.send(HOME, { text: "done", suggestions: [] });
-      await channel.status(HOME, view("storage — waiting on you"));
-      expect(client.deleted).toEqual(["900.000100"]);
-      expect(client.sent.map((p) => p.text.split("\n")[0])).toEqual(["_▤ open items_", "done", "_▤ open items_"]);
+      await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
+      await channel.status(HOME, view("storage — merged"));
+      expect(client.deleted).toEqual([]);
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — merged" });
+      expect(client.sent.map((p) => p.text.split("\n")[0])).toEqual(["_▤ open items_", "done", "_⚠ failed_"]);
       await channel.status(HOME, view("Nothing open."));
-      expect(client.deleted).toEqual(["900.000100", "902.000100"]);
+      expect(client.deleted).toEqual(["900.000100"]);
       await expect(channel.status(CHANNEL, view("x"))).rejects.toThrow(/not the home DM/);
     });
 
-    it("a turn that opened an item keeps the message's 👀, then ❓ and ✅ as the item moves", async () => {
+    it("/status is answered once: the message re-posted at the bottom, or the note when nothing is open", async () => {
+      const origin = { kind: "chat-command" as const, command: "status" as const };
+      await channel.status(HOME, view("a"));
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.notify(HOME, { text: "a — running", origin });
+      expect(client.deleted).toEqual(["900.000100"]);
+      expect(client.sent.map((p) => p.text)).toEqual(["_▤ open items_\na", "done", "_▤ open items_\na — running"]);
+      await channel.status(HOME, view("Nothing open."));
+      await channel.notify(HOME, { text: "Nothing open.", origin });
+      expect(client.sent.map((p) => p.text).slice(3)).toEqual(["_/status_\n> Nothing open."]);
+    });
+
+    it("a turn that opened an item takes the message's 👀 off, then ❓ and ✅ as the item moves", async () => {
       await feed(dm({ text: "design storage", ts: "2000.000100" }));
       await channel.send(HOME, { text: "on it", suggestions: [], meta, opened: ["storage", "cache"] });
-      expect(client.reactions).toEqual([{ channel: HOME, ts: "2000.000100", name: "eyes", add: true }]);
+      expect(client.reactions).toEqual([
+        { channel: HOME, ts: "2000.000100", name: "eyes", add: true },
+        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
+      ]);
       // A view read in the join's millisecond may predate the marker; only a later one says gone.
       await new Promise((r) => setTimeout(r, 2));
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
+      expect(client.reactions).toHaveLength(2);
       await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
-      expect(client.reactions.slice(1)).toEqual([
-        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
+      expect(client.reactions.slice(2)).toEqual([
         { channel: HOME, ts: "2000.000100", name: "question", add: true },
       ]);
       await channel.status(HOME, view("Nothing open."));
