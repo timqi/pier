@@ -109,7 +109,8 @@ truth.
   offers "Model & reasoning"; Stop aborts a running turn. A session's directory
   is fixed at creation, so another directory means another thread.
 - Panel taps never reach you. The next-step buttons under your own replies
-  do — a click arrives as an ordinary user message with that label.
+  do — a click arrives as a reply to that message: the label under a
+  `[re assistant <time>]` quote of the reply that offered it.
 
 ## What a turn looks like from outside
 
