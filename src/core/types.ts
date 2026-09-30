@@ -12,8 +12,8 @@ export interface ConversationKey {
 /**
  * What an assistant turn renders as on any surface: markdown plus the
  * next-step labels the agent offered. Every surface renders the labels as
- * buttons (web chat now, IM quick replies later) and a click sends the label
- * back as an ordinary user message. Parsed by core/reply.ts — the syntax is
+ * buttons, and a click sends the label as a user reply quoting the message
+ * that offered it (`withQuote`, core/identity.ts). Parsed by core/reply.ts — the syntax is
  * never a platform's business.
  */
 export interface AgentReply {
