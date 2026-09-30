@@ -38,10 +38,10 @@ delivery.
   phase (`TaskStore.leads`): `design` when its creating run carries
   `launch.design` (`--design`, set by the head only for a product or architecture
   design the user finalizes), `build` for any other lead.
-- A code change runs build → review → wait for the user → finish.
-- A worker launched `--worktree <branch>` (or `--rounds <n>`, n ≥ 1) is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead's review of its integrated branch is such a goal in its own worktree (`--rounds <n> --cwd <its tree>`), and `finish` takes a build lead's branch only at the sha the newest goal there ended clean on.
+- A code change runs build → review → wait for the user → merge.
+- A worker launched `--worktree <branch>` (or `--rounds <n>`, n ≥ 1) is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead's review of its integrated branch is such a goal in its own worktree (`--rounds <n> --cwd <its tree>`); its done milestone names the sha that goal ended clean on.
 - A lead integrates workers into its own branch (`git merge <branch>` in its worktree, their worktrees kept) and never merges into the target; its done milestone ends on the branch ready and names the worktrees left.
-- The merge into the target and every worktree's removal are the user's decision; no build session runs `wt merge`/`wt remove` or is resumed to. On the user's yes the head runs `pier task finish --run <root>` (`--remove-worktree` only when they said so), whose run and prompt are code (`finishPrompt`, `removePrompt`, `tasks/goals.ts`); a branch counts as merged when its content is on the target, not only its commits.
+- The merge into the target and every worktree's removal are the user's decision; no build session runs `wt merge`/`wt remove` or is resumed to. On the user's yes the head merges itself (`DISPATCHER`): HEAD the clean review's sha and the tree clean, then `wt -C <worktree> merge <target>`, removing the worktree unless they keep it, then the project's checks on the target.
 - Models are `MODEL_TABLE` (`agent/roles.ts`), carried by `DISPATCHER` and `lead("build")`.
 - A rule has one owner, the lowest layer every reader of it loads: the reply language is `surfacePrompt`'s, what stops a run and the `Approved:` line lifting it the baseline's Working style (`agent/pi.ts`), the result's shape `RUN_RESULT`'s, the merge being the user's `DISPATCHER`'s — `WORKER` and `lead("build")` carry it as one clause.
 

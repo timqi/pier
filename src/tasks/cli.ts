@@ -22,7 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
-  worktree: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" }, "remove-worktree": { type: "boolean" },
+  worktree: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" },
   days: { type: "string" }, state: { type: "string" }, since: { type: "string" }, limit: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
@@ -38,10 +38,6 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
       "        [--cwd <dir>] --name <text> [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
-  },
-  finish: {
-    usage: "finish --run <root> [--remove-worktree]",
-    help: "merge a reviewed goal's branch into its target as a cheap finishing run in the main repo; refused unless HEAD is the reviewed sha and the tree clean",
   },
   save: {
     usage: "save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)\n" +
@@ -164,7 +160,7 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
   if (status === 200) {
     // Compact: the reader is a model, and the ids are what it keeps; an answer
     // the server already wrote in lines (`--model ?`) is printed as it came.
-    io.stdout(typeof body.result === "string" ? body.result : ((name === "run" || name === "finish") && !json && receiptLine(body.result)) || JSON.stringify(body.result));
+    io.stdout(typeof body.result === "string" ? body.result : (name === "run" && !json && receiptLine(body.result)) || JSON.stringify(body.result));
     // A full page looks the same as "that is all" unless it says otherwise.
     if (params.operation === "runs" && Array.isArray(body.result) && body.result.length === params.limit) {
       io.stderr(`task: ${String(params.limit)} shown, the --limit; there may be more (--state, --since, --limit)`);
@@ -202,7 +198,6 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     const days = Number(values.days ?? 30);
     return Number.isInteger(days) && days > 0 ? { operation: "stats", days } : refuse("--days must be a positive whole number");
   }
-  if (name === "finish") return compact({ operation: name, run_id: values.run ?? refuse("finish needs --run"), remove_worktree: values["remove-worktree"] || undefined });
   if (name === "cancel" || name === "recover") {
     if ((values.run === undefined) === (values.group === undefined)) refuse(`${name} takes exactly one of --run or --group`);
     if (name === "recover" && values.reason === undefined) refuse("recover needs --reason");

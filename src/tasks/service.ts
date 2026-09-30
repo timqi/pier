@@ -3,8 +3,7 @@
 // Decisions belong to the files beside it.
 
 import { execFile } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { stat } from "node:fs/promises";
 import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
@@ -75,14 +74,7 @@ async function worktree(cwd: string): Promise<Worktree> {
   const base = origin?.replace(/^origin\//, "") ?? "main";
   const baseSha = await git(cwd, "merge-base", "HEAD", base);
   const clean = (await git(cwd, "status", "--porcelain")) === "";
-  // Exit 1 is merge-tree's conflict: HEAD's content is not on base, a verdict rather than a failure.
-  const byTree = await git(cwd, "merge-tree", "--write-tree", base, "HEAD").then(
-    async (tree) => tree.split("\n")[0] === await git(cwd, "rev-parse", `${base}^{tree}`),
-    (err: unknown) => { if ((err as { status?: unknown }).status === 1) return false; throw err; },
-  );
-  const merged = byTree ? "tree" as const
-    : (await git(cwd, "cherry", base, "HEAD")).split("\n").every((line) => line.startsWith("-")) ? "patches" as const : null;
-  return { head, branch, base, baseSha, clean, merged };
+  return { head, branch, base, baseSha, clean };
 }
 
 /** A fresh run's own worktree, `branch` off the one `cwd` has checked out: `.path` of `wt`'s JSON line. */
@@ -111,8 +103,6 @@ export class TaskService {
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
-  /** The repository a worktree belongs to: its common git dir's parent. */
-  mainRepo = async (cwd: string): Promise<string> => dirname(await realpath(resolve(cwd, await git(cwd, "rev-parse", "--git-common-dir"))));
 
   constructor(
     readonly store: TaskStore,

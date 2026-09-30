@@ -29,7 +29,7 @@ export interface AgentLaunchPolicy {
   worktree?: string;
   /** Present exactly on a goal's root (tasks/goals.ts): the reviews the goal
    *  allows (1–9), the work reviewed and fixed without a turn of its supervisor's
-   *  until the end; the merge is the user's (`pier task finish`). */
+   *  until the end; the merge is the user's. */
   rounds?: number;
   /** The review's model as the dispatcher named it (a tier or a menu name);
    *  the root run's tier, else its model, when absent. */

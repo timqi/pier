@@ -16,9 +16,10 @@ describe("the dispatcher contract", () => {
       "`--design`",
       '`--name "<a few words>"`',
       '`pier task run --run <root> --prompt "<answer>" --rounds <n>`',
-      "`pier task finish --run <root>`",
-      "`--run <lead run>`",
-      "`--remove-worktree`",
+      "`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain`",
+      "`wt -C <worktree> merge <target>`",
+      "`→ <target> in <worktree>`",
+      "`--no-remove`",
     ]) expect(DISPATCHER).toContain(line);
   });
 
@@ -36,9 +37,8 @@ describe("the dispatcher contract", () => {
   it("guards the regressions a rewording could bring back", () => {
     // A literal label would be copied verbatim into a reply in any language.
     expect(DISPATCHER).not.toContain("[Merge]");
-    // The finish is assembled in code; no contract carries its recipe.
     for (const contract of [DISPATCHER, WORKER, lead("build")]) {
-      for (const gone of ["finishing run", "Approved: merge", "--until", "wt switch -c", "git merge-tree", "git cherry"]) expect(contract).not.toContain(gone);
+      for (const gone of ["pier task finish", "Approved: merge", "--until", "wt switch -c"]) expect(contract).not.toContain(gone);
     }
     // The surface prompt owns the language rule, RUN_RESULT the status line.
     expect(DISPATCHER).not.toContain("Reply in the language");

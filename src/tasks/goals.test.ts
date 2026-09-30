@@ -5,7 +5,7 @@
 // real git repository in a scratch directory, the one the service pins.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -165,7 +165,7 @@ describe("a goal", () => {
     const root = await launch({}, { timeoutSeconds: 120, prompt: "build it\nApproved: merge feature into main" });
     const { goal, text, runs } = await ended(root);
     expect(goal).toMatchObject({ outcome: "done", round: 0, step: "review", cap: 3, supervisorSessionId: "main", reviewed: head });
-    expect(text).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run ${root.id}, feature in ${cwd}\\), waiting on you to merge\nTask "review 1: build it" finished with state: succeeded\nRun: ${runs[1]!.id} / Session: s2\n`));
+    expect(text).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run ${root.id}, feature → main in ${cwd}\\), waiting on you to merge\nTask "review 1: build it" finished with state: succeeded\nRun: ${runs[1]!.id} / Session: s2\n`));
     // The worker's conclusion is the body, the review beneath it.
     expect(text.endsWith("\n\nbuilt on branch x\n\nReview:\nnothing to fix\n\nVerdict: clean")).toBe(true);
     expect(runs.map((r) => r.triggerSource)).toEqual(["agent", "goal"]);
@@ -259,7 +259,7 @@ describe("a goal", () => {
       const r = rig({ s1: ["built"], s2: [reply] });
       const { goal, text } = await r.ended(await r.launch());
       expect(goal, reply).toMatchObject({ outcome: "failed", step: "review", reason });
-      expect(text.split("\n")[0]).toBe(`Goal: failed at review — ${reason} (run ${goal.rootRunId}, feature in ${r.cwd})`);
+      expect(text.split("\n")[0]).toBe(`Goal: failed at review — ${reason} (run ${goal.rootRunId}, feature → main in ${r.cwd})`);
       r.service.stop();
     }
   });
@@ -291,7 +291,7 @@ describe("a goal", () => {
     const root = await launch();
     const { goal, text, runs } = await ended(root);
     expect(goal).toMatchObject({ outcome: "done", round: 1 });
-    expect(text.split("\n")[0]).toBe(`Goal: review clean at ${head.slice(0, 7)} after 2 reviews (run ${root.id}, feature in ${cwd}), waiting on you to merge`);
+    expect(text.split("\n")[0]).toBe(`Goal: review clean at ${head.slice(0, 7)} after 2 reviews (run ${root.id}, feature → main in ${cwd}), waiting on you to merge`);
     expect(runs.map((r) => r.targetSessionId)).toEqual(["s1", "s2", "s1", "s3"]);
     onlyTheEndCalledBack(runs);
     const worker = sessions.get("s1")!.systemInputs.map((i) => i.text);
@@ -306,7 +306,7 @@ describe("a goal", () => {
     const root = await one.launch({ rounds: 1 });
     const first = await one.ended(root);
     expect(first.goal).toMatchObject({ outcome: "cap", round: 0, cap: 1 });
-    expect(first.text).toMatch(new RegExp(`^Goal: 1 review, still findings \\(run ${root.id}, feature in ${one.cwd}\\)\n`));
+    expect(first.text).toMatch(new RegExp(`^Goal: 1 review, still findings \\(run ${root.id}, feature → main in ${one.cwd}\\)\n`));
     expect(first.text).toContain("Review:\nb.ts:2 · still wrong");
     expect(first.runs).toHaveLength(2);
     onlyTheEndCalledBack(first.runs);
@@ -342,7 +342,7 @@ describe("a goal", () => {
     const fix = rig({ s1: ["built", "Needs your decision — rename it?"], s2: ["a.ts:1 · off by one · use <=\nVerdict: findings"] });
     const third = await fix.ended(await fix.launch());
     expect(third.goal).toMatchObject({ outcome: "decision", round: 1, step: "work" });
-    expect(third.text).toMatch(/^Goal: needs your decision after 1 review \(run \w+, feature in [^)]+\)\n/);
+    expect(third.text).toMatch(/^Goal: needs your decision after 1 review \(run \w+, feature → main in [^)]+\)\n/);
     fix.service.stop();
   });
 
@@ -350,14 +350,14 @@ describe("a goal", () => {
     const broken = rig({ s1: ["built"], s2: [{ error: "provider down" }] });
     const one = await broken.ended(await broken.launch());
     expect(one.goal).toMatchObject({ outcome: "failed", step: "review", reason: "Error: provider down" });
-    expect(one.text).toMatch(/^Goal: failed at review — Error: provider down \(run \w+, feature in [^)]+\)\nTask "review 1: build it" finished with state: failed/);
+    expect(one.text).toMatch(/^Goal: failed at review — Error: provider down \(run \w+, feature → main in [^)]+\)\nTask "review 1: build it" finished with state: failed/);
     onlyTheEndCalledBack(one.runs);
     broken.service.stop();
 
     const vague = rig({ s1: ["built"], s2: ["looks fine to me"] });
     const two = await vague.ended(await vague.launch());
     expect(two.goal).toMatchObject({ outcome: "failed", reason: "no verdict" });
-    expect(two.text.split("\n")[0]).toMatch(/^Goal: failed at review — no verdict \(run \w+, feature in /);
+    expect(two.text.split("\n")[0]).toMatch(/^Goal: failed at review — no verdict \(run \w+, feature → main in /);
     vague.service.stop();
   });
 
@@ -393,7 +393,7 @@ describe("a goal", () => {
     await vi.waitFor(() => expect(callbacks()).toHaveLength(1));
     expect(goalOf(root)).toMatchObject({ outcome: "failed", reason: "cancelled by main", step: "review" });
     expect(review()).toMatchObject({ state: "cancelled", callbackState: "delivered" });
-    expect(callbacks()[0]).toMatch(new RegExp(`^Goal: failed at review — cancelled by main \\(run ${root.id}, feature in `));
+    expect(callbacks()[0]).toMatch(new RegExp(`^Goal: failed at review — cancelled by main \\(run ${root.id}, feature → main in `));
     release("Verdict: clean");
     // An ended goal's run resumes as any run does, out of the goal.
     const resumed = await service.handle({ operation: "message", run_id: root.id, message: "go on" }, "main") as { delivery: string; run: { runId: string } };
@@ -421,7 +421,7 @@ describe("a goal", () => {
     // A new goal rooted at the resumed run, of the reviews it named, on the ended goal's review model.
     expect(second.goal).toMatchObject({ rootRunId: resumed.id, outcome: "done", round: 0, cap: 2, reviewModel: "test/model", reviewed: head });
     expect(second.goal.id).not.toBe(first.goal.id);
-    expect(second.text).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run ${resumed.id}, feature in ${cwd}\\), waiting on you to merge\n`));
+    expect(second.text).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run ${resumed.id}, feature → main in ${cwd}\\), waiting on you to merge\n`));
     expect(sessions.get("s1")!.systemInputs.map((i) => i.text)).toHaveLength(2);
     // The review quotes the task and the answer the root resumed with.
     expect(sessions.get("s3")!.systemInputs[0]!.text).toMatch(/\n\nbuild it\n\nSteering from the supervisor, resuming the work:\n\nkeep it\n\nFor each issue/);
@@ -536,7 +536,7 @@ describe("a goal", () => {
     expect(store.getGoal("g1")).toMatchObject({ outcome: "done", round: 0 });
     // A goal stored before reviews were pinned carries no `reviewed`; its review pins one.
     expect(store.getGoal("g1")!.reviewed).toBe(head);
-    expect(callbacks()[0]).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run root, feature in ${cwd}\\), waiting on you to merge\n`));
+    expect(callbacks()[0]).toMatch(new RegExp(`^Goal: review clean at ${head.slice(0, 7)} \\(run root, feature → main in ${cwd}\\), waiting on you to merge\n`));
     expect(sessions.get("w")!.systemInputs).toEqual([]);
     service.stop();
   });
@@ -585,226 +585,5 @@ describe("a goal", () => {
     await expect(service.handle({ operation: "save", task: { name: "n", prompt: "x", cwd, launch: { model: "test/model", worktree: "b" } } }, "main"))
       .rejects.toThrow("--worktree and --rounds are one run's; save files a definition that runs again");
     service.stop();
-  });
-});
-
-describe("pier task finish", () => {
-  const cheap = [{ provider: "p", id: "small", tier: "cheap" as const }];
-  const finish = (r: ReturnType<typeof rig>, runId: string, extra: Record<string, unknown> = {}) =>
-    r.service.handle({ operation: "finish", run_id: runId, ...extra }, "main") as Promise<{ runId: string; next: string }>;
-
-  it("merges a reviewed goal's branch as a cheap worker's run in the main repo, at the reviewed sha only", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["merged"] }, cheap);
-    const root = await r.launch();
-    await r.ended(root);
-    const receipt = await finish(r, root.id, { remove_worktree: true });
-    expect(receipt.next).toBe("the result arrives as a callback message once your turn ends; nothing to query");
-    const run = r.store.getRun(receipt.runId)!;
-    const main = realpathSync(r.cwd);
-    expect(run).toMatchObject({ invokedBySessionId: "main", callbackSessionId: "main" });
-    expect(run.goalId).toBeUndefined();
-    expect(run.context.definition).toMatchObject({
-      kind: "subagent", name: "finish: build it",
-      action: { session: { mode: "fresh", cwd: main }, launch: { model: { provider: "p", id: "small" }, tier: "cheap" } },
-    });
-    await r.ended(root, 2);
-    expect(r.created.at(-1)).toBe("s3:p/small");
-    const prompt = r.sessions.get("s3")!.systemInputs[0]!.text;
-    expect(prompt).toContain(`Approved: merge feature into main at ${r.head}\nApproved: remove worktree ${r.cwd}\n\nWorktree: ${r.cwd}\nMain repo: ${main}\n`);
-    expect(prompt).toContain(`\`wt -C ${r.cwd} merge main\``);
-    const plain = r.store.getRun((await finish(r, root.id)).runId)!;
-    expect(plain.context.definition.action.type === "agent" && plain.context.definition.action.prompt).not.toContain("Approved: remove worktree");
-
-    writeFileSync(join(r.cwd, "b.ts"), "left\n");
-    await expect(finish(r, root.id)).rejects.toThrow(`${r.cwd} has uncommitted changes; commit them, then re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1`);
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "add", "b.ts"], { cwd: r.cwd });
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b"], { cwd: r.cwd });
-    const moved = execFileSync("git", ["rev-parse", "HEAD"], { cwd: r.cwd, encoding: "utf8" }).trim();
-    await expect(finish(r, root.id)).rejects.toThrow(`feature moved past the reviewed sha ${r.head.slice(0, 7)} (HEAD ${moved.slice(0, 7)}); re-review with`);
-    const review = r.goalOf(root).currentRunId;
-    await expect(finish(r, review)).rejects.toThrow(`run ${review} is neither a reviewed goal's root nor a build lead's run`);
-    r.service.stop();
-  });
-
-  it("removes a branch whose content is on its target though no commit of it is, and never merges it", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["removed"] }, cheap);
-    const root = await r.launch();
-    await r.ended(root);
-    const git = (...args: string[]): string =>
-      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
-    // Squashes of feature onto main, main moving on between them: feature's tip is no ancestor of main.
-    git("update-ref", "refs/heads/main", git("commit-tree", "feature^{tree}", "-p", "main", "-m", "squash"));
-    git("checkout", "-q", "main");
-    writeFileSync(join(r.cwd, "later.ts"), "main moved on\n");
-    git("add", "later.ts");
-    git("commit", "-qm", "later");
-    git("checkout", "-q", "feature");
-    writeFileSync(join(r.cwd, "c.ts"), "feature again\n");
-    git("add", "c.ts");
-    git("commit", "-qm", "moved past the review");
-    git("checkout", "-q", "main");
-    git("checkout", "-q", "feature", "--", "c.ts");
-    git("commit", "-qm", "squash again");
-    git("checkout", "-q", "feature");
-    expect(() => git("merge-base", "--is-ancestor", "feature", "main")).toThrow();
-
-    await expect(finish(r, root.id)).rejects.toThrow("feature's content is already on main; nothing to merge — --remove-worktree removes its worktree and branch");
-    writeFileSync(join(r.cwd, "d.ts"), "left\n");
-    await expect(finish(r, root.id, { remove_worktree: true })).rejects.toThrow(`${r.cwd} has uncommitted changes; commit them`);
-    rmSync(join(r.cwd, "d.ts"));
-    const run = r.store.getRun((await finish(r, root.id, { remove_worktree: true })).runId)!;
-    const { action } = run.context.definition;
-    const prompt = action.type === "agent" ? action.prompt : "";
-    const main = realpathSync(r.cwd);
-    expect(prompt).toContain(`Approved: remove worktree ${r.cwd} and branch feature, its content already on main\n\nWorktree: ${r.cwd}\nMain repo: ${main}\n`);
-    expect(prompt).toContain(`git -C ${main} merge-tree --write-tree main feature && git -C ${main} rev-parse main^{tree}\` — HEAD the tip`);
-    expect(prompt).toContain(`\nTip: ${git("rev-parse", "feature")}\n`);
-    expect(prompt).not.toContain("Then check each commit");
-    expect(prompt).toContain(`\`wt -C ${main} remove -D feature -y --foreground\``);
-    expect(prompt).not.toContain("Approved: merge");
-    r.service.stop();
-  });
-
-  it("finds a branch on its target by tree, else by patches, else not at all", async () => {
-    const r = rig({});
-    const git = (...args: string[]): string =>
-      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: null });
-    git("checkout", "-q", "main");
-    git("cherry-pick", "-x", "feature");
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "main", merged: "tree" });
-    // main edits the picked lines: merge-tree conflicts (exit 1), the patch still matches.
-    writeFileSync(join(r.cwd, "a.ts"), "export const later = 1;\n");
-    git("commit", "-qam", "later");
-    git("checkout", "-q", "feature");
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: "patches" });
-    git("checkout", "-q", "main");
-    git("reset", "-q", "--hard", "main~2");
-    writeFileSync(join(r.cwd, "a.ts"), "export const other = 1;\n");
-    git("add", "a.ts");
-    git("commit", "-qm", "conflicting");
-    git("checkout", "-q", "feature");
-    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: null });
-    r.service.stop();
-  });
-
-  it("merges before it removes: a branch not on its target is refused with --remove-worktree as without it", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: findings"] }, cheap);
-    const root = await r.launch({ rounds: 1 });
-    await r.ended(root);
-    for (const extra of [{}, { remove_worktree: true }]) {
-      await expect(finish(r, root.id, extra)).rejects.toThrow(`run ${root.id}'s goal ended cap, nothing to merge`);
-    }
-    r.store.saveGoal({ ...r.goalOf(root), outcome: "done" });
-    const git = (...args: string[]): string =>
-      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
-    writeFileSync(join(r.cwd, "b.ts"), "not on main\n");
-    git("add", "b.ts");
-    git("commit", "-qm", "moved past the review");
-    await expect(finish(r, root.id, { remove_worktree: true })).rejects.toThrow(`feature moved past the reviewed sha ${r.head.slice(0, 7)}`);
-    r.service.stop();
-  });
-
-  it("merges then removes on the session's latest goal, refusing an earlier root of it", async () => {
-    const r = rig({ s1: ["built", "kept it"], s2: ["Needs your decision — keep it?"], s3: ["Verdict: clean"], s4: ["merged"] }, cheap);
-    const root = await r.launch({ rounds: 1 });
-    expect((await r.ended(root)).goal).toMatchObject({ outcome: "decision", reviewed: r.head });
-    const again = await r.service.handle({ operation: "message", run_id: root.id, message: "keep it", rounds: 1 }, "main") as { run: { runId: string } };
-    const resumed = r.store.getRun(again.run.runId)!;
-    expect((await r.ended(resumed, 2)).goal).toMatchObject({ outcome: "done", reviewed: r.head });
-    await expect(finish(r, root.id, { remove_worktree: true }))
-      .rejects.toThrow(`run ${root.id}'s session is in a later goal, rooted at run ${resumed.id}; --run that one`);
-    const run = r.store.getRun((await finish(r, resumed.id, { remove_worktree: true })).runId)!;
-    const { action } = run.context.definition;
-    const prompt = action.type === "agent" ? action.prompt : "";
-    expect(prompt).toContain(`Approved: merge feature into main at ${r.head}\nApproved: remove worktree ${r.cwd}\n`);
-    expect(prompt).toContain(`\`wt -C ${r.cwd} merge main\``);
-    expect(prompt).not.toContain("merge nothing");
-    r.service.stop();
-  });
-
-  it("sends a goal that already merged, its branch not found on its target, to a line check, removing it only then", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["checked"] }, cheap);
-    const root = await r.launch({ rounds: 1 });
-    await r.ended(root);
-    r.store.saveGoal({ ...r.goalOf(root), step: "merge" });
-    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s goal ended merged, nothing to merge`);
-    const run = r.store.getRun((await finish(r, root.id, { remove_worktree: true })).runId)!;
-    const { action } = run.context.definition;
-    const prompt = action.type === "agent" ? action.prompt : "";
-    const main = realpathSync(r.cwd);
-    expect(prompt).toContain(`Approved: remove worktree ${r.cwd} and branch feature, only if every line it changes is already on main\n\nWorktree: ${r.cwd}\nMain repo: ${main}\nTip: ${r.head}\n`);
-    expect(prompt).toContain(`\`git -C ${r.cwd} rev-parse HEAD && git -C ${r.cwd} status --porcelain && git -C ${r.cwd} branch --show-current\` — HEAD the tip`);
-    expect(prompt).toContain(`Then check each commit \`git -C ${main} cherry main feature\` marks \`+\``);
-    expect(prompt).toContain("end on `Needs your decision — feature has changes not on main: merge, keep or remove it anyway?`");
-    expect(prompt).toContain(`the tip ${r.head} first, with \`git -C ${main} branch feature ${r.head}\` to restore it`);
-    expect(prompt).not.toContain("Approved: merge");
-    r.service.stop();
-  });
-
-  it("refuses an older root in a tree a newer goal has reviewed since", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["built again"], s4: ["Verdict: findings"] }, cheap);
-    const old = await r.launch({ rounds: 1 });
-    await r.ended(old);
-    const newer = await r.launch({ rounds: 1 });
-    await r.ended(newer, 2);
-    await expect(finish(r, old.id)).rejects.toThrow(`${r.cwd} is in a later goal, rooted at run ${newer.id}; --run that one`);
-    r.service.stop();
-  });
-
-  it("refuses a goal that did not end clean", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: findings"] }, cheap);
-    const root = await r.launch({ rounds: 1 });
-    await r.ended(root);
-    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s goal ended cap, nothing to merge`);
-    r.service.stop();
-  });
-
-  it("merges a build lead's branch only at the sha the newest goal in its tree reviewed clean, once the lead is idle and its tree clean", async () => {
-    let release: (text: string) => void = () => {};
-    const r = rig({ s1: ["integrated", "done: reviewed clean", new Promise<string>((done) => { release = done; })], s2: ["checked"], s3: ["Verdict: clean"] }, cheap);
-    const { runId } = await r.service.handle({ operation: "run", prompt: "lead it", name: "lead it", cwd: r.cwd, launch: { model: "test/model", role: "lead" } }, "main") as { runId: string };
-    await vi.waitFor(() => expect(r.store.getRun(runId)!.state).toBe("succeeded"));
-    const head = r.head.slice(0, 7);
-    await expect(finish(r, runId)).rejects.toThrow(`feature at HEAD ${head} has no clean review: no goal was rooted in ${r.cwd}; the lead reviews it with pier task run --rounds <n> --cwd ${r.cwd}`);
-    // The lead's review is a goal in its own tree; its end is the lead's milestone.
-    const review = await r.service.handle({ operation: "run", prompt: "review the integrated branch", name: "lead review", cwd: r.cwd, launch: { model: "test/model", rounds: 1 } }, "s1") as { runId: string };
-    await vi.waitFor(() => expect(r.callbacks()).toHaveLength(2));
-    expect(r.goalOf(r.store.getRun(review.runId)!)).toMatchObject({ supervisorSessionId: "s1", outcome: "done", reviewed: r.head });
-    const run = r.store.getRun((await finish(r, runId)).runId)!;
-    const { action } = run.context.definition;
-    expect(action.type === "agent" && action.prompt).toContain(`Approved: merge feature into main at ${r.head}\n\nWorktree: ${r.cwd}\n`);
-    const git = (...args: string[]): string =>
-      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
-    writeFileSync(join(r.cwd, "c.ts"), "fixed after the review\n");
-    git("add", "c.ts");
-    git("commit", "-qm", "after the review");
-    await expect(finish(r, runId)).rejects.toThrow(`feature moved past the reviewed sha ${head} (HEAD ${git("rev-parse", "--short=7", "HEAD")}); the lead reviews it with pier task run --rounds <n> --cwd ${r.cwd}`);
-    git("reset", "-q", "--hard", "HEAD~1");
-    await r.service.handle({ operation: "message", run_id: runId, message: "one more thing" }, "main");
-    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")?.state).toBe("running"));
-    await expect(finish(r, runId)).rejects.toThrow(`run ${runId}'s session s1 is still at work; wait for its end`);
-    release("done");
-    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")).toBeUndefined());
-    await expect(r.service.handle({ operation: "finish", run_id: runId }, "s1"))
-      .rejects.toThrow("a lead never merges into the target; the finish is your supervisor's, from your milestone");
-    writeFileSync(join(r.cwd, "b.ts"), "left\n");
-    await expect(finish(r, runId)).rejects.toThrow(`${r.cwd} has uncommitted changes; commit them`);
-    execFileSync("git", ["checkout", "-q", "main"], { cwd: r.cwd });
-    await expect(finish(r, runId)).rejects.toThrow("main is its own target; nothing to merge");
-    r.service.stop();
-  });
-
-  it("refuses a reviewed goal's root while its session is at work again", async () => {
-    let release: (text: string) => void = () => {};
-    const r = rig({ s1: ["built", new Promise<string>((done) => { release = done; })], s2: ["Verdict: clean"] }, cheap);
-    const root = await r.launch();
-    await r.ended(root);
-    await r.service.handle({ operation: "message", run_id: root.id, message: "one more thing" }, "main");
-    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")?.state).toBe("running"));
-    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s session s1 is still at work; wait for its end`);
-    release("done");
-    await vi.waitFor(() => expect(r.store.findActiveRunForTarget("s1")).toBeUndefined());
-    r.service.stop();
   });
 });

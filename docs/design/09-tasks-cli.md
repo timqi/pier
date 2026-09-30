@@ -10,7 +10,6 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | Command | Does |
 | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
-| `finish` | `--run <root>`: a reviewed goal's (or a build lead's) branch merged by one cheap run in the main repo (§`finish`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
 | `list` | stored definitions, as JSON, each with `nextRun` and `lastRun` (§`list`) |
 | `pause` · `resume` · `archive` | `--task-id <id>`: a definition's schedule off, on, or retired (§Schedule verbs) |
@@ -20,7 +19,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
 Every command returns at once and prints the receipt as compact JSON on
-stdout, exit 0; `run`'s and `finish`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
+stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
 `<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
 a resume `resumed: …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
@@ -61,7 +60,7 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
 - **`--rounds <n>`**: rides as `launch.rounds`, the reviews a goal allows
   (0–9); present, the fresh `--prompt` run roots a goal (`tasks/goals.ts`):
   reviewed by a run Pier launches, fixed by resuming the worker, ended on a
-  clean review with the merge left to `finish`; a findings review that is the
+  clean review with the merge left to the user; a findings review that is the
   `n`th ends it `cap`, a review ending `Verdict: blocked — <why>` ends it
   `failed`. `--rounds 0` is no goal. A stored `until` reads as `rounds` 3.
   A review's requirement is the first prompt, then every resume and delivered
@@ -106,52 +105,6 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   run flags. `--join` (default `all`), `--callback`, `--callback-session`
   belong before the first `--member`. Members are ordinary argv; at most one
   may read `--prompt -`. Admission is all-or-nothing.
-
-## `finish`
-
-```
-pier task finish --run <root> [--remove-worktree]
-```
-
-- One `{operation: "finish", run_id, remove_worktree?}` request. `<root>` is
-  a goal's root whose goal ended clean (`done`, `reviewed` set), or a build
-  lead's run; else `task: run <id> is neither a reviewed goal's root nor a
-  build lead's run` / `task: run <id>'s goal ended <outcome>, nothing to merge`.
-- The worktree is the run's cwd; the approved sha is the goal's `reviewed`
-  (a lead's: that of the newest goal rooted in its worktree, ended `done`,
-  else `task: <branch> at HEAD <h> has no clean review: …; the lead reviews it
-  with pier task run --rounds <n> --cwd <worktree>`), the target the goal's
-  `base` else the worktree's. Refused unless HEAD is that sha (`task: <branch>
-  moved past the reviewed sha <s> (HEAD <h>); re-review with pier task run
-  --run <root> --prompt "<what changed>" --rounds 1`, a lead's ending on the
-  `--rounds <n> --cwd <worktree>` line instead), no later goal roots in the worktree (`task: <worktree> is in
-  a later goal, rooted at run <r>; --run that one`), the tree is clean, the branch is not its own target
-  (`task: <branch> is its own target; nothing to merge`), and the root's
-  session has no run queued or running (`task: run <id>'s session <s> is
-  still at work; wait for its end`), and no later goal roots that session
-  (`task: run <id>'s session is in a later goal, rooted at run <r>; --run that
-  one`). A lead never finishes (`task: a lead never merges into the target;
-  …`).
-- Launches one fresh `cheap`-tier worker run, `finish: <root's name>`, in the
-  main repo (the worktree's common git dir's parent), prompt `finishPrompt`
-  (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
-  `Approved: remove worktree <path>` line only with `--remove-worktree`, a
-  one-call verify, the merge and the repo's checks. Receipt and callback as `run`'s.
-- Merged is by content, not ancestry (`Worktree.merged`): `tree` when `git
-  merge-tree --write-tree <base> <branch>` is `<base>`'s tree, else `patches`
-  when `git cherry <base> <branch>` marks every commit `-`. Such a branch
-  without the flag is refused (`task: <branch>'s content is already on <base>;
-  nothing to merge — …`); with it the run's prompt is `removePrompt`
-  (`goals.ts`), the goal's outcome and the reviewed sha not required.
-- Any other branch the flag merges first, refused as without it; only a goal
-  that already merged (`step` `merge`) gets `removePrompt` with `by` null: the
-  run reads each `+` commit's diff against `<base>`'s files and removes only
-  when every changed line is there, else lists the missing lines and ends on
-  `Needs your decision — <branch> has changes not on <base>: …`.
-- A removal re-verifies HEAD (the tip), a clean status and the branch, then
-  `wt remove <branch>`, `-D` when wt keeps it as unmerged, never `--force`;
-  the tip is logged (`finish <root>: <branch> at <tip> …`) and named first in
-  the result with the `git branch <branch> <tip>` that restores it.
 
 ## `save`
 

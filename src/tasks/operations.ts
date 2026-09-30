@@ -1,4 +1,4 @@
-// The `/task` socket route: every `pier task` operation — run, message, finish,
+// The `/task` socket route: every `pier task` operation — run, message,
 // save, list, pause, resume, archive, cancel, recover — validated here once, answered
 // with the summaries a model reads. Scheduling and delivery stay in the
 // service; this file decides who may ask for what.
@@ -6,9 +6,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, TASK_RUN_STATES, type LedgerRun, type ModelRef, type ModelTier, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
-import { clipResult, runCwd } from "./callbacks.js";
+import { clipResult } from "./callbacks.js";
 import { type TaskDefinitions, parseLaunch, record, requiredString } from "./definitions.js";
-import { finishPrompt, removePrompt } from "./goals.js";
 import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
 import { isTerminal, type CallbackFields, type CallbackMode, type Goal, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
@@ -384,65 +383,7 @@ export async function handleTask(
     const delivery = input.after === true ? "follow_up" : "steer";
     return { delivery, message: await host.control(run.id, callerSessionId, delivery, message) };
   }
-  if (input.operation === "finish") {
-    if (lead) throw new Error("a lead never merges into the target; the finish is your supervisor's, from your milestone");
-    const root = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(root);
-    const task = await resolveDraft(host, definitions, menu, await finishDraft(host, store, root, input.remove_worktree === true), callerSessionId);
-    const provenance = { invokedBySessionId: callerSessionId, sourceSessionId: callerSessionId, callbackSessionId: callerSessionId, background: true };
-    const run = host.run(task.id, null, "agent", null, provenance);
-    return receipt(summarize(run), callerSessionId, "followUp", callerSessionId);
-  }
   throw new Error("unknown task operation");
-}
-
-/** A reviewed goal's merge, or a build lead's integrated branch (the newest goal in
- *  its tree reviewed it), as a cheap worker's run in the main repo, refused unless the
- *  worktree is still exactly what the last review read. A branch whose content is already on
- *  its target is never merged: with `remove` its worktree and branch go, reviewed or
- *  not. Otherwise `remove` merges first, refused wherever the merge is; only a
- *  goal that already merged goes to a line check. */
-async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, remove: boolean): Promise<unknown> {
-  const goal = root.goalId ? store.getGoal(root.goalId) : undefined;
-  const path = runCwd(root);
-  const lead = root.targetSessionId !== null && store.leadPhaseOf(root.targetSessionId) === "build" ? root.targetSessionId : undefined;
-  const latest = goal?.rootRunId === root.id && root.targetSessionId !== null ? store.goalOf(root.targetSessionId) : undefined;
-  if (latest && latest.id !== goal?.id) throw new Error(`run ${root.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
-  const reviewed = goal?.rootRunId === root.id && goal.reviewed ? goal : undefined;
-  if ((!reviewed && !lead) || !path) throw new Error(`run ${root.id} is neither a reviewed goal's root nor a build lead's run`);
-  const tried = store.goalIn(path);
-  if (reviewed && tried && tried.id !== reviewed.id) throw new Error(`${path} is in a later goal, rooted at run ${tried.rootRunId}; --run that one`);
-  // A build lead's done is the newest goal in its tree, ended clean: its sha is the one merged.
-  const evidence = reviewed ?? (tried?.outcome === "done" && tried.step === "review" && tried.reviewed ? tried : undefined);
-  if (reviewed?.finishedAt === null) throw new Error(`run ${root.id}'s goal has not ended; wait for its end`);
-  const unmergeable = reviewed && (reviewed.outcome !== "done" || reviewed.step === "merge")
-    ? `run ${root.id}'s goal ended ${reviewed.step === "merge" ? "merged" : reviewed.outcome ?? "failed"}, nothing to merge` : null;
-  if (unmergeable && !remove) throw new Error(unmergeable);
-  const session = root.targetSessionId;
-  if (session !== null && store.findActiveRunForTarget(session)) throw new Error(`run ${root.id}'s session ${session} is still at work; wait for its end`);
-  const tree = await host.worktree(path);
-  const branch = reviewed?.branch ?? tree.branch;
-  const base = reviewed?.base ?? tree.base;
-  if (branch === base) throw new Error(`${branch} is its own target; nothing to merge`);
-  const sha = evidence?.reviewed ?? tree.head;
-  const again = reviewed ? `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1` : `the lead reviews it with pier task run --rounds <n> --cwd ${path}`;
-  const unreviewed = evidence ? null : `${branch} at HEAD ${tree.head.slice(0, 7)} has no clean review: ${!tried ? `no goal was rooted in ${path}`
-    : `the newest goal in ${path}, rooted at run ${tried.rootRunId}, ${tried.finishedAt === null ? "has not ended" : `ended ${tried.outcome ?? "failed"} at ${tried.reviewed?.slice(0, 7) ?? "no review"}`}`}; ${again}`;
-  if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed && !tree.merged ? `, then ${again}` : ""}`);
-  if (tree.merged && !remove) throw new Error(`${branch}'s content is already on ${base}; nothing to merge — --remove-worktree removes its worktree and branch`);
-  const refused = unmergeable ?? unreviewed ?? (tree.head === sha ? null
-    : `${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
-  // `--remove-worktree` is merge-then-remove: removing without a merge needs a branch with nothing left to merge.
-  const removal = tree.merged !== null || (remove && reviewed?.step === "merge");
-  if (refused && !removal) throw new Error(refused);
-  const main = await host.mainRepo(path);
-  // The tip before any removal, so a wrong one is `git branch <branch> <tip>` away.
-  if (remove) log.info(`finish ${root.id}: ${branch} at ${tree.head} in ${path} to be removed, ${removal ? `on ${base} by ${tree.merged ?? "line check"}` : `merged into ${base}`}`);
-  const prompt = removal ? removePrompt({ branch, base, path, main, tip: tree.head, by: tree.merged })
-    : finishPrompt({ branch, base, sha, path, main, remove });
-  // The tier by name: `expandDraft` resolves it on the menu like any draft's.
-  const action = { type: "agent", session: { mode: "fresh", cwd: main }, prompt, launch: { model: "cheap" } };
-  return { name: `finish: ${root.context.definition.name}`, action };
 }
 
 /** A single run's draft: the top-level shorthand (`prompt` …) or `task`, never both. */
@@ -509,7 +450,6 @@ async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu
   }
   const action = record(draft.action);
   const session = record(action?.session);
-  // Normalized even when absolute: `goalIn` finds a tree's goals by the exact string.
   const absolute = async (cwd: unknown): Promise<string> => {
     if (typeof cwd === "string" && isAbsolute(cwd)) return resolve(cwd);
     const base = await definitions.sessionCwd(callerSessionId);

@@ -58,14 +58,14 @@ export const DESIGN_FINAL = /^Design final:/m;
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
 /** What heads a goal's end callback: the head reads it without parsing the result;
- *  `cwd` is the root run's, the worktree `pier task finish` merges from. */
+ *  `cwd` is the root run's, the worktree the head merges from into `base`. */
 export const goalLine = (goal: Goal, cwd: string | null): string => {
   if (goal.outcome === "done" && goal.step === "merge") {
     return goal.round ? `Goal: merged after ${String(goal.round)} review round${goal.round === 1 ? "" : "s"}` : "Goal: merged, review clean";
   }
   const n = goal.round + (goal.step === "review" ? 1 : 0);
   const reviews = `${String(n)} review${n === 1 ? "" : "s"}`;
-  const root = `(run ${goal.rootRunId}${goal.branch && cwd ? `, ${goal.branch} in ${cwd}` : ""})`;
+  const root = `(run ${goal.rootRunId}${goal.branch && cwd ? `, ${goal.branch}${goal.base ? ` → ${goal.base}` : ""} in ${cwd}` : ""})`;
   if (goal.outcome === "done") return `Goal: review clean${goal.reviewed ? ` at ${goal.reviewed.slice(0, 7)}` : ""}${n > 1 ? ` after ${reviews}` : ""} ${root}, waiting on you to merge`;
   if (goal.outcome === "decision") return `Goal: needs your decision${n ? ` after ${reviews}` : ""} ${root}`;
   if (goal.outcome === "cap") return `Goal: ${reviews}, still findings ${root}`;

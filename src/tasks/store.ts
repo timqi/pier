@@ -337,12 +337,6 @@ export class TaskStore {
     `, sessionId);
   }
 
-  /** The newest goal whose root run works in `cwd`, whoever launched it: the tree's review evidence. */
-  goalIn(cwd: string): Goal | undefined {
-    return this.#one(`SELECT g.json FROM goals g JOIN task_runs r ON r.id = g.root_run_id WHERE coalesce(json_extract(r.json, '$.context.cwd'),
-      json_extract(r.json, '$.context.definition.action.session.cwd')) = ? ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1`, cwd);
-  }
-
   /** Goals not ended, oldest first: the boot pass advances any whose current run settled unadvanced. */
   liveGoals(): Goal[] {
     return this.#many("SELECT json FROM goals WHERE finished_at IS NULL ORDER BY created_at");
