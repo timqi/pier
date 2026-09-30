@@ -8,7 +8,7 @@ import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, TASK_RUN_STATES, type Ledge
 import { logger } from "../log.js";
 import { clipResult, runCwd } from "./callbacks.js";
 import { type TaskDefinitions, parseLaunch, record, requiredString } from "./definitions.js";
-import { finishPrompt } from "./goals.js";
+import { finishPrompt, removePrompt } from "./goals.js";
 import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
 import { isTerminal, type CallbackFields, type CallbackMode, type Goal, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
@@ -391,7 +391,8 @@ export async function handleTask(
 
 /** A reviewed goal's merge, or a build lead's integrated branch (the lead reviewed
  *  it), as a cheap worker's run in the main repo, refused unless the worktree is
- *  still exactly what the last review read. */
+ *  still exactly what the last review read. A branch whose content is already on
+ *  its target is never merged: with `remove` its worktree and branch go, reviewed or not. */
 async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, remove: boolean): Promise<unknown> {
   const goal = root.goalId ? store.getGoal(root.goalId) : undefined;
   const path = runCwd(root);
@@ -399,9 +400,9 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   const reviewed = goal?.rootRunId === root.id && goal.reviewed ? goal : undefined;
   if ((!reviewed && !lead) || !path) throw new Error(`run ${root.id} is neither a reviewed goal's root nor a build lead's run`);
   if (reviewed?.finishedAt === null) throw new Error(`run ${root.id}'s goal has not ended; wait for its end`);
-  if (reviewed && (reviewed.outcome !== "done" || reviewed.step === "merge")) {
-    throw new Error(`run ${root.id}'s goal ended ${reviewed.step === "merge" ? "merged" : reviewed.outcome ?? "failed"}, nothing to merge`);
-  }
+  const unmergeable = reviewed && (reviewed.outcome !== "done" || reviewed.step === "merge")
+    ? `run ${root.id}'s goal ended ${reviewed.step === "merge" ? "merged" : reviewed.outcome ?? "failed"}, nothing to merge` : null;
+  if (unmergeable && !remove) throw new Error(unmergeable);
   const session = root.targetSessionId;
   if (session !== null && store.findActiveRunForTarget(session)) throw new Error(`run ${root.id}'s session ${session} is still at work; wait for its end`);
   const tree = await host.worktree(path);
@@ -410,10 +411,12 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   if (branch === base) throw new Error(`${branch} is its own target; nothing to merge`);
   const sha = reviewed?.reviewed ?? tree.head;
   const again = `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1`;
-  if (tree.head !== sha) throw new Error(`${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
-  if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed ? `, then ${again}` : ""}`);
+  if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed && !tree.merged ? `, then ${again}` : ""}`);
+  if (tree.merged && !remove) throw new Error(`${branch}'s content is already on ${base}; nothing to merge — --remove-worktree removes its worktree and branch`);
+  if (unmergeable && !tree.merged) throw new Error(unmergeable);
+  if (!tree.merged && tree.head !== sha) throw new Error(`${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
   const main = await host.mainRepo(path);
-  const prompt = finishPrompt({ branch, base, sha, path, main, remove });
+  const prompt = tree.merged ? removePrompt({ branch, base, path, main }) : finishPrompt({ branch, base, sha, path, main, remove });
   // The tier by name: `expandDraft` resolves it on the menu like any draft's.
   const action = { type: "agent", session: { mode: "fresh", cwd: main }, prompt, launch: { model: "cheap" } };
   return { name: `finish: ${root.context.definition.name}`, action };

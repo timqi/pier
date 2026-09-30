@@ -5,7 +5,7 @@
 // real git repository in a scratch directory, the one the service pins.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -568,6 +568,57 @@ describe("pier task finish", () => {
     await expect(finish(r, root.id)).rejects.toThrow(`feature moved past the reviewed sha ${r.head.slice(0, 7)} (HEAD ${moved.slice(0, 7)}); re-review with`);
     const review = r.goalOf(root).currentRunId;
     await expect(finish(r, review)).rejects.toThrow(`run ${review} is neither a reviewed goal's root nor a build lead's run`);
+    r.service.stop();
+  });
+
+  it("removes a branch whose content is on its target though no commit of it is, and never merges it", async () => {
+    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["removed"] }, cheap);
+    const root = await r.launch();
+    await r.ended(root);
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
+    // Squashes of feature onto main, main moving on between them: feature's tip is no ancestor of main.
+    git("update-ref", "refs/heads/main", git("commit-tree", "feature^{tree}", "-p", "main", "-m", "squash"));
+    git("checkout", "-q", "main");
+    writeFileSync(join(r.cwd, "later.ts"), "main moved on\n");
+    git("add", "later.ts");
+    git("commit", "-qm", "later");
+    git("checkout", "-q", "feature");
+    writeFileSync(join(r.cwd, "c.ts"), "feature again\n");
+    git("add", "c.ts");
+    git("commit", "-qm", "moved past the review");
+    git("checkout", "-q", "main");
+    git("checkout", "-q", "feature", "--", "c.ts");
+    git("commit", "-qm", "squash again");
+    git("checkout", "-q", "feature");
+    expect(() => git("merge-base", "--is-ancestor", "feature", "main")).toThrow();
+
+    await expect(finish(r, root.id)).rejects.toThrow("feature's content is already on main; nothing to merge — --remove-worktree removes its worktree and branch");
+    writeFileSync(join(r.cwd, "d.ts"), "left\n");
+    await expect(finish(r, root.id, { remove_worktree: true })).rejects.toThrow(`${r.cwd} has uncommitted changes; commit them`);
+    rmSync(join(r.cwd, "d.ts"));
+    const run = r.store.getRun((await finish(r, root.id, { remove_worktree: true })).runId)!;
+    const { action } = run.context.definition;
+    const prompt = action.type === "agent" ? action.prompt : "";
+    const main = realpathSync(r.cwd);
+    expect(prompt).toContain(`Approved: remove worktree ${r.cwd} and branch feature, its content already on main\n\nWorktree: ${r.cwd}\nMain repo: ${main}\n`);
+    expect(prompt).toContain(`git -C ${main} merge-tree --write-tree main feature && git -C ${main} rev-parse main^{tree}`);
+    expect(prompt).toContain(`\`wt -C ${main} remove -D feature -y --foreground\``);
+    expect(prompt).not.toContain("Approved: merge");
+    r.service.stop();
+  });
+
+  it("reads a branch that conflicts with its target as not on it", async () => {
+    const r = rig({});
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: false });
+    git("checkout", "-q", "main");
+    writeFileSync(join(r.cwd, "a.ts"), "export const other = 1;\n");
+    git("add", "a.ts");
+    git("commit", "-qm", "conflicting");
+    git("checkout", "-q", "feature");
+    expect(await r.service.worktree(r.cwd)).toMatchObject({ branch: "feature", merged: false });
     r.service.stop();
   });
 

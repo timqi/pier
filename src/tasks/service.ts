@@ -59,7 +59,7 @@ const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
 const exec = (tool: "git" | "wt", cwd: string, args: string[]): Promise<string> => new Promise((done, reject) => {
   execFile(tool, args, { cwd }, (err, stdout, stderr) => {
     const why = (stderr.trim() || err?.message || "").split("\n")[0]!;
-    if (err) reject(new Error(tool === "git" ? `git ${args.join(" ")}: ${why}` : `wt: ${why}`));
+    if (err) reject(Object.assign(new Error(tool === "git" ? `git ${args.join(" ")}: ${why}` : `wt: ${why}`), { status: err.code }));
     else done(stdout.trim());
   });
 });
@@ -75,7 +75,12 @@ async function worktree(cwd: string): Promise<Worktree> {
   const base = origin?.replace(/^origin\//, "") ?? "main";
   const baseSha = await git(cwd, "merge-base", "HEAD", base);
   const clean = (await git(cwd, "status", "--porcelain")) === "";
-  return { head, branch, base, baseSha, clean };
+  // Exit 1 is merge-tree's conflict: HEAD's content is not on base, a verdict rather than a failure.
+  const merged = await git(cwd, "merge-tree", "--write-tree", base, "HEAD").then(
+    async (tree) => tree.split("\n")[0] === await git(cwd, "rev-parse", `${base}^{tree}`),
+    (err: unknown) => { if ((err as { status?: unknown }).status === 1) return false; throw err; },
+  );
+  return { head, branch, base, baseSha, clean, merged };
 }
 
 /** A fresh run's own worktree, `branch` off the one `cwd` has checked out: `.path` of `wt`'s JSON line. */

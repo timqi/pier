@@ -125,6 +125,14 @@ pier task finish --run <root> [--remove-worktree]
   (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
   `Approved: remove worktree <path>` line only with `--remove-worktree`, a
   one-call verify, the merge and the repo's checks. Receipt and callback as `run`'s.
+- Merged is by content, not ancestry: a branch whose `git merge-tree
+  --write-tree <base> <branch>` is `<base>`'s tree is already on its target
+  (`Worktree.merged`). Without the flag it is refused (`task: <branch>'s content
+  is already on <base>; nothing to merge — …`); with it the goal's outcome and
+  the reviewed sha are not required, only a clean tree and an idle session, and
+  the run's prompt is `removePrompt` (`goals.ts`): re-check the trees, `wt
+  remove <branch>`, `wt remove -D <branch>` when wt keeps it as unmerged, never
+  `--force`.
 
 ## `save`
 

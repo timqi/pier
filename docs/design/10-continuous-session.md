@@ -41,7 +41,7 @@ delivery.
 - A code change runs build → review → wait for the user → finish.
 - A worker launched `--worktree <branch>` (or `--rounds <n>`, n ≥ 1) is the root of a goal (`tasks/goals.ts`, [09 §run](09-tasks-cli.md#run)); a lead may launch one too and reviews its own integrated branch before its done milestone.
 - A lead integrates workers into its own branch (`git merge <branch>` in its worktree, their worktrees kept) and never merges into the target; its done milestone ends on the branch ready and names the worktrees left.
-- The merge into the target and every worktree's removal are the user's decision; no build session runs `wt merge`/`wt remove` or is resumed to. On the user's yes the head runs `pier task finish --run <root>` (`--remove-worktree` only when they said so), whose run and prompt are code (`finishPrompt`, `tasks/goals.ts`).
+- The merge into the target and every worktree's removal are the user's decision; no build session runs `wt merge`/`wt remove` or is resumed to. On the user's yes the head runs `pier task finish --run <root>` (`--remove-worktree` only when they said so), whose run and prompt are code (`finishPrompt`, `removePrompt`, `tasks/goals.ts`); a branch counts as merged when its content is on the target, not only its commits.
 - Models are `MODEL_TABLE` (`agent/roles.ts`), carried by `DISPATCHER` and `lead("build")`.
 
 ### Milestones

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- A branch is merged when its content is on its target — `git merge-tree --write-tree <target> <branch>` is the target's tree — not only when its commits are: `pier task finish` refuses to merge it again, and with `--remove-worktree` launches a removal-only run (`wt remove`, `-D` when wt keeps the branch as unmerged), reviewed or not; uncommitted changes still refuse.
 - A run result and a goal's review end with one status line, the last non-blank line outside code blocks, plain text: `Verdict: clean`, `Verdict: findings`, `Verdict: blocked — <why>` or `Needs your decision — <question>`. A bolded, bulleted or fenced verdict is no verdict; a second status line ends the goal `failed` (`several status lines`); `Verdict: blocked` ends it `failed — blocked — <why>`.
 - `--until` is gone: `--rounds <n>` roots a goal of n reviews (1–9, `0` none) on a fresh `--prompt` run, a stored `until` reads as 3, and `pier task run --run <root> --prompt <answer> --rounds <n>` resumes an ended goal's root as a new goal.
 - A fresh `--prompt` run, top-level or a `--member`, requires `--name`, the session's title.
