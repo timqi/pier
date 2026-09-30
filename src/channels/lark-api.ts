@@ -26,9 +26,8 @@ export interface LarkButton {
 }
 
 /** `root` rides along because the callback does not carry the message's
- *  thread. `label` too: `message.get` cannot return a 2.0 card (it answers a
- *  "please upgrade your client" post), so the echoed value is the only place a
- *  clicked button's meaning survives. */
+ *  thread. `label` too: a click does not carry the card, so the echoed value
+ *  keeps a clicked button's meaning without a read. */
 export interface LarkActionValue {
   key: string;
   root: string;
