@@ -431,8 +431,8 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   time, source, duration) whose log (error, result, probe, a link to the run's
   session) unfolds in place; defining a task stays `pier task`'s. Boards
   (`#/settings/boards`): one row per board — title linking where it is
-  readable, slug, age — with a Public switch, Copy link and Delete (a rename,
-  no confirm). A refused switch redraws from the server and says why. Agent: two panels (what a session is
+  readable, slug, age — with an unlabelled Public switch and a ⋯ menu holding
+  Copy link (the ⋯ flashes the outcome) and Delete (a rename, confirmed in the same menu: Cancel, then Delete <slug>). A refused switch redraws from the server and says why. Agent: two panels (what a session is
   made of / what the selected item affords), Scope in the Console's control
   skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check

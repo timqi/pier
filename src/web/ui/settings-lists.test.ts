@@ -3,7 +3,7 @@
 // a run's log opens from its row.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
+import { button as buttonIn, installDom, labelled, walk, type FakeElement } from "./dom.testkit.js";
 import { createBoardsPane } from "./boards.js";
 import { createTasksPane } from "./tasks.js";
 
@@ -120,11 +120,27 @@ describe("Settings → Boards", () => {
     expect(link.getAttribute("href") ?? (link as unknown as { href: string }).href).toBe("/p/digest-0123abcd/");
   });
 
-  it("deletes and redraws the list", async () => {
+  it("copies the absolute link from the row's menu", async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
+    await mount(createBoardsPane());
+    labelled(root, "Actions for Weekly")!.onclick!(new Event("click"));
+    buttonIn(document.body as unknown as FakeElement, "Copy link")!.onclick!(new Event("click"));
+    await settled();
+    expect(writeText).toHaveBeenCalledWith("https://pier.test/boards/digest/");
+    expect(text()).toContain("Copied digest's link.");
+  });
+
+  it("deletes once confirmed, and redraws the list", async () => {
     answers["DELETE /api/boards/digest"] = () => Response.json({ deleted: "digest" });
     await mount(createBoardsPane());
     answers["GET /api/boards"] = () => Response.json([]);
-    buttonIn(root, "Delete")!.onclick!(new Event("click"));
+    vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
+    labelled(root, "Actions for Weekly")!.onclick!(new Event("click"));
+    buttonIn(document.body as unknown as FakeElement, /^Delete/)!.onclick!(new Event("click"));
+    expect(calls()).not.toContain("DELETE /api/boards/digest");
+    buttonIn(document.body as unknown as FakeElement, /^Delete digest/)!.onclick!(new Event("click"));
     await settled();
     expect(text()).toContain("No boards yet");
     expect(text()).toContain("Deleted digest");

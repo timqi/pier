@@ -93,6 +93,17 @@ describe("closing", () => {
     }
   });
 
+  it("leaves a trigger that declares its popup to toggle it on click", () => {
+    anchor.setAttribute("aria-haspopup", "true");
+    open();
+    fire(doc, "pointerdown", anchor);
+    fire(doc, "focusin", anchor);
+    expect(menu.menuOpen()).toBe(true);
+    anchor.removeAttribute("aria-haspopup");
+    fire(doc, "pointerdown", anchor);
+    expect(menu.menuOpen()).toBe(false);
+  });
+
   it("leaves nothing listening once closed", () => {
     open();
     menu.closeMenu();

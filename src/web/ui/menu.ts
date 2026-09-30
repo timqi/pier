@@ -21,6 +21,9 @@ let trigger: HTMLElement | null = null;
 let backdrop: HTMLElement | null = null;
 
 function onOutside(ev: Event): void {
+  // A trigger that declares its popup toggles it on click; closing here on the
+  // press (or the focus it moves) would let that click reopen it.
+  if (ev.type !== "wheel" && trigger?.hasAttribute("aria-haspopup") && trigger.contains(ev.target as Node)) return;
   if (panel && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
 }
 
@@ -209,7 +212,7 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], title?: string)
   const content = h("div", "");
   if (title && isSheet()) {
     const close = h("button", "icon-btn h-11 w-11", icon(X));
-    close.setAttribute("aria-label", "Close session actions");
+    close.setAttribute("aria-label", "Close menu");
     close.onclick = closeMenu;
     content.append(h("div", "flex items-center gap-3 border-b border-neutral-200 px-3 pb-1 mb-1",
       h("span", "min-w-0 flex-1 truncate text-sm font-medium text-neutral-500", title), close));
