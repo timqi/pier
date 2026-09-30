@@ -114,7 +114,7 @@ the credential on both prefixes), `Cache-Control: no-store` (every board URL is
 revocable, and a stored copy would outlive the revocation),
 `Access-Control-Allow-Origin: *` (an opaque
 origin needs CORS for its own fonts and modules), and a CSP of `sandbox
-allow-scripts; default-src 'self'; img-src 'self' data:; style-src 'self'
+allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'self'; img-src 'self' data:; style-src 'self'
 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none';
 frame-ancestors 'none'`.
 

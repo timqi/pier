@@ -82,7 +82,7 @@ describe("serving", () => {
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     // The whole point of the signed prefix: no board runs with same-origin.
     const csp = res.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain("sandbox allow-scripts;");
+    expect(csp).toContain("sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;");
     expect(csp).not.toContain("allow-same-origin");
     expect(csp).toContain("connect-src 'none'");
     expect(csp).toContain("form-action 'none'");
@@ -146,8 +146,8 @@ describe("serving", () => {
     const res = await app.request(`/p/${key("digest")}/`);
     expect(res.status).toBe(200);
     const csp = res.headers.get("content-security-policy");
-    expect(csp).toContain("sandbox allow-scripts;");
-    expect(csp).not.toContain("sandbox allow-scripts allow-same-origin");
+    expect(csp).toContain("sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;");
+    expect(csp).not.toContain("allow-same-origin");
     expect(csp).toContain("connect-src 'none'");
     expect(csp).toContain("frame-src 'none'");
     expect(csp).toContain("form-action 'none'");

@@ -56,12 +56,14 @@ const TYPES: Record<string, string> = {
 };
 
 // Agent-written script, so it runs in an opaque origin: no `allow-same-origin`
-// on any board, published or not, and the sandbox also removes forms, frames,
-// popups and subresource requests. What that costs is the session cookie —
-// an opaque-origin document sends none with its own assets — which is why a
+// on any board, published or not, and the sandbox also removes forms, frames
+// and subresource requests; popups stay, unsandboxed, so `target=_blank` links
+// open an ordinary tab. What that costs is the session cookie — an
+// opaque-origin document sends none with its own assets — which is why a
 // board is never served on a cookie-authorized URL (docs/design/05-boards.md).
 const CSP =
-  "sandbox allow-scripts; default-src 'self'; img-src 'self' data:; " +
+  "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; " +
+  "default-src 'self'; img-src 'self' data:; " +
   "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; " +
   "connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; " +
   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
