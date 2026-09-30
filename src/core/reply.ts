@@ -153,6 +153,11 @@ export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, numb
     ? `run ${r.runId} — ${NOT_IN_LEDGER}`
     : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}${r.goal ? ` · review: ${goalText(r.goal)}` : ""}`;
 
+/** The open items' text with each ` · run <id8>…` token dropped and its state kept, for an IM
+ *  chat where the id opens nothing; anchored on the state after it, so a problem's own "run" stays. */
+const OPEN_RUN_ID = new RegExp(` · run [\\w-]+(?:…? (?=(?:${TASK_RUN_STATES.join("|")}) )| — (?=${NOT_IN_LEDGER}))`, "g");
+export const withoutRunIds = (text: string): string => text.replace(OPEN_RUN_ID, " · ");
+
 /** The one open-item status (tasks/types.ts `OpenStatus`) that asks anything of the user:
  *  what `/status`, the status panel, its chip's `needs you` and the app badge group by. */
 export const waitsOnYou = (status: string): boolean => status === "waiting on you";

@@ -52,6 +52,14 @@ describe("the status message", () => {
     expect(handed).toHaveLength(3);
   });
 
+  it("shows no run id, which opens nothing in a chat, and hands the view on whole", async () => {
+    const { status, calls, handed } = rig();
+    await status.show("D1", view("- a (running) · run x0d7dyb1… running now"));
+    expect(await status.answer("D1", "- a (running) · run x0d7dyb1… running 1m")).toBe(true);
+    expect(calls).toEqual(["post D1 > - a (running) · running now", "delete m1", "post D1 > - a (running) · running 1m"]);
+    expect(handed[0]!.text).toBe("- a (running) · run x0d7dyb1… running now");
+  });
+
   it("/status re-posts it at the bottom with the answer's text, as the one reply", async () => {
     const { status, calls } = rig();
     await status.show("D1", view("a"));

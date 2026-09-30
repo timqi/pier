@@ -9,4 +9,10 @@ describe("noteBody", () => {
     const digested = noteBody({ text, origin: { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null } }, "*");
     expect(digested).toContain("… +4 more lines");
   });
+
+  it("drops run ids from /status's answer, and only from it", () => {
+    const text = "- a (running) · run x0d7dyb1… running now";
+    expect(noteBody({ text, origin: { kind: "chat-command", command: "status" } }, "*")).toBe("*/status*\n> - a (running) · running now");
+    expect(noteBody({ text, origin: { kind: "error" } }, "*")).toContain("run x0d7dyb1…");
+  });
 });

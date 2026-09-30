@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, openRunText, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, openRunText, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -410,5 +410,24 @@ describe("saidText", () => {
     const reply = "<open>parser — worker running (run r1)</open>\nThe **“parser”** is fixed.<silent>noted</silent>\n<done>old thing</done>\n\n---\n[Run it] | [Show the diff]";
     expect(saidText(reply)).toBe("The **“parser”** is fixed.");
     expect(saidText("see `<done>x</done>`\n\n---\nnot [a] block here")).toBe("see `<done>x</done>`\n\n---\nnot [a] block here");
+  });
+});
+
+describe("withoutRunIds", () => {
+  it("drops each run's id and keeps its state, a lead's workers and a goal's review", () => {
+    const text = [
+      "In progress",
+      "- 每周工作流 review 定时任务 — 试跑中 (running) · run x0d7dyb1… running now",
+      "- build — lead (running) · run k4k3jz55… running 2m · workers: 1 running · review: working",
+      "- gone (stopped) · run r1 — not in the ledger",
+      "- run the nightly · run tests (running) · run ab12cd34… queued now",
+    ].join("\n");
+    expect(withoutRunIds(text)).toBe([
+      "In progress",
+      "- 每周工作流 review 定时任务 — 试跑中 (running) · running now",
+      "- build — lead (running) · running 2m · workers: 1 running · review: working",
+      "- gone (stopped) · not in the ledger",
+      "- run the nightly · run tests (running) · queued now",
+    ].join("\n"));
   });
 });
