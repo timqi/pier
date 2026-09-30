@@ -636,7 +636,11 @@ describe("next-step buttons", () => {
 
   it("retires the row, echoes the pick, and steers the label in", async () => {
     const offerId = await offer();
-    // The value carries the label — Lark echoes it back; nothing is read back.
+    const at = new Date(2026, 5, 1, 9, 5).getTime();
+    // What message.get answers for the card as sent, buttons included.
+    const sent = { messageId: offerId, chatId: CHAT, messageType: "interactive", content: JSON.stringify(client.cards.get(offerId)) };
+    client.stored.set(offerId, { mine: true, at, message: sent });
+    // The value carries the label — Lark echoes it back; the card is read back only for the quote.
     await act({
       messageId: offerId,
       chatId: CHAT,
@@ -655,9 +659,11 @@ describe("next-step buttons", () => {
     expect(client.reactions.at(-1)!.messageId).not.toBe(offerId);
     expect(inbound.at(-1)).toMatchObject({
       key: { conversationId: `${CHAT}/om_g` },
-      text: "Rollback",
+      // A pick is a reply to the card that offered it, in the web's quote.
+      text: "[re assistant 2026-06-01 09:05]\n> which?\n\nRollback",
       mode: "steer",
     });
+    expect(client.fetched).toEqual([offerId]);
   });
 
   it("a click on a card sent before this process still works; the row just stays", async () => {
@@ -672,7 +678,9 @@ describe("next-step buttons", () => {
       value: { key: "sg:1", root: "om_g", label: "Rollback" },
     });
     await new Promise((r) => setTimeout(r, 20));
+    // An unreadable card (no scope here) costs the quote, loudly, not the pick.
     expect(inbound.at(-1)).toMatchObject({ text: "Rollback", mode: "steer" });
+    expect(dropped.some((m) => m.includes(`quoted message ${offerId} unreadable`))).toBe(true);
     expect(client.patched.filter((p) => p.messageId === offerId)).toEqual([]);
     expect(dropped.some((m) => m.includes("not retired"))).toBe(true);
     await fresh.stop();

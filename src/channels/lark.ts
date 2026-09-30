@@ -255,31 +255,25 @@ export class LarkChannel implements Channel {
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
     // A command or skill ask is not a reply, as in the web composer: quoted, it would not parse.
-    const quote = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId) : undefined;
     const body = [text, ...markers].filter(Boolean).join("\n");
+    const said = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId, body) : body;
     // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
     const answered = home && command && !command.args && isChatCommand(command.name);
     if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
-    onMessage({
-      key: here,
-      senderId,
-      sender,
-      text: quote ? withQuote(quote, body) : body,
-      mode: "steer",
-    });
+    onMessage({ key: here, senderId, sender, text: said, mode: "steer" });
   }
 
-  /** A reply in the main flow names its parent as the web's Reply does. */
-  private async quoted(messageId: string): Promise<Parameters<typeof withQuote>[0] | undefined> {
+  /** `body` naming the message it answers as the web's Reply does. */
+  private async quoted(messageId: string, body: string): Promise<string> {
     const got = await this.api.message(messageId).catch((err: unknown) => {
       this.log(`quoted message ${messageId} unreadable, sent without its quote: ${String(err)}`);
       return undefined;
     });
-    if (!got) return undefined;
+    if (!got) return body;
     // An image or a file has no words, but the model should still know what was answered.
     const text = this.readContent(got.message).text.trim() || `(${got.message.messageType ?? "unknown"} message)`;
-    return { role: got.mine ? "assistant" : "user", at: got.at, text };
+    return withQuote({ role: got.mine ? "assistant" : "user", at: got.at, text }, body);
   }
 
   /** `content` is a JSON string; malformed or unreadable types are logged and
@@ -427,6 +421,9 @@ export class LarkChannel implements Channel {
         .catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
+    // A pick is a reply to the card that offered it, as on the web. Read beside
+    // the retire: dropping the buttons changes nothing `cardText` reads.
+    const said = this.quoted(action.messageId, label);
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // topic shows an answer to a request nobody can see, with nothing to carry the eyes.
     await this.out.retire(action.messageId);
@@ -435,7 +432,7 @@ export class LarkChannel implements Channel {
         this.log(`option echo failed: ${String(err)}`);
         return undefined;
       });
-    await this.deliver(key, action, echo?.messageId, label, onMessage);
+    await this.deliver(key, action, echo?.messageId, await said, onMessage);
   }
 
   /** A tap's text as the tapper's message; `messageId` is the message that carries the 👀. */

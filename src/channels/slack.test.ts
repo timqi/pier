@@ -972,11 +972,18 @@ describe("next-step buttons", () => {
     },
   ];
 
-  it("reads the label off the clicked message, echoes it, and steers", async () => {
+  it("reads the label off the clicked message, echoes it, and steers it as a reply to that message", async () => {
     openGates();
+    const ts = `${new Date(2026, 5, 1, 9, 5).getTime() / 1000}.000100`;
+    const blocks: SlackBlock[] = [
+      { type: "markdown", text: "Ready?" },
+      { type: "markdown", text: "Two ways:" },
+      { type: "context", elements: [{ type: "mrkdwn", text: "opus · 3s" }] },
+      ...withOptions().slice(1),
+    ];
     await feed(interaction({
       channel: { id: CHANNEL },
-      message: { ts: "1900.000100", thread_ts: "1700.000100", blocks: withOptions() },
+      message: { ts, thread_ts: "1700.000100", blocks },
       actions: [{ action_id: "sg:0" }],
     }));
     // A bot cannot post as the user, so the pick is echoed and marked.
@@ -985,7 +992,8 @@ describe("next-step buttons", () => {
       key: { channelId: "slack", conversationId: "C100/1700.000100" },
       senderId: "U42",
       sender: { id: "U42", name: "Q" },
-      text: "Run it",
+      // The web's quote of the offering message: its words, not its footer or buttons.
+      text: "[re assistant 2026-06-01 09:05]\n> Ready?\n>\n> Two ways:\n\nRun it",
       mode: "steer",
     }]);
   });
@@ -1214,7 +1222,7 @@ describe("the home chat", () => {
     expect(client.updated.at(-1)!.ts).toBe("900.000100");
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: undefined, text: "▸ Deploy" });
     expect(client.reactions.at(-1)).toEqual({ channel: HOME, ts: "901.000100", name: "eyes", add: true });
-    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: expect.stringMatching(/^\[re assistant [^\]]+\]\n> which\?\n\nDeploy$/) });
   });
 
   it("a button in an old thread of the home DM still steers the head, echoed in that thread", async () => {
@@ -1226,7 +1234,7 @@ describe("the home chat", () => {
       actions: [{ action_id: "sg:0" }],
     }));
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "800.000100", text: "▸ Deploy" });
-    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+    expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: expect.stringMatching(/^\[re assistant [^\]]+\]\n> which\?\n\nDeploy$/) });
   });
 
   it("a panel card left in the DM before it became the home is stale, never a session under the home key", async () => {
@@ -1281,7 +1289,7 @@ describe("the home chat", () => {
       actions: [{ action_id: "sg:0" }],
     }));
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "1900.000100", text: "▸ Finalize design" });
-    expect(inbound.at(-1)).toMatchObject({ key: child, text: "Finalize design" });
+    expect(inbound.at(-1)).toMatchObject({ key: child, text: expect.stringMatching(/^\[re assistant [^\]]+\]\n> Which storage\?\n\nFinalize design$/) });
   });
 
   // docs/design/11-im-conversation.md §Status

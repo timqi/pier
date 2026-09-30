@@ -12,7 +12,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | ✅ |
 | Progress receipts | Every message that entered a turn wears 👀 until it settles; in the home chat a message that opened an item wears its state (❓ / ✅) after its turn, beside one status message edited in place ([11 §Status](11-im-conversation.md#status)); no intermediate reasoning is ever posted | shared ledger and status row, adapter calls the reaction and message APIs | ✅ | ✅ |
 | Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ |
-| Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as an ordinary message | shared parse, adapter renders + feeds back | ✅ | ✅ |
+| Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as a reply to the message that offered it, in the web's quote (`withQuote`) | shared parse, adapter renders + feeds back | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ |
 | Outbound attachments | A `file://` link in a reply is dead on anyone else's machine, so the file is uploaded to the platform and the link's label stays in the text; over the cap, missing or refused becomes an `[attachment lost: …]` line (shared: `channels/attach.ts`, upload per `*-api.ts`) | shared split/read/report, adapter uploads | ✅ | ✅ |
 | System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers; in the home main flow a delegation or a succeeded callback is the status message's instead ([11 §Status](11-im-conversation.md#status)) | shared (`Channel.notify`) | ✅ | ✅ |
@@ -452,12 +452,13 @@ Answer these first.
 - **A card callback carries no thread id**, only message and chat — every
   button value carries the thread root (`LarkActionValue.root`), the cwd form
   carries it in the submit button's `name`.
-- **A sent 2.0 card is not read back on a click** (by default `message.get`
-  answers a "please upgrade" post), so the next-step label rides in the button value
+- **A click does not carry the sent 2.0 card**, so the next-step label rides in the button value
   (`LarkActionValue.label`) and retiring a taken row is best-effort from a
   bounded in-process copy of the sent card — the one sanctioned exception to
   "never key interaction state on adapter memory"; the failure is a leftover
-  row, not a dead button.
+  row, not a dead button. The quote of a pick is the one read back: `message.get`
+  of the clicked card, beside the retire; a failed read is logged and the label
+  goes unquoted.
 - **Reactions are named keys** (👀 = `OnIt`); removal is list-then-delete by
   `reaction_id`, filtered to `operator_type === "app"`.
 - **The cwd prompt is a form card** (a WebSocket app cannot open a modal);

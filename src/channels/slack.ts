@@ -18,6 +18,7 @@ import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
+import { withQuote } from "../core/identity.js";
 import { awaitsTurn, isSilentReply, shownByStatus } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
@@ -45,7 +46,7 @@ import {
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
-import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
+import { blocksText, context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
 // The envelope is already acked, so this bounds concurrency (sockets,
@@ -349,7 +350,10 @@ export class SlackChannel implements Channel {
       this.log(`option echo failed: ${String(err)}`);
       return undefined;
     });
-    await this.deliver(key, channel, echo?.ts, user, text, onMessage);
+    // A pick is a reply to the message that offered it, as on the web.
+    const at = Number(message.ts) * 1000;
+    const quoted = at > 0 ? withQuote({ role: "assistant", at, text: blocksText(message.blocks) }, text) : text;
+    await this.deliver(key, channel, echo?.ts, user, quoted, onMessage);
   }
 
   /** A click's text as the clicker's message; `ts` is the message that carries the 👀. */
