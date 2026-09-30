@@ -46,7 +46,7 @@ import {
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
-import { blocksText, context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
+import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
 // The envelope is already acked, so this bounds concurrency (sockets,
@@ -350,9 +350,12 @@ export class SlackChannel implements Channel {
       this.log(`option echo failed: ${String(err)}`);
       return undefined;
     });
-    // A pick is a reply to the message that offered it, as on the web.
+    // A pick is a reply to the message that offered it, as on the web. `text`,
+    // not the blocks: Slack may store a `markdown` block as other block types.
     const at = Number(message.ts) * 1000;
-    const quoted = at > 0 ? withQuote({ role: "assistant", at, text: blocksText(message.blocks) }, text) : text;
+    const said = message.text?.trim().replace(/^…$/, "") ?? "";
+    if (!said || !(at > 0)) this.log(`option message ${message.ts} has no text to quote, pick sent unquoted`);
+    const quoted = said && at > 0 ? withQuote({ role: "assistant", at, text: said }, text) : text;
     await this.deliver(key, channel, echo?.ts, user, quoted, onMessage);
   }
 

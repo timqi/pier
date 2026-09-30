@@ -142,8 +142,3 @@ export function offeredLabel(
   }
   return undefined;
 }
-
-/** A message's words read back for a quote: its body blocks, less the footer and the buttons. */
-export const blocksText = (blocks: SlackBlock[] | undefined): string =>
-  (blocks ?? []).flatMap((b) => (b.type === "markdown" ? [b.text] : b.type === "section" ? [b.text.text] : []))
-    .join("\n\n");

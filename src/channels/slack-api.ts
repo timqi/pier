@@ -99,7 +99,7 @@ export interface SlackInteraction {
   trigger_id?: string;
   user?: { id: string };
   channel?: { id: string };
-  message?: { ts: string; thread_ts?: string; blocks?: SlackBlock[] };
+  message?: { ts: string; thread_ts?: string; text?: string; blocks?: SlackBlock[] };
   actions?: { action_id: string; value?: string }[];
   view?: SlackView;
 }

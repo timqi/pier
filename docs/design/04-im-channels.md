@@ -360,8 +360,8 @@ Answer these first.
 
 | # | Question | Slack | Lark |
 | - | -------- | ----- | ---- |
-| 1 | **Interactive payload size?** | `action_id` 255 chars, `value` 2000 | `value` is a JSON object; exact cap undocumented — Pier sends `{key, root}` (~40 bytes) and never a label |
-| 2 | **Does it echo the component back** on the message a click came from? | yes, `message.blocks` | **no, and it cannot be fetched either** — `message.get` on a 2.0 card answers a "please upgrade your client" post, so the button's `value` is the only echo; the label travels inside it |
+| 1 | **Interactive payload size?** | `action_id` 255 chars, `value` 2000 | `value` is a JSON object; exact cap undocumented — Pier sends `{key, root}` plus a next-step button's label |
+| 2 | **Does it echo the component back** on the message a click came from? | yes, `message.blocks` and `message.text` (a stored `markdown` block may come back as other block types, so a pick quotes `text`) | **no** — the label travels in the button's `value`; `message.get` with `card_msg_content_type=user_card_content` reads the card back as sent, which a pick's quote relies on |
 | 3 | **Can a bot add _and remove_ its own reactions?** | yes, but by **short name** (`eyes`), never the codepoint | add yes; remove is **list-then-delete by reaction_id**; keys are names (👀 = `OnIt`) |
 | 4 | **Thread primitive, and what right to create one?** | `thread_ts`; no right at all, no setup | `reply_in_thread` on the reply call; no right, no setup, works in DMs |
 | 5 | **Length cap and rate limit** | 3000 per section block, ~1 msg/s per channel (`429` + `Retry-After`) | card request 30KB in **bytes** (chunk budget 7000 chars); QPS limits not yet hit in anger |

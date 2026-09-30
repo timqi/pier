@@ -975,15 +975,10 @@ describe("next-step buttons", () => {
   it("reads the label off the clicked message, echoes it, and steers it as a reply to that message", async () => {
     openGates();
     const ts = `${new Date(2026, 5, 1, 9, 5).getTime() / 1000}.000100`;
-    const blocks: SlackBlock[] = [
-      { type: "markdown", text: "Ready?" },
-      { type: "markdown", text: "Two ways:" },
-      { type: "context", elements: [{ type: "mrkdwn", text: "opus · 3s" }] },
-      ...withOptions().slice(1),
-    ];
     await feed(interaction({
       channel: { id: CHANNEL },
-      message: { ts, thread_ts: "1700.000100", blocks },
+      // `text` is what was sent; the stored blocks need not be the ones Pier posted.
+      message: { ts, thread_ts: "1700.000100", text: "Ready?\n\nTwo ways:", blocks: withOptions() },
       actions: [{ action_id: "sg:0" }],
     }));
     // A bot cannot post as the user, so the pick is echoed and marked.
@@ -992,10 +987,21 @@ describe("next-step buttons", () => {
       key: { channelId: "slack", conversationId: "C100/1700.000100" },
       senderId: "U42",
       sender: { id: "U42", name: "Q" },
-      // The web's quote of the offering message: its words, not its footer or buttons.
+      // The web's quote of the offering message.
       text: "[re assistant 2026-06-01 09:05]\n> Ready?\n>\n> Two ways:\n\nRun it",
       mode: "steer",
     }]);
+  });
+
+  it("a message with no words (only its buttons) sends the pick unquoted, loudly", async () => {
+    openGates();
+    await feed(interaction({
+      channel: { id: CHANNEL },
+      message: { ts: "1900.000100", thread_ts: "1700.000100", text: "…", blocks: withOptions() },
+      actions: [{ action_id: "sg:0" }],
+    }));
+    expect(inbound.at(-1)).toMatchObject({ text: "Run it" });
+    expect(dropped.some((m) => m.includes("no text to quote"))).toBe(true);
   });
 
   it("retires the row, keeping the reply text", async () => {
@@ -1216,7 +1222,7 @@ describe("the home chat", () => {
     const offer = client.sent.at(-1)!;
     await feed(interaction({
       channel: { id: HOME },
-      message: { ts: "900.000100", blocks: offer.blocks },
+      message: { ts: "900.000100", text: offer.text, blocks: offer.blocks },
       actions: [{ action_id: "sg:0" }],
     }));
     expect(client.updated.at(-1)!.ts).toBe("900.000100");
@@ -1230,7 +1236,7 @@ describe("the home chat", () => {
     const offer = client.sent.at(-1)!;
     await feed(interaction({
       channel: { id: HOME },
-      message: { ts: "900.000200", thread_ts: "800.000100", blocks: offer.blocks },
+      message: { ts: "900.000200", thread_ts: "800.000100", text: offer.text, blocks: offer.blocks },
       actions: [{ action_id: "sg:0" }],
     }));
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "800.000100", text: "▸ Deploy" });
@@ -1285,7 +1291,7 @@ describe("the home chat", () => {
     expect(offer.thread_ts).toBe("1900.000100");
     await feed(interaction({
       channel: { id: HOME },
-      message: { ts: "1900.000500", thread_ts: "1900.000100", blocks: offer.blocks },
+      message: { ts: "1900.000500", thread_ts: "1900.000100", text: offer.text, blocks: offer.blocks },
       actions: [{ action_id: "sg:0" }],
     }));
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "1900.000100", text: "▸ Finalize design" });
