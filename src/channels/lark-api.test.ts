@@ -72,6 +72,45 @@ beforeEach(() => {
   api = new LarkApi("cli_app", "secret", (m) => logs.push(m));
 });
 
+describe("message", () => {
+  it("reads a message back in the event's shape, asking for the card as sent", async () => {
+    sdk.get.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [{
+          msg_type: "text",
+          create_time: "1780000000000",
+          chat_id: "oc_1",
+          sender: { id: "cli_app", id_type: "app_id", sender_type: "app" },
+          body: { content: "{\"text\":\"@_user_1 hi\"}" },
+          mentions: [{ key: "@_user_1", id: "ou_42", id_type: "open_id", name: "Q" }],
+        }],
+      },
+    });
+    expect(await api.message("om_1")).toEqual({
+      mine: true,
+      at: 1780000000000,
+      message: {
+        messageId: "om_1",
+        chatId: "oc_1",
+        messageType: "text",
+        content: "{\"text\":\"@_user_1 hi\"}",
+        mentions: [{ key: "@_user_1", id: { open_id: "ou_42" }, name: "Q" }],
+      },
+    });
+    expect(sdk.get).toHaveBeenCalledWith({ path: { message_id: "om_1" }, params: { card_msg_content_type: "user_card_content" } });
+  });
+
+  it("another app's message is not ours; a missing time or a business code is the error", async () => {
+    sdk.get.mockResolvedValueOnce({ code: 0, data: { items: [{ create_time: "1", sender: { id: "cli_other", id_type: "app_id", sender_type: "app" } }] } });
+    expect((await api.message("om_2")).mine).toBe(false);
+    sdk.get.mockResolvedValueOnce({ code: 0, data: { items: [{ sender: { id: "cli_app", id_type: "app_id", sender_type: "app" } }] } });
+    await expect(api.message("om_4")).rejects.toThrow(/no create_time on om_4/);
+    sdk.get.mockResolvedValueOnce({ code: 230027, msg: "Lack of necessary permissions." });
+    await expect(api.message("om_3")).rejects.toThrow(/message.get: 230027/);
+  });
+});
+
 describe("connect", () => {
   it("resolves without waiting for the SDK's start, and close() reaches the socket", async () => {
     const socket = await api.connect({ onMessage: () => {}, onCardAction: () => {} });
@@ -89,6 +128,8 @@ describe("connect", () => {
       message: {
         message_id: "om_1",
         root_id: "om_root",
+        parent_id: "om_parent",
+        thread_id: "omt_1",
         chat_id: "oc_1",
         chat_type: "group",
         message_type: "text",
@@ -103,6 +144,8 @@ describe("connect", () => {
       message: {
         messageId: "om_1",
         rootId: "om_root",
+        parentId: "om_parent",
+        threadId: "omt_1",
         chatId: "oc_1",
         chatType: "group",
         messageType: "text",

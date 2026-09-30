@@ -46,6 +46,17 @@ export const withFooter = (body: string, note: string): LarkElement => {
   return markdown(`${body}${brk}<font color='grey'>${note}</font>`);
 };
 
+const FOOTER = /\n*<font color='grey'>[^]*<\/font>$/;
+
+/** A card's words read back for a quote: its markdown bodies, less the footer. */
+export function cardText(value: unknown): string {
+  if (Array.isArray(value)) return value.map(cardText).filter(Boolean).join("\n");
+  if (!value || typeof value !== "object") return "";
+  const el = value as Record<string, unknown>;
+  if (el.tag !== "markdown") return cardText(Object.values(el));
+  return el.text_size === "notation" || typeof el.content !== "string" ? "" : el.content.replace(FOOTER, "");
+}
+
 const truncate = (label: string): string => cut(label, BUTTON_MAX);
 
 export const button = (label: string, value: LarkActionValue): LarkButton => ({

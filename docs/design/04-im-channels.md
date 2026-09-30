@@ -452,8 +452,8 @@ Answer these first.
 - **A card callback carries no thread id**, only message and chat — every
   button value carries the thread root (`LarkActionValue.root`), the cwd form
   carries it in the submit button's `name`.
-- **A sent 2.0 card cannot be read back** (`message.get` answers a "please
-  upgrade" post), so the next-step label rides in the button value
+- **A sent 2.0 card is not read back on a click** (by default `message.get`
+  answers a "please upgrade" post), so the next-step label rides in the button value
   (`LarkActionValue.label`) and retiring a taken row is best-effort from a
   bounded in-process copy of the sent card — the one sanctioned exception to
   "never key interaction state on adapter memory"; the failure is a leftover
@@ -465,6 +465,13 @@ Answer these first.
 - **Threads follow Slack's rule**, DMs included: `reply_in_thread` roots a
   topic per top-level message; `root_id` continues it. Pier posts no root of
   its own outside the home chat's main flow ([11](11-im-conversation.md)).
+- **A reply outside a topic carries its parent as a quote**: `parent_id`
+  without `thread_id` is read back with `message.get`
+  (`card_msg_content_type=user_card_content`, so Pier's own card returns as
+  sent, footer dropped) and wrapped with `withQuote` (`core/identity.ts`), the
+  web's Reply format — `assistant` when this app sent it. Needs `im:message`,
+  plus `im:message.group_msg` in a group; a failed read is logged and the reply
+  goes unquoted. Slack has no quote-reply.
 - **Permissions and the `im.message.receive_v1` subscription take effect only
   after a version is published and approved** — the usual reason a configured
   bot stays silent.

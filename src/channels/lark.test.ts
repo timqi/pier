@@ -23,6 +23,7 @@ import type {
   LarkCard,
   LarkCardAction,
   LarkClient,
+  LarkFetched,
   LarkHandlers,
   LarkMessageEvent,
   LarkTarget,
@@ -108,6 +109,16 @@ class FakeClient implements LarkClient {
     return Promise.resolve(openId === USER ? "Q" : openId);
   }
 
+  /** What message.get answers, by id; a miss is Lark's error. */
+  readonly stored = new Map<string, LarkFetched>();
+  readonly fetched: string[] = [];
+
+  message(messageId: string): Promise<LarkFetched> {
+    this.fetched.push(messageId);
+    const hit = this.stored.get(messageId);
+    return hit ? Promise.resolve(hit) : Promise.reject(new Error(`lark message.get: 230027 Lack of necessary permissions.`));
+  }
+
   oversized = false;
 
   download(
@@ -154,6 +165,8 @@ function message(over: {
   text?: string;
   messageId?: string;
   rootId?: string;
+  parentId?: string;
+  threadId?: string;
   chatId?: string;
   chatType?: string;
   messageType?: string;
@@ -171,6 +184,8 @@ function message(over: {
     message: {
       messageId: over.messageId ?? `om_in_${eventSeq}`,
       rootId: over.rootId,
+      parentId: over.parentId,
+      threadId: over.threadId,
       chatId: over.chatId ?? CHAT,
       chatType: over.chatType ?? "group",
       messageType: over.messageType ?? "text",
@@ -910,6 +925,47 @@ describe("the home chat", () => {
     await channel.notify(HOME, { text: "seed", origin: { kind: "session-seed", reason: "new", previousSessionId: null } });
     expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*/stop*\n> nothing running", "*↺ new session · new*\n> seed"]);
     expect(client.reactions).toHaveLength(3);
+  });
+
+  it("a reply in the main flow carries its parent as the web's quote; a topic's message does not", async () => {
+    const at = new Date(2026, 5, 1, 9, 5).getTime();
+    const said = (content: object, messageType = "text") => ({ messageId: "", chatId: HOME, messageType, content: JSON.stringify(content) });
+    client.stored.set("om_p1", { mine: false, at, message: said({ text: "ship\nfriday?" }) });
+    client.stored.set("om_p2", {
+      mine: true,
+      at,
+      // The card as sent (user_card_content): the footer is the turn's, not its words.
+      message: said({ schema: "2.0", body: { elements: [{ tag: "markdown", content: "Done.\n<font color='grey'>opus · 3s</font>" }] } }, "interactive"),
+    });
+    client.stored.set("om_p3", { mine: false, at, message: said({ image_key: "img_1" }, "image") });
+    await feed(
+      dm({ text: "yes", rootId: "om_p1", parentId: "om_p1" }),
+      dm({ text: "thanks", rootId: "om_p1", parentId: "om_p2" }),
+      dm({ text: "this one", parentId: "om_p3", rootId: "om_p3" }),
+      dm({ text: "in a topic", rootId: "om_p1", parentId: "om_p1", threadId: "omt_1" }),
+    );
+    expect(inbound.map((m) => m.text)).toEqual([
+      "[re user 2026-06-01 09:05]\n> ship\n> friday?\n\nyes",
+      "[re assistant 2026-06-01 09:05]\n> Done.\n\nthanks",
+      "[re user 2026-06-01 09:05]\n> (image message)\n\nthis one",
+      "in a topic",
+    ]);
+    expect(inbound.every((m) => m.key.conversationId === HOME)).toBe(true);
+    expect(client.fetched).toEqual(["om_p1", "om_p2", "om_p3"]);
+  });
+
+  it("a chat command sent as a reply is not quoted: it still parses, and wears no 👀", async () => {
+    client.stored.set("om_p1", { mine: false, at: Date.now(), message: { messageId: "", chatId: HOME, messageType: "text", content: JSON.stringify({ text: "hi" }) } });
+    await feed(dm({ text: "%stop", messageId: "om_cmd", rootId: "om_p1", parentId: "om_p1" }), dm({ text: "/new", rootId: "om_p1", parentId: "om_p1" }));
+    expect(inbound.map((m) => m.text)).toEqual(["%stop", "/new"]);
+    expect(client.fetched).toEqual([]);
+    expect(client.reactions).toEqual([]);
+  });
+
+  it("a parent Lark will not read back is logged and the reply goes unquoted", async () => {
+    await feed(dm({ text: "yes", rootId: "om_gone", parentId: "om_gone" }));
+    expect(inbound.map((m) => m.text)).toEqual(["yes"]);
+    expect(dropped.some((m) => m.includes("quoted message om_gone unreadable") && m.includes("230027"))).toBe(true);
   });
 
   it("drops a message that is only a mention, loudly", async () => {

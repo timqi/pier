@@ -3,7 +3,7 @@
 // broke other adapters.
 
 import { describe, expect, it } from "vitest";
-import { button, chunk, footer, markdown, withFooter } from "./lark-render.js";
+import { button, card, cardText, chunk, footer, markdown, withFooter } from "./lark-render.js";
 
 describe("chunk", () => {
   it("returns short text whole", () => {
@@ -81,5 +81,13 @@ describe("truncation", () => {
     const long = "选".repeat(80);
     const b = button(long.slice(0, 59) + "…", { key: "sg:0", root: "om_1", label: long.slice(0, 59) + "…" });
     expect(JSON.stringify(b.behaviors![0]!.value).length).toBeLessThan(300);
+  });
+});
+
+describe("cardText", () => {
+  it("reads a card's markdown back without its footer or buttons", () => {
+    const sent = card([markdown("part one"), withFooter("- last item", "opus · 3s"), button("Deploy", { key: "sg:0", root: "" })]);
+    expect(cardText(sent)).toBe("part one\n- last item");
+    expect(cardText(card([footer("no reply · opus")]))).toBe("");
   });
 });

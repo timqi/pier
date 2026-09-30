@@ -80,6 +80,10 @@ export interface LarkMessageEvent {
   message: {
     messageId: string;
     rootId?: string;
+    /** The message a reply answers; inside a topic, the topic's. */
+    parentId?: string;
+    /** Set only inside a topic: a `parentId` without it is a reply in the main flow. */
+    threadId?: string;
     chatId: string;
     chatType?: string; // "p2p" | "group"
     messageType?: string;
@@ -87,6 +91,15 @@ export interface LarkMessageEvent {
     content?: string;
     mentions?: LarkMention[];
   };
+}
+
+/** A message read back by id: what a reply quotes. */
+export interface LarkFetched {
+  /** Sent by this app. */
+  mine: boolean;
+  /** Epoch ms. */
+  at: number;
+  message: LarkMessageEvent["message"];
 }
 
 export interface LarkCardAction {
@@ -143,6 +156,8 @@ export interface LarkClient {
   /** Deletion is by reaction_id, so this lists and removes only our own. */
   removeReaction(messageId: string, emojiType: string): Promise<void>;
   chatName(chatId: string): Promise<string | undefined>;
+  /** Needs im:message (or :readonly), plus im:message.group_msg in a group. */
+  message(messageId: string): Promise<LarkFetched>;
   userName(openId: string): Promise<string>;
   uploadFile(
     to: LarkTarget,
@@ -216,6 +231,8 @@ export class LarkApi implements LarkClient {
           message: {
             messageId: data.message.message_id,
             rootId: data.message.root_id,
+            parentId: data.message.parent_id,
+            threadId: data.message.thread_id,
             chatId: data.message.chat_id,
             chatType: data.message.chat_type,
             messageType: data.message.message_type,
@@ -376,6 +393,31 @@ export class LarkApi implements LarkClient {
   async chatName(chatId: string): Promise<string | undefined> {
     const res = ok("chat.get", await this.client.im.v1.chat.get({ path: { chat_id: chatId } }));
     return res.data?.name || undefined;
+  }
+
+  async message(messageId: string): Promise<LarkFetched> {
+    const res = ok("message.get", await this.client.im.v1.message.get({
+      path: { message_id: messageId },
+      // The card as sent; the default answers a 2.0 card with a "please upgrade" post.
+      params: { card_msg_content_type: "user_card_content" },
+    }));
+    const item = res.data?.items?.[0];
+    if (!item) throw new Error(`lark message.get: no message ${messageId}`);
+    const at = Number(item.create_time);
+    // A quote's minute is its header; NaN would write one no reader parses.
+    if (!item.create_time || !Number.isFinite(at)) throw new Error(`lark message.get: no create_time on ${messageId}`);
+    return {
+      mine: item.sender?.sender_type === "app" && item.sender.id === this.appId,
+      at,
+      message: {
+        messageId,
+        chatId: item.chat_id ?? "",
+        messageType: item.msg_type,
+        content: item.body?.content,
+        // The event's shape: here the id is a bare string.
+        mentions: item.mentions?.map((m) => ({ key: m.key, id: { open_id: m.id }, name: m.name })),
+      },
+    };
   }
 
   async userName(openId: string): Promise<string> {

@@ -20,6 +20,7 @@ import { isChatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
+import { withQuote } from "../core/identity.js";
 import { awaitsTurn, isSilentReply, shownByStatus } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
@@ -39,7 +40,7 @@ import {
 } from "./lark-api.js";
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
-import { card, chunk, LARK_MAX, markdown, OFFER_PREFIX } from "./lark-render.js";
+import { card, cardText, chunk, LARK_MAX, markdown, OFFER_PREFIX } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import { StatusMessage } from "./status.js";
@@ -253,6 +254,9 @@ export class LarkChannel implements Channel {
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
+    // A command or skill ask is not a reply, as in the web composer: quoted, it would not parse.
+    const quote = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId) : undefined;
+    const body = [text, ...markers].filter(Boolean).join("\n");
     // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
     const answered = home && command && !command.args && isChatCommand(command.name);
     if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
@@ -261,9 +265,21 @@ export class LarkChannel implements Channel {
       key: here,
       senderId,
       sender,
-      text: [text, ...markers].filter(Boolean).join("\n"),
+      text: quote ? withQuote(quote, body) : body,
       mode: "steer",
     });
+  }
+
+  /** A reply in the main flow names its parent as the web's Reply does. */
+  private async quoted(messageId: string): Promise<Parameters<typeof withQuote>[0] | undefined> {
+    const got = await this.api.message(messageId).catch((err: unknown) => {
+      this.log(`quoted message ${messageId} unreadable, sent without its quote: ${String(err)}`);
+      return undefined;
+    });
+    if (!got) return undefined;
+    // An image or a file has no words, but the model should still know what was answered.
+    const text = this.readContent(got.message).text.trim() || `(${got.message.messageType ?? "unknown"} message)`;
+    return { role: got.mine ? "assistant" : "user", at: got.at, text };
   }
 
   /** `content` is a JSON string; malformed or unreadable types are logged and
@@ -289,6 +305,9 @@ export class LarkChannel implements Channel {
         attachments.push(...post.images);
         break;
       }
+      case "interactive":
+        text = cardText(content);
+        break;
       case "image":
         if (content.image_key) {
           attachments.push({ key: String(content.image_key), type: "image", name: "image.png" });
