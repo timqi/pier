@@ -1020,9 +1020,9 @@ describe("the turn's bubble", () => {
     const launched = bubble();
     chat.appendTurn("user", "and the board?", false, 2);
     callback("other");
-    activity.renderBackgroundRun(run("review", { goalId: "g1", goalStep: true }));
+    activity.renderBackgroundRun(run("review", { goalId: "g1", byPier: true }));
     // A step whose goal is not on screen: a closed bubble of its own, above the turn in flight.
-    activity.renderBackgroundRun(run("lost", { goalId: "g2", goalStep: true }));
+    activity.renderBackgroundRun(run("lost", { goalId: "g2", byPier: true }));
     chat.completeTurn("Board.");
     expect(names(launched)).toEqual(["run · runningroot", "run · runningreview"]);
     expect(launched.children.find((el) => el.classList.contains("chip-details"))!.children).toHaveLength(3);
@@ -1040,10 +1040,50 @@ describe("the turn's bubble", () => {
       { role: "assistant", text: "Launched.", steps, meta: meta(2) },
       { role: "user", text: "and the board?", at: 3 },
       { role: "assistant", text: "Board.", steps, meta: meta(10) },
-    ], "idle", [run("root", { goalId: "g1", queuedAt: 1 }), run("review", { goalId: "g1", goalStep: true, queuedAt: 5 })]);
+    ], "idle", [run("root", { goalId: "g1", queuedAt: 1 }), run("review", { goalId: "g1", byPier: true, queuedAt: 5 })]);
     const [first, second] = pane().querySelectorAll("[data-kind='assistant']");
     expect(chips(first)).toEqual(["activity", "background-run", "background-run"]);
     expect(chips(second)).toEqual(["activity"]);
+  });
+
+  it("puts a lead's milestone resume with the lead's run, never on the silent reply at the tail", () => {
+    const names = (b: FakeElement) => b.querySelectorAll("[data-kind='background-run']").map((c) => c.textContent);
+    chat.appendTurn("user", "optimize the prompts", false, 1);
+    activity.renderBackgroundRun(run("lead", { taskId: "prompts" }));
+    chat.completeTurn("<silent>dispatched</silent>\n<open>prompts — lead running</open>");
+    const launched = bubble();
+    chat.appendTurn("user", "fix twitter search", false, 2);
+    activity.renderBackgroundRun(run("twitter", { taskId: "twitter" }));
+    chat.completeTurn("<silent>dispatched</silent>\n<open>twitter — worker running</open>");
+    const tail = bubble();
+    // No turn in flight: the resume the lead's wave triggered lands while the tail is another topic's.
+    activity.renderBackgroundRun(run("milestone", { taskId: "prompts", byPier: true, state: "succeeded", finishedAt: 9 }));
+    expect(names(launched)).toEqual(["run · runninglead", "run · succeededmilestone"]);
+    expect(names(tail)).toEqual(["run · runningtwitter"]);
+    // Its callback and the reply to it are a bubble of their own, below.
+    callback("milestone");
+    chat.completeTurn("<silent>milestone</silent>\n<open>prompts — integrated</open>");
+    expect(chips()).toEqual(["topic-tag", "system"]);
+    expect(names(tail)).toEqual(["run · runningtwitter"]);
+  });
+
+  it("places a lead's milestone resume with the lead's run on a reload, not on the reply above its callback", () => {
+    const meta = (completedAt: number) => ({ completedAt, durationMs: 1, tokens: 1 });
+    chat.renderSnapshot([
+      { role: "user", text: "optimize the prompts", at: 1 },
+      { role: "assistant", text: "<silent>dispatched</silent>", steps, meta: meta(2) },
+      { role: "user", text: "fix twitter search", at: 3 },
+      { role: "assistant", text: "<silent>dispatched</silent>", steps, meta: meta(4) },
+      { role: "system", text: "done\n\nok", origin: { kind: "task-callback", taskId: "prompts", runId: "milestone", sourceSessionId: null, runIds: ["milestone"] }, at: 8 },
+      { role: "assistant", text: "<silent>milestone</silent>", meta: meta(9) },
+    ], "idle", [
+      run("lead", { taskId: "prompts", queuedAt: 1 }),
+      run("twitter", { taskId: "twitter", queuedAt: 3 }),
+      run("milestone", { taskId: "prompts", byPier: true, queuedAt: 6 }),
+    ]);
+    const [first, second] = pane().querySelectorAll("[data-kind='assistant']");
+    expect(first!.querySelectorAll("[data-kind='background-run']").map((c) => c.textContent)).toEqual(["run · runninglead", "run · runningmilestone"]);
+    expect(second!.querySelectorAll("[data-kind='background-run']").map((c) => c.textContent)).toEqual(["run · runningtwitter"]);
   });
 
   it("shows angle brackets in a reply as written, in text and in code, and never as markup", () => {

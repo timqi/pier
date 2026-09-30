@@ -253,9 +253,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   system line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` are run chips of
   the bubble that launched them, updated from `task-status` events; a
-  goal's step (`goalStep`, launched by its loop, not a turn) joins the bubble
-  of its goal's latest chip, else a closed bubble of its own above any turn
-  in flight, live and replayed alike; the status panel lists the runs still
+  run Pier launched, not a turn (`byPier`: a goal's step, a lead's milestone
+  or design final) joins the bubble of its goal's latest chip — outside a
+  goal, its task's — else a closed bubble of its own above any turn in
+  flight, live and replayed alike; the status panel lists the runs still
   in flight. The message's
   creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs are cause chips with a Session link in the head, never

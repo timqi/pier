@@ -270,8 +270,9 @@ export interface BackgroundRun extends RunModel {
   queuedMessages: number;
   /** The goal this run is a step of, its root run included. */
   goalId?: string;
-  /** Launched by its goal's loop, not by a turn of the invoking session. */
-  goalStep?: boolean;
+  /** Launched by Pier itself — its goal's loop, a lead's milestone or design
+   *  final — not by a turn of the invoking session. */
+  byPier?: boolean;
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */

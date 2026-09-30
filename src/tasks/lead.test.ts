@@ -163,6 +163,8 @@ describe("a feature lead", () => {
     expect(callbacks()).toHaveLength(1);
     const resumed = store.latestRunForTarget("lead")!;
     expect(resumed).toMatchObject({ resumedFromRunId: "lead-run", callbackSessionId: "main", invokedBySessionId: "main" });
+    // No turn of main launched it: main's card says so, or it wears the reply at main's tail.
+    expect(service.backgroundRuns("main").find((r) => r.runId === resumed.id)?.byPier).toBe(true);
     expect(lead.systemInputs.at(-1)).toMatchObject({
       origin: { kind: "task-delegation", runId: resumed.id },
       text: expect.stringMatching(/^\[Pier: the last result owed you follows[\s\S]*second/),
@@ -271,6 +273,7 @@ describe("a feature lead", () => {
     const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };
     const plain = await service.waitForRun(service.resume("lead-run", "what do you propose?", owed).id);
     expect(store.getRun(plain.id)).toMatchObject({ state: "succeeded", callbackState: null, callbackError: LEAD_TURN, callbackSessionId: "main" });
+    expect(service.backgroundRuns("main").find((r) => r.runId === plain.id)!.byPier).toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(main.systemInputs).toEqual([]);
 
@@ -324,6 +327,7 @@ describe("a feature lead", () => {
     });
     expect(store.leads().get("lead")?.designOpen).toBe(false);
     expect(service.openDesigns()).toEqual([]);
+    expect(service.backgroundRuns("main").find((r) => r.runId === store.latestRunForTarget("lead")!.id)?.byPier).toBe(true);
     service.stop();
 
     // A run's own turn reports through the run; a build lead's and a main session's direct turns record nothing.

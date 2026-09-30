@@ -720,7 +720,8 @@ export class TaskService {
       finishedAt: run.finishedAt,
       // A finished run's pending messages only wait for the sweep to expire them.
       queuedMessages: isTerminal(run.state) ? 0 : this.store.countPendingFollowUps(run.id),
-      ...(run.goalId ? { goalId: run.goalId, goalStep: run.triggerSource === "goal" } : {}),
+      ...(run.goalId ? { goalId: run.goalId } : {}),
+      ...(byPier(run) ? { byPier: true } : {}),
       ...runModel(run),
     };
   }
@@ -736,6 +737,12 @@ export class TaskService {
     }
   }
 }
+
+/** A lead's milestone resume carries its marker; a design final outside any run
+ *  is the one resume with no prompt (`designFinal`). */
+const byPier = (run: TaskRun): boolean =>
+  run.triggerSource === "goal" || run.context.resumePrompt?.startsWith(MILESTONE) === true ||
+  (run.resumedFromRunId !== null && !run.context.resumePrompt);
 
 /** A child run's abnormal end the home chat would not otherwise see. An
  *  interruption always: its callback lands while no chat is connected. A failure

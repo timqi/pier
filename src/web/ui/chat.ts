@@ -974,9 +974,9 @@ export function renderSnapshot(
   const unplacedRuns = new Map(backgroundRuns.map((run) => [run.runId, run]));
   // A card belongs to the turn that was running when its run was queued: the
   // first turn to finish at or after that moment. Same process, same clock.
-  // A goal's step no turn launched: its chip finds its goal's (turn-activity.ts).
+  // A run Pier launched, not a turn: its chip finds its kin's (turn-activity.ts).
   const queuedBy = (completedAt: number): string[] =>
-    [...unplacedRuns].filter(([, run]) => !run.goalStep && run.queuedAt <= completedAt).map(([runId]) => runId);
+    [...unplacedRuns].filter(([, run]) => !run.byPier && run.queuedAt <= completedAt).map(([runId]) => runId);
   const placeRuns = (runIds: string[]): void => {
     for (const runId of runIds) {
       const run = unplacedRuns.get(runId);

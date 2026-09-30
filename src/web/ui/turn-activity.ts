@@ -212,6 +212,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     el = chip(spec, card);
     el.dataset.kind = "background-run";
     if (run.goalId) el.dataset.goal = run.goalId;
+    el.dataset.task = run.taskId;
     runChips.set(run.runId, el);
     runDetails.set(el, { card, prompt });
   } else paintChip(el, spec);
@@ -232,15 +233,16 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     sessionId: run.targetSessionId,
   });
   card.replaceChildren(head, ...(prompt ? [prompt] : []));
-  // A goal's step was launched by its loop, not by the reply at the tail: it
-  // joins the bubble of its goal's latest chip.
-  if (fresh && run.goalStep) turns.chip(el, card, goalChips(run.goalId).at(-1)?.closest<HTMLElement>("[data-kind='assistant'], [data-kind='error']") ?? "alone");
+  // Pier launched it, not the reply at the tail: it joins the bubble of its
+  // goal's latest chip, or outside a goal its task's (a lead's earlier run).
+  if (fresh && run.byPier) turns.chip(el, card, kinChips(run).at(-1)?.closest<HTMLElement>("[data-kind='assistant'], [data-kind='error']") ?? "alone");
   else if (fresh) turns.chip(el, card, "join");
   turns.scroll();
 }
 
-const goalChips = (goalId: string | undefined): HTMLElement[] =>
-  [...turns.el.querySelectorAll<HTMLElement>("[data-kind='background-run']")].filter((c) => c.dataset.goal === goalId);
+const kinChips = (run: BackgroundRun): HTMLElement[] =>
+  [...turns.el.querySelectorAll<HTMLElement>("[data-kind='background-run']")]
+    .filter((c) => (run.goalId ? c.dataset.goal === run.goalId : c.dataset.task === run.taskId));
 
 // --- activity group ------------------------------------------------------------------
 
