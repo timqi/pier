@@ -141,8 +141,8 @@ thread half only for the home chat; any other is refused.
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
 - Receipts: the 👀 on a home message is keyed by the home conversation id and
-  comes off with the head's turn-end, as any conversation's; a message whose
-  turn opened an item then wears that item's state (§Status). A chat command
+  comes off with the head's turn-end, as any conversation's — unless that turn
+  opened an item, when it stays as the item's state (§Status). A chat command
   wears none — its answer is a note, and no turn would take it off — and
   neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
   message that caused a seed already wears its own.
@@ -154,11 +154,11 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
 
 - `AgentReply.opened` is the problems the reply's `<open>` markers named, in
   order (`splitReply`). A home main-flow reply with `opened` moves the
-  receipts its turn settles to item receipts under the first problem; the 👀
-  comes off either way.
-- An item receipt wears its item's `OpenStatus`: `running` → nothing, `waiting on
+  receipts its turn settles to item receipts under the first problem, silent
+  reply or not; the 👀 stays.
+- An item receipt wears its item's `OpenStatus`: `running` → 👀, `waiting on
   you` → ❓, gone from the list → ✅ and forgotten; `stopped` and `pending
-  release` keep what they wear, except a 👀 an older release booked, which comes off. A change removes the old reaction and adds the
+  release` keep what they wear, except a 👀, which comes off. A change removes the old reaction and adds the
   new one; no change, no call. At most 20 messages per item; the oldest past
   that is cleared and forgotten. The stale and startup sweeps skip them.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
@@ -331,7 +331,7 @@ through what the head launches (`pier task`), never by a group's message.
 
 - A day of use from the phone: every spoken reply, seed and `/status` answer
   of the head appears in the DM's main flow in order, a message wears its
-  item's ❓ / ✅ once its turn is done, one status message shows what is open, and a
+  item's state until it is done, one status message shows what is open, and a
   callback shows only as that message changing in place unless a run failed or the head
   speaks (§Status); nothing appears twice on the phone (no push beside
   the DM); the web timeline matches.

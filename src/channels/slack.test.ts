@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
+import { splitReply } from "../core/reply.js";
 import { openDb } from "../db.js";
 import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
@@ -1333,19 +1334,17 @@ describe("the home chat", () => {
       expect(client.sent.map((p) => p.text).slice(3)).toEqual(["_/status_\n> Nothing open."]);
     });
 
-    it("a turn that opened an item takes the message's 👀 off, then ❓ and ✅ as the item moves", async () => {
+    it("a turn that opened an item keeps the message's 👀, then ❓ and ✅ as the item moves", async () => {
       await feed(dm({ text: "design storage", ts: "2000.000100" }));
       await channel.send(HOME, { text: "on it", suggestions: [], meta, opened: ["storage", "cache"] });
-      expect(client.reactions).toEqual([
-        { channel: HOME, ts: "2000.000100", name: "eyes", add: true },
-        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
-      ]);
+      expect(client.reactions).toEqual([{ channel: HOME, ts: "2000.000100", name: "eyes", add: true }]);
       // A view read in the join's millisecond may predate the marker; only a later one says gone.
       await new Promise((r) => setTimeout(r, 2));
       await channel.status(HOME, view("storage — running", [["storage", "running"]]));
-      expect(client.reactions).toHaveLength(2);
+      expect(client.reactions).toHaveLength(1);
       await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
-      expect(client.reactions.slice(2)).toEqual([
+      expect(client.reactions.slice(1)).toEqual([
+        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
         { channel: HOME, ts: "2000.000100", name: "question", add: true },
       ]);
       await channel.status(HOME, view("Nothing open."));
@@ -1355,6 +1354,20 @@ describe("the home chat", () => {
       ]);
       await channel.status(HOME, view("Nothing open."));
       expect(client.reactions).toHaveLength(5);
+    });
+
+    it("a silent dispatch keeps the message's 👀 on its item: nothing posted, nothing cleared", async () => {
+      await feed(dm({ text: "fix the parser", ts: "2002.000100" }));
+      await channel.send(HOME, splitReply("<silent>dispatched</silent>\n<open>parser — worker running (run r1)</open>", meta));
+      expect(client.sent).toEqual([]);
+      await new Promise((r) => setTimeout(r, 2));
+      await channel.status(HOME, view("parser — running", [["parser", "running"]]));
+      expect(client.reactions).toEqual([{ channel: HOME, ts: "2002.000100", name: "eyes", add: true }]);
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.reactions.slice(1)).toEqual([
+        { channel: HOME, ts: "2002.000100", name: "eyes", add: false },
+        { channel: HOME, ts: "2002.000100", name: "white_check_mark", add: true },
+      ]);
     });
 
     it("a quiet main-flow turn posts its footer only for a settled message that opened nothing", async () => {

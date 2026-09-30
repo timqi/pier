@@ -1,8 +1,7 @@
 // Reaction receipts: a 👀 goes on an inbound message and comes off when its
-// turn settles; a message whose turn opened an open item then wears that
-// item's ❓ / ✅ (docs/design/11 §Status). Durable, because the emoji lives on
-// the platform: a process ending between the two halves would leave it with
-// nobody to clear it.
+// turn settles, or stays on as its open item's state when the turn opened one
+// (docs/design/11 §Status). Durable, because the emoji lives on the platform: a
+// process ending between the two halves would leave it with nobody to clear it.
 
 import type { DatabaseSync } from "node:sqlite";
 import { waitsOnYou } from "../core/reply.js";
@@ -14,7 +13,7 @@ import type { ChannelPlatform } from "./types.js";
 const SWEEP_EVERY_MS = 60_000;
 /** Messages one item wears its state on; the oldest past it comes clear. */
 const ITEM_CAP = 20;
-/** An item receipt's reaction while its item runs: the turn's 👀 is gone, and nothing replaces it. */
+/** An item receipt wearing nothing: a `stopped` or `pending release` item takes its 👀 off. */
 const NONE = "";
 
 interface Receipt {
@@ -31,7 +30,7 @@ interface ReceiptRow {
   message_id: string;
 }
 
-/** A message that opened an open item, wearing `reaction` (`NONE` while it runs) until the item is done. */
+/** A message that opened an open item, wearing `reaction` until the item is done. */
 type ItemReceipt = { chatId: string; messageId: string; problem: string; reaction: string; createdAt: number };
 
 const toReceipt = (row: ReceiptRow): Receipt => ({
@@ -204,10 +203,10 @@ export class Receipts {
     await Promise.all(this.ledger.items().map(async (item) => {
       const now = status.get(item.problem);
       if (now === undefined && item.createdAt >= seen) return;
-      // `stopped` and `pending release` wait for the head's next marker; an item
-      // never wears the turn's 👀, so one booked by an older release comes off.
+      // `stopped` and `pending release` wait for the head's next marker, but a 👀
+      // there would say work is still going on.
       const want = now === undefined ? this.emoji.done
-        : now === "running" ? NONE
+        : now === "running" ? this.emoji.working
         : waitsOnYou(now) ? this.emoji.waiting
         : item.reaction === this.emoji.working ? NONE : item.reaction;
       this.ledger.setItem(item, now === undefined ? null : want);
@@ -224,10 +223,10 @@ export class Receipts {
     return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working));
   }
 
-  /** The 👀 comes off as for any turn; the books move, and an item past its cap comes clear. */
+  /** The 👀 stays on; only the books move, and an item past its cap comes clear. */
   private async join(receipts: Receipt[], problem: string): Promise<void> {
-    await this.clear(receipts);
-    await this.clear(this.ledger.join(receipts, problem, NONE));
+    await this.landed(receipts);
+    await this.clear(this.ledger.join(receipts, problem, this.emoji.working));
   }
 
   private async swap(chatId: string, messageId: string, from: string, to: string): Promise<void> {

@@ -116,7 +116,9 @@ truth.
 
 - IM channels put a 👀 (Lark: "OnIt") on the message that started a turn and
   take it off when the turn settles; a restart and a periodic sweep clear stragglers.
-  A 👀 that never clears means the turn died, not that you are still thinking.
+  A 👀 that never clears means the turn died, not that you are still thinking —
+  except in the home chat, where a message whose turn opened an item wears that
+  item's state: 👀 running, ❓ waiting on you, ✅ done.
 - Every finished reply carries its cost: elapsed time and the context size at
   completion (`1m14s · 32K tok`) — a running total, not this turn's spend. IM
   shows it as a footer line; the web shows the duration in the reply's activity
