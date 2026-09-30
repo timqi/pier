@@ -1,6 +1,6 @@
 ---
 name: pier-tasks
-description: Subagents and scheduled tasks with `pier task`. Daily `run`, `--run` and `finish` are in your contract; read this for `--member`, `--bash`, cron/watch, `recover`, `stats` and the goal's mechanics.
+description: Subagents and schedules with `pier task` beyond your contract — `--member`, `--bash`, cron/watch, `recover`, `stats` and the goal's mechanics.
 ---
 
 # Pier tasks
@@ -36,39 +36,33 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | `--worktree <branch> [--rounds <n>] [--review-model <tier|model>]` | a code worker's default: a new `wt` worktree off `--cwd`'s branch, reviewed n times (3; `0` none, 1–9), fixed between, stopped short of the merge, one callback opening `Goal:`; `--rounds <n>` alone is a goal in `--cwd`; on a `--role lead` run `--worktree` makes the worktree and opens no goal (`--rounds` refused); refused beside `--session`, `--bash`, `--task-id`, `--member`, `save` |
 
 `--bash` is for a command whose output needs no model **and** runs too long to
-hold your turn; a quick one belongs in your own shell, where `&` and `wait`
-already run several at once. Raise `--timeout` past the hour a long one needs,
+hold your turn; a quick one, where your role runs commands, belongs in your
+own shell, where `&` and `wait` already run several at once. Raise `--timeout` past the hour a long one needs,
 or it is killed and reported as timed out. A non-zero exit still delivers what
 it printed.
 
-A child's result follows the worker contract — conclusion (paths, risks,
-unverified points, ending with the final state it verified, which you trust),
-then a status line only when something needs one; it stops only on a
-destructive step or a question only you can answer — answer with
-`--run <id> --prompt`; a step the user approved goes in the prompt as
-`Approved: <step>`. Core owns the join: never aggregate members by hand.
+A child's result ends on the final state it verified, which you trust; a
+status line, only when one is needed, is its last line:
+`Needs your decision — <the question>`, or a review's `Verdict: clean` ·
+`Verdict: findings` · `Verdict: blocked — <why>`; a goal's callback opens on
+`Goal:` instead (below).
+Answer with `--run <id> --prompt`; a step the user approved goes in the prompt
+as `Approved: <step>`. Core owns the join: never aggregate members by hand.
 
-A result's status line is its last non-blank line, plain text (no bold,
-bullet or heading), never inside a code block, in English, at most one per
-result; one of `Verdict: clean` · `Verdict: findings` ·
-`Verdict: blocked — <why>` (a review's) · `Needs your decision — <the question, one line>`.
+A goal callback opens with one of four lines, each naming its root `(run <root>)`, with `, <branch> in <worktree>` inside once a review has pinned the branch: `Goal: review clean at <sha7> …, waiting on you to merge` means ready, unmerged; `Goal: needs your decision …` asks you to decide; `Goal: … still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure, a `Verdict: blocked` review included. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; once ended, `pier task run --run <root> --prompt "<answer>" --rounds <n>` opens a new goal on that root with n reviews (`--rounds` beside `--after` refused), and `--run` without `--rounds` is a plain resume, out of the goal; `pier task cancel --run <root>` cancels the goal. A re-entry on a goal a review ended with findings or a decision carries that review in full ahead of your words, so name the fix, not the findings. A prompt with backticks or `<…>` goes through `--prompt -` on a quoted heredoc (`<<'EOF'`), not a double-quoted argument.
 
-A goal callback opens with one of four lines, each naming its root `(run <root>)`, with `, <branch> in <worktree>` inside once a review has pinned the branch: `Goal: review clean at <sha7> …, waiting on you to merge` means ready, unmerged; `Goal: needs your decision …` asks you to decide; `Goal: … still findings` asks whether to continue; `Goal: failed at <step> — <why>` reports failure, a `Verdict: blocked` review included. While live, `--run <root>` steers the worker, is refused during review or a fix, and resumes it once ended; once ended, `pier task run --run <root> --prompt "<answer>" --rounds <n>` opens a new goal on that root with n reviews (`--rounds` beside `--after` refused), and `--run` without `--rounds` is a plain resume, out of the goal; `pier task cancel --run <root>` cancels the goal.
-
-`pier task finish --run <root> [--remove-worktree]` merges a reviewed goal's branch into its target: a `cheap` run in the main repo, its callback like `run`'s, the worktree removed only with the flag; `--run <lead run>` merges an idle build lead's branch at its clean HEAD the same way. Refused unless the root's goal ended review clean and the worktree's HEAD is the reviewed sha with a clean tree; a moved branch is re-reviewed first with `--run <root> --prompt "<what changed>" --rounds 1`. A branch is merged when its content is on the target — `git merge-tree --write-tree <target> <branch>` is the target's tree, or `git cherry <target> <branch>` marks every commit `-` — whether or not its commits are; such a branch is never merged again, and `--remove-worktree` removes it, reviewed or not. Any other branch `--remove-worktree` merges first and then removes, refused as the merge is; only a goal that already merged, its branch not found that way, goes to a cheap run that checks every changed line against the target and removes it only when all are there, else reports what is missing. An earlier root of a session a later goal roots is refused, naming that goal's root. Uncommitted changes refuse every removal; the result names the tip and the `git branch <branch> <tip>` that restores it.
+`pier task finish --run <root> [--remove-worktree]` merges a reviewed goal's branch into its target: a `cheap` run in the main repo, its callback like `run`'s, the worktree removed only with the flag; `--run <lead run>` merges an idle build lead's branch the same way, at the sha the newest goal in its worktree ended review clean on. Refused unless the root's goal ended review clean and the worktree's HEAD is the reviewed sha with a clean tree; a moved branch is re-reviewed first with `--run <root> --prompt "<what changed>" --rounds 1`, a lead's with `--rounds <n> --cwd <its worktree>` from the lead. A branch is merged when its content is on the target — `git merge-tree --write-tree <target> <branch>` is the target's tree, or `git cherry <target> <branch>` marks every commit `-` — whether or not its commits are; such a branch is never merged again, and `--remove-worktree` removes it, reviewed or not. Any other branch `--remove-worktree` merges first and then removes, refused as the merge is; only a goal that already merged, its branch not found that way, goes to a cheap run that checks every changed line against the target and removes it only when all are there, else reports what is missing. An earlier root of a session a later goal roots is refused, naming that goal's root. Uncommitted changes refuse every removal; the result names the tip and the `git branch <branch> <tip>` that restores it.
 
 ## Model choice
 
-`--model` is required on a fresh run: a tier, or a model the user named.
-`--model hardest | balanced | cheap` are tiers the
-operator pinned on the menu; thinking follows the pin, `--thinking`
-overrides (`off/minimal/low/medium/high/xhigh/max`). The tier per kind of
-work is your launching contract's table. A review's model is
-`--review-model` on a goal, `--model` on a review you launch yourself; it is
-your judgement of the task, the loop reads no diffs.
+`--model` and `--thinking` (`off/minimal/low/medium/high/xhigh/max`) follow
+your launching contract's table. A review's model is `--review-model` on a
+goal, `--model` on a review you launch yourself: your judgement of the task,
+the loop reads no diffs.
 
-Any other name is a substring of provider or id ("let gpt review it" is
-`--model gpt`); none or several hits lists the pins. `--model ?` prints the
+A name that is not a tier (`hardest`, `balanced`, `cheap`) is a substring of
+provider or id ("let gpt review it" is `--model gpt`); none or several hits
+lists the pins. `--model ?` prints the
 menu, the tier in front of each pinned line; an unassigned tier refuses with
 the menu. Never name a model id from memory.
 
@@ -128,14 +122,6 @@ fails the run. The action does not see the script's output. Without
 | `pier task resume --task-id <id>` | schedule on |
 | `pier task run --task-id <id>` | run now |
 | `pier task archive --task-id <id>` | retired for good |
-
-## Answering the user about the schedule
-
-- Run `pier task list`; the schedule is its cron and watch definitions.
-- One line each: name, trigger (cron + zone, or watch every N s), next run,
-  last run's state and age. Paused: say so in place of next run.
-- One-shots and manual tasks are runs, not schedule.
-- Older runs: `pier task runs`; a finished result's full text: `recover`.
 
 ## Limits
 

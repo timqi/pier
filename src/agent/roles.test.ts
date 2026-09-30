@@ -1,161 +1,133 @@
 import { describe, expect, it } from "vitest";
 import { DISPATCHER, lead, MODEL_TABLE, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
 
+// What code or the CLI parses back out of these prompts, not their sentences.
+const instance = { boardsDir: "/home/q/.pier/boards", publicUrl: "" };
+const tokens = (text: string): number => Math.ceil(text.length / 4);
+
 describe("the dispatcher contract", () => {
-  it("defaults code workers to a worktree and reviews, and leaves the stage uncounted", () => {
-    expect(DISPATCHER).toContain("`--worktree <branch> --cwd <repo>`: its own `wt` worktree and 3 reviews");
-    expect(DISPATCHER).toContain("`--rounds 0` for none");
-    expect(DISPATCHER).toContain("a lead, `--role lead --worktree <branch> --cwd <repo>`: its own `wt` worktree, no goal");
-    expect(DISPATCHER).toContain("`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree>");
-    for (const gone of ["--until", "wt switch -c"]) {
-      expect(DISPATCHER).not.toContain(gone);
-      expect(lead("build")).not.toContain(gone);
+  it("carries the launch lines the head fills each dispatch", () => {
+    for (const line of [
+      "`--role lead --worktree <branch> --cwd <repo>`",
+      "`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree>",
+      "`--worktree <branch> --cwd <repo>`",
+      "`--rounds 0`",
+      "`--review-model`",
+      "`--design`",
+      '`--name "<a few words>"`',
+      '`pier task run --run <root> --prompt "<answer>" --rounds <n>`',
+      "`pier task finish --run <root>`",
+      "`--run <lead run>`",
+      "`--remove-worktree`",
+    ]) expect(DISPATCHER).toContain(line);
+  });
+
+  it("names the markers core/reply.ts strips and the lines the callbacks carry", () => {
+    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<topic>problem</topic>", "<note>line</note>", "<silent>dispatched</silent>"]) {
+      expect(DISPATCHER).toContain(syntax);
     }
-    expect(DISPATCHER).not.toContain("· auto");
-    expect(DISPATCHER).toContain("callback opens with a `Goal:` line");
-    expect(DISPATCHER).toContain("stage is written once at dispatch with nothing to count");
+    // tasks/open-items.ts reads an item as waiting on the user by this stage word.
+    expect(DISPATCHER).toContain("`waiting on you: <question>`");
+    for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
+      expect(DISPATCHER).toContain(line);
+    }
   });
 
-  it("leaves the merge and the worktree's removal to the user, and asks first beyond it only for a seam or design", () => {
-    expect(DISPATCHER).toContain("The merge and the worktree's removal are the user's decision, never yours or a child's");
-    expect(DISPATCHER).toContain("`review clean at <sha7>, waiting on you to merge`");
-    expect(DISPATCHER).toContain("Beyond the merge, ask the user first only for a seam or a design");
-    expect(DISPATCHER).toContain("restart after the merge is still theirs");
-  });
-
-  it("sends a decision or leftover findings back through the loop, and a doubtful result to a child", () => {
-    expect(DISPATCHER).toContain('`pier task run --run <root> --prompt "<answer>" --rounds <n>`, never a review by hand');
-    expect(DISPATCHER).toContain("goes to a child to check, never re-run by you");
-    expect(DISPATCHER).toContain("A child does: any edit outside this directory, any implementation, any review of a diff");
-    expect(DISPATCHER).not.toContain("creating a worktree");
-  });
-
-  it("merges through `pier task finish` on the user's yes, a button being one, the removal only when they said so", () => {
-    expect(DISPATCHER).toContain("next-step buttons to merge, to merge and remove the worktree, and to see the review, worded your way in the reply's language");
+  it("guards the regressions a rewording could bring back", () => {
     // A literal label would be copied verbatim into a reply in any language.
     expect(DISPATCHER).not.toContain("[Merge]");
-    expect(DISPATCHER).toContain("also removes, without a merge, a branch whose content is already on its target though its commits are not — same tree after `git merge-tree`, patches all `-` in `git cherry`");
-    expect(DISPATCHER).toContain("a click on either merge button is one — `pier task finish --run <root>` — or `--run <lead run>` for a lead's milestone — `--remove-worktree` only when they said so");
-    expect(DISPATCHER).toContain("build → review → wait for the user → finish");
     // The finish is assembled in code; no contract carries its recipe.
     for (const contract of [DISPATCHER, WORKER, lead("build")]) {
-      expect(contract).not.toContain("finishing run");
-      expect(contract).not.toContain("Approved: merge");
+      for (const gone of ["finishing run", "Approved: merge", "--until", "wt switch -c", "git merge-tree", "git cherry"]) expect(contract).not.toContain(gone);
     }
+    // The surface prompt owns the language rule, RUN_RESULT the status line.
+    expect(DISPATCHER).not.toContain("Reply in the language");
+    expect(DISPATCHER).not.toContain("Needs your decision");
     expect(MODEL_TABLE).not.toContain("finishing");
   });
+});
 
-  it("seeds memory once and tags a callback's answer by its item", () => {
-    expect(DISPATCHER).toContain("seeded in full at every session open, never re-read");
-    expect(DISPATCHER).toContain("or answering a callback of its run, is tagged by it already");
-  });
-
-  it("carries the one model table in both launching contracts, and leaves the skill's prose to the skill", () => {
-    // The skill is read on demand only, so the table the head fills every dispatch is here.
-    for (const contract of [DISPATCHER, lead("build")]) {
-      expect(contract).toContain(MODEL_TABLE);
-      expect(contract.split(MODEL_TABLE)).toHaveLength(2);
-    }
-    expect(MODEL_TABLE).toContain("A model the user names wins over the table");
-    for (const gone of ["`--thinking high` for", "the lead's own, never a worker's"]) {
-      expect(DISPATCHER).not.toContain(gone);
-      expect(lead("build")).not.toContain(gone);
-    }
-    for (const owned of ["follows the change's difficulty", "for orientation, never for waiting", "substring of provider"]) {
-      expect(DISPATCHER).not.toContain(owned);
-    }
-  });
-
-  it("hands an approval down as the run contract's Approved: line and trusts the child's final state", () => {
-    // The run contract honors exactly this line; the skill both the head and a
-    // lead read names it the same, and neither contract repeats the contract.
-    expect(RUN_RESULT).toContain("`Approved:` line");
-    expect(DISPATCHER).toContain("(skills/pier-tasks for `--member`, `--bash`, schedules, `recover`, `stats`)");
-    expect(lead("build")).toContain("in the same two parts as a worker's result (skills/pier-tasks)");
-    expect(lead("build")).not.toContain("Approved:");
-    for (const contract of [DISPATCHER, lead("build")]) expect(contract).not.toContain("Needs your decision");
-    expect(DISPATCHER).toContain("never re-check it with your own commands");
-  });
-
-  it("leaves the language rule to the surface prompt every session gets", () => {
-    expect(DISPATCHER).not.toContain("Reply in the language");
-    expect(surfacePrompt({ boardsDir: "/b", publicUrl: "" })).toContain("Reply in the language of the\nmost recent `lang=`");
+describe("the model table", () => {
+  it("is carried once by each launching contract and by nothing else", () => {
+    for (const contract of [DISPATCHER, lead("build")]) expect(contract.split(MODEL_TABLE)).toHaveLength(2);
+    for (const contract of [lead("design"), WORKER]) expect(contract).not.toContain("`--model` is required");
+    for (const tier of ["`hardest`", "`balanced`", "`cheap`", "`high`", "`medium`"]) expect(MODEL_TABLE).toContain(tier);
   });
 });
 
-describe("the role contracts", () => {
+describe("the lead contract", () => {
   it("gives a lead only its phase's section", () => {
+    for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
     expect(lead("design")).toContain("## Design");
     expect(lead("design")).not.toContain("## Build");
-    expect(lead("design")).toContain("offering it as a next-step button in the reply's language");
+    expect(lead("design")).toContain("`Design final: <absolute path of the doc>`");
     expect(lead("build")).toContain("## Build");
     expect(lead("build")).not.toContain("## Design");
-    expect(lead("build")).toContain("Before the milestone that declares the build done");
-    expect(lead("build")).toContain("one review worker (`--model balanced`, `hardest` for a seam or a risk)");
-    expect(lead("build")).toContain("its end arriving as a callback counted among the results owed");
-    expect(lead("build")).toContain("--model balanced --worktree <branch> --rounds 0 --prompt …` from here, each worktree branching off yours");
-    expect(lead("build")).toContain("a worker launched with its reviews like the head's (no `--rounds 0`)");
-    expect(lead("build")).toContain("`git merge <branch>` in this worktree, never into the target, so its worktree stays");
-    expect(lead("build")).toContain("carried out by your supervisor: you never run `wt merge` or `wt remove`");
-    expect(lead("build")).toContain("names the worktrees left for the user to decide on");
-    expect(lead("build")).not.toContain("next-step button");
-    for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
   });
 
-  it("gives a worker the run contract for its life, and the refusal it would otherwise learn from the CLI", () => {
-    expect(WORKER).toContain(RUN_RESULT);
-    expect(WORKER).toContain("`pier task` is refused");
-    expect(WORKER).toContain("never merges into the target branch, never removes a worktree, and is never resumed to do either");
-    expect(WORKER).toContain("commit before you end your turn");
-    expect(WORKER).not.toContain("is the last command run in the worktree");
-  });
-
-  it("ends a result on one plain status line, a review on its verdict", () => {
-    expect(RUN_RESULT).toContain("the status line `Needs your decision — <the question, one line>` as the very last line, its details above it");
-    expect(RUN_RESULT).toContain("`Verdict: clean`, `Verdict: findings` or `Verdict: blocked — <why>`");
-    expect(RUN_RESULT).toContain("never inside a code block");
-    expect(WORKER).not.toContain("Next-step buttons");
+  it("launches workers and its review goal, and integrates without merging into the target", () => {
+    const build = lead("build");
+    for (const line of ["`--worktree <branch>`", "`--rounds 0`", '`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"`', "`git merge <branch>`", "`wt merge`/`wt remove`"]) {
+      expect(build).toContain(line);
+    }
+    expect(build).not.toContain("Approved:");
   });
 });
 
-describe("the instance facts in the surface prompt", () => {
+describe("the worker contract", () => {
+  it("carries the run contract and the refusal it would otherwise learn from the CLI", () => {
+    expect(WORKER).toContain(RUN_RESULT);
+    expect(WORKER).toContain("`pier task` is refused");
+    expect(WORKER).toContain("`wt merge`/`wt remove`");
+    expect(WORKER).not.toContain("Next-step buttons");
+  });
+
+  it("ends a result on the status lines tasks/goals.ts parses", () => {
+    for (const line of ["`Needs your decision — <the question, one line>`", "`Verdict: clean`", "`Verdict: findings`", "`Verdict: blocked — <why>`"]) {
+      expect(RUN_RESULT).toContain(line);
+    }
+    // The stop rule is Working style's; the run contract only points at it.
+    expect(RUN_RESULT).toContain("Working style");
+    expect(RUN_RESULT).not.toContain("Approved:");
+  });
+});
+
+describe("the surface prompt", () => {
   it("names the real boards folder and both board routes", () => {
-    const prompt = surfacePrompt({
-      boardsDir: "/home/q/.pier_test/boards",
-      publicUrl: "https://test-pier.example.com",
-    });
-    expect(prompt).toContain("/home/q/.pier_test/boards/<slug>/");
-    expect(prompt).toContain("https://test-pier.example.com");
-    // Both routes, named once each — the host is not repeated per route.
-    expect(prompt).toContain("/boards/<slug>/");
-    expect(prompt).toContain("/p/<slug>-<token>/");
-    // The contract itself is still there — the facts are an appendix to it.
-    expect(prompt).toContain("Pier chat surface");
-    // The editing fact: named because a model that assumes otherwise spends a
-    // failed shell call finding out.
-    expect(prompt).toContain("apply_patch");
+    const prompt = surfacePrompt({ boardsDir: "/home/q/.pier_test/boards", publicUrl: "https://test-pier.example.com" });
+    for (const fact of ["/home/q/.pier_test/boards/<slug>/", "https://test-pier.example.com", "/boards/<slug>/", "/p/<slug>-<token>/", "apply_patch"]) {
+      expect(prompt).toContain(fact);
+    }
   });
 
   it("says an unset address is unset, so nothing invents one", () => {
-    const prompt = surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "" });
+    const prompt = surfacePrompt(instance);
     expect(prompt).toContain("No public address is configured");
     expect(prompt).not.toContain("http");
   });
 
-  it("teaches a worker no button or attachment: an agent reads its replies", () => {
-    const instance = { boardsDir: "/home/q/.pier/boards", publicUrl: "" };
-    const worker = surfacePrompt(instance, "worker");
-    expect(worker).not.toContain("Next-step buttons");
-    expect(worker).not.toContain("file://");
-    expect(worker).not.toContain("[re assistant"); // no human quotes a worker
-    expect(worker).toContain("One optional markdown\nconvention");
-    for (const kept of ["Staying silent", "lang=zh", "apply_patch", "/home/q/.pier/boards/<slug>/"]) expect(worker).toContain(kept);
+  it("teaches the chat syntax core/reply.ts parses, and a worker only what an agent reader needs", () => {
     for (const role of [undefined, "lead"] as const) {
       const prompt = surfacePrompt(instance, role);
-      expect(prompt).toContain("Next-step buttons");
-      expect(prompt).toContain("except a button that is the user's decision itself");
-      expect(prompt).toContain("file:///abs/path/report.md");
-      expect(prompt).toContain("callbacks.\n\nA message opening with `[re assistant 2026-06-01 12:00]`");
+      for (const syntax of ["`---`", "`[label]`", "file:///abs/path/report.md", "<silent>why</silent>", "[name<id> time place lang=zh]", "[re assistant 2026-06-01 12:00]", "`lang=`"]) {
+        expect(prompt).toContain(syntax);
+      }
     }
+    const worker = surfacePrompt(instance, "worker");
+    for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>"]) expect(worker).not.toContain(gone);
+    for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch", "/home/q/.pier/boards/<slug>/"]) expect(worker).toContain(kept);
+  });
+});
+
+// Ceilings in the sense of AGENTS.md Budgets rule 5, chars/4 like the Console:
+// crossing one asks what is in there, and is raised with a sentence.
+describe("prompt sizes", () => {
+  it.each([
+    ["DISPATCHER", DISPATCHER, 1_400],
+    ["WORKER", WORKER, 320],
+    ['lead("build")', lead("build"), 550],
+    ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
+  ])("%s stays under its ceiling", (_name, text, ceiling) => {
+    expect(tokens(text)).toBeLessThanOrEqual(ceiling);
   });
 });

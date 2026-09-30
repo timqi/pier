@@ -342,10 +342,15 @@ describe("task operations", () => {
     expect((await ask({ operation: "run", task: { action: { type: "bash", script: "make check\nsecond line" } } }) as RunSummary).runId).toBe("new");
     expect(await ask({ operation: "run", task: { action: { type: "bash", script: "make", cwd: "sub/dir" } } })).toBeTruthy();
     expect(await ask({ operation: "run", task: { name: "build", action: { type: "bash", script: "make", cwd: "/elsewhere" } } })).toBeTruthy();
+    // An absolute path is normalized too: a goal is found in its tree by the stored string.
+    expect(await ask({ operation: "run", task: { name: "slash", action: { type: "bash", script: "make", cwd: "/elsewhere/tree/" } } })).toBeTruthy();
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "test/model" }, cwd: "/elsewhere/./tree/" })).toBeTruthy();
     expect(ask.created.map((draft) => [draft.name, draft.action])).toEqual([
       ["make check", { type: "bash", script: "make check\nsecond line", cwd: "/tmp" }],
       ["make", { type: "bash", script: "make", cwd: "/tmp/sub/dir" }],
       ["build", { type: "bash", script: "make", cwd: "/elsewhere" }],
+      ["slash", { type: "bash", script: "make", cwd: "/elsewhere/tree" }],
+      ["Work", { type: "agent", session: { mode: "fresh", cwd: "/elsewhere/tree" }, prompt: "Work", launch: { model: { provider: "test", id: "model" } } }],
     ]);
   });
 

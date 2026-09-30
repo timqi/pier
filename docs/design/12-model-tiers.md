@@ -80,11 +80,9 @@ the verb's line and the one reading rule (a row is a question, not a fault).
 The requirement is taught before it is enforced, in the two texts a
 dispatcher already reads — the third copy is this file pointing at them:
 
-- `skills/pier-tasks/SKILL.md` §Model choice: "Default: your model" becomes
-  "`--model` is required on a fresh run: a tier, or a model the user named";
-  the tier table stays as is.
-- `agent/roles.ts` lead/worker preamble: the `--model` clause reads as
-  required, same words.
+- `MODEL_TABLE` (`agent/roles.ts`): "`--model` is required on a fresh run",
+  above the tier table; `skills/pier-tasks/SKILL.md` §Model choice points at
+  it.
 - `tasks/cli.ts` `COMMANDS.run.usage`: `--model <tier|model>` outside the
   brackets, so `pier task --help` agrees.
 - The refusal reuses the unassigned-tier error's shape (`menuLines`), one

@@ -1,6 +1,6 @@
 ---
 name: pier-boards
-description: Publish a Board — static HTML at a stable Pier URL. Read before creating or editing a page-shaped deliverable (report, digest, dashboard).
+description: Publishing a Board — a report, digest or dashboard as static HTML at a stable Pier URL.
 ---
 
 # Boards

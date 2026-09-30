@@ -42,6 +42,13 @@ describe("Pier system prompt", () => {
     expect(prompt).toContain("ask first; unattended, don't do them");
     expect(prompt).toContain("`Approved: <step>` line was asked and answered — take that step, and only that one");
   });
+
+  it("leaves the reply language to the surface prompt, for a worker too", () => {
+    for (const role of [undefined, "worker"] as const) {
+      expect(pierSystemPrompt(undefined, role)).not.toContain("Reply in the language");
+      expect(pierSystemPrompt(undefined, role)).toContain("stay verbatim");
+    }
+  });
 });
 
 describe("config files", () => {

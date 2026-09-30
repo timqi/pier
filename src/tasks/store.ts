@@ -275,6 +275,11 @@ export class TaskStore {
     `, sessionId);
   }
 
+  /** A session's runs oldest first: a goal's review reads its worker's steering off them. */
+  runsForTarget(sessionId: string): TaskRun[] {
+    return this.#many("SELECT json FROM task_runs WHERE json_extract(json, '$.targetSessionId') = ? ORDER BY queued_at, rowid", sessionId);
+  }
+
   /** Runs in flight whose result is owed to the session, their own or their
    *  unfinished group's; a finished group's losers still cancelling owe nothing. */
   countOwedTo(sessionId: string): number {
@@ -329,6 +334,12 @@ export class TaskStore {
       WHERE json_extract(r.json, '$.targetSessionId') = ?
       ORDER BY g.created_at DESC LIMIT 1
     `, sessionId);
+  }
+
+  /** The newest goal whose root run works in `cwd`, whoever launched it: the tree's review evidence. */
+  goalIn(cwd: string): Goal | undefined {
+    return this.#one(`SELECT g.json FROM goals g JOIN task_runs r ON r.id = g.root_run_id WHERE coalesce(json_extract(r.json, '$.context.cwd'),
+      json_extract(r.json, '$.context.definition.action.session.cwd')) = ? ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1`, cwd);
   }
 
   /** Goals not ended, oldest first: the boot pass advances any whose current run settled unadvanced. */

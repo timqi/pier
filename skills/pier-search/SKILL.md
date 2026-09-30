@@ -1,6 +1,6 @@
 ---
 name: pier-search
-description: Earlier sessions by what was said in them with `pier search` — every user message and reply Pier has, across all sessions. Read before looking for something said in an earlier session that memory does not hold.
+description: Finding what was said in an earlier session, beyond memory, with `pier search`.
 ---
 
 # Earlier sessions from the shell

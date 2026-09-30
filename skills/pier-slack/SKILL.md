@@ -1,6 +1,6 @@
 ---
 name: pier-slack
-description: Slack from the shell with `pier slack` — read, post, edit, files — and Slack's mention syntax. Read before reading or posting to Slack.
+description: Reading and posting on Slack from the shell with `pier slack`, and Slack's mention syntax.
 ---
 
 # Slack from the shell

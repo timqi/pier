@@ -389,9 +389,9 @@ export async function handleTask(
   throw new Error("unknown task operation");
 }
 
-/** A reviewed goal's merge, or a build lead's integrated branch (the lead reviewed
- *  it), as a cheap worker's run in the main repo, refused unless the worktree is
- *  still exactly what the last review read. A branch whose content is already on
+/** A reviewed goal's merge, or a build lead's integrated branch (the newest goal in
+ *  its tree reviewed it), as a cheap worker's run in the main repo, refused unless the
+ *  worktree is still exactly what the last review read. A branch whose content is already on
  *  its target is never merged: with `remove` its worktree and branch go, reviewed or
  *  not. Otherwise `remove` merges first, refused wherever the merge is; only a
  *  goal that already merged goes to a line check. */
@@ -403,6 +403,10 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   if (latest && latest.id !== goal?.id) throw new Error(`run ${root.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
   const reviewed = goal?.rootRunId === root.id && goal.reviewed ? goal : undefined;
   if ((!reviewed && !lead) || !path) throw new Error(`run ${root.id} is neither a reviewed goal's root nor a build lead's run`);
+  const tried = store.goalIn(path);
+  if (reviewed && tried && tried.id !== reviewed.id) throw new Error(`${path} is in a later goal, rooted at run ${tried.rootRunId}; --run that one`);
+  // A build lead's done is the newest goal in its tree, ended clean: its sha is the one merged.
+  const evidence = reviewed ?? (tried?.outcome === "done" && tried.step === "review" && tried.reviewed ? tried : undefined);
   if (reviewed?.finishedAt === null) throw new Error(`run ${root.id}'s goal has not ended; wait for its end`);
   const unmergeable = reviewed && (reviewed.outcome !== "done" || reviewed.step === "merge")
     ? `run ${root.id}'s goal ended ${reviewed.step === "merge" ? "merged" : reviewed.outcome ?? "failed"}, nothing to merge` : null;
@@ -413,11 +417,13 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   const branch = reviewed?.branch ?? tree.branch;
   const base = reviewed?.base ?? tree.base;
   if (branch === base) throw new Error(`${branch} is its own target; nothing to merge`);
-  const sha = reviewed?.reviewed ?? tree.head;
-  const again = `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1`;
+  const sha = evidence?.reviewed ?? tree.head;
+  const again = reviewed ? `re-review with pier task run --run ${root.id} --prompt "<what changed>" --rounds 1` : `the lead reviews it with pier task run --rounds <n> --cwd ${path}`;
+  const unreviewed = evidence ? null : `${branch} at HEAD ${tree.head.slice(0, 7)} has no clean review: ${!tried ? `no goal was rooted in ${path}`
+    : `the newest goal in ${path}, rooted at run ${tried.rootRunId}, ${tried.finishedAt === null ? "has not ended" : `ended ${tried.outcome ?? "failed"} at ${tried.reviewed?.slice(0, 7) ?? "no review"}`}`}; ${again}`;
   if (!tree.clean) throw new Error(`${path} has uncommitted changes; commit them${reviewed && !tree.merged ? `, then ${again}` : ""}`);
   if (tree.merged && !remove) throw new Error(`${branch}'s content is already on ${base}; nothing to merge — --remove-worktree removes its worktree and branch`);
-  const refused = unmergeable ?? (tree.head === sha ? null
+  const refused = unmergeable ?? unreviewed ?? (tree.head === sha ? null
     : `${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
   // `--remove-worktree` is merge-then-remove: removing without a merge needs a branch with nothing left to merge.
   const removal = tree.merged !== null || (remove && reviewed?.step === "merge");
@@ -496,20 +502,22 @@ async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu
   }
   const action = record(draft.action);
   const session = record(action?.session);
+  // Normalized even when absolute: `goalIn` finds a tree's goals by the exact string.
   const absolute = async (cwd: unknown): Promise<string> => {
+    if (typeof cwd === "string" && isAbsolute(cwd)) return resolve(cwd);
     const base = await definitions.sessionCwd(callerSessionId);
     if (!base) throw new Error(`cwd ${cwd === undefined ? "omitted" : `"${String(cwd)}" is relative`} and the calling session has no working directory; give an absolute path`);
     return resolve(base, typeof cwd === "string" ? cwd : ".");
   };
-  const relative = (cwd: unknown): boolean => cwd === undefined || (typeof cwd === "string" && !isAbsolute(cwd));
+  const given = (cwd: unknown): boolean => cwd === undefined || typeof cwd === "string";
   // A fresh session is the one launch whose model nothing else has settled.
   if (action?.type === "agent" && session?.mode === "fresh" && record(action.launch)?.model === undefined) {
     throw new Error(`--model is required — a tier (${MODEL_TIERS.join(" | ")}) or a model on the operator's menu:\n${menuLines(await menu())}`);
   }
-  if (action?.type === "agent" && session?.mode === "fresh" && relative(session.cwd)) {
+  if (action?.type === "agent" && session?.mode === "fresh" && given(session.cwd)) {
     draft = { ...draft, action: { ...action, session: { ...session, cwd: await absolute(session.cwd) } } };
   }
-  if (action?.type === "bash" && relative(action.cwd)) {
+  if (action?.type === "bash" && given(action.cwd)) {
     draft = { ...draft, action: { ...action, cwd: await absolute(action.cwd) } };
   }
   const label = action?.prompt ?? action?.script;

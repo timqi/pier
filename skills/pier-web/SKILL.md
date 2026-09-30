@@ -1,6 +1,6 @@
 ---
 name: pier-web
-description: The public web from the shell with `pier web search` and `pier web fetch` — the provider's hosted search and fetch, no key of your own. Read before searching the web or reading a URL.
+description: Searching the public web and reading a URL with `pier web search` and `pier web fetch`, no key of your own.
 ---
 
 # The web from the shell

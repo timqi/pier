@@ -64,6 +64,10 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   clean review with the merge left to `finish`; a findings review that is the
   `n`th ends it `cap`, a review ending `Verdict: blocked — <why>` ends it
   `failed`. `--rounds 0` is no goal. A stored `until` reads as `rounds` 3.
+  A review's requirement is the first prompt, then every resume and delivered
+  message the worker's session was given, in order, each under a steering
+  head; Pier's fix prompts are not in it, and an `Approved:` line anywhere in
+  it authorizes nothing.
   Refused beside `--bash`, `--task-id`, `--session`, `--role` (argv), in a
   `--member`, on `save` or with `--callback none` (server).
 - **`--worktree <branch>`**: rides as `launch.worktree`; the server runs
@@ -76,7 +80,9 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   and on `save`.
 - **`--run <root> --prompt … --rounds <n>`**: accepted only when that run is
   a goal's root whose goal has ended; the resume opens a new goal of `n`
-  reviews (1–9) on the resumed run, on `--review-model` else the ended goal's.
+  reviews (1–9) on the resumed run, on `--review-model` else the ended goal's;
+  when a review ended that goal with findings or a decision, its full text
+  goes before the prompt, the words after it.
   Beside any other `--run`, `--rounds` is refused; without it `--run` is a
   plain resume, out of the goal.
 - **`--review-model <tier|model>`**: rides as `launch.reviewModel`, the
@@ -112,10 +118,14 @@ pier task finish --run <root> [--remove-worktree]
   lead's run; else `task: run <id> is neither a reviewed goal's root nor a
   build lead's run` / `task: run <id>'s goal ended <outcome>, nothing to merge`.
 - The worktree is the run's cwd; the approved sha is the goal's `reviewed`
-  (a lead's: the worktree's HEAD), the target the goal's `base` else the
-  worktree's. Refused unless HEAD is that sha (`task: <branch> moved past the
-  reviewed sha …; re-review with pier task run --run <root> --prompt "<what
-  changed>" --rounds 1`), the tree is clean, the branch is not its own target
+  (a lead's: that of the newest goal rooted in its worktree, ended `done`,
+  else `task: <branch> at HEAD <h> has no clean review: …; the lead reviews it
+  with pier task run --rounds <n> --cwd <worktree>`), the target the goal's
+  `base` else the worktree's. Refused unless HEAD is that sha (`task: <branch>
+  moved past the reviewed sha <s> (HEAD <h>); re-review with pier task run
+  --run <root> --prompt "<what changed>" --rounds 1`, a lead's ending on the
+  `--rounds <n> --cwd <worktree>` line instead), no later goal roots in the worktree (`task: <worktree> is in
+  a later goal, rooted at run <r>; --run that one`), the tree is clean, the branch is not its own target
   (`task: <branch> is its own target; nothing to merge`), and the root's
   session has no run queued or running (`task: run <id>'s session <s> is
   still at work; wait for its end`), and no later goal roots that session
@@ -292,7 +302,7 @@ A session's role is fixed by the run that made it, for the session's life
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session represented in the head's history counts as the one
 that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
-`parentRunId` links only a `task` action's child, which a cancel walks. The run contract (`RUN_RESULT`, `agent/roles.ts`) fixes the result's shape — the conclusion, then only when something needs one the status line `Needs your decision — <question>` as the last line, plain text, outside code blocks, a review's `Verdict: clean|findings|blocked — <why>` in its place — and the stop rule: reversible choices are the run's own, named in the result; a destructive or irreversible step, or a question only the reader can answer, ends the turn with it, unless the prompt names the step on an `Approved:` line; the conclusion ends with the verified final state. A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
+`parentRunId` links only a `task` action's child, which a cancel walks. The run contract is `RUN_RESULT` (`agent/roles.ts`): the result's shape and the status lines `statusLine` parses (`tasks/goals.ts`); what stops a run, and the `Approved:` line that lifts it for one step, is the baseline's Working style (`agent/pi.ts`). A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
 
 ## Skill
 
@@ -300,9 +310,7 @@ that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
 turn after launching; callbacks are the only delivery; ownership; the
 instance limit; workers do not delegate, a lead delegates to workers only;
 `recover` only for lost text; models by name. Its size is measured in the
-commit that changes it. When asked what is scheduled, the head uses `list` and
-answers one line per cron/watch with name, trigger, next run and last-run
-state/age; one-shots and manual definitions are runs, not schedules.
+commit that changes it.
 
 ## Tests
 

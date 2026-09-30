@@ -1,6 +1,6 @@
 ---
 name: pier-help
-description: How Pier itself works — durable sessions, what survives a restart, how messages and files reach you from IM, in-chat commands, and what only the operator's Console can change. Read before explaining Pier's behavior or advising a user on it.
+description: How Pier itself works — sessions, restarts, messages and files from IM, chat commands, and what only the operator's Console changes.
 ---
 
 # How Pier works

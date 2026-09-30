@@ -1,6 +1,6 @@
 ---
 name: pier-vault
-description: Run a command with a named vault secret via `pier vault run`, never seeing the value. Read before anything needing a token, key or password, or on a `vault:` error.
+description: Running a command with a named vault secret via `pier vault run`, never seeing its value — for any token, key or password, or a `vault:` error.
 ---
 
 # Pier vault

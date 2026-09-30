@@ -37,7 +37,7 @@ const preamble = (run: TaskRun, role: AgentRole | undefined): string => {
       ? "read by the agent session it is delivered to"
       : "read by the operator";
   return `${tag} Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there. ${RUN_RESULT}\n\n`;
+    `next-step buttons and file:// attachments do not render there.${RUN_RESULT}\n\n`;
 };
 
 export class AgentTaskRunner {
