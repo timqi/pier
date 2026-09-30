@@ -164,6 +164,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   begins (no model, no key) is written to the transcript as a failed turn, so
   a head the send just created still shows the message and the reason.
 - Assistant markdown: `marked` + DOMPurify, `@tailwindcss/typography`.
+  Raw HTML in a chat row is text (`<slug>` reads as written, as on IM); a
+  Files `.md` keeps its HTML.
   Provisional text paints incrementally in the work log; the final bubble
   renders markdown, attachments and next-step controls. User/error rows are
   plain text.
@@ -250,8 +252,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   on its first open, once. A compaction (Pi's automatic one) leaves one
   system line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` are run chips of
-  the bubble that launched them, updated from `task-status` events; the
-  status panel lists the runs still in flight. The message's
+  the bubble that launched them, updated from `task-status` events; a
+  goal's step (`goalStep`, launched by its loop, not a turn) joins the bubble
+  of its goal's latest chip, else a closed bubble of its own above any turn
+  in flight, live and replayed alike; the status panel lists the runs still
+  in flight. The message's
   creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs are cause chips with a Session link in the head, never
   user messages.

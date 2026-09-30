@@ -1010,6 +1010,51 @@ describe("the turn's bubble", () => {
     expect(chips()).toEqual(["background-run"]);
   });
 
+  it("puts a goal's step in its goal's bubble, never on the reply its loop happened to run under", () => {
+    const names = (b: FakeElement) => b.querySelectorAll("[data-kind='background-run']").map((c) => c.textContent);
+    chat.appendTurn("user", "build it", false, 1);
+    activity.activityToolStart(1, "c1", "bash", {});
+    activity.activityToolEnd("c1", false, "");
+    activity.renderBackgroundRun(run("root", { goalId: "g1" }));
+    chat.completeTurn("Launched.");
+    const launched = bubble();
+    chat.appendTurn("user", "and the board?", false, 2);
+    callback("other");
+    activity.renderBackgroundRun(run("review", { goalId: "g1", goalStep: true }));
+    // A step whose goal is not on screen: a closed bubble of its own, above the turn in flight.
+    activity.renderBackgroundRun(run("lost", { goalId: "g2", goalStep: true }));
+    chat.completeTurn("Board.");
+    expect(names(launched)).toEqual(["run · runningroot", "run · runningreview"]);
+    expect(launched.children.find((el) => el.classList.contains("chip-details"))!.children).toHaveLength(3);
+    expect(chips()).toEqual(["system"]);
+    const lone = pane().querySelectorAll("[data-kind='assistant']").at(-2)!;
+    expect(names(lone)).toEqual(["run · runninglost"]);
+    expect("pending" in lone.dataset).toBe(false);
+    expect(bubble().querySelector(".md")!.textContent.trim()).toBe("Board.");
+  });
+
+  it("leaves a goal's step out of the turn that finished after it was queued, on a reload", () => {
+    const meta = (completedAt: number) => ({ completedAt, durationMs: 1, tokens: 1 });
+    chat.renderSnapshot([
+      { role: "user", text: "build it", at: 1 },
+      { role: "assistant", text: "Launched.", steps, meta: meta(2) },
+      { role: "user", text: "and the board?", at: 3 },
+      { role: "assistant", text: "Board.", steps, meta: meta(10) },
+    ], "idle", [run("root", { goalId: "g1", queuedAt: 1 }), run("review", { goalId: "g1", goalStep: true, queuedAt: 5 })]);
+    const [first, second] = pane().querySelectorAll("[data-kind='assistant']");
+    expect(chips(first)).toEqual(["activity", "background-run", "background-run"]);
+    expect(chips(second)).toEqual(["activity"]);
+  });
+
+  it("shows angle brackets in a reply as written, in text and in code, and never as markup", () => {
+    chat.completeTurn("弹出\"取消 / Delete <slug>\"，`Delete <slug>` <img src=x onerror=alert(1)>\n\n<script>alert(1)</script>");
+    const md = bubble().querySelector(".md")!;
+    expect(md.querySelector("code")!.textContent).toBe("Delete <slug>");
+    expect(md.textContent).toContain("弹出\"取消 / Delete <slug>\"，Delete <slug> <img src=x onerror=alert(1)>");
+    expect(md.textContent).toContain("<script>alert(1)</script>");
+    expect(md.querySelectorAll("img, script, slug")).toHaveLength(0);
+  });
+
   it("carries the chip row on a silent, an interrupted and a failed turn's own material", () => {
     callback("r1");
     chat.completeTurn("<silent>nothing to add</silent>");

@@ -280,6 +280,7 @@ export class FakeElement extends EventTarget {
   append(...nodes: (Child | string)[]): void { this.#insert(nodes, null); }
   prepend(...nodes: (Child | string)[]): void { this.#insert(nodes, this.#nodes[0] ?? null); }
   appendChild<T extends Child>(node: T): T { this.#insert([node], null); return node; }
+  insertBefore<T extends Child>(node: T, ref: Child | null): T { this.#insert([node], ref); return node; }
   removeChild<T extends Child>(node: T): T {
     const i = this.#nodes.indexOf(node);
     if (i < 0) throw new Error("fake DOM: NotFoundError");

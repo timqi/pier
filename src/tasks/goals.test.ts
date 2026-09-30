@@ -169,6 +169,8 @@ describe("a goal", () => {
     // The worker's conclusion is the body, the review beneath it.
     expect(text.endsWith("\n\nbuilt on branch x\n\nReview:\nnothing to fix\n\nVerdict: clean")).toBe(true);
     expect(runs.map((r) => r.triggerSource)).toEqual(["agent", "goal"]);
+    // The card names its goal, and which of its runs no turn of main launched.
+    expect(service.backgroundRuns("main").map((r) => [r.goalId, r.goalStep])).toEqual([[goal.id, false], [goal.id, true]]);
     onlyTheEndCalledBack(runs);
     // The review is a fresh run of the supervisor's, on the root's model, in its worktree.
     expect(runs[1]).toMatchObject({ invokedBySessionId: "main", sourceSessionId: "main", targetSessionId: "s2", callbackSessionId: "main" });

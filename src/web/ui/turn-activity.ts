@@ -19,8 +19,9 @@ interface TurnsPane {
   bulk: () => boolean;
   /** A chip and its detail into the turn's bubble: the tail while it is still
    *  this turn's, else a new one opened there. `join`: a run chip joins the
-   *  tail bubble even after its text landed. */
-  chip: (chip: HTMLElement, detail: HTMLElement | null, join?: boolean) => void;
+   *  tail bubble even after its text landed; `alone`: a closed bubble of its
+   *  own; a bubble: that one. */
+  chip: (chip: HTMLElement, detail: HTMLElement | null, place?: "join" | "alone" | HTMLElement) => void;
 }
 
 let deps: ChatDeps;
@@ -210,6 +211,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     const card = runCard(STATE_STYLE[run.state].edge);
     el = chip(spec, card);
     el.dataset.kind = "background-run";
+    if (run.goalId) el.dataset.goal = run.goalId;
     runChips.set(run.runId, el);
     runDetails.set(el, { card, prompt });
   } else paintChip(el, spec);
@@ -230,9 +232,15 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     sessionId: run.targetSessionId,
   });
   card.replaceChildren(head, ...(prompt ? [prompt] : []));
-  if (fresh) turns.chip(el, card, true);
+  // A goal's step was launched by its loop, not by the reply at the tail: it
+  // joins the bubble of its goal's latest chip.
+  if (fresh && run.goalStep) turns.chip(el, card, goalChips(run.goalId).at(-1)?.closest<HTMLElement>("[data-kind='assistant'], [data-kind='error']") ?? "alone");
+  else if (fresh) turns.chip(el, card, "join");
   turns.scroll();
 }
+
+const goalChips = (goalId: string | undefined): HTMLElement[] =>
+  [...turns.el.querySelectorAll<HTMLElement>("[data-kind='background-run']")].filter((c) => c.dataset.goal === goalId);
 
 // --- activity group ------------------------------------------------------------------
 

@@ -720,6 +720,7 @@ export class TaskService {
       finishedAt: run.finishedAt,
       // A finished run's pending messages only wait for the sweep to expire them.
       queuedMessages: isTerminal(run.state) ? 0 : this.store.countPendingFollowUps(run.id),
+      ...(run.goalId ? { goalId: run.goalId, goalStep: run.triggerSource === "goal" } : {}),
       ...runModel(run),
     };
   }

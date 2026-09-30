@@ -3,7 +3,7 @@
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
-import { marked } from "marked";
+import { Marked, marked } from "marked";
 import { agoLabel as agoAt, relTime as ageAt } from "../../core/reply.js";
 
 /** Repaint budget for anything painted from a stream — the reply text
@@ -84,10 +84,15 @@ export function prose(markdown: string): HTMLElement {
   return el;
 }
 
-/** A block of sanitized rendered markdown — a chat reply, a file in Files. */
-export function markdownBox(markdown: string): HTMLElement {
+/** Chat text is markdown on every surface, IM included: a `<slug>` in it is
+ *  text, never a tag for the sanitizer to drop. */
+const textOnly = new Marked({ tokenizer: { html: () => undefined, tag: () => undefined } });
+
+/** A block of sanitized rendered markdown — a chat reply, a file in Files.
+ *  `html`: raw HTML renders (a file's); off, it reads as the text it is. */
+export function markdownBox(markdown: string, html = true): HTMLElement {
   const box = h("div", "");
-  box.innerHTML = DOMPurify.sanitize(marked.parse(markdown, { async: false }));
+  box.innerHTML = DOMPurify.sanitize((html ? marked : textOnly).parse(markdown, { async: false }));
   externalLinks(box);
   return box;
 }

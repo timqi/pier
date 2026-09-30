@@ -96,13 +96,14 @@ function pendingBubble(): HTMLElement | null {
   return tail && "pending" in tail.dataset ? tail : null;
 }
 
-function openBubble(): HTMLElement {
+/** `closed`: a bubble no turn fills, above a turn still in flight, which keeps the tail. */
+function openBubble(closed = false): HTMLElement {
   const bubble = h("div", `group relative ${ROW_STYLE.assistant.row}`);
   bubble.dataset.kind = "assistant";
-  bubble.dataset.pending = "";
+  if (!closed) bubble.dataset.pending = "";
   if (readonlyRows) bubble.dataset.readonly = "";
   if (!bulk) bubble.dataset.enter = "";
-  turnsPane.append(bubble);
+  turnsPane.insertBefore(bubble, closed ? pendingBubble() : null);
   return bubble;
 }
 
@@ -129,10 +130,11 @@ function chipSlots(bubble: HTMLElement): [row: HTMLElement, details: HTMLElement
 
 /** A chip into the turn's bubble: the tail while it is still this turn's, else
  *  a new one opened there. `join`: a run chip joins the tail bubble even after
- *  its text landed — the run was launched by that reply. */
-function chipInto(el: HTMLElement, detail: HTMLElement | null, join = false): void {
+ *  its text landed — the run was launched by that reply. `alone`: a closed
+ *  bubble of its own. A bubble: that one. */
+function chipInto(el: HTMLElement, detail: HTMLElement | null, place?: "join" | "alone" | HTMLElement): void {
   const tail = turnsPane.lastElementChild as HTMLElement | null;
-  const bubble = pendingBubble() ?? (join && isBubble(tail) ? tail : openBubble());
+  const bubble = typeof place === "object" ? place : place === "alone" ? openBubble(true) : pendingBubble() ?? (place === "join" && isBubble(tail) ? tail : openBubble());
   const [row, details] = chipSlots(bubble);
   row.append(el);
   if (detail) details.append(detail);
@@ -735,7 +737,7 @@ function setRowTime(row: HTMLElement, at: number): void {
  *  drops `file:` URLs. */
 function mdBox(raw: string): HTMLElement {
   const id = deps.sessionId();
-  return markdownBox(id ? rewriteFileLinks(raw, id) : raw);
+  return markdownBox(id ? rewriteFileLinks(raw, id) : raw, false);
 }
 
 /** Swap a plain-text bubble to sanitized rendered markdown. */
@@ -972,8 +974,9 @@ export function renderSnapshot(
   const unplacedRuns = new Map(backgroundRuns.map((run) => [run.runId, run]));
   // A card belongs to the turn that was running when its run was queued: the
   // first turn to finish at or after that moment. Same process, same clock.
+  // A goal's step no turn launched: its chip finds its goal's (turn-activity.ts).
   const queuedBy = (completedAt: number): string[] =>
-    [...unplacedRuns].filter(([, run]) => run.queuedAt <= completedAt).map(([runId]) => runId);
+    [...unplacedRuns].filter(([, run]) => !run.goalStep && run.queuedAt <= completedAt).map(([runId]) => runId);
   const placeRuns = (runIds: string[]): void => {
     for (const runId of runIds) {
       const run = unplacedRuns.get(runId);

@@ -267,6 +267,10 @@ export interface BackgroundRun extends RunModel {
   finishedAt: number | null;
   /** `pier task run --run <id> --after` messages parked on this run, not yet delivered. */
   queuedMessages: number;
+  /** The goal this run is a step of, its root run included. */
+  goalId?: string;
+  /** Launched by its goal's loop, not by a turn of the invoking session. */
+  goalStep?: boolean;
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */
