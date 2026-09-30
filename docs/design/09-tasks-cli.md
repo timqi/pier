@@ -118,8 +118,10 @@ pier task finish --run <root> [--remove-worktree]
   changed>" --rounds 1`), the tree is clean, the branch is not its own target
   (`task: <branch> is its own target; nothing to merge`), and the root's
   session has no run queued or running (`task: run <id>'s session <s> is
-  still at work; wait for its end`). A lead never finishes (`task: a lead
-  never merges into the target; …`).
+  still at work; wait for its end`), and no later goal roots that session
+  (`task: run <id>'s session is in a later goal, rooted at run <r>; --run that
+  one`). A lead never finishes (`task: a lead never merges into the target;
+  …`).
 - Launches one fresh `cheap`-tier worker run, `finish: <root's name>`, in the
   main repo (the worktree's common git dir's parent), prompt `finishPrompt`
   (`goals.ts`): the `Approved: merge <branch> into <base> at <sha>` line, the
@@ -131,8 +133,8 @@ pier task finish --run <root> [--remove-worktree]
   without the flag is refused (`task: <branch>'s content is already on <base>;
   nothing to merge — …`); with it the run's prompt is `removePrompt`
   (`goals.ts`), the goal's outcome and the reviewed sha not required.
-- With the flag, a branch neither found on its target nor mergeable (goal not
-  clean, HEAD past the reviewed sha) also gets `removePrompt`, `by` null: the
+- Any other branch the flag merges first, refused as without it; only a goal
+  that already merged (`step` `merge`) gets `removePrompt` with `by` null: the
   run reads each `+` commit's diff against `<base>`'s files and removes only
   when every changed line is there, else lists the missing lines and ends on
   `Needs your decision — <branch> has changes not on <base>: …`.

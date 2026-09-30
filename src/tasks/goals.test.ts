@@ -635,11 +635,47 @@ describe("pier task finish", () => {
     r.service.stop();
   });
 
-  it("sends a branch it can neither merge nor find on its target to a line check, removing it only then", async () => {
-    const r = rig({ s1: ["built"], s2: ["Verdict: findings"], s3: ["checked"] }, cheap);
+  it("merges before it removes: a branch not on its target is refused with --remove-worktree as without it", async () => {
+    const r = rig({ s1: ["built"], s2: ["Verdict: findings"] }, cheap);
     const root = await r.launch({ rounds: 1 });
     await r.ended(root);
-    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s goal ended cap, nothing to merge`);
+    for (const extra of [{}, { remove_worktree: true }]) {
+      await expect(finish(r, root.id, extra)).rejects.toThrow(`run ${root.id}'s goal ended cap, nothing to merge`);
+    }
+    r.store.saveGoal({ ...r.goalOf(root), outcome: "done" });
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: r.cwd, encoding: "utf8" }).trim();
+    writeFileSync(join(r.cwd, "b.ts"), "not on main\n");
+    git("add", "b.ts");
+    git("commit", "-qm", "moved past the review");
+    await expect(finish(r, root.id, { remove_worktree: true })).rejects.toThrow(`feature moved past the reviewed sha ${r.head.slice(0, 7)}`);
+    r.service.stop();
+  });
+
+  it("merges then removes on the session's latest goal, refusing an earlier root of it", async () => {
+    const r = rig({ s1: ["built", "kept it"], s2: ["Needs your decision — keep it?"], s3: ["Verdict: clean"], s4: ["merged"] }, cheap);
+    const root = await r.launch({ rounds: 1 });
+    expect((await r.ended(root)).goal).toMatchObject({ outcome: "decision", reviewed: r.head });
+    const again = await r.service.handle({ operation: "message", run_id: root.id, message: "keep it", rounds: 1 }, "main") as { run: { runId: string } };
+    const resumed = r.store.getRun(again.run.runId)!;
+    expect((await r.ended(resumed, 2)).goal).toMatchObject({ outcome: "done", reviewed: r.head });
+    await expect(finish(r, root.id, { remove_worktree: true }))
+      .rejects.toThrow(`run ${root.id}'s session is in a later goal, rooted at run ${resumed.id}; --run that one`);
+    const run = r.store.getRun((await finish(r, resumed.id, { remove_worktree: true })).runId)!;
+    const { action } = run.context.definition;
+    const prompt = action.type === "agent" ? action.prompt : "";
+    expect(prompt).toContain(`Approved: merge feature into main at ${r.head}\nApproved: remove worktree ${r.cwd}\n`);
+    expect(prompt).toContain(`\`wt -C ${r.cwd} merge main\``);
+    expect(prompt).not.toContain("merge nothing");
+    r.service.stop();
+  });
+
+  it("sends a goal that already merged, its branch not found on its target, to a line check, removing it only then", async () => {
+    const r = rig({ s1: ["built"], s2: ["Verdict: clean"], s3: ["checked"] }, cheap);
+    const root = await r.launch({ rounds: 1 });
+    await r.ended(root);
+    r.store.saveGoal({ ...r.goalOf(root), step: "merge" });
+    await expect(finish(r, root.id)).rejects.toThrow(`run ${root.id}'s goal ended merged, nothing to merge`);
     const run = r.store.getRun((await finish(r, root.id, { remove_worktree: true })).runId)!;
     const { action } = run.context.definition;
     const prompt = action.type === "agent" ? action.prompt : "";

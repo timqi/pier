@@ -393,11 +393,14 @@ export async function handleTask(
  *  it), as a cheap worker's run in the main repo, refused unless the worktree is
  *  still exactly what the last review read. A branch whose content is already on
  *  its target is never merged: with `remove` its worktree and branch go, reviewed or
- *  not; one that is neither mergeable nor found on its target goes to a line check. */
+ *  not. Otherwise `remove` merges first, refused wherever the merge is; only a
+ *  goal that already merged goes to a line check. */
 async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, remove: boolean): Promise<unknown> {
   const goal = root.goalId ? store.getGoal(root.goalId) : undefined;
   const path = runCwd(root);
   const lead = root.targetSessionId !== null && store.leadPhaseOf(root.targetSessionId) === "build" ? root.targetSessionId : undefined;
+  const latest = goal?.rootRunId === root.id && root.targetSessionId !== null ? store.goalOf(root.targetSessionId) : undefined;
+  if (latest && latest.id !== goal?.id) throw new Error(`run ${root.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
   const reviewed = goal?.rootRunId === root.id && goal.reviewed ? goal : undefined;
   if ((!reviewed && !lead) || !path) throw new Error(`run ${root.id} is neither a reviewed goal's root nor a build lead's run`);
   if (reviewed?.finishedAt === null) throw new Error(`run ${root.id}'s goal has not ended; wait for its end`);
@@ -416,9 +419,10 @@ async function finishDraft(host: TaskService, store: TaskStore, root: TaskRun, r
   if (tree.merged && !remove) throw new Error(`${branch}'s content is already on ${base}; nothing to merge — --remove-worktree removes its worktree and branch`);
   const refused = unmergeable ?? (tree.head === sha ? null
     : `${branch} moved past the reviewed sha ${sha.slice(0, 7)} (HEAD ${tree.head.slice(0, 7)}); ${again}`);
-  if (refused && !remove) throw new Error(refused);
+  // `--remove-worktree` is merge-then-remove: removing without a merge needs a branch with nothing left to merge.
+  const removal = tree.merged !== null || (remove && reviewed?.step === "merge");
+  if (refused && !removal) throw new Error(refused);
   const main = await host.mainRepo(path);
-  const removal = tree.merged !== null || refused !== null;
   // The tip before any removal, so a wrong one is `git branch <branch> <tip>` away.
   if (remove) log.info(`finish ${root.id}: ${branch} at ${tree.head} in ${path} to be removed, ${removal ? `on ${base} by ${tree.merged ?? "line check"}` : `merged into ${base}`}`);
   const prompt = removal ? removePrompt({ branch, base, path, main, tip: tree.head, by: tree.merged })
