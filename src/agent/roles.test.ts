@@ -31,9 +31,11 @@ describe("the dispatcher contract", () => {
   });
 
   it("merges through `pier task finish` on the user's yes, a button being one, the removal only when they said so", () => {
-    expect(DISPATCHER).toContain("`[Merge] | [Merge, remove worktree] | [Show the review]`");
+    expect(DISPATCHER).toContain("next-step buttons to merge, to merge and remove the worktree, and to see the review, worded your way in the reply's language");
+    // A literal label would be copied verbatim into a reply in any language.
+    expect(DISPATCHER).not.toContain("[Merge]");
     expect(DISPATCHER).toContain("also removes, without a merge, a branch whose content is already on its target though its commits are not — same tree after `git merge-tree`, patches all `-` in `git cherry`");
-    expect(DISPATCHER).toContain("a click on the first two is one — `pier task finish --run <root>` — or `--run <lead run>` for a lead's milestone — `--remove-worktree` only when they said so");
+    expect(DISPATCHER).toContain("a click on either merge button is one — `pier task finish --run <root>` — or `--run <lead run>` for a lead's milestone — `--remove-worktree` only when they said so");
     expect(DISPATCHER).toContain("build → review → wait for the user → finish");
     // The finish is assembled in code; no contract carries its recipe.
     for (const contract of [DISPATCHER, WORKER, lead("build")]) {
@@ -85,7 +87,7 @@ describe("the role contracts", () => {
   it("gives a lead only its phase's section", () => {
     expect(lead("design")).toContain("## Design");
     expect(lead("design")).not.toContain("## Build");
-    expect(lead("design")).toContain("[Finalize design]");
+    expect(lead("design")).toContain("offering it as a next-step button in the reply's language");
     expect(lead("build")).toContain("## Build");
     expect(lead("build")).not.toContain("## Design");
     expect(lead("build")).toContain("Before the milestone that declares the build done");
@@ -96,7 +98,7 @@ describe("the role contracts", () => {
     expect(lead("build")).toContain("`git merge <branch>` in this worktree, never into the target, so its worktree stays");
     expect(lead("build")).toContain("carried out by your supervisor: you never run `wt merge` or `wt remove`");
     expect(lead("build")).toContain("names the worktrees left for the user to decide on");
-    expect(lead("build")).not.toContain("[Finalize design]");
+    expect(lead("build")).not.toContain("next-step button");
     for (const phase of ["design", "build"] as const) expect(lead(phase)).toMatch(/^# You are a feature lead/);
   });
 

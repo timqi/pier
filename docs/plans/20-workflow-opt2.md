@@ -130,9 +130,9 @@ index …, seeded in full at every session open, never re-read."
 ### 6. The merge question ends with buttons (item 6)
 
 `DISPATCHER`: the reply to a `Goal: review clean` callback ends with
-`---` / `[Merge] | [Merge, remove worktree] | [Show the review]`; a click on the
-first two is the user's yes (`pier task finish --run <root>`,
-`--remove-worktree` on the second). `SURFACE_CHAT`: "Only for short, obvious
+next-step buttons to merge, merge and remove the worktree, and see the review,
+worded in the reply's language; a click on either merge button is the user's
+yes (`pier task finish --run <root>`, `--remove-worktree` on the second). `SURFACE_CHAT`: "Only for short, obvious
 next moves; never for anything destructive, except a button that is the
 user's decision itself (a merge, a removal) — the click is their yes, and
 nothing runs before it."

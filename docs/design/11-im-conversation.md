@@ -94,7 +94,7 @@ Both platforms, the same rule.
   through the row like any thread's message; the chat outranks the `task:`
   alias, so every later turn of the lead lands in the thread), and
   `Channel.send(thread, splitReply(result))` — the result that already ended,
-  buttons included (`[Finalize design]`), which the turn-end delivered
+  buttons included (the finalize button), which the turn-end delivered
   nowhere. A failure after the root is posted is an error note in the thread;
   before, in the main flow.
 - **Then**: the user's replies in the thread are the lead's messages; a button
@@ -336,7 +336,7 @@ through what the head launches (`pier task`), never by a group's message.
 - Disabling the platform in the Console returns the head to the web with
   Web Push, with no restart.
 - A design lead launched from the phone asks its first question in a thread
-  of the home DM, on Lark and on Slack alike; the discussion and
-  `[Finalize design]` happen there; the head reports the final design in the
+  of the home DM, on Lark and on Slack alike; the discussion and the
+  finalize button happen there; the head reports the final design in the
   main flow and the build starts.
 
