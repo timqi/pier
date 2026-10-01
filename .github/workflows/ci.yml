@@ -24,7 +24,19 @@ jobs:
       # so a run that quietly resolved something else proves nothing.
       - run: npm ci
       # high fails the run; moderates only show in the log, so a transitive one nobody can fix does not block main.
-      - run: npm audit --omit=dev --audit-level=high
+      # The ignored ids are brace-expansion 5.0.9, pinned by Pi's npm-shrinkwrap.json where no lockfile or override reaches;
+      # remove them once a Pi release's shrinkwrap carries brace-expansion >=5.0.12.
+      - name: npm audit (high fails)
+        run: |
+          npm audit --omit=dev || true
+          npm audit --omit=dev --json | node -e '
+            const ignored = new Set(["GHSA-q2hr-2g5m-vwhr", "GHSA-qhr7-859c-m2p7", "GHSA-6j4f-fj2g-mc7p"]);
+            const { vulnerabilities = {} } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const bad = Object.values(vulnerabilities).flatMap((v) => v.via)
+              .filter((a) => typeof a === "object" && ["high", "critical"].includes(a.severity))
+              .filter((a) => !(a.name === "brace-expansion" && ignored.has(a.url.split("/").pop())));
+            for (const a of bad) console.error(`${a.severity}: ${a.name} ${a.url}`);
+            process.exit(bad.length ? 1 : 0);'
       - run: npm run check
       - run: npm run lint
       # Not optional, and before the tests: it proves type-checking passes on
