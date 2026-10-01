@@ -40,9 +40,10 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
 const shortId = (id: string): string => id.slice(0, 8);
 
 interface RunHead {
-  glyph: SVGElement;
-  /** The kind of card or the run's state, whichever the card is about. */
-  label: string;
+  glyph?: SVGElement;
+  /** The kind of card or the run's state, whichever the card is about;
+   *  absent under a chip that already says it. */
+  label?: string;
   labelCls: string;
   taskName?: string;
   /** What the run worked on, as it recorded it: one badge, `tier · id · level`. */
@@ -85,7 +86,8 @@ export function linkRuns(content: HTMLElement, sessions: Record<string, string>,
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", "run-head flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500");
-  head.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
+  if (o.glyph) head.append(o.glyph);
+  if (o.label) head.append(h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
   // subagent's name is its whole prompt line.
   if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));

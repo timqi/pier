@@ -6,11 +6,11 @@ import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, Squar
 import { icon } from "./icons.js";
 import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
-import { imageRow, inboundAttachment, markFileRefs, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
+import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, plainText, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
 import { refreshSuggestions, renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
@@ -451,8 +451,10 @@ function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElemen
 const shownText = (kind: "user" | "assistant", node: HTMLElement): string =>
   (kind === "assistant" ? node.dataset.raw : undefined) ?? node.textContent ?? "";
 
-/** Two clamped lines, so a blank line in the source must not be one of them. */
-export const excerptText = (excerpt: string): string => splitReply(excerpt).text.replace(/\n{2,}/g, "\n").trim();
+/** Two clamped lines, so a blank line in the source must not be one of them;
+ *  a reply's markdown shows as its words, a user's plain text as typed. */
+export const excerptText = (excerpt: string, role: Quote["role"]): string =>
+  (role === "assistant" ? plainText(splitReply(excerpt).text) : excerpt).replace(/\n{2,}/g, "\n").trim();
 
 /** The quote at the top of a user bubble: `role · time` and the excerpt as the
  *  source showed it; a click jumps to the source when it is on screen. */
@@ -461,7 +463,7 @@ function quoteBlock(quote: Quote): HTMLElement {
   block.setAttribute("type", "button");
   block.append(
     h("div", "font-mono text-[10.5px] leading-tight opacity-70", `${quote.role} · ${quote.when.slice(11)}`),
-    h("div", "quote-excerpt text-[12.5px] leading-snug opacity-85", excerptText(quote.excerpt)),
+    h("div", "quote-excerpt text-[12.5px] leading-snug opacity-85", excerptText(quote.excerpt, quote.role)),
   );
   block.onclick = () => {
     const source = quoteSource(quote);
@@ -514,19 +516,19 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const state = origin.kind === "task-callback" ? origin.state : undefined;
   const card = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   const [meta, body] = splitMetaBlock(withoutLanguage(text));
-  const content = runBody(body);
+  // A result is the child's reply, so it reads as one; what was sent stays as sent.
+  const content = origin.kind === "task-callback" ? h("div", "mt-1.5") : runBody(body);
   const glyphEl = (): SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
   const labelCls = state ? STATE_STYLE[state].label : cls;
   const name = origin.kind === "session-seed" ? origin.reason
     : origin.kind === "chat-command" ? undefined
     : origin.source?.taskName ?? meta?.split("\n")[0];
+  // Under its chip the card says what the chip does not: the chip names kind and state.
   const head = origin.kind === "session-seed"
     ? runHead({ glyph: glyphEl(), label, labelCls, taskName: name, sessionId: origin.previousSessionId })
     : origin.kind === "chat-command"
     ? runHead({ glyph: glyphEl(), label: `/${origin.command}`, labelCls })
     : runHead({
-      glyph: glyphEl(),
-      label: state ? `${label} \u00b7 ${state}` : label,
       labelCls,
       ...(name ? { taskName: name } : {}),
       ...(origin.source ? { model: origin.source } : {}),
@@ -539,9 +541,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions, deps.select);
   if (origin.kind === "task-callback") {
     // The child wrote these paths, so they resolve against its cwd, not this session's.
-    const codes = markFileRefs(content);
-    const id = origin.sourceSessionId ?? deps.sessionId();
-    if (id) renderFileRefs(codes, id, origin.cwd ? [origin.cwd] : []);
+    renderMarkdown(content, body, origin.sourceSessionId ?? deps.sessionId(), origin.cwd ? [origin.cwd] : []);
     if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
   }
   card.append(head, content);
@@ -735,14 +735,14 @@ function setRowTime(row: HTMLElement, at: number): void {
 
 /** Attachment links are rewritten to the files route first: the sanitizer
  *  drops `file:` URLs. */
-function mdBox(raw: string): HTMLElement {
-  const id = deps.sessionId();
+function mdBox(raw: string, id = deps.sessionId()): HTMLElement {
   return markdownBox(id ? rewriteFileLinks(raw, id) : raw, false);
 }
 
-/** Swap a plain-text bubble to sanitized rendered markdown. */
-function renderMarkdown(node: HTMLElement, raw: string): void {
-  node.replaceChildren(...mdBox(raw).childNodes);
+/** Swap a plain-text bubble to sanitized rendered markdown. `cwds` resolve its
+ *  relative file references; by default the session's own, then its callbacks'. */
+function renderMarkdown(node: HTMLElement, raw: string, id = deps.sessionId(), cwds?: string[]): void {
+  node.replaceChildren(...mdBox(raw, id).childNodes);
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
   // Colour lands when its chunk does, which may be after the copy buttons —
@@ -754,9 +754,8 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   const codes = [...node.querySelectorAll<HTMLElement>("code")].filter((code) => !code.closest("pre"));
   for (const code of codes) holdToCopy(code, () => code.textContent ?? "");
   renderAttachments(node);
-  const id = deps.sessionId();
   const cwd = deps.sessionCwd();
-  if (id) renderFileRefs(codes, id, [...(cwd ? [cwd] : []), ...callbackCwds.filter((c) => c !== cwd)]);
+  if (id) renderFileRefs(codes, id, cwds ?? [...(cwd ? [cwd] : []), ...callbackCwds.filter((c) => c !== cwd)]);
 }
 
 /** `offer`: the live next-step buttons, on the turn that just ended or the

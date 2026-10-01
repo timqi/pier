@@ -38,6 +38,8 @@ updates this document.
   exception is a topic's colour (`topics.ts` `topicHue`), a hue hashed from
   the open item's key so it holds across sessions and reloads without a table;
   it paints the topic tag and the status panel's dot, never a bubble's edge.
+  The tag's text is that colour mixed 40% toward `--color-neutral-900`, the
+  ink that flips with the theme, so it reads on either theme and either bubble.
 
 ## Layout
 
@@ -45,7 +47,7 @@ updates this document.
 - **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's `waiting on you` rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
 - **Status panel**: one flat list, one row per session, what waits on you first — a dot (a topic's colour, pulsing while its run is live), the name, a second line for where it stands, and a worded status tag unless it is running, `waiting on you` the one solid tag, white on amber-700 — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
 - **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
-- **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.
+- **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. A draft past one line takes the composer's full width, `+` and send/stop on a row under it; the line count is read at the one-line width, so the mode never flips as the wider box rewraps, and read again when the width changes.
 - **Palette**: solid panel with floating-chrome edge and raised shadow; flat
   rows; keyboard selection a tinted pill, medium weight, no edge bar;
   sentence-case section labels; matches marked by ink and weight. 0.9375rem
@@ -80,7 +82,11 @@ updates this document.
 
 - User messages: bounded mist-blue surface, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
-- Assistant replies: solid reading surface, comfortable width.
+- Assistant replies: solid reading surface, comfortable width; on a phone the
+  full column. A table scrolls sideways in its own box, columns as wide as
+  their text up to a bounded cell, an edge shade on the side with more; a
+  short one stays content-sized. A lone image is a 4:3 contained preview up to
+  17.5rem, its space held before it loads; several stay 64px tiles.
 - During a turn, progress, thinking and tool activity live in expandable steps
   before the reply; after it, the final text is the reply — not duplicated, no
   empty activity groups. The chip row draws first and the text streams under
@@ -110,10 +116,11 @@ updates this document.
   width, in chip order. Every chip starts closed and opens only by its own
   click, closing any other open chip in its row — one detail per bubble,
   other bubbles untouched; there is no global open. Mode, model, duration
-  and ids are the opened head's, never the chip's. Chat command answers stay open cards.
+  and ids are the opened head's, never the chip's; a cause card's head does not
+  repeat the chip's kind and state. Chat command answers stay open cards.
 - A quote is a neutral grey bar and two clamped lines at the top of the
   user's bubble, the excerpt in the bubble's own type at a
-  step down; the row controls (Reply, Edit) share one gutter and one hover.
+  step down, a quoted reply's markdown shown as its words; the row controls (Reply, Edit) share one gutter and one hover.
   Without hover they are not painted (focus-visible and screen readers still
   reach them): a finger swipes the row right to reply — the row follows, a
   Reply glyph fills in and turns indigo at the release point — and holds it

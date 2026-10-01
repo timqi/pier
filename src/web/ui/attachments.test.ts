@@ -1,4 +1,4 @@
-// What counts as a file reference in a reply, and how the existence check is
+// What counts as a file reference in a reply, which links route to a file, and how the existence check is
 // batched. The rest of the plumbing needs a browser; these decide whether prose
 // turns into a wrong link or every link goes plain, so they are worth pinning.
 
@@ -15,7 +15,21 @@ vi.mock("./dom.js", async (orig) => ({
 const report = vi.fn();
 vi.mock("./report.js", () => ({ report }));
 
-const { parseFileRef, renderFileRefs } = await import("./attachments.js");
+const { parseFileRef, renderFileRefs, rewriteFileLinks } = await import("./attachments.js");
+
+describe("rewriteFileLinks", () => {
+  const url = (p: string) => `/api/sessions/s1/files?path=${encodeURIComponent(p)}`;
+
+  it("routes a file: link and a bare path under a filesystem root through the files route", () => {
+    expect(rewriteFileLinks("![图](file:///tmp/a%20b.png)", "s1")).toBe(`![图](${url("/tmp/a b.png")})`);
+    expect(rewriteFileLinks("| [截图](/tmp/run/chat.jpg) |", "s1")).toBe(`| [截图](${url("/tmp/run/chat.jpg")}) |`);
+  });
+
+  it("leaves the server's own routes, other links and code alone", () => {
+    const kept = "[board](/boards/x/) [web](https://x.test/tmp/a.png) `![x](/tmp/a.png)`";
+    expect(rewriteFileLinks(kept, "s1")).toBe(kept);
+  });
+});
 
 describe("parseFileRef", () => {
   it("reads the path and the line it names", () => {

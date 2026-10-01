@@ -4,10 +4,10 @@ import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.te
 
 const state = vi.hoisted(() => ({
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
-  observed: [] as (ResizeObserverOptions | undefined)[],
+  observed: [] as { target: unknown; options?: ResizeObserverOptions; fire: () => void }[],
 }));
 vi.mock("./chat.js", () => ({
-  appendTurn: state.appendTurn, excerptText: (t: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
+  appendTurn: state.appendTurn, excerptText: (t: string, _role: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
 }));
 vi.mock("./attachments.js", () => ({ imageThumb: () => document.createElement("img") }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
@@ -43,7 +43,8 @@ beforeEach(async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("ResizeObserver", class {
-    observe(_el: unknown, options?: ResizeObserverOptions) { state.observed.push(options); }
+    constructor(private readonly cb: () => void) {}
+    observe(target: unknown, options?: ResizeObserverOptions) { state.observed.push({ target, options, fire: this.cb }); }
   });
   // A pasted screenshot: the reader hands back a data URL, synchronously here.
   vi.stubGlobal("FileReader", class {
@@ -107,12 +108,51 @@ async function recallPending(stage: "fetch" | "body") {
 // pays back — measured that way, --dock-h stayed 34px short and the last
 // transcript row sat under the input pill.
 it("measures the dock's parts as border-box", () => {
-  expect(state.observed.length).toBe(2);
-  expect(state.observed).toEqual(state.observed.map(() => ({ box: "border-box" })));
+  const dock = state.observed.filter((o) => o.target !== node("#input").parentNode).map((o) => o.options);
+  expect(dock.length).toBe(2);
+  expect(dock).toEqual(dock.map(() => ({ box: "border-box" })));
+});
+
+it("gives a draft past one line the row's width, and takes it back when the draft is one line again", () => {
+  const row = node("#input").parentNode!;
+  type("one line");
+  expect("multiline" in row.dataset).toBe(false);
+  type("two\nlines");
+  expect("multiline" in row.dataset).toBe(true);
+  type("one again");
+  expect("multiline" in row.dataset).toBe(false);
+});
+
+// Wrapped prose takes fewer lines across the full row than beside the actions:
+// the box is the wide measure, or blank lines hang under the draft.
+it("sizes a wrapped draft at the row's full width, not the width that decided its mode", () => {
+  const row = node("#input").parentNode!;
+  const input = node("#input");
+  Object.defineProperty(input, "scrollHeight", { get: () => ("multiline" in row.dataset ? 104 : 156) });
+  Object.defineProperty(input, "clientHeight", { value: 30 });
+  type("prose long enough to wrap beside the actions and across the row");
+  expect("multiline" in row.dataset).toBe(true);
+  expect(input.style.height).toBe("104px");
+});
+
+// The mode is read at the row's width: a window resized under a draft reads it again.
+it("re-reads the draft's mode when the row's width changes, not its height", () => {
+  const row = node("#input").parentNode!;
+  const input = node("#input");
+  type("a draft that fits one line here");
+  const watch = state.observed.find((o) => o.target === row)!;
+  Object.defineProperty(input, "scrollHeight", { value: 60 });
+  Object.defineProperty(input, "clientHeight", { value: 30 });
+  watch.fire();
+  expect("multiline" in row.dataset).toBe(false);
+  Object.defineProperty(row, "clientWidth", { value: 240 });
+  watch.fire();
+  expect("multiline" in row.dataset).toBe(true);
 });
 
 // A board's page is active content on this origin (boards/boards.ts), so
 // localStorage is readable by a script the agent wrote; a tab-scoped store is not.
+
 it("keeps an unsent draft out of localStorage", () => {
   type("unsent operator secret");
   expect(drafts.get("pier.draft.a")).toBe("unsent operator secret");

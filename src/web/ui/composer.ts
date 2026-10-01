@@ -55,6 +55,7 @@ const imageStrip = $("#image-strip");
 const quoteStrip = $("#quote-strip");
 const commandMenu = $("#command-menu");
 const attachInput = $<HTMLInputElement>("#attach-input");
+const inputRow = input.parentElement!;
 
 let queueHasRows = false;
 let queueVersion = 0;
@@ -90,6 +91,17 @@ function trackKeyboard(): void {
   // The keyboard arrives as a resize, the scroll under it as an offset change.
   vv.addEventListener("resize", sync);
   vv.addEventListener("scroll", sync);
+}
+
+/** The mode and height are read at the row's width, so a new width (a rotation,
+ *  a resized window) reads them again; the row's own height changes are not one. */
+function trackWidth(): void {
+  let width = inputRow.clientWidth;
+  new ResizeObserver(() => {
+    if (inputRow.clientWidth === width) return;
+    width = inputRow.clientWidth;
+    autosize();
+  }).observe(inputRow);
 }
 
 /** The dock floats over the transcript, so the pane pads its tail by the dock's
@@ -240,7 +252,7 @@ export function setQuote(source: QuoteSource | null): void {
     quoteStrip.replaceChildren();
     return;
   }
-  const excerpt = h("div", "quote-excerpt min-w-0 flex-1 text-[12.5px] leading-snug text-neutral-600", excerptText(source.text.slice(0, QUOTE_CHARS)));
+  const excerpt = h("div", "quote-excerpt min-w-0 flex-1 text-[12.5px] leading-snug text-neutral-600", excerptText(source.text.slice(0, QUOTE_CHARS), source.role));
   const remove = h("button", "flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(X, "h-3.5 w-3.5"));
   remove.setAttribute("type", "button");
   remove.setAttribute("aria-label", "Remove quote");
@@ -440,13 +452,24 @@ export function restoreDraft(id: string): void {
 
 /** A changed height re-pins the tail in the same frame: left to the
  *  ResizeObserver it lands a frame later, and the last message bounces once
- *  per wrap — with an IME, once per candidate. */
+ *  per wrap — with an IME, once per candidate. A draft past one line takes the
+ *  row's width, its actions below (style.css); the line count is always read
+ *  at the beside-the-actions width, so the wider box cannot fit it back onto
+ *  one line and flip the mode on every keystroke. */
 function autosize(): void {
   const was = input.style.height;
+  const wasMultiline = "multiline" in inputRow.dataset;
+  delete inputRow.dataset.multiline;
   input.style.height = "auto";
+  // A classic scrollbar on the one-row box narrows the lines measured: one too many.
+  input.style.overflowY = "hidden";
+  const multiline = input.value.includes("\n") || input.scrollHeight > input.clientHeight + 1;
+  if (multiline) inputRow.dataset.multiline = "";
+  // Read after the flag: the forced layout measures the full-width box, not the narrow one.
   const next = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
+  input.style.overflowY = "";
   input.style.height = next;
-  if (next !== was) scrollBottom();
+  if (next !== was || multiline !== wasMultiline) scrollBottom();
 }
 
 // --- sending ---------------------------------------------------------------------------
@@ -587,6 +610,7 @@ export function initComposer(d: ComposerDeps): void {
   adoptStoredDrafts();
   trackKeyboard();
   trackDock();
+  trackWidth();
   const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });

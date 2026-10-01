@@ -572,10 +572,11 @@ main {
 .line-fold { position: relative; cursor: pointer; transition: color 120ms; }
 .line-fold:hover, .line-fold[aria-expanded="true"] { color: var(--color-neutral-600); }
 .line-fold:focus-visible { outline: 2px solid var(--color-indigo-400); outline-offset: 2px; border-radius: 0.25rem; }
-/* A topic (topics.ts): its colour is the tag's `--topic` and nowhere else on the row. */
+/* A topic (topics.ts): its colour is the tag's `--topic` and nowhere else on the row.
+   The hue alone is mid-lightness; toward the ink, which flips with the theme, it reads in both. */
 .topic-tag {
   position: relative;
-  color: var(--topic);
+  color: color-mix(in oklab, var(--topic), var(--color-neutral-900) 40%);
   background: color-mix(in oklab, var(--topic) 12%, transparent);
   width: fit-content;
   max-width: min(36ch, 100%);
@@ -703,6 +704,10 @@ main {
   height: var(--composer-control-size);
   border-radius: 50%;
 }
+/* A draft past one line (composer.ts autosize): the text takes the row, the actions a row under it. */
+#composer [data-multiline] { flex-wrap: wrap; }
+#composer [data-multiline] > #input { order: -1; flex-basis: 100%; }
+#composer [data-multiline] > #attach { margin-right: auto; }
 .glass { box-shadow: var(--glass-shadow); }
 /* Opacity/transform entrances avoid layout animation; history replay skips them. */
 @keyframes surface-in {
@@ -810,7 +815,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* The conversation's one chip is the context, short enough to stay beside the title. */
   #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
   #turns { padding-inline: 0.625rem; }
-  #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
+  /* A reply is the reading: on a phone it has no side to give away. */
+  #turns > [data-kind="assistant"] { max-width: 100%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
   /* The gutter is the pencil's here; a time in it would scroll the pane sideways. */
@@ -926,6 +932,19 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .thumbs {
     @apply mt-1.5 flex flex-wrap items-center gap-1.5;
   }
+  /* A lone image is the message's subject: a reading-size box whose space is
+     held before the file loads, still contained. In a table cell it stays a tile.
+     Not a percentage width: the bubble would size to the file's natural width. */
+  .thumbs > .thumb:only-child {
+    width: 17.5rem;
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+  }
+  :is(td, th) > .thumbs > .thumb:only-child {
+    @apply h-16 w-16;
+    aspect-ratio: auto;
+  }
 
   /* Markdown-rendered chat content: prose rhythm, chat font size.
      Prose's default 1.75 line-height reads airy in chat — #turns sets a tighter
@@ -997,7 +1016,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .md ol,
   .md pre,
   .md blockquote,
-  .md table {
+  .md table,
+  .md .table-scroll {
     margin-block: 0.5em;
   }
   .md li {
@@ -1046,6 +1066,34 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     max-width: 100%;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+  }
+  /* In chat a table is in its own scroll box (chat.ts mdBox) and keeps the
+     table layout: columns as wide as their text, a cell's line bounded so one
+     long cell does not stretch a row past reading. The edge fades are the
+     scroll-shadow pattern: covers in the bubble's colour scroll with the
+     content, so a shade shows only on the side that has more. */
+  .md .table-scroll {
+    --cover: var(--color-white);
+    --shade: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    background:
+      linear-gradient(to right, var(--cover) 40%, transparent) left / 1.5rem 100% no-repeat local,
+      linear-gradient(to left, var(--cover) 40%, transparent) right / 1.5rem 100% no-repeat local,
+      linear-gradient(to right, var(--shade), transparent) left / 0.75rem 100% no-repeat scroll,
+      linear-gradient(to left, var(--shade), transparent) right / 0.75rem 100% no-repeat scroll;
+  }
+  .system-card .md .table-scroll { --cover: var(--color-neutral-100); }
+  .md .table-scroll > table {
+    display: table;
+    max-width: none;
+    margin-block: 0;
+  }
+  .md .table-scroll :is(th, td) {
+    max-width: 18rem;
+    overflow-wrap: break-word;
   }
 
   /* Code should read as a patch of canvas, not a slab: prose's near-black pre

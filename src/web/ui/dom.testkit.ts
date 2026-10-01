@@ -29,6 +29,7 @@ function* ancestors(el: FakeElement): Generator<FakeElement> {
 }
 
 export class FakeText {
+  readonly nodeType = 3;
   parentNode: FakeElement | null = null;
   constructor(public data: string) {}
   get textContent(): string { return this.data; }
@@ -120,6 +121,7 @@ function parse(html: string): Child[] {
 }
 
 export class FakeElement extends EventTarget {
+  readonly nodeType = 1;
   readonly localName: string;
   readonly namespaceURI: string;
   parentNode: FakeElement | null = null;
@@ -130,6 +132,7 @@ export class FakeElement extends EventTarget {
   selected = false;
   scrollTop = 0;
   readonly scrollHeight = 0;
+  readonly clientHeight = 0;
   readonly offsetHeight = 0;
   readonly offsetWidth = 0;
   onclick: Handler = null;
@@ -422,12 +425,14 @@ export class FakeDocument extends EventTarget {
   querySelector(selector: string): FakeElement | null { return this.querySelectorAll(selector)[0] ?? null; }
 }
 
-/** A fresh document as the global `document`, with `Option` beside it; the
- *  test's `vi.unstubAllGlobals()` takes both away. */
+/** A fresh document as the global `document`, with `Option` and `Node`'s
+ *  constants beside it; the test's `vi.unstubAllGlobals()` takes them away. */
 export function installDom(): FakeDocument {
   const doc = new FakeDocument();
   vi.stubGlobal("document", doc);
   vi.stubGlobal("Option", FakeOption);
+  // A class, not a bag of constants: the test runner's own `instanceof Node` needs a constructor.
+  vi.stubGlobal("Node", class { static readonly ELEMENT_NODE = 1; static readonly TEXT_NODE = 3; });
   return doc;
 }
 

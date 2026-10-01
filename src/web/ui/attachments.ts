@@ -162,11 +162,14 @@ const fileUrl = (sessionId: string, path: string): string =>
 const openInFiles = (sessionId: string, cwd: string | null, path: string, line?: number): void =>
   void import("./explorer.js").then((m) => m.openPath({ id: sessionId, cwd: cwd ?? "" }, path, line));
 
-/** `[x](file:///p)` → the session's files route, so the sanitizer keeps it.
+/** `[x](file:///p)` and `![x](/tmp/p.png)` → the session's files route: the
+ *  sanitizer drops `file:`, and a bare path would ask this server for its own
+ *  `/tmp`. A bare one only under a filesystem root, so `/boards/x` stays a route.
  *  Not inside code: an example link is the code the reader asked to see. */
 export function rewriteFileLinks(markdown: string, sessionId: string): string {
-  return replaceOutsideCode(markdown, /\]\(\s*<?file:\/\/(\/[^)>\s]*)>?\s*\)/g, (match) => {
-    let decoded = match[1]!;
+  return replaceOutsideCode(markdown, /\]\(\s*<?(file:\/\/)?(\/[^)>\s]*)>?\s*\)/g, (match) => {
+    if (!match[1] && !FS_ROOT.test(match[2]!)) return match[0];
+    let decoded = match[2]!;
     try {
       decoded = decodeURIComponent(decoded);
     } catch {
@@ -287,26 +290,6 @@ export function renderFileRefs(codes: Iterable<HTMLElement>, sessionId: string, 
   }
 }
 
-/** A plain-text body (a callback card's) has no code elements, only the
- *  backticks: each span inside them that is a reference becomes the code
- *  element renderFileRefs takes, the backticks left as written. */
-export function markFileRefs(el: HTMLElement): HTMLElement[] {
-  const text = el.textContent ?? "";
-  const parts: (Node | string)[] = [];
-  const codes: HTMLElement[] = [];
-  let at = 0;
-  for (const m of text.matchAll(/`([^`\n]+)`/g)) {
-    if (!parseFileRef(m[1]!.trim())) continue;
-    const start = m.index + 1;
-    const code = h("code", "", m[1]!);
-    parts.push(text.slice(at, start), code);
-    codes.push(code);
-    at = start + m[1]!.length;
-  }
-  if (parts.length) el.replaceChildren(...parts, text.slice(at));
-  return codes;
-}
-
 function fileRef(el: HTMLElement, sessionId: string, cwd: string | null, path: string, line?: number): void {
   const open = (): void => openInFiles(sessionId, cwd, path, line);
   el.classList.add("fileref");
@@ -379,13 +362,16 @@ function groupAttachments(placed: HTMLElement[]): void {
     const bare = [...block.childNodes].every((n) =>
       n.nodeType === Node.TEXT_NODE ? !n.textContent?.trim() : mine.includes(n as Element),
     );
-    if (bare) {
+    // A table cell keeps its display and its row: the strip goes inside it.
+    const cell = block.localName === "td" || block.localName === "th";
+    if (bare && !cell) {
       block.classList.add("thumbs");
       continue;
     }
     const strip = h("div", "thumbs");
     strip.append(...mine);
-    block.after(strip);
+    if (cell) block.append(strip);
+    else block.after(strip);
   }
 }
 

@@ -125,13 +125,15 @@ it("folds a callback to state and name; the detail carries model, ids and the te
   expect(line()).toBe("callback · succeededfix it");
   expect(toggle().querySelector(".chip-name")!.textContent).toBe("fix it");
   const head = detail().querySelector(".run-head")!;
-  expect(head.textContent).toBe("callback · succeededfix itbalancedclaude-xhighrun45678s-run");
+  // The chip already says kind and state; the head under it does not repeat them.
+  expect(head.textContent).toBe("fix itbalancedclaude-xhighrun45678s-run");
+  expect(head.querySelector(".run-label")).toBeNull();
   // One badge, `tier · id · level`: the stylesheet draws the dots between its parts.
   const badge = head.querySelector(".run-model")!;
   expect([...badge.children].map((part) => [part.className, part.textContent]))
     .toEqual([["run-tier", "balanced"], ["run-model-id", "claude-x"], ["run-thinking", "high"]]);
   expect(badge.getAttribute("title")).toBe("Tier balanced · anthropic / claude-x · Reasoning high");
-  expect(body().textContent).toBe("All green.");
+  expect(body().textContent.trim()).toBe("All green.");
   expect(toggle().localName).toBe("button"); // Enter and Space are the browser's
   expect(toggle().getAttribute("type")).toBe("button");
   expect(toggle().getAttribute("aria-expanded")).toBe("false");
@@ -144,6 +146,23 @@ it("folds a callback to state and name; the detail carries model, ids and the te
   toggle().onclick?.();
   expect(toggle().hasAttribute("data-open")).toBe(false);
   expect(detail().hidden).toBe(true);
+});
+
+it("renders a callback's result as markdown, its local images through the files route, and leaves a delegation's prompt as sent", () => {
+  chat.appendSystemInput('Task "ui" finished with state: succeeded\n\n已完成**桌面截图**。\n\n| 页面 | 截图 |\n|---|---|\n| 聊天 | [截图](/tmp/ui/chat.jpg) |', {
+    kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s-child", source: { taskName: "ui" }, state: "succeeded",
+  });
+  expect(body().classList.contains("md")).toBe(true);
+  expect(body().querySelector("strong")!.textContent).toBe("桌面截图");
+  const scroll = body().querySelector(".table-scroll")!;
+  expect(scroll.children[0]!.localName).toBe("table");
+  const thumb = scroll.querySelector("img.thumb")!;
+  expect((thumb as unknown as HTMLImageElement).src).toBe(`/api/sessions/s-child/files?path=${encodeURIComponent("/tmp/ui/chat.jpg")}`);
+  // In a cell the strip goes inside it: the cell stays a cell.
+  expect(thumb.parentElement!.classList.contains("thumbs")).toBe(true);
+  expect(thumb.parentElement!.parentElement!.localName).toBe("td");
+  chat.appendSystemInput("Task: review\n\nRead **the** diff.", { kind: "task-delegation", taskId: "t4", runId: "run4", sourceSessionId: "s-lead" });
+  expect(body().textContent).toBe("Read **the** diff.");
 });
 
 it("keeps a failed callback's reason on the line, in the state's colour", () => {
@@ -521,9 +540,9 @@ describe("file references", () => {
     const callback = detail();
     await vi.waitFor(() => expect(refs(callback)).toEqual(["/w/child/src/config-sync.ts:239", "/tmp/run.log"]));
     expect(asked.flat()).toEqual(["/w/child/src/config-sync.ts", "/tmp/run.log"]);
-    // The body still reads as the child wrote it, backticks included.
-    expect(body().textContent).toBe(text.slice(text.indexOf("\n\n") + 2));
-    expect(codes(callback).map((c) => c.textContent)).toEqual(["src/config-sync.ts:239", "/tmp/run.log"]);
+    // The body is the child's markdown, rendered: the spans are code, not backticks.
+    expect(body().textContent.trim()).toBe("Fixed src/config-sync.ts:239; log at /tmp/run.log, not res.text.");
+    expect(codes(callback).map((c) => c.textContent)).toEqual(["src/config-sync.ts:239", "/tmp/run.log", "res.text"]);
   });
 
   it("leaves a batch callback's relative paths plain: no one cwd is theirs", async () => {
@@ -563,6 +582,17 @@ describe("the reply quote", () => {
     expect(block.style.getPropertyValue("--topic")).toBe("");
     expect(fake(user.querySelector(".whitespace-pre-wrap")).textContent).toBe("ship it");
     // Editing resends the quote with the words.
+    expect(fake(user.querySelector(".whitespace-pre-wrap")).dataset.raw).toBe(stored);
+    block.onclick!();
+    expect(reply.dataset.reveal).toBe("");
+  });
+
+  it("shows a quoted reply's markdown as its words, and still finds the source by the raw text", () => {
+    const reply = fake(chat.appendTurn("assistant", "## 结论\n\n**已合并**，见 `src/a.ts`。", true, noon).parentElement);
+    const stored = "[re assistant 2024-06-01 12:00]\n> ## 结论\n>\n> **已合并**，见 `src/a.ts`。\n\n好";
+    const user = fake(chat.appendTurn("user", stored, false, noon + 60_000).parentElement);
+    const block = fake(user.querySelector(".quote-block"));
+    expect(block.textContent).toBe("assistant · 12:00结论\n已合并，见 src/a.ts。");
     expect(fake(user.querySelector(".whitespace-pre-wrap")).dataset.raw).toBe(stored);
     block.onclick!();
     expect(reply.dataset.reveal).toBe("");
@@ -917,7 +947,7 @@ describe("the turn's bubble", () => {
     expect("pending" in bubble().dataset).toBe(false);
     expect(chips()).toEqual(["topic-tag", "system", "activity"]);
     expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
-    expect(bubble().querySelector(".md")!.textContent.trim()).toBe("Done.");
+    expect(bubble().children.find((el) => el.classList.contains("md"))!.textContent.trim()).toBe("Done.");
     // The steps chip says the count, not an outcome; its detail is the log, closed.
     expect(stepsChip().textContent).toMatch(/^1 step · \d+s$/);
     expect(stepsChip().getAttribute("aria-expanded")).toBe("false");
@@ -1030,7 +1060,7 @@ describe("the turn's bubble", () => {
     const lone = pane().querySelectorAll("[data-kind='assistant']").at(-2)!;
     expect(names(lone)).toEqual(["run · runninglost"]);
     expect("pending" in lone.dataset).toBe(false);
-    expect(bubble().querySelector(".md")!.textContent.trim()).toBe("Board.");
+    expect(bubble().children.find((el) => el.classList.contains("md"))!.textContent.trim()).toBe("Board.");
   });
 
   it("leaves a goal's step out of the turn that finished after it was queued, on a reload", () => {

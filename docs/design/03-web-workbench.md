@@ -165,7 +165,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   a head the send just created still shows the message and the reason.
 - Assistant markdown: `marked` + DOMPurify, `@tailwindcss/typography`.
   Raw HTML in a chat row is text (`<slug>` reads as written, as on IM); a
-  Files `.md` keeps its HTML.
+  Files `.md` keeps its HTML. A `**` run touching CJK is strong even where
+  CommonMark's flanking rule refuses it (`结论：**重要。**后面`); a chat table
+  is wrapped in `.table-scroll`, a focusable region named `Table`. Links to `file://` paths and to bare absolute
+  paths under a filesystem root (`/tmp`, `/home`, …) go through the files
+  route; `/boards`, `/app` and other routes stay links.
   Provisional text paints incrementally in the work log; the final bubble
   renders markdown, attachments and next-step controls. User/error rows are
   plain text.
@@ -244,7 +248,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`queuedMessages`), the `tier · model id · reasoning` badge (each part only
   when recorded; below md a tiered badge without its id, its tooltip has it)
   and `<id8>` — the other session's id, a link to it, else the run id as
-  text — are the opened head's, never the chip's. The steps log: thinking,
+  text — are the opened head's, never the chip's; a cause card's head drops
+  the chip's glyph and `kind · state`. A callback's body is the child's
+  reply rendered as chat markdown (files route against the child session,
+  relative paths against its cwd); a delegation's prompt and a task
+  message stay plain text. The steps log: thinking,
   progress, tool rows; tool rows reveal args/output, thinking rows
   tail-capped text; an opened log scrolls independently and follows its
   tail; simple replies leave no empty log; interrupted work stays visible. A
@@ -306,7 +314,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   so it survives reload, edit and rotation with no field, and reaches the
   model as its own convention (`agent/roles.ts`). A next-step button never
   takes it. A user bubble renders the quote as a block above its words — role
-  and minute, the excerpt clamped to two lines, a neutral grey bar — and a click reveals the source
+  and minute, the excerpt clamped to two lines (a reply's markdown shown as
+  plain text, `dom.ts` `plainText`; the stored excerpt unchanged), a neutral grey bar — and a click reveals the source
   (`quoteSource`: same role and minute, then the row whose text opens with
   the excerpt); a source not on screen leaves the block inert with a title
   saying so. Only user messages carry quotes.
