@@ -496,6 +496,17 @@ describe("toChatTurns", () => {
     ])).toEqual([{ role: "system", text: "Nothing open.", origin, at: 1 }, { role: "system", text: "Open", origin: bare, at: 3 }]);
   });
 
+  it("keeps a malformed optional status snapshot's original text and a visible fallback reason", () => {
+    for (const statusSnapshot of [{ version: 2, items: [] }, { version: 1, items: [{}] }, { version: 1, items: "bad" }, null]) {
+      const [turn] = toChatTurns([{ role: "custom", customType: "pier.system-input", content: "Original complete status", details: {
+        kind: "chat-command", command: "status", statusSnapshot, sessions: { "full-run": "full-session" },
+      }, timestamp: 1 }]);
+      expect(turn?.text).toBe("Original complete status");
+      expect(turn?.origin).toMatchObject({ kind: "chat-command", command: "status", sessions: { "full-run": "full-session" }, statusSnapshotError: expect.any(String) });
+      expect(turn?.origin).not.toHaveProperty("statusSnapshot");
+    }
+  });
+
   it("stamps user and system turns with when they arrived, and invents nothing", () => {
     // An assistant turn carries `meta.completedAt`; these two had no time at
     // all after a reload, so the hover chip had nothing to show.

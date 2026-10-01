@@ -2,6 +2,8 @@
 // imports, so it is unit-testable without Pi and Pi types never leak past the
 // seam. The golden table in events.test.ts is the mapping's spec.
 
+import { isOpenItemsSnapshot } from "../core/open-items.js";
+import { logger } from "../log.js";
 import { isChatCommand, isModelTier, isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
   ActivityStep,
@@ -82,13 +84,22 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
       : null;
   }
   if (origin.kind === "chat-command") {
-    const { command, sessions } = origin;
+    const { command, sessions, statusSnapshot } = origin;
     if (!isChatCommand(command)) return null;
     // A malformed map costs the card its links, not the card.
     const links = sessions && typeof sessions === "object" && !Array.isArray(sessions) && Object.values(sessions).every((v) => typeof v === "string")
       ? { sessions: sessions as Record<string, string> }
       : {};
-    return { kind: "chat-command", command, ...links };
+    let snapshot = {};
+    if (command === "status" && statusSnapshot !== undefined) {
+      if (isOpenItemsSnapshot(statusSnapshot)) snapshot = { statusSnapshot };
+      else {
+        const statusSnapshotError = "Status details unavailable — invalid snapshot; showing original text.";
+        logger("agent").warn(statusSnapshotError);
+        snapshot = { statusSnapshotError };
+      }
+    }
+    return { kind: "chat-command", command, ...links, ...snapshot };
   }
   if (origin.kind === "restart") {
     const { at, downMs, taskId, runId, sourceSessionId } = origin;

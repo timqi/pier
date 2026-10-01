@@ -93,6 +93,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   Stream.all = [];
   h.content = [];
+  h.history.mockReset().mockImplementation(() => Promise.resolve(snapshot("loaded")));
+  h.revealTopic.mockReset().mockReturnValue(true);
   h.renderSnapshot.mockImplementation((turns: ChatTurn[]) => { h.content.push(...turns.map((t) => t.text)); });
   h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
   vi.stubGlobal("EventSource", Stream);
@@ -434,7 +436,7 @@ describe("the continuous conversation", () => {
     h.history.mockImplementation((url: string) => Promise.resolve(snapshot(url.includes("/h1/") ? "head" : "child")));
     h.drawer.select("other");
     await settled();
-    expect(await h.drawer.showTopic("auth", false)).toBe(true);
+    await h.drawer.openItem({ problem: "auth", runs: [] });
     expect(h.header.continuousOpen()).toBe(true);
     expect(historyCalls().at(-1)).toBe("/api/sessions/h1/history");
     expect(h.revealTopic).toHaveBeenLastCalledWith("auth");
@@ -442,12 +444,12 @@ describe("the continuous conversation", () => {
     const { scrollBottom } = await import("./chat.js");
     vi.mocked(scrollBottom).mockClear();
     h.revealTopic.mockReturnValueOnce(false);
-    expect(await h.drawer.showTopic("gone", false)).toBe(false);
+    await h.drawer.openItem({ problem: "gone", runs: [] });
     expect(scrollBottom).toHaveBeenCalledWith(true);
     // A row about to open its run's session skips the tail it would leave at once.
     vi.mocked(scrollBottom).mockClear();
     h.revealTopic.mockReturnValueOnce(false);
-    expect(await h.drawer.showTopic("gone", true)).toBe(false);
+    await h.drawer.openItem({ problem: "gone", runs: [{ runId: "r", targetSessionId: "child" }] });
     expect(scrollBottom).not.toHaveBeenCalled();
   });
 
@@ -460,24 +462,82 @@ describe("the continuous conversation", () => {
     await settled();
     void h.drawer.select("h1");
     h.revealTopic.mockClear();
-    const shown = h.drawer.showTopic("auth", false);
+    const shown = h.drawer.openItem({ problem: "auth", runs: [] });
     await settled();
     expect(h.revealTopic).not.toHaveBeenCalled();
     head.resolve(snapshot("head"));
-    expect(await shown).toBe(true);
+    await shown;
     expect(h.revealTopic).toHaveBeenCalledOnce();
 
     h.drawer.select("other");
     await settled();
     head = deferred();
     h.revealTopic.mockClear();
-    const left = h.drawer.showTopic("auth", false);
+    const left = h.drawer.openItem({ problem: "auth", runs: [] });
     await settled();
     h.drawer.select("other");
     head.resolve(snapshot("head"));
-    expect(await left).toBe(true);
+    await left;
     expect(h.revealTopic).not.toHaveBeenCalled();
     expect(h.header.continuousOpen()).toBe(false);
+  });
+
+  it("opens a live design before the main topic, then uses topic, ordered run fallback and tail after finalization", async () => {
+    await boot([member("h1")]);
+    h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
+    h.revealTopic.mockClear();
+    const target = { problem: "feature", runs: [{ runId: "gone", targetSessionId: null }, { runId: "full-run", targetSessionId: "worker" }] };
+    await h.drawer.openItem({ ...target, designSessionId: "design", waitsIn: "answer" });
+    expect(h.header.currentId()).toBe("design");
+    expect(h.revealTopic).not.toHaveBeenCalled();
+    await h.drawer.openItem({ ...target, waitsIn: "answer" });
+    expect(h.header.currentId()).toBe("answer");
+    h.revealTopic.mockReturnValueOnce(true);
+    await h.drawer.openItem(target);
+    expect(h.header.continuousOpen()).toBe(true);
+    h.revealTopic.mockReturnValueOnce(false);
+    await h.drawer.openItem(target);
+    expect(h.header.currentId()).toBe("worker");
+    h.revealTopic.mockReturnValueOnce(false);
+    await h.drawer.openItem({ problem: "no run", runs: [] });
+    expect(h.header.continuousOpen()).toBe(true);
+    const { scrollBottom } = await import("./chat.js");
+    expect(scrollBottom).toHaveBeenLastCalledWith(true);
+  });
+
+  it.each([404, 503, "network"] as const)("keeps a %s history error visible without treating it as a missing topic", async (failure) => {
+    await boot([member("h1")]);
+    h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
+    h.drawer.select("other");
+    await settled();
+    h.revealTopic.mockClear();
+    h.history.mockReset();
+    h.history.mockImplementation(() => failure === "network" ? Promise.reject(new Error("offline"))
+      : Promise.resolve(Response.json({ error: "head history unavailable" }, { status: failure })));
+    await h.drawer.openItem({ problem: "feature", runs: [{ runId: "full-run", targetSessionId: "worker" }] });
+    expect(h.header.continuousOpen()).toBe(true);
+    expect(h.revealTopic).not.toHaveBeenCalled();
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+    expect(h.content.join(" ")).toMatch(/unavailable|offline/);
+  });
+
+  it.each(["newer item", "Console", "browser route"])("lets %s cancel an older topic lookup", async (next) => {
+    await boot([member("h1")]);
+    h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
+    h.drawer.select("other"); await settled();
+    const head = deferred();
+    h.history.mockImplementation((url: string) => url.includes("/h1/") ? head.promise : Promise.resolve(snapshot("child")));
+    h.revealTopic.mockClear();
+    h.revealTopic.mockReturnValue(false);
+    const older = h.drawer.openItem({ problem: "older", runs: [{ runId: "old-run", targetSessionId: "old-worker" }] });
+    await settled();
+    const newer = next === "newer item" ? h.drawer.openItem({ problem: "newer", runs: [{ runId: "new-run", targetSessionId: "new-worker" }] }) : undefined;
+    if (next !== "newer item") h.views.cancelNavigation();
+    head.resolve(snapshot("head"));
+    await older; await newer;
+    expect(h.revealTopic).not.toHaveBeenCalledWith("older");
+    expect(historyCalls()).not.toContain("/api/sessions/old-worker/history");
+    if (next === "newer item") expect(h.header.currentId()).toBe("new-worker");
   });
 
   it("keeps the pane as it is while a page's head snapshot is on its way", async () => {
@@ -516,6 +576,80 @@ describe("the continuous conversation", () => {
     await settled();
     expect(historyCalls().slice(1)).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
     expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true);
+  });
+
+  it("leaves Settings open across head rotation and cancels delayed rotation paging after newer navigation", async () => {
+    await boot([member("h1")]);
+    const views = await import("./views.js");
+    const visible = vi.mocked(views.isChatVisible);
+    const shown = vi.mocked(views.showChat);
+    try {
+      h.views.cancelNavigation();
+      visible.mockReturnValue(false);
+      shown.mockClear();
+      chain = [member("h2"), member("h1")];
+      h.composer.headMoved?.();
+      await settled();
+      expect(shown).not.toHaveBeenCalled();
+      expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+
+      visible.mockReturnValue(true);
+      h.views.openContinuous();
+      await settled();
+      expect(h.header.currentId()).toBe("h2");
+      const next = deferred();
+      h.history.mockImplementation((url) => url.includes("/h3/") ? next.promise : Promise.resolve(snapshot("child")));
+      chain = [member("h3"), ...chain];
+      h.composer.headMoved?.();
+      await settled();
+      h.views.cancelNavigation();
+      visible.mockReturnValue(false);
+      const before = historyCalls();
+      next.resolve(snapshot("rotated"));
+      await settled();
+      expect(historyCalls()).toEqual(before);
+    } finally {
+      visible.mockReturnValue(true);
+    }
+  });
+
+  it.each([
+    ["earlier", 200], ["earlier", 503], ["head", 200], ["head", 503],
+  ] as const)("keeps a newer topic navigation when rotation paging's %s request returns %s", async (pending, status) => {
+    await boot([member("h1")]);
+    const old = deferred();
+    let headReads = 0;
+    h.history.mockImplementation((url) => {
+      if (url.includes("/h1/")) return pending === "earlier" ? old.promise : Promise.resolve(earlier("h1"));
+      if (++headReads === 1) return Promise.resolve(snapshot("rotated head"));
+      return pending === "head" ? old.promise : Promise.resolve(Response.json({ error: "temporarily unavailable" }, { status: 503 }));
+    });
+    chain = [member("h2"), member("h1")];
+    h.composer.headMoved?.();
+    await settled(); await settled();
+    expect(historyCalls().slice(1)).toEqual(pending === "earlier"
+      ? ["/api/sessions/h2/history", "/api/sessions/h1/history"]
+      : ["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
+    const stream = latest();
+    const shown = h.drawer.openItem({ problem: "newer topic", runs: [] });
+    await settled();
+    expect(h.revealTopic).toHaveBeenLastCalledWith("newer topic");
+    stream.message(1, "live while paging", "h2");
+    const reads = historyCalls();
+    const paints = h.resetChat.mock.calls.length;
+    old.resolve(status === 503 ? Response.json({ error: "temporarily unavailable" }, { status })
+      : pending === "earlier" ? earlier("h1") : snapshot("obsolete head"));
+    await shown; await settled();
+    expect(historyCalls()).toEqual(reads);
+    expect(h.content).toEqual(["rotated head", "live while paging"]);
+    expect(h.resetChat).toHaveBeenCalledTimes(paints);
+    expect(h.keepScroll).not.toHaveBeenCalled();
+    expect(stream.closed).toBe(false);
+    // The cancelled page must neither consume the earlier member nor leave paging locked.
+    h.history.mockImplementation((url) => Promise.resolve(url.includes("/h1/") ? earlier("h1") : snapshot("fresh head")));
+    (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+    await settled();
+    expect(h.content).toEqual(["said in h1", "fresh head"]);
   });
 
   it("opens before its first session exists, and follows the head its first message made", async () => {

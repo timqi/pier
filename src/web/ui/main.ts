@@ -76,6 +76,7 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
+  OpenItemTarget,
   SessionEvent,
   SessionState,
   ThinkingLevel,
@@ -96,6 +97,8 @@ interface SessionSnapshot {
   backgroundRuns: BackgroundRun[];
   skills: { name: string; description: string }[];
 }
+
+type SnapshotRead = Awaited<ReturnType<typeof getJson<SessionSnapshot>>>;
 
 declare const __PIER_VERSION__: string; // injected by vite.config.ts
 
@@ -165,26 +168,36 @@ function commitOpenItems(open: OpenItems): void {
   refreshSuggestions();
 }
 
-/** A status panel row: the conversation, at the topic's latest reply, or —
- *  none on screen, and nowhere `elsewhere` to go — at its tail; `false` then.
- *  A reader who moved on meanwhile is left where they went: `true`. */
-async function showTopic(problem: string, elsewhere: boolean): Promise<boolean> {
-  if (!continuousOpen()) {
-    const head = headId();
-    if (!head) return false;
-    await select(head);
+let navigation = 0;
+let snapshotReady = false;
+const cancelNavigation = (): void => { ++navigation; };
+
+/** One click owns topic lookup and fallback; only a successfully loaded, missing topic may fall back. */
+async function openItem(target: OpenItemTarget): Promise<void> {
+  const intent = ++navigation;
+  const current = (): boolean => intent === navigation && isChatVisible();
+  const runSession = target.runs.find((r) => r.targetSessionId)?.targetSessionId;
+  const direct = target.designSessionId ?? target.waitsIn ?? (target.direct ? runSession : null);
+  if (direct) return select(direct, false);
+  const head = headId();
+  if (!head) return openContinuous(false);
+  await select(head, false);
+  if (!current()) return;
+  while (inFlight) {
+    await inFlight;
+    if (!current()) return;
   }
-  // `select` returns early while a load is already on its way; the reveal needs its rows.
-  while (inFlight) await inFlight;
-  if (!continuousOpen()) return true;
-  if (revealTopic(problem)) return true;
-  if (!elsewhere) scrollBottom(true);
-  return false;
+  if (!snapshotReady || !continuousOpen()) return;
+  if (!target.direct && revealTopic(target.problem)) return;
+  if (!current()) return;
+  if (runSession) await select(runSession, false);
+  else scrollBottom(true);
 }
 
-function openContinuous(): void {
+function openContinuous(user = true): void {
+  if (user) cancelNavigation();
   const head = headId();
-  if (head) return void select(head);
+  if (head) return void select(head, false);
   if (unstarted) {
     showChat();
     return setConversationHash();
@@ -212,8 +225,9 @@ function openContinuous(): void {
 async function followHead(head: string): Promise<void> {
   earlier = [];
   unstarted = false;
-  await select(head);
-  if (chain.length > 1) await page();
+  const intent = navigation;
+  await select(head, false);
+  if (intent === navigation && isChatVisible() && chain.length > 1) await page();
 }
 
 /** One earlier session in above the rest; the head is re-read with it, and the
@@ -221,17 +235,23 @@ async function followHead(head: string): Promise<void> {
 async function page(): Promise<void> {
   const head = headId();
   const member = chain[earlier.length + 1];
-  if (paging || !head || !member || currentId !== head) return;
+  if (paging || !head || !member || currentId !== head || !isChatVisible()) return;
+  const intent = navigation;
+  const generation = loadSeq;
+  const current = (): boolean => intent === navigation && generation === loadSeq && currentId === head && headId() === head && isChatVisible();
   paging = true;
   try {
     const got = await getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
       `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session");
-    if (currentId !== head) return;
+    if (!current()) return;
+    // Both reads belong to this navigation; keep the pane and its stream live until they can commit together.
+    const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session");
+    if (!current()) return;
     earlier.unshift(got.ok
       ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
       : { member, turns: [], runs: [], error: got.error });
-    await loadSession(head, true);
-    pagedAt = Date.now();
+    await loadSession(head, snapshot);
+    if (intent === navigation) pagedAt = Date.now();
   } finally {
     paging = false;
   }
@@ -278,7 +298,7 @@ const refreshSessions = coalesce(async () => {
     loadChain(),
     loadOpenItems(),
   ]);
-  const following = continuousOpen();
+  const following = continuousOpen() && isChatVisible();
   const was = headId();
   chain = next.chain;
   rotateAt = next.rotateAt;
@@ -484,7 +504,8 @@ function connect(id: string, cursor: string, generation: number): void {
 
 // --- selection --------------------------------------------------------------------
 
-async function select(id: string): Promise<void> {
+async function select(id: string, user = true): Promise<void> {
+  if (user) cancelNavigation();
   // Any session of the continuous conversation opens the conversation, at its head.
   if (inConversation(id)) id = headId()!;
   if (id !== currentId || unstarted) {
@@ -524,9 +545,9 @@ function resetPane(): void {
 let inFlight: Promise<void> | null = null;
 
 /** (Re)load the current session, the load kept as `inFlight` for a caller that needs its rows. */
-function loadSession(id: string, keep = false): Promise<void> {
+function loadSession(id: string, paged?: SnapshotRead): Promise<void> {
   if (currentId !== id) return Promise.resolve();
-  const load = drawSession(id, keep).finally(() => {
+  const load = drawSession(id, paged).finally(() => {
     if (inFlight === load) inFlight = null;
   });
   inFlight = load;
@@ -534,19 +555,19 @@ function loadSession(id: string, keep = false): Promise<void> {
 }
 
 /** Fetch the snapshot, paint it and reconnect the event stream. */
-async function drawSession(id: string, keep: boolean): Promise<void> {
+async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
+  const keep = paged !== undefined;
   const generation = ++loadSeq;
   source?.close();
   source = null;
   loading = true;
-  // Painted before the fetch: a long transcript takes a moment to arrive and
-  // render, and until then the pane would look like an empty session. A page
-  // (`keep`) leaves the pane as it is until the snapshot is in hand.
+  snapshotReady = false;
+  // Ordinary loads paint their loading state; paging already has both snapshots and commits synchronously.
   if (!keep) {
     resetPane();
     chatLoading(true);
   }
-  const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
+  const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
   // Measured here, not before the fetch: the reader may scroll, an image load or a resize move the pane meanwhile.
@@ -559,6 +580,7 @@ async function drawSession(id: string, keep: boolean): Promise<void> {
     appendTurn("error", got.error);
     return;
   }
+  snapshotReady = true;
   const snap = got.value;
   if (continuousOpen()) renderEarlier();
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
@@ -606,6 +628,7 @@ initChat({
   sessionCwd: () => currentSession()?.cwd ?? null,
   sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
+  openItem: (target) => void openItem(target),
   select: (id) => void select(id),
   send: (mode, label, quote) => void send(mode, label, quote),
   ownTurn: (text) => {
@@ -632,7 +655,7 @@ initDrawer({
   chain: () => chain,
   openContinuous,
   open: () => openItems,
-  showTopic,
+  openItem,
 });
 initHeader({
   currentId: () => currentId,
@@ -645,6 +668,7 @@ initHeader({
   openContinuous,
 });
 initViews({
+  cancelNavigation,
   sessions: () => sessions,
   currentId: () => currentId,
   currentSession,

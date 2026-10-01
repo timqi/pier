@@ -102,9 +102,9 @@ describe("a feature lead", () => {
     // A lead that plans and builds itself is not a design, whatever its prompt says.
     const direct = await service.waitForRun((await service.handle({ operation: "run", prompt: "review and simplify it", launch: { model: "test/model", role: "lead" } }, "main") as { runId: string }).runId);
     expect(store.leads()).toEqual(new Map([
-      [run.targetSessionId!, { phase: "design", runId: run.id, runLive: false, designOpen: true }],
-      [build.targetSessionId!, { phase: "build", runId: build.id, runLive: false, designOpen: false }],
-      [direct.targetSessionId!, { phase: "build", runId: direct.id, runLive: false, designOpen: false }],
+      [run.targetSessionId!, { phase: "design", runId: run.id, title: run.context.definition.name, runLive: false, designOpen: true }],
+      [build.targetSessionId!, { phase: "build", runId: build.id, title: build.context.definition.name, runLive: false, designOpen: false }],
+      [direct.targetSessionId!, { phase: "build", runId: direct.id, title: direct.context.definition.name, runLive: false, designOpen: false }],
     ]));
     expect(service.openDesigns().map((r) => [r.runId, r.targetSessionId])).toEqual([[run.id, run.targetSessionId]]);
     // Only a line that opens with it is the milestone; one mid-sentence is not.
@@ -315,6 +315,13 @@ describe("a feature lead", () => {
     await leadRan();
     const lead = sessions.get("lead")!;
     router.attach({ channelId: "web", conversationId: "lead" }, lead);
+    store.markOpenItems([{ op: "open", problem: "Keep the original design question", stage: "waiting on you: finalize this scope?", runIds: ["missing-first-run", "lead-run"] }], Date.now());
+    const item = () => service.openItems().items.find((i) => i.problem === "Keep the original design question")!;
+    expect(item()).toMatchObject({ status: "waiting on you", designSessionId: "lead" });
+    lead.setState("streaming");
+    expect(item()).toMatchObject({ status: "running", designSessionId: "lead" });
+    expect(item().waitsIn).toBeUndefined();
+    lead.setState("idle");
     lead.emit({ type: "turn-end", text: "Shall I finalize?" });
     lead.emit({ type: "turn-end", text: "", error: "provider down" });
     expect(store.latestRunForTarget("lead")!.id).toBe("lead-run");
@@ -327,6 +334,9 @@ describe("a feature lead", () => {
     });
     expect(store.leads().get("lead")?.designOpen).toBe(false);
     expect(service.openDesigns()).toEqual([]);
+    expect(item().problem).toBe("Keep the original design question");
+    expect(item().designSessionId).toBeUndefined();
+    expect(item().waitsIn).toBeUndefined();
     expect(service.backgroundRuns("main").find((r) => r.runId === store.latestRunForTarget("lead")!.id)?.byPier).toBe(true);
     service.stop();
 

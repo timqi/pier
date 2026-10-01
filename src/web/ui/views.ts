@@ -9,6 +9,7 @@ import type { SessionInfo } from "./drawer.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 interface ViewsDeps {
+  cancelNavigation: () => void;
   sessions: () => SessionInfo[];
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
@@ -52,6 +53,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
 /** Open a Console view by name — callers address them this way rather
  *  than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string, query?: string): void {
+  deps.cancelNavigation();
   // Switching tabs re-enters the same view: not a new origin.
   const from = parseHash();
   if (from && !(from.kind === "console" && from.name === name)) origins.set(name, from);
@@ -111,7 +113,8 @@ function closeOverlay(name: ConsoleName): void {
   const id = deps.currentId();
   const back = origins.get(name) ?? (id ? chatRoute(id) : CONVERSATION);
   origins.delete(name);
-  setHash(back); // onhashchange → applyRoute() does the switching
+  setHash(back);
+  applyRoute();
 }
 
 export function showChat(): void {
@@ -170,7 +173,7 @@ function setHash(r: Route, replace = false): void {
   const next = hashOf(r);
   if (location.hash === next) return;
   if (replace) history.replaceState(null, "", next);
-  else location.hash = next; // pushes an entry, so Back returns to the last view
+  else history.pushState(null, "", next); // our own sync is not a second navigation intent
 }
 
 const chatRoute = (id: string): Route => (deps.inConversation(id) ? CONVERSATION : { kind: "session", id });
@@ -181,6 +184,7 @@ export const setConversationHash = (): void => setHash(CONVERSATION);
 /** Hash → UI. Session routes may name sessions not listed yet; select
  *  verifies them. A bare or unknown hash is the conversation. */
 export function applyRoute(): void {
+  deps.cancelNavigation();
   const route = parseHash() ?? CONVERSATION;
   applyingRoute = true;
   try {

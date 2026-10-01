@@ -186,10 +186,47 @@ export type SystemInputOrigin = {
    *  never reaches the model's context. */
   kind: "chat-command";
   command: ChatCommand;
-  /** `/status`'s named runs that have a session, run id → session id: the
-   *  text carries only `run <id8>…`, and the card links each to its session. */
+  /** Run id → session id for legacy `/status` text links. */
   sessions?: Record<string, string>;
+  /** `/status` at answer time; replay never recalculates its ages or navigation. */
+  statusSnapshot?: OpenItemsSnapshot;
+  /** A malformed optional snapshot leaves the original text readable. */
+  statusSnapshotError?: string;
 };
+
+/** A status row's navigation facts; a design entrance is independent of waiting. */
+export interface OpenItemTarget {
+  problem: string;
+  designSessionId?: string;
+  waitsIn?: string;
+  runs: { runId: string; targetSessionId: string | null }[];
+  /** Unlisted runs and independent sessions open directly, with no topic lookup. */
+  direct?: boolean;
+}
+
+/** Browser-safe, already worded content shared by IM, live rows and command history. */
+export interface OpenItemPresentation extends OpenItemTarget {
+  key: string;
+  title: string;
+  status: "running" | "queued" | "waiting on you" | "pending release" | "stopped";
+  statusLabel: string;
+  stage: string;
+  metadata: string[];
+  details: { text: string; summary?: string; runId?: string; targetSessionId?: string }[];
+}
+
+export interface OpenItemsSnapshot {
+  version: 1;
+  items: OpenItemPresentation[];
+}
+
+/** One read produces the compact answer, complete seed and fixed history content. */
+export interface OpenItemsStatus {
+  text: string;
+  seed: string;
+  sessions: Record<string, string>;
+  snapshot: OpenItemsSnapshot;
+}
 
 /** The chat commands, each with the one line the composer's completion shows:
  *  a message to the continuous conversation that is exactly `/<word>` or `%<word>` is a

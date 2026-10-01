@@ -1107,12 +1107,13 @@ describe("the home chat", () => {
     });
 
     it("/status is answered once: the card re-posted at the bottom, or the note when nothing is open", async () => {
-      const origin = { kind: "chat-command" as const, command: "status" as const };
+      const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: { version: 1 as const, items: [] } };
+      const text = `Waiting on you · 1\n\n${"A & B · run literal12… ".repeat(12)}\n是否合并 <scope>？\nsucceeded 2m ago\n\nIn progress · 1\n\nBuild\nelapsed <1m`;
       await channel.status(HOME, view("a"));
       await channel.send(HOME, { text: "done", suggestions: [] });
-      await channel.notify(HOME, { text: "a — running", origin });
+      await channel.notify(HOME, { text, origin });
       expect(client.deleted).toEqual(["om_900"]);
-      expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*▤ open items*\na", "done", "*▤ open items*\na — running"]);
+      expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*▤ open items*\na", "done", `*▤ open items*\n${text}`]);
       await channel.status(HOME, view("Nothing open."));
       await channel.notify(HOME, { text: "Nothing open.", origin });
       expect(client.sent.map((p) => bodyText(p.card)).slice(3)).toEqual(["*/status*\n> Nothing open."]);

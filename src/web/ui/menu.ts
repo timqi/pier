@@ -43,9 +43,10 @@ export function listStep(ev: KeyboardEvent): number | undefined {
 /** From outside the list the first step lands on the near end. False when
  *  there is nothing to walk, so the caller can leave the key alone. */
 export function walkRows(list: HTMLElement, to: number | "first" | "last"): boolean {
-  const rows = [...list.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  const rows = [...list.querySelectorAll<HTMLButtonElement>(list.dataset.list === "status" ? ".session-open" : "button:not(:disabled)")];
   if (!rows.length) return false;
-  const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const active = list.dataset.list === "status" ? document.activeElement?.closest("li")?.querySelector(".session-open") : document.activeElement;
+  const index = rows.indexOf(active as HTMLButtonElement);
   const next = to === "first" ? 0 : to === "last" ? rows.length - 1
     : index < 0 ? (to > 0 ? 0 : rows.length - 1)
     : (index + to + rows.length) % rows.length;

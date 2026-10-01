@@ -228,6 +228,20 @@ export class TaskStore {
     `, sessionId);
   }
 
+  /** Creating names for the sessions a projection needs, without reading transcripts. */
+  creationTitles(sessionIds: string[]): Map<string, string> {
+    const rows = this.sql(`
+      SELECT session_id, name FROM (
+        SELECT json_extract(json, '$.targetSessionId') AS session_id,
+          json_extract(json, '$.context.definition.name') AS name,
+          ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.targetSessionId') ORDER BY queued_at, rowid) AS n
+        FROM task_runs WHERE json_extract(json, '$.sessionMode') = 'fresh'
+          AND json_extract(json, '$.targetSessionId') IN (SELECT value FROM json_each(?))
+      ) WHERE n = 1
+    `).all(JSON.stringify(sessionIds)) as unknown as { session_id: string; name: string }[];
+    return new Map(rows.filter((r) => r.name).map((r) => [r.session_id, r.name]));
+  }
+
   roleOf(sessionId: string): AgentRole | undefined {
     const run = this.creatorOf(sessionId);
     return run && createdRole(run);
@@ -242,10 +256,11 @@ export class TaskStore {
    *  whether a run targeting it is queued or running, and — a design lead's —
    *  whether no run of it has reported `Design final:` yet, which leaves the
    *  design on the user; in one statement for the session list's listing. */
-  leads(): Map<string, { phase: LeadPhase; runId: string; runLive: boolean; designOpen: boolean }> {
+  leads(): Map<string, { phase: LeadPhase; runId: string; title: string; runLive: boolean; designOpen: boolean }> {
     const rows = this.sql(`
-      SELECT c.id, c.run_id, c.design, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
+      SELECT c.id, c.run_id, c.title, c.design, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
         SELECT id AS run_id, json_extract(json, '$.targetSessionId') AS id,
+          json_extract(json, '$.context.definition.name') AS title,
           json_extract(json, '$.context.definition.action.launch.role') AS role,
           json_extract(json, '$.context.definition.action.launch.design') AS design,
           ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.targetSessionId') ORDER BY queued_at) AS n
@@ -261,10 +276,10 @@ export class TaskStore {
           AND instr(char(10) || json_extract(json, '$.result.text'), char(10) || 'Design final:') > 0
       ) f ON f.id = c.id
       WHERE c.n = 1 AND c.role = 'lead'
-    `).all() as unknown as { id: string; run_id: string; design: number | null; live: number; final: number }[];
+    `).all() as unknown as { id: string; run_id: string; title: string; design: number | null; live: number; final: number }[];
     return new Map(rows.map((r) => {
       const phase: LeadPhase = r.design === 1 ? "design" : "build";
-      return [r.id, { phase, runId: r.run_id, runLive: r.live === 1, designOpen: phase === "design" && r.final === 0 }];
+      return [r.id, { phase, runId: r.run_id, title: r.title, runLive: r.live === 1, designOpen: phase === "design" && r.final === 0 }];
     }));
   }
 

@@ -60,7 +60,7 @@ ${MODEL_TABLE}
 - Track what this conversation is solving with hidden markers: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes.
 - The problem, in the user's words every time, is the key; the stage says where it stands, \`waiting on you: <question>\` when it waits on them; one \`(run <id>)\` per run behind it. Only work in flight or awaiting the user, \`<done>\` once neither; backlog goes in MEMORY.md.
 - A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
-- Write one whenever a callback or decision moves the stage or it goes stale; a standing authorization ("deploy after the change") lives in the stage.`;
+- Update markers when callbacks or decisions change the stage, or it goes stale; stage names the concrete phase, question and standing authorization, omitting ledger-derived run state, elapsed time and review rounds.`;
 
 /** The result contract of a task run: a worker's system prompt carries it for
  *  the session's life, a role-less run's message each time (tasks/agent.ts),

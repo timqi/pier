@@ -71,7 +71,13 @@ export function linkRuns(content: HTMLElement, sessions: Record<string, string>,
   let at = 0;
   for (const m of text.matchAll(/\brun ([\w-]+)(…?)/g)) {
     const [token, id = "", cut] = m;
-    const runId = Object.keys(sessions).find((r) => (cut ? r.startsWith(id) : r === id));
+    const matches = Object.keys(sessions).filter((r) => (cut ? r.startsWith(id) : r === id));
+    if (matches.length > 1) {
+      parts.push(text.slice(at, m.index), h("span", "", `${token} (ambiguous run prefix — cannot locate session)`));
+      at = m.index + token.length;
+      continue;
+    }
+    const runId = matches[0];
     if (!runId) continue;
     const link = h("button", "text-indigo-600 hover:underline", token);
     link.setAttribute("type", "button");

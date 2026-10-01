@@ -27,7 +27,7 @@ let drawer: typeof import("./drawer.js");
 const state = { chain: [] as ChainMember[], current: null as string | null, items: null as OpenItems | null };
 const openContinuous = vi.fn();
 const select = vi.fn();
-const showTopic = vi.fn(async (_problem: string, _elsewhere: boolean) => true);
+const openItem = vi.fn();
 let sessions: Row[] = [];
 
 beforeEach(async () => {
@@ -38,7 +38,7 @@ beforeEach(async () => {
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
     sessions: () => sessions, currentId: () => state.current, select, chain: () => state.chain, openContinuous, open: () => state.items,
-    showTopic,
+    openItem,
   });
 });
 
@@ -86,19 +86,16 @@ it("lists each open item once, what waits on you first, with who runs it and whe
     unlisted: [ledgerRun("q1", { name: "Queued one", state: "queued", targetSessionId: null })],
   };
   open();
-  const ids = doc.querySelector("[data-list='status']")!.querySelectorAll("[data-session-id]").map((el) => el.dataset.sessionId);
-  expect(ids).toEqual(["item:model menu", "s-lead1abcdef", "s-w1", "item:Queued one"]);
-  const byId = (id: string) => doc.querySelectorAll("[data-session-id]").find((el) => el.dataset.sessionId === id)!;
-  // The row is its stage; who runs it and its runs are the tooltip's.
-  expect(byId("s-lead1abcdef").textContent).toBe("open items 视图lead designing");
-  expect(byId("s-lead1abcdef").title).toContain("lead · design");
-  expect(byId("s-lead1abcdef").title).toContain("workers: 1 running, 1 succeeded");
-  expect(byId("item:model menu").title).toContain("run gone1 — not in the ledger");
-  byId("s-w1").querySelector("button")!.onclick?.();
-  expect(showTopic).toHaveBeenLastCalledWith("auth review", true);
-  openContinuous.mockClear();
-  byId("item:Queued one").querySelector("button")!.onclick?.();
-  expect(openContinuous).toHaveBeenCalledOnce();
+  const ids = doc.querySelectorAll("[data-row-key]").map((el) => el.dataset.rowKey);
+  expect(ids).toEqual(["item:model menu", "item:open items 视图", "item:auth review", "run:q1"]);
+  const byId = (id: string) => doc.querySelectorAll("[data-row-key]").find((el) => el.dataset.rowKey === id)!;
+  expect(byId("item:open items 视图").querySelector(".open-item-stage")!.textContent).toBe("lead designing");
+  expect(byId("item:open items 视图").textContent).toContain("workers: 1 running, 1 succeeded");
+  expect(byId("item:model menu").textContent).toContain("not in the ledger");
+  byId("item:auth review").querySelector("button")!.onclick?.();
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "auth review" }));
+  byId("run:q1").querySelector("button")!.onclick?.();
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "q1", targetSessionId: null }] }));
 });
 
 it("adds no row when nothing is open, and does not open with nothing to list", () => {
@@ -106,6 +103,6 @@ it("adds no row when nothing is open, and does not open with nothing to list", (
   sessions = [row("h1", { state: "streaming" })];
   state.items = { items: [], unlisted: [] };
   open();
-  expect(doc.querySelector("[data-list]")).toBeNull();
+  expect(doc.querySelectorAll(".session-open")).toHaveLength(0);
   expect(doc.querySelector("#status-chip")!.classList.contains("hidden")).toBe(true);
 });

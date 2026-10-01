@@ -1,7 +1,8 @@
 // The open items: main's markers, written only from the head's turn ends, and
-// joined to the stored runs into the one text `/status` and the seed show.
+// joined to stored runs for stable facts, compact status and the full continuation seed.
 
 import { describe, expect, it, onTestFinished } from "vitest";
+import { toChatTurns } from "../agent/events.js";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { agoLabel } from "../core/reply.js";
@@ -44,7 +45,9 @@ function rig() {
   const store = new TaskStore(db);
   const now = Date.now();
   const workerReads: string[][] = [];
+  const titleReads: string[][] = [];
   const reads: OpenItemReads = {
+    creationTitles: (ids) => { titleReads.push(ids); return store.creationTitles(ids); },
     getRun: (id) => store.getRun(id),
     goalOf: (id) => store.goalOf(id),
     latestRunForTarget: (id) => store.latestRunForTarget(id),
@@ -68,7 +71,7 @@ function rig() {
     id: `g-${rootRunId}`, rootRunId, supervisorSessionId: "h1", cap: 3, round: 0, step: "work", currentRunId: rootRunId,
     outcome: null, reason: null, reviewModel: null, createdAt: 0, finishedAt: null, ...over,
   });
-  return { now, save, workers, workerReads, router, item, list, goal };
+  return { now, save, workers, workerReads, titleReads, router, item, list, goal };
 }
 
 describe("the open items", () => {
@@ -87,9 +90,8 @@ describe("the open items", () => {
     expect(open.unlisted).toEqual([]);
     expect(r.workerReads).toEqual([["lead1"]]);
     expect(openItemsStatus(open, now).text).toBe([
-      "In progress",
-      "- model menu 重选 — merged, restart pending (stopped) · run gone1 — not in the ledger",
-      "- open items 视图 — lead designing (running) · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
+      "In progress · 1", "", "lead open items", "lead designing", "elapsed 23m · workers: 1 running", "",
+      "Other open · 1", "", "model menu 重选 · Stopped", "merged, restart pending", "not in the ledger",
     ].join("\n"));
   });
 
@@ -109,10 +111,8 @@ describe("the open items", () => {
     const open = r.list();
     expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-queued"]);
     expect(openItemsStatus(open, now).text).toBe([
-      "In progress",
-      "- the problem (stopped) · run r-named failed just now",
-      "- Build it — not on the list (running) · run r-live running 5m",
-      "- Next — not on the list (queued) · run r-queued queued 1m",
+      "In progress · 2", "", "Build it", "elapsed 5m", "", "Next · Queued", "elapsed 1m", "",
+      "Other open · 1", "", "Named · Stopped", "failed just now",
     ].join("\n"));
   });
 
@@ -128,7 +128,7 @@ describe("the open items", () => {
     const open = r.list();
     expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
     expect(open.unlisted).toEqual([]);
-    expect(openItemsStatus(open, now).text).toBe("In progress\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
+    expect(openItemsStatus(open, now).text).toBe("In progress · 1\n\nlead again\nlead building\nelapsed 2m");
   });
 
   it("follows a session of 250 runs to its newest, past any listing's cap", () => {
@@ -178,12 +178,31 @@ describe("the open items", () => {
     r.item("model menu", "merged", [], 1);
     const status = openItemsStatus(r.list(["h1"], [design]), r.now);
     expect(status.text).toBe([
-      "Waiting on you",
-      `- Rail redesign (waiting on you) · run d1abcdef… succeeded ${agoLabel(0, r.now)}`,
-      "In progress",
-      "- model menu — merged (pending release)",
+      "Waiting on you · 1", "", "Rail redesign", "Finalize design", `succeeded ${agoLabel(0, r.now)}`, "",
+      "Other open · 1", "", "model menu · Pending release", "merged",
     ].join("\n"));
     expect(status.sessions).toEqual({ d1abcdefgh: "s-d1" });
+  });
+
+  it("keeps same-named designs distinct from each other and a marker through refresh and snapshot replay", () => {
+    const r = rig();
+    const name = "Same design name";
+    const designs = ["held", "first", "second"].map((id) => {
+      r.save(saved(`root-${id}`, { name, lead: true, targetSessionId: id, state: "succeeded", queuedAt: 1, finishedAt: 2 }));
+      return run(`root-${id}`, { name, targetSessionId: id, state: "succeeded", queuedAt: 1, finishedAt: 2 });
+    });
+    r.item(name, "", ["root-held"], 1);
+    const initial = openItemsStatus(r.list(["h1"], designs), r.now);
+    const identities = (status: typeof initial) => status.snapshot.items.map((i) => [i.key, i.designSessionId]);
+    expect(identities(initial)).toEqual([[`item:${name}`, "held"], ["design:first", "first"], ["design:second", "second"]]);
+    expect(initial.text).toContain("Waiting on you · 3");
+    const origin = { kind: "chat-command", command: "status", statusSnapshot: initial.snapshot, sessions: initial.sessions };
+    const history = JSON.stringify([{ role: "custom", customType: "pier.system-input", content: initial.text, details: origin, timestamp: 1 }]);
+    r.save(saved("followup", { name: "New steering title", targetSessionId: "first", state: "succeeded", queuedAt: 3, finishedAt: 4 }));
+    const refreshed = openItemsStatus(r.list(["h1"], [...designs].reverse()), r.now + MIN);
+    expect(identities(refreshed)).toEqual([[`item:${name}`, "held"], ["design:second", "second"], ["design:first", "first"]]);
+    expect(refreshed.snapshot.items[2]).toMatchObject({ title: name, runs: [{ runId: "followup", targetSessionId: "first" }] });
+    expect(toChatTurns(JSON.parse(history))).toEqual([{ role: "system", text: initial.text, at: 1, origin }]);
   });
 
   // One session is one row: an item or an in-flight run holding a design's session stands for it.
@@ -201,10 +220,8 @@ describe("the open items", () => {
     expect(open.items.map((i) => [i.problem, i.status])).toEqual([["子任务 thread", "waiting on you"]]);
     expect(open.unlisted.map((u) => u.runId)).toEqual(["t2"]);
     expect(openItemsStatus(open, now).text).toBe([
-      "Waiting on you",
-      "- 子任务 thread — design lead narrowing scope (running) (waiting on you) · run t1 succeeded 11m ago",
-      "In progress",
-      "- Rail again — not on the list (running) · run t2 running 1m",
+      "Waiting on you · 1", "", "子任务 thread", "design lead narrowing scope (running)", "succeeded 11m ago", "",
+      "In progress · 1", "", "Rail again", "elapsed 1m",
     ].join("\n"));
   });
 
@@ -269,17 +286,41 @@ describe("the open items", () => {
       ["goal merged", "pending release", undefined],
       ["goal legacy", "pending release", undefined],
     ]);
-    expect(openItemsStatus(open, now).text.split("\n")).toEqual([
-      "Waiting on you",
-      "- goal decision — worker building (waiting on you) · run decision succeeded 1m ago · review: waiting on you",
-      "- goal cap — worker building (waiting on you) · run cap succeeded 1m ago · review: 3 reviews, still findings",
-      "- goal done — worker building (waiting on you) · run done succeeded 1m ago · review: review clean, waiting on you",
-      "In progress",
-      "- goal live — worker building (running) · run live succeeded 1m ago · review: review 3/3",
-      "- goal failed — worker building (stopped) · run failed succeeded 1m ago · review: failed: no verdict",
-      "- goal merged — worker building (pending release) · run merge succeeded 1m ago",
-      "- goal legacy — worker building (pending release) · run legacy succeeded 1m ago · review: merged",
+    const status = openItemsStatus(open, now);
+    expect(status.snapshot.items.map((i) => i.metadata)).toEqual([
+      ["review 3/3"], ["succeeded 1m ago"],
+      ["succeeded 1m ago", "review cap reached · findings remain"], ["succeeded 1m ago", "review clean"],
+      ["succeeded 1m ago", "failed: no verdict"], ["succeeded 1m ago"], ["succeeded 1m ago", "merged"],
     ]);
+    expect(status.text).toContain("Waiting on you · 3");
+    expect(status.text).not.toContain("run ");
+    expect(status.seed).toContain("run live");
+    expect(status.seed).toContain("session s-live");
+  });
+
+  it("keeps multi-run review progress and failures consistent in compact text, details and replay", () => {
+    const r = rig();
+    r.save(
+      saved("root", { name: "Reviewed work", targetSessionId: "root-session", state: "succeeded", finishedAt: r.now - MIN }),
+      saved("failed", { name: "First line\nSecond line", state: "failed", finishedAt: r.now - MIN }),
+      saved("queued", { name: "Next work", state: "queued", queuedAt: r.now - MIN }),
+    );
+    r.goal("root", { step: "review" });
+    r.item("original multi-run question", "Authorized scope", ["root", "failed", "queued"], 1);
+    const status = openItemsStatus(r.list(), r.now);
+    expect(status.text).toContain("3 runs · review 1/3");
+    expect(status.text).not.toContain("succeeded");
+    expect(status.text).toContain("First line\nSecond line · failed 1m ago");
+    expect(status.text).toContain("Next work · queued · elapsed 1m");
+    expect(status.snapshot.items[0]!.details.find((d) => d.runId === "root")!.text).toContain("succeeded 1m ago");
+    expect(status.seed).toContain("run root");
+    const reason = "Approval needed\nOnly the current branch is authorized";
+    r.goal("root", { outcome: "decision", reason, finishedAt: r.now });
+    const decision = openItemsStatus(r.list(), r.now);
+    expect(decision.text).toContain(`decision: ${reason}`);
+    const replay = toChatTurns([{ role: "custom", customType: "pier.system-input", content: decision.text,
+      details: { kind: "chat-command", command: "status", statusSnapshot: decision.snapshot }, timestamp: r.now }]);
+    expect(replay[0]!.origin).toMatchObject({ statusSnapshot: decision.snapshot });
   });
 
   it("names the child session a wait is answered in: a design's lead; never a stage's or a goal's, answered in the chat", () => {
@@ -318,13 +359,11 @@ describe("the open items", () => {
       ["重启卡住原因", "running"],
       ["已合并", "pending release"],
     ]);
-    expect(openItemsStatus(open, now).text.split("\n").map((l) => l.replace(/ · run .*/, ""))).toEqual([
-      "Waiting on you",
-      "- 回调后回复语言跑偏 — waiting on you: 手动重启还是派 worker (waiting on you)",
-      "In progress",
-      "- 重启卡住原因 — lead 实现中 (running)",
-      "- 已合并 — merged, restart pending (pending release)",
-    ]);
+    const text = openItemsStatus(open, now).text;
+    expect(text.indexOf("Waiting on you · 1")).toBeLessThan(text.indexOf("In progress · 1"));
+    expect(text).toContain("手动重启还是派 worker");
+    expect(text).toContain("workers: 3 running");
+    expect(text).toContain("Other open · 1");
   });
 
   it("reads every shown lead's workers in one read, three leads or one", () => {
@@ -376,6 +415,36 @@ describe("the open items", () => {
     r.save(saved("r-sess", { targetSessionId: "s-r" }), saved("r-none"));
     r.item("with a session", "running", ["r-sess", "r-none", "r-gone"], 1);
     expect(openItemsStatus(r.list(), r.now).sessions).toEqual({ "r-sess": "s-r" });
+  });
+
+  it("keeps creation identity through steering, a running design, snapshot replay and full continuation", () => {
+    const r = rig();
+    const original = "改进状态卡片，保留原始问题全文以及合并授权边界";
+    const design = run("created-design-full", { name: "Open items", targetSessionId: "design-session-full" });
+    r.save(
+      saved(design.runId, { name: design.name, lead: true, targetSessionId: design.targetSessionId, queuedAt: 1, state: "succeeded" }),
+      saved("created-worker-full", { name: "Worker title", sessionMode: "fresh", targetSessionId: "worker-session-full", queuedAt: 1, state: "succeeded" }),
+      saved("steering-design-full", { name: "A very long new steering prompt", targetSessionId: design.targetSessionId, queuedAt: 2 }),
+      saved("steering-worker-full", { name: "Another follow-up", targetSessionId: "worker-session-full", queuedAt: 2 }),
+    );
+    r.item(original, "waiting on you: 是否合并？授权只限当前分支。", [design.runId, "created-worker-full"], 1);
+    const open = r.list(["h1"], [design]);
+    expect(open.items[0]).toMatchObject({ title: "Open items", status: "running", designSessionId: "design-session-full" });
+    expect(open.items[0]!.waitsIn).toBeUndefined();
+    expect(r.titleReads).toEqual([["worker-session-full"]]);
+    expect(open.items[0]!.runs.map((v) => v.title)).toEqual(["Open items", "Worker title"]);
+    const status = openItemsStatus(open, r.now);
+    expect(status.snapshot.items[0]).toMatchObject({ key: `item:${original}`, title: "Open items", problem: original, designSessionId: "design-session-full" });
+    expect(status.text).toContain("是否合并？授权只限当前分支。");
+    expect(status.text).not.toContain("steering-design-full");
+    for (const full of [original, "steering-design-full", "steering-worker-full", "design-session-full", "worker-session-full"]) expect(status.seed).toContain(full);
+    const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: status.snapshot, sessions: status.sessions };
+    const replay = toChatTurns(JSON.parse(JSON.stringify([{ role: "custom", customType: "pier.system-input", content: status.text, details: origin, timestamp: 1 }])));
+    expect(replay).toEqual([{ role: "system", text: status.text, at: 1, origin }]);
+    r.save(saved("steering-design-full", { name: "changed again", targetSessionId: design.targetSessionId, queuedAt: 2, state: "failed" }));
+    expect(replay[0]!.origin).toEqual(origin);
+    const fallback = openItemsStatus({ items: [{ problem: "original", stage: "", status: "stopped", runs: [run("missing", { state: NOT_IN_LEDGER })] }], unlisted: [] }, r.now);
+    expect(fallback.snapshot.items[0]!.title).toBe("original");
   });
 
   it("writes the head's markers on its turn end and says so once, a restart's head and a new head alike", () => {

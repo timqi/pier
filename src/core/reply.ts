@@ -121,38 +121,6 @@ export const runStatus = (r: LedgerRun, now: number): string =>
 export const workerCounts = (workers: Record<TaskRunState, number>): string =>
   TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`).join(", ") || "none";
 
-/** A goal as core sees it: tasks/types.ts `OpenRun.goal`, structurally. */
-interface RunGoal {
-  step: "work" | "review" | "merge";
-  round: number;
-  cap: number;
-  outcome: "done" | "decision" | "cap" | "failed" | null;
-  reason: string | null;
-}
-
-/** Where a goal stands; `round` counts fix rounds and `cap` reviews, so the review after round n is review n+1 of the cap. */
-const goalText = (g: RunGoal): string => {
-  // A goal stored before `cap` counted reviews can sit a round past it.
-  const of = (n: number) => `${String(Math.min(n, g.cap))}/${String(g.cap)}`;
-  switch (g.outcome) {
-    case "done": return g.step === "merge" ? "merged" : "review clean, waiting on you";
-    case "decision": return "waiting on you";
-    case "cap": return `${String(g.cap)} reviews, still findings`;
-    case "failed": return g.reason ? `failed: ${g.reason}` : "failed";
-    case null:
-      if (g.step === "merge") return "merging";
-      if (g.step === "review") return `review ${of(g.round + 1)}`;
-      return g.round ? `fixing for review ${of(g.round + 1)}` : "working";
-  }
-};
-
-/** A run behind an open item, `run <id8>… <state> <age>`, a lead's with its workers,
- *  a goal's root with where the goal stands; web/ui/turn-activity.ts `linkRuns` reads the token back. */
-export const openRunText = (r: LedgerRun & { workers?: Record<TaskRunState, number>; goal?: RunGoal }, now: number): string =>
-  r.state === NOT_IN_LEDGER
-    ? `run ${r.runId} — ${NOT_IN_LEDGER}`
-    : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${r.workers ? ` · workers: ${workerCounts(r.workers)}` : ""}${r.goal ? ` · review: ${goalText(r.goal)}` : ""}`;
-
 /** The open items' text with each ` · run <id8>…` token dropped and its state kept, for an IM
  *  chat where the id opens nothing; anchored on the state after it, so a problem's own "run" stays. */
 const OPEN_RUN_ID = new RegExp(` · run [\\w-]+(?:…? (?=(?:${TASK_RUN_STATES.join("|")}) )| — (?=${NOT_IN_LEDGER}))`, "g");

@@ -1,5 +1,6 @@
+import { goalText } from "./open-items.js";
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, openRunText, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -373,16 +374,15 @@ describe("open-item markers", () => {
 
 describe("a goal on its run line", () => {
   const at = (step: "work" | "review" | "merge", round: number, outcome: "done" | "decision" | "cap" | "failed" | null = null, reason: string | null = null) =>
-    openRunText({ runId: "r1", name: "r1", state: "succeeded", targetSessionId: "s", cwd: null, queuedAt: 0, finishedAt: 0, goal: { step, round, cap: 3, outcome, reason } }, 0);
+    goalText({ step, round, cap: 3, outcome, reason });
   it("says where the loop stands after the run token, never past the cap", () => {
-    expect(at("work", 0)).toBe("run r1 succeeded just now · review: working");
-    expect([at("review", 0), at("work", 1), at("review", 1), at("work", 3), at("review", 3), at("merge", 2)].map((t) => t.split(": ")[1]))
-      .toEqual(["review 1/3", "fixing for review 2/3", "review 2/3", "fixing for review 3/3", "review 3/3", "merging"]);
+    expect(at("work", 0)).toBe("");
+    expect([at("review", 0), at("work", 1), at("review", 1), at("work", 3), at("review", 3), at("merge", 2)])
+      .toEqual(["review 1/3", "fixing · next review 2/3", "review 2/3", "fixing · next review 3/3", "review 3/3", "merging"]);
   });
   it("names how it ended", () => {
-    expect([at("merge", 1, "done"), at("review", 1, "done"), at("work", 1, "decision"), at("review", 3, "cap"), at("review", 0, "failed", "no verdict"), at("work", 0, "failed")]
-      .map((t) => t.split(" · review: ")[1]))
-      .toEqual(["merged", "review clean, waiting on you", "waiting on you", "3 reviews, still findings", "failed: no verdict", "failed"]);
+    expect([at("merge", 1, "done"), at("review", 1, "done"), at("work", 1, "decision"), at("review", 3, "cap"), at("review", 0, "failed", "no verdict"), at("work", 0, "failed")])
+      .toEqual(["merged", "review clean", "waiting on you", "review cap reached · findings remain", "failed: no verdict", "failed"]);
   });
 });
 

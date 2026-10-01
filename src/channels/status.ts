@@ -4,7 +4,6 @@
 // three calls are injected.
 
 import type { DatabaseSync } from "node:sqlite";
-import { withoutRunIds } from "../core/reply.js";
 import { NOTHING_OPEN, type OpenItemsView } from "../core/types.js";
 import type { Receipts } from "./receipts.js";
 import type { ChannelPlatform } from "./types.js";
@@ -60,7 +59,7 @@ export class StatusMessage {
 
   private async apply(chatId: string, shown: OpenItemsView, seen: number, repost: boolean): Promise<void> {
     await this.receipts.items(shown, seen);
-    const view = { ...shown, text: withoutRunIds(shown.text) };
+    const view = shown;
     // The home moved within the platform: the old chat's card would read as current.
     const stale = this.db.prepare("SELECT chat_id, message_id FROM status_messages WHERE platform = ? AND chat_id <> ?")
       .all(this.platform, chatId) as { chat_id: string; message_id: string }[];

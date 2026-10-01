@@ -14,7 +14,7 @@ import { cut, openItemMarkers } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
 import type {
-  AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun,
+  AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItemsStatus,
 } from "./types.js";
 
 const log = logger("core");
@@ -43,8 +43,8 @@ interface ChainDeps {
   home: string;
   /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`. */
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
-  /** The open items' one text, for `/status` and the seed; `sessions`, run id → session id, for the card to link. */
-  status: (now: number) => { text: string; sessions: Record<string, string> };
+  /** A single read supplies the complete seed, compact answer and fixed command snapshot. */
+  status: (now: number) => OpenItemsStatus;
   /** The operator's Settings default model and reasoning, read at each new head. */
   defaults: () => Promise<AgentDefaults>;
   now?: () => number;
@@ -135,8 +135,8 @@ export class MainChain {
     return ids.includes(sessionId) ? ids : undefined;
   }
 
-  /** What `/status` answers, now: the Status panel shows this same text. */
-  status(): { text: string; sessions: Record<string, string> } {
+  /** The current compact answer, complete seed and shared status presentation. */
+  status(): OpenItemsStatus {
     return this.deps.status(this.now());
   }
 
@@ -170,8 +170,8 @@ export class MainChain {
       await session.systemInput(running ? "stopped" : "nothing running", origin, "append");
       return undefined;
     }
-    const { text, sessions } = this.status();
-    await session.systemInput(text, { ...origin, sessions }, "append");
+    const { text, sessions, snapshot } = this.status();
+    await session.systemInput(text, { ...origin, sessions, statusSnapshot: snapshot }, "append");
     return undefined;
   }
 
@@ -252,7 +252,7 @@ export class MainChain {
     return withLanguage(userLanguage(spoken), [
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
-      section("Open", this.deps.status(this.now()).text),
+      section("Open", this.deps.status(this.now()).seed),
       section("Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
       ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS, `memory/${date}.md`))))),
       section("The previous session's last exchanges", open ? tail(lastExchanges(spoken, EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),

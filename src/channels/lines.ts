@@ -55,7 +55,7 @@ function digest(text: string): string {
 export function noteBody(note: { text: string; origin: NoteOrigin }, emphasis: string): string {
   const whole = note.origin.kind === "error" || note.origin.kind === "chat-command";
   const status = note.origin.kind === "chat-command" && note.origin.command === "status";
-  const text = status ? withoutRunIds(note.text) : whole ? note.text : digest(note.text);
+  const text = note.origin.kind === "chat-command" && status && !note.origin.statusSnapshot ? withoutRunIds(note.text) : whole ? note.text : digest(note.text);
   const body = text.split("\n").map((line) => `> ${line}`).join("\n");
   // The run's model is a detail of the label, so it sits outside the emphasis.
   const source = note.origin.kind === "task-callback" || note.origin.kind === "task-delegation" || note.origin.kind === "restart" ? note.origin.source : undefined;

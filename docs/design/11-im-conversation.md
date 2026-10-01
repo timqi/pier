@@ -167,9 +167,11 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   `ChannelRuntime.openItems`, which calls `Channel.status` on the home
   platform's live adapter; nothing otherwise.
 - The status message is `▤ open items` in the platform's emphasis over the
-  view's text, one per home chat. It and `/status`'s answer drop each run's
-  ` · run <id8>…` and keep its state (`withoutRunIds`, `core/reply.ts`): an id
-  opens nothing in a chat; the web's `/status` card links it. Same text as last posted → nothing;
+  view's compact shared presentation, one per home chat: counted groups, title/status,
+  full phase or question, then time/goal/worker metadata, with a blank line between items;
+  multi-run summaries retain complete names and applicable states, omitting an ended root's outcome while its goal is live;
+  run IDs appear only in Web detail links, and old text-only `/status` notes retain the
+  legacy `withoutRunIds` transform. Same text as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
   none). Replies, notes and thread roots never move it; only `/status` in the
   main flow deletes it and posts it anew at the bottom, with the answer's text

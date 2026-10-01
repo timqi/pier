@@ -2,6 +2,7 @@
 // callbacks, delegations and runs are chips of the reply's bubble, each
 // opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openItemPresentation } from "../../core/open-items.js";
 import type { SystemInputOrigin } from "../../core/types.js";
 import { STREAM_PAINT_MS } from "./dom.js";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
@@ -13,19 +14,21 @@ let chat: typeof import("./chat.js");
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 vi.mock("./highlight.js", () => ({ highlightCode: async () => {} }));
 const select = vi.fn();
+const openItem = vi.fn();
 const quote = vi.fn();
 const send = vi.fn();
 
 beforeEach(async () => {
   vi.resetModules();
   select.mockClear();
+  openItem.mockClear();
   doc = installPage();
   // Only the tail-follow uses them, and the fake DOM has no layout to follow.
   for (const name of ["ResizeObserver", "MutationObserver"]) vi.stubGlobal(name, class { observe(): void {} });
   chat = await import("./chat.js");
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
-    select, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+    select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
   });
   quote.mockClear();
   send.mockClear();
@@ -59,6 +62,33 @@ it("draws the same links from a reloaded transcript, and none for an answer with
   chat.appendSystemInput(text, { kind: "chat-command", command: "status" });
   expect(links()).toEqual([]);
   expect(card().textContent).toContain(text);
+});
+
+it("replays fixed status rows with separate details and full targets, without guessing ambiguous old links", () => {
+  const p = openItemPresentation({ problem: "original problem", title: "Stable title", stage: "waiting on you: merge only this branch?",
+    status: "waiting on you", designSessionId: "full-design-session", runs: [{ runId: "full-run", name: "a later prompt", state: "running", targetSessionId: "full-design-session", queuedAt: 0, finishedAt: null, cwd: "/repo" }] }, 120_000);
+  const origin: SystemInputOrigin = { kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [p] } };
+  vi.spyOn(Date, "now").mockReturnValue(600_000);
+  chat.renderSnapshot([{ role: "system", text: "compact original text", origin }], "idle", []);
+  expect(card().textContent).toContain("Waiting on you · 1");
+  expect(card().querySelector(".open-item-stage")!.textContent).toBe("merge only this branch?");
+  expect(card().querySelector(".open-item-meta")!.textContent).toBe("elapsed 2m");
+  const disclosure = card().querySelector(".open-item-toggle")!;
+  disclosure.onclick?.();
+  expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  expect(openItem).not.toHaveBeenCalled();
+  expect(card().querySelector(".open-item-details")!.textContent).toContain("original problem");
+  card().querySelector(".session-open")!.onclick?.();
+  expect(openItem).toHaveBeenCalledWith(p);
+  card().querySelectorAll(".open-item-link").find((b) => b.textContent === "Session full-design-session")!.onclick?.();
+  expect(select).toHaveBeenCalledWith("full-design-session");
+  chat.appendSystemInput("run shared12… failed", { kind: "chat-command", command: "status", sessions: { "shared12-first": "one", "shared12-second": "two" } });
+  expect(links()).toEqual([]);
+  expect(card().textContent).toContain("ambiguous run prefix");
+  chat.appendSystemInput("Original status", { kind: "chat-command", command: "status", statusSnapshotError: "Invalid snapshot" });
+  expect(card().textContent).toContain("Original status");
+  expect(card().textContent).toContain("Invalid snapshot");
+  vi.restoreAllMocks();
 });
 
 /** A cause chip (`data-kind="system"` on the chip) and the detail it opens. */
@@ -409,7 +439,7 @@ describe("tail follow across the final render", () => {
     chat = await import("./chat.js");
     chat.initChat({
       sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming",
-      select, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+      select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
     });
   });
 
@@ -504,7 +534,7 @@ describe("file references", () => {
 
   it("falls back to the cwds earlier callbacks carried, most recent first, when the session's own has nothing", async () => {
     const asked = disk(["/w/main/src/a.ts", "/w/one/src/b.ts", "/w/two/src/b.ts", "/w/one/src/c.ts"]);
-    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote };
+    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote };
     chat.initChat(deps);
     const callback = (cwd: string) => chat.appendSystemInput("Task \"t\" finished with state: succeeded\n\nok", {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s", source: { taskName: "t" }, state: "succeeded", cwd,

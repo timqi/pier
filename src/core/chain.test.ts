@@ -56,7 +56,7 @@ function rig({
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   // The open items' text is tasks/open-items.ts's; the chain only places it.
-  const status = { text: "Nothing open.", sessions: {} as Record<string, string>, asked: [] as number[] };
+  const status = { text: "Nothing open.", seed: undefined as string | undefined, sessions: {} as Record<string, string>, asked: [] as number[] };
   const chain = new MainChain(db, {
     factory, router, home,
     ledger: (ids, since) => {
@@ -65,7 +65,7 @@ function rig({
     },
     status: (now) => {
       status.asked.push(now);
-      return { text: status.text, sessions: status.sessions };
+      return { text: status.text, seed: status.seed ?? status.text, snapshot: { version: 1, items: [] }, sessions: status.sessions };
     },
     defaults: async () => (typeof defaults.value === "function" ? defaults.value() : defaults.value),
     now: () => clock.now,
@@ -348,9 +348,10 @@ describe("the chat commands", () => {
   it("puts the open items in a new head's seed, after MEMORY.md", async () => {
     const r = rig();
     r.existing("h1", r.clock.now - 3 * IDLE_MS);
-    r.status.text = "Open\n- 60K rotation — waiting on you: keep 60K or raise to 80K?";
+    r.status.text = "Compact status";
+    r.status.seed = "Open\n- 60K rotation — waiting on you: keep 60K or raise to 80K?\nrun full-run-identity";
     await r.say("morning");
-    expect(r.sessions.get("m1")!.systemInputs[0]!.text).toContain("## Open\n\nOpen\n- 60K rotation — waiting on you: keep 60K or raise to 80K?\n\n## Runs");
+    expect(r.sessions.get("m1")!.systemInputs[0]!.text).toContain("## Open\n\nOpen\n- 60K rotation — waiting on you: keep 60K or raise to 80K?\nrun full-run-identity\n\n## Runs");
     expect(r.status.asked).toEqual([r.clock.now]);
   });
 
@@ -372,7 +373,7 @@ describe("the chat commands", () => {
     const r = rig();
     r.status.sessions = { "r-sess": "s-r" };
     await r.say("/status");
-    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { "r-sess": "s-r" } });
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { "r-sess": "s-r" }, statusSnapshot: { version: 1, items: [] } });
   });
 
   it("rotates on `/new` with the seed as the answer, once when the head was due anyway, and refuses a replying head", async () => {

@@ -22,14 +22,15 @@ beforeEach(async () => {
   conversation.current = null;
   installPage();
   vi.stubGlobal("location", { hash: "#/" });
-  vi.stubGlobal("history", { replaceState: (_a: unknown, _b: string, hash: string) => { location.hash = hash; } });
+  const setHash = (_a: unknown, _b: string, hash: string) => { location.hash = hash; };
+  vi.stubGlobal("history", { replaceState: setHash, pushState: setHash });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
   views = await import("./views.js");
   views.initViews({
     sessions: () => [], currentId: () => conversation.current, currentSession: () => session, select: conversation.select,
     inConversation: (id) => id.startsWith("chain-"), openContinuous: conversation.open,
-    maybeAckRead: vi.fn(),
+    maybeAckRead: vi.fn(), cancelNavigation: vi.fn(),
   });
 });
 afterEach(() => vi.unstubAllGlobals());

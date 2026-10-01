@@ -11,6 +11,8 @@ import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, plainText, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { openItemsCard } from "./open-items.js";
+import type { OpenItemTarget } from "../../core/types.js";
 import { button } from "./form.js";
 import { refreshSuggestions, renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
@@ -52,6 +54,7 @@ export interface ChatDeps {
   sessionChannel: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
+  openItem: (target: OpenItemTarget) => void;
   /** `quote`: the reply a next-step label answers, sent as a Reply to it. */
   send: (mode: "auto" | "steer", label?: string, quote?: QuoteSource) => void;
   /** A user turn this client just drew itself: ledger it so the `user-message`
@@ -508,7 +511,9 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const card = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   const [meta, body] = splitMetaBlock(withoutLanguage(text));
   // A result is the child's reply, so it reads as one; what was sent stays as sent.
-  const content = origin.kind === "task-callback" ? h("div", "mt-1.5") : runBody(body);
+  const content = origin.kind === "chat-command" && origin.statusSnapshot
+    ? openItemsCard(origin.statusSnapshot, deps)
+    : origin.kind === "task-callback" ? h("div", "mt-1.5") : runBody(body);
   const glyphEl = (): SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
   const labelCls = state ? STATE_STYLE[state].label : cls;
   const name = origin.kind === "session-seed" ? origin.reason
@@ -529,7 +534,10 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       runId: origin.runId,
       sessionId: origin.sourceSessionId,
     });
-  if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions, deps.select);
+  if (origin.kind === "chat-command" && !origin.statusSnapshot) {
+    if (origin.sessions) linkRuns(content, origin.sessions, deps.select);
+    if (origin.statusSnapshotError) content.append(h("p", "text-amber-700 mt-2", origin.statusSnapshotError));
+  }
   if (origin.kind === "task-callback") {
     // The child wrote these paths, so they resolve against its cwd, not this session's.
     renderMarkdown(content, body, origin.sourceSessionId ?? deps.sessionId(), origin.cwd ? [origin.cwd] : []);

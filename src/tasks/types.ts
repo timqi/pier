@@ -295,6 +295,7 @@ export const GOAL_STEP = "a goal's step, not its end";
 /** A run behind an open item; a lead's carries its own launches, counted by state,
  *  a goal's root the goal's step, round, cap and end, until a run is queued in its session after that end. */
 export interface OpenRun extends LedgerRun {
+  title?: string;
   workers?: Record<TaskRunState, number>;
   goal?: Pick<Goal, "step" | "round" | "cap" | "outcome" | "reason">;
 }
@@ -312,16 +313,22 @@ export type OpenStatus = "running" | "waiting on you" | "pending release" | "sto
  *  a `waiting on you` item is answered in, derived beside the status; absent
  *  when the answer is given in the main chat. */
 export interface OpenItem {
+  /** Automatic designs use their session identity; marker items default to their problem. */
+  key?: string;
   problem: string;
   stage: string;
   runs: OpenRun[];
   status: OpenStatus;
+  /** The session's creating run name, resolved from the ledger in one batch. */
+  title?: string;
+  /** The first associated design that has not reported Design final, independent of status. */
+  designSessionId?: string;
   waitsIn?: string;
 }
 
 /** What the continuous conversation is solving, as main last said it
- *  (docs/design/10-continuous-session.md#open-items). A session is in one
- *  item or one `unlisted` run, never two. */
+ *  (docs/design/10-continuous-session.md#open-items). Items keep their problem identity
+ *  even when several hold the same session. */
 export interface OpenItems {
   /** Main's items by `updated_at`, oldest first; then each design lead that has
    *  not reported `Design final:`, is not closed and no item holds, named by its

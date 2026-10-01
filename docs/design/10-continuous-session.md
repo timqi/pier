@@ -89,7 +89,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn) |
-| Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; each part is cut to its budget: `MEMORY.md` 12K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), each day's notes 6K and the exchanges 4K from the front by whole lines, headed by `… <N> lines omitted, the rest in <memory/<date>.md | session <id>>`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
+| Seed | `MEMORY.md`, `## Open` (§Open items' complete seed projection, `Nothing open.` included), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; each part is cut to its budget: `MEMORY.md` 12K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), each day's notes 6K and the exchanges 4K from the front by whole lines, headed by `… <N> lines omitted, the rest in <memory/<date>.md | session <id>>`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
@@ -133,8 +133,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   however old, so a lead woken again stays the same item; a token naming no run
   reads `run <id> — not in the ledger` (`NOT_IN_LEDGER`); a lead run's carries all
   its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
-  and running runs in no item's session; no listing window or cap applies;
-  `renderOpenItems` is the one text.
+  and running runs in no item's session; no listing window or cap applies.
+- Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem, on every surface.
+- Optional `designSessionId` is the first associated run target in `openDesigns`, independent of status or `waitsIn`; it changes navigation only, and disappears from fresh projections once the existing design lifecycle records `Design final:`.
 - Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading
   of its run tree — each run, its session, a lead's workers (workers never
   delegate, so that is the whole tree) — and its stage; first match wins:
@@ -152,30 +153,23 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
   `core/reply.ts`): `/status`'s first group, the status panel's, its chip's
   `needs you`; a finished worker's outcome is read from its lead's run, not its own.
-- An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
-  the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
-  60K or 80K?`); only work in flight or waiting on the user's decision now, the
-  backlog in MEMORY.md.
+- An item is keyed by `problem` in the user's words; `stage` holds concrete phase, question and valid authorization, omitting ledger-derived run state, time and review rounds; only work in flight or waiting on the user's decision now belongs here, with backlog in MEMORY.md.
 - A goal root's goal is read from the ledger (`TaskStore.goalOf`,
   by the run's session), never from the stage; a run queued in that session
   after the goal ended (the user's answer, the merge) carries it no more.
 - Every design lead not closed whose runs have not reported `Design final:`
   (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
-  named by its creating run, unless an item or an unlisted run already holds
-  its session: a session is in the list once.
-- The text: `Waiting on you`, the `waiting on you` items, then `In progress`,
-  every other item and each unlisted run as `- <name> — not on the list`; a line
-  is `- <problem> — <stage> (<status>)`, an unlisted run's status `queued` until
-  it starts, each run rendered ` · run <id8>… <state> <age>` (`openRunText`,
-  `core/reply.ts`), a lead's ` · workers: <counts>` and a goal's root's
-  ` · review: <text>` — `working`, `review n/cap`, `fixing for review n/cap`,
-  `merging` while live; `review clean, waiting on you`, `waiting on you`,
-  `cap reviews, still findings`, `merged`, `failed: <reason>` once ended; `Nothing open.` when
-  both are empty.
+  named by its creating run and keyed by its design session in both live rows and command snapshots,
+  unless an item or an unlisted run already holds its session; separate marker items may share that session.
+- `core/open-items.ts` builds the shared browser-safe presentation: title, necessary status, full stage/question, metadata, complete details and full run/session targets; only a waiting item's leading `waiting on you:` display prefix is omitted.
+- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview, including IM's multi-run summaries, while its goal is live; multiple runs read `N runs` with individual times in Details.
+- Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker failures/interruptions stay visible while all worker counts remain in Details.
+- `openItemsStatus` returns compact `text`, a complete `seed` retaining original problem/stage and full run/session identities, and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
+- Compact text and command cards group waiting rows under `Waiting on you`, running/queued under `In progress`, and pending release/stopped under `Other open`, with counts and no empty groups; IM separates title/status, stage and metadata by lines, with no non-clickable run IDs.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, kept out of the model's context (`agent/pi.ts`), its origin
-  carrying `sessions`, run id → session id for every run it names that has one; any
+  carrying `sessions`, run id → session id, and optional `statusSnapshot` with fixed display text and targets; replay validates the snapshot and logs a malformed one, retaining original text and a visible fallback notice. Old commands keep their text and uniquely resolvable run links; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card, and the web's status panel, opened by the bar's
   status chip — the same statuses as rows, `waiting on you` first in one list (`GET /api/continuous/open`),
