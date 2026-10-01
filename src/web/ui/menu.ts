@@ -33,12 +33,8 @@ function onOutside(ev: Event): void {
 const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
 const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
 
-/** A global chord on a list key (⌃K) must stand down while a menu is walking
- *  on it: the chord is a capture listener and would fire first. */
-export const menuOpen = (): boolean => panel !== null;
-
-/** Which way this keypress walks a list, if it does. Shared with the palette,
- *  so the menu and the palette answer to the same keys. */
+/** Which way this keypress walks a list, if it does. Shared with the composer's
+ *  command list, so the menu and the composer answer to the same keys. */
 export function listStep(ev: KeyboardEvent): number | undefined {
   if (ev.altKey || ev.metaKey || ev.shiftKey || !ev.key) return undefined; // no `key`: synthetic event
   return ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key];

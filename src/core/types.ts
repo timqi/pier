@@ -523,15 +523,28 @@ export interface SessionSummary {
   modified?: number;
 }
 
-/** One place a search found its query: the best-ranked message of a session,
- *  with each match delimited by \u0001…\u0002 inside `snippet` so a surface can
- *  mark them without searching again. `at` names the turn — `ChatTurn.at` for a
- *  user turn, `meta.completedAt` for a reply. */
+/** Where a search looks, every field ANDed. */
+export interface SearchScope {
+  /** Hits at most; the host refuses outside 1–50. */
+  limit: number;
+  /** ms; only messages at or after it. */
+  since?: number;
+  role?: "user" | "assistant";
+  /** Only these sessions; empty finds nothing. */
+  sessions?: string[];
+  /** Every session but these; empty excludes none. */
+  exclude?: string[];
+}
+
+/** One message that matched the query: `text` is the message with chat markup
+ *  off, cut to ~600 characters around the first match, `…` at a cut, nothing
+ *  marked. `at` names the turn — `ChatTurn.at` for a user turn,
+ *  `meta.completedAt` for a reply. */
 export interface SearchHit {
   sessionId: string;
   role: "user" | "assistant";
   at: number;
-  snippet: string;
+  text: string;
 }
 
 export interface AgentFactory {
@@ -555,9 +568,9 @@ export interface AgentFactory {
   /** The system prompt the model has, read off the transcript: undefined for
    *  a session that does not exist, null before any request carried one. */
   readSystemPrompt(sessionId: string): Promise<SystemPrompt | null | undefined>;
-  /** Sessions by what was said in them — user messages and replies, never
-   *  steps — at most one hit per session, best first. How the text is indexed
-   *  is the backend's business; core sees the hits. `limit` caps the hits;
-   *  absent, the backend's own default. */
-  search(query: string, limit?: number): Promise<SearchHit[]>;
+  /** Messages that say the query — user messages and replies, never steps —
+   *  one hit per message, several from one session alike, ranked best match
+   *  then newest. How the text is indexed is the backend's business; core sees
+   *  the hits inside `scope`. */
+  search(query: string, scope: SearchScope): Promise<SearchHit[]>;
 }

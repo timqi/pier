@@ -1,5 +1,5 @@
 // Exercise the real orchestrator with deferred HTTP and EventSource delivery;
-// surface renderers are spies while the palette, icons and error
+// surface renderers are spies while icons and error
 // reporting run on index.html's body, so no browser, Pi session or network is needed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTurn } from "../../core/types.js";

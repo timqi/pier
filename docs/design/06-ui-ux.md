@@ -17,13 +17,12 @@ updates this document.
 
 ## Materials
 
-- **Solid**: replies, modal forms, the search palette, file previews, menus and
-  popovers.
+- **Solid**: replies, modal forms, file previews, menus and popovers.
 - **Glass + hairline + shadow**: navigation and floating controls only. One
   token set — canvas one step darker than the panel, neutral translucent
   hairline (light in dark mode), top-edge highlight, two-part shadow (wide
   ambient + tight contact) — shared by the bar, floating controls and menus; the
-  composer and the search palette take it one step raised.
+  composer takes it one step raised.
 - Corner radii coordinate with nesting. Reuse the shared palette, controls,
   menus and time labels; no page-specific styles.
 - Canvas: pale neutral page edge, matched by installed-window theme metadata in
@@ -48,12 +47,6 @@ updates this document.
 - **Status panel**: one flat list, one row per session, what waits on you first — a dot (a topic's colour, pulsing while its run is live), the name, a second line for where it stands, and a worded status tag unless it is running, `waiting on you` the one solid tag, white on amber-700 — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
 - **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. A draft past one line takes the composer's full width, `+` and send/stop on a row under it; the line count is read at the one-line width, so the mode never flips as the wider box rewraps, and read again when the width changes.
-- **Palette**: solid panel with floating-chrome edge and raised shadow; flat
-  rows; keyboard selection a tinted pill, medium weight, no edge bar;
-  sentence-case section labels; matches marked by ink and weight. 0.9375rem
-  labels in 2.5rem rows (44px on touch); 1.75rem Lucide tile per row; no rules
-  between rows or groups; 0.8125rem subtitle truncating before the label;
-  0.75rem marks; 1.0625rem input in a 3.25rem band.
 - **Menus**: labels align without a reserved selection column; only selectable
   options reserve checkmarks; restrained separators; secondary hints truncate;
   focus leaving a nonmodal menu dismisses it. Phone sheets name the target

@@ -44,7 +44,6 @@ import {
   updateComposer,
 } from "./composer.js";
 import { initPush } from "./notifications.js";
-import { initPalette } from "./palette.js";
 import { initReport } from "./report.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
 import { initTheme } from "./theme.js";
@@ -634,13 +633,6 @@ initDrawer({
   openContinuous,
   open: () => openItems,
   showTopic,
-});
-initPalette({
-  sessions: () => sessions,
-  loadSessions: refreshSessions,
-  select,
-  openContinuous,
-  openConsole: showConsole,
 });
 initHeader({
   currentId: () => currentId,

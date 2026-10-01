@@ -49,8 +49,8 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   settings: "Settings",
 };
 
-/** Open a Console view by name — the ⋯ menu and the search palette both
- *  address them this way rather than clicking each other's buttons. */
+/** Open a Console view by name — callers address them this way rather
+ *  than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string, query?: string): void {
   // Switching tabs re-enters the same view: not a new origin.
   const from = parseHash();

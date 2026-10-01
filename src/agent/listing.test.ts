@@ -12,6 +12,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitSpeaker } from "../core/identity.js";
 import { saidText } from "../core/reply.js";
+import type { SearchScope } from "../core/types.js";
 import { openDb } from "../db.js";
 import { IndexedListing, type SessionRecord } from "./listing.js";
 
@@ -355,7 +356,7 @@ describe("the on-disk index", () => {
     expect(fts()).toEqual([]);
   });
 
-  it("finds a phrase by trigram, ranked, one hit per session with the match marked", async () => {
+  it("finds a phrase by trigram, ranked, one hit per message", async () => {
     await write("--p--", "s1", [
       header("s1", "/p"),
       user("please fix the Parser today", 60_000),
@@ -363,69 +364,95 @@ describe("the on-disk index", () => {
     ]);
     await write("--q--", "s2", [header("s2", "/q"), user("unrelated", 62_000), assistant("a parser", 63_000)]);
     await listing.scan();
-    const hits = listing.search("parser");
-    expect(hits.map((h) => h.sessionId).sort()).toEqual(["s1", "s2"]);
-    expect(hits).toHaveLength(2); // never two rows for one session
-    const s1 = hits.find((h) => h.sessionId === "s1");
-    expect(s1?.snippet).toContain("\u0001parser\u0002");
-    expect(s1?.at).toBe(61_000); // the reply that says it twice outranks the prompt
+    const hits = listing.search("parser", { limit: 10 });
+    // Both of s1's messages: no dedupe per session.
+    expect(hits.map((h) => h.at).sort()).toEqual([60_000, 61_000, 63_000]);
+    // Ranked, not by time: the reply that says it twice outranks the prompt.
+    expect(hits.findIndex((h) => h.at === 61_000)).toBeLessThan(hits.findIndex((h) => h.at === 60_000));
+    expect(hits.find((h) => h.at === 60_000)?.text).toBe("please fix the Parser today");
     // Case folds, and a space is "and this too": both terms, in any order.
-    expect(listing.search("the parser")).toHaveLength(1);
-    expect(listing.search("parser today").map((h) => h.sessionId)).toEqual(["s1"]);
-    expect(listing.search("today please").map((h) => h.sessionId)).toEqual(["s1"]);
-    expect(listing.search("parser unrelated")).toEqual([]); // one message, not one session
-    // Each term is marked where it lands, and FTS syntax in a term is text.
-    expect(listing.search("please today")[0]?.snippet).toBe(
-      "\u0001please\u0002 fix the Parser \u0001today\u0002",
-    );
-    expect(listing.search('fix "OR" nothing')).toEqual([]);
-    expect(listing.search("parser", 1)).toHaveLength(1);
+    expect(listing.search("the parser", { limit: 10 })).toHaveLength(2);
+    expect(listing.search("parser today", { limit: 10 }).map((h) => h.at)).toEqual([60_000]);
+    expect(listing.search("today please", { limit: 10 }).map((h) => h.at)).toEqual([60_000]);
+    expect(listing.search("parser unrelated", { limit: 10 })).toEqual([]); // one message, not one session
+    expect(listing.search('fix "OR" nothing', { limit: 10 })).toEqual([]);
+    expect(listing.search("parser", { limit: 1 })).toHaveLength(1);
   });
 
-  it("cuts the snippet from what was said with chat markup off, centered on the match", async () => {
+  it("scopes a search by time, speaker and session, on both paths", async () => {
+    await write("--p--", "s1", [header("s1", "/p"), user("parser 解析", 60_000), assistant("parser 解析 done", 61_000)]);
+    await write("--q--", "s2", [header("s2", "/q"), user("parser 解析 again", 70_000)]);
+    await write("--r--", "s3", [header("s3", "/r"), assistant("parser 解析 there", 80_000)]);
+    await listing.scan();
+    for (const q of ["parser", "解析"]) {
+      const at = (scope: Omit<SearchScope, "limit">): number[] =>
+        listing.search(q, { limit: 10, ...scope }).map((h) => h.at).sort();
+      expect(at({})).toEqual([60_000, 61_000, 70_000, 80_000]);
+      expect(at({ since: 70_000 })).toEqual([70_000, 80_000]);
+      expect(at({ role: "user" })).toEqual([60_000, 70_000]);
+      expect(at({ role: "assistant", since: 61_000 })).toEqual([61_000, 80_000]);
+      expect(at({ sessions: ["s1", "s3"] })).toEqual([60_000, 61_000, 80_000]);
+      expect(at({ sessions: [] })).toEqual([]);
+      expect(at({ exclude: ["s1"] })).toEqual([70_000, 80_000]);
+      expect(at({ exclude: [] })).toEqual([60_000, 61_000, 70_000, 80_000]);
+      expect(at({ sessions: ["s1", "s2"], exclude: ["s2"], role: "user" })).toEqual([60_000]);
+      expect(listing.search(q, { limit: 2 })).toHaveLength(2);
+    }
+    // Substring path: newest first.
+    expect(listing.search("解析", { limit: 2 }).map((h) => h.at)).toEqual([80_000, 70_000]);
+  });
+
+  it("cuts the text from what was said with chat markup off, centered on the match", async () => {
     const said = new IndexedListing(dir, db, (text) => splitSpeaker(text).text, saidText);
     const filler = "x".repeat(200);
     await write("--p--", "s1", [
       header("s1", "/p"),
       assistant(`<open>${filler} — stage</open>\nthe parser is fixed now\n\n---\n[Run it] | [Show the diff]`, 61_000),
     ]);
-    await write("--q--", "s2", [header("s2", "/q"), assistant(`<silent>${filler}</silent>${"y".repeat(100)} 解析 done`, 62_000)]);
+    await write("--q--", "s2", [header("s2", "/q"), assistant(`<silent>${filler}</silent>${"y".repeat(1000)} 解析 done`, 62_000)]);
+    await write("--r--", "s3", [header("s3", "/r"), user(`${"z".repeat(700)} needle ${"w".repeat(700)}`, 63_000)]);
     await said.scan();
-    expect(said.search("parser")).toEqual([
-      { sessionId: "s1", role: "assistant", at: 61_000, snippet: "the \u0001parser\u0002 is fixed now" },
+    expect(said.search("parser", { limit: 10 })).toEqual([
+      { sessionId: "s1", role: "assistant", at: 61_000, text: "the parser is fixed now" },
     ]);
-    expect(said.search("解析")[0]?.snippet).toBe(`…${"y".repeat(31)} \u0001解析\u0002 done`);
-    // A match only inside the markup still names its session, by the message's opening.
-    expect(said.search("stage")[0]?.snippet).toBe("the parser is fixed now");
+    // Near the end: the window keeps its 600 characters, cut only before.
+    const tail = said.search("解析", { limit: 10 })[0]?.text;
+    expect(tail).toBe(`…${"y".repeat(592)} 解析 done`);
+    // In the middle: cut on both sides, the match inside, no marks.
+    const mid = said.search("needle", { limit: 10 })[0]?.text ?? "";
+    expect(mid).toMatch(/^…z+ needle w+…$/);
+    expect(mid.length).toBe(602);
+    // A match only inside the markup still names its message, by its opening.
+    expect(said.search("stage", { limit: 10 })[0]?.text).toBe("the parser is fixed now");
   });
 
-  it("leaves no marker or button row in a snippet whose match is only in the buttons", async () => {
+  it("leaves no marker or button row in a text whose match is only in the buttons", async () => {
     const said = new IndexedListing(dir, db, (text) => splitSpeaker(text).text, saidText);
     const reply = "stable 已更新到 `34cd771` 并构建成功，15 秒后自动重启。我这里还没确认 Pier 已经起来。\n\n重启后可以照 [实测清单](file:///home/qiqi/.pier/artifacts/live-verify-checklist.md) 逐项试。另外 `lead.test.ts` 偶发失败还没修，要修的话说一声。\n\n<done>计划内遗留</done>\n\n---\n[修 flaky 测试] | [先不做]";
     await write("--p--", "s1", [header("s1", "/p"), assistant(reply, 61_000)]);
     await said.scan();
-    const snippet = said.search("flaky")[0]?.snippet;
-    expect(snippet).toBe("stable 已更新到 `34cd771` 并构建成功，15 秒后自动重启。我这里还没确认 Pier 已经起来。\n\n重启后可以照…");
-    expect(said.search("偶发失败")[0]?.snippet).not.toMatch(/<done>|---|\[先不做\]/);
+    const text = said.search("flaky", { limit: 10 })[0]?.text;
+    expect(text).toBe("stable 已更新到 `34cd771` 并构建成功，15 秒后自动重启。我这里还没确认 Pier 已经起来。\n\n重启后可以照 [实测清单](file:///home/qiqi/.pier/artifacts/live-verify-checklist.md) 逐项试。另外 `lead.test.ts` 偶发失败还没修，要修的话说一声。");
+    expect(said.search("偶发失败", { limit: 10 })[0]?.text).not.toMatch(/<done>|---|\[先不做\]/);
   });
 
-  it("finds a two-character CJK query by substring, newest first, marked the same way", async () => {
+  it("finds a two-character CJK query by substring, newest first", async () => {
     await write("--p--", "s1", [header("s1", "/p"), user("修复解析器的问题", 60_000)]);
     await write("--q--", "s2", [header("s2", "/q"), user("解析失败了", 70_000), assistant("已经修好", 71_000)]);
     await listing.scan();
-    expect(listing.search("解析")).toEqual([
-      { sessionId: "s2", role: "user", at: 70_000, snippet: "\u0001解析\u0002失败了" },
-      { sessionId: "s1", role: "user", at: 60_000, snippet: "修复\u0001解析\u0002器的问题" },
+    expect(listing.search("解析", { limit: 10 })).toEqual([
+      { sessionId: "s2", role: "user", at: 70_000, text: "解析失败了" },
+      { sessionId: "s1", role: "user", at: 60_000, text: "修复解析器的问题" },
     ]);
     // Three characters is a phrase again.
-    expect(listing.search("解析器").map((h) => h.sessionId)).toEqual(["s1"]);
-    // One short term puts every term on the substring path, and each is marked.
-    expect(listing.search("解析 失败")).toEqual([
-      { sessionId: "s2", role: "user", at: 70_000, snippet: "\u0001解析\u0002\u0001失败\u0002了" },
+    expect(listing.search("解析器", { limit: 10 }).map((h) => h.sessionId)).toEqual(["s1"]);
+    // One short term puts every term on the substring path.
+    expect(listing.search("解析 失败", { limit: 10 })).toEqual([
+      { sessionId: "s2", role: "user", at: 70_000, text: "解析失败了" },
     ]);
-    expect(listing.search("解析 修好")).toEqual([]); // one message, not one session
+    expect(listing.search("解析 修好", { limit: 10 })).toEqual([]); // one message, not one session
     // LIKE's wildcards are characters here, not patterns.
-    expect(listing.search("%")).toEqual([]);
-    expect(listing.search("   ")).toEqual([]);
+    expect(listing.search("%", { limit: 10 })).toEqual([]);
+    expect(listing.search("   ", { limit: 10 })).toEqual([]);
   });
 });

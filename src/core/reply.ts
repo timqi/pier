@@ -310,8 +310,8 @@ const unmarked = (markdown: string): string =>
   replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim();
 
 /** What a message says with Pier's markup off — `<silent>`, the open-item
- *  markers, the next-step block — and otherwise untouched: search cuts its
- *  snippets from this. */
+ *  markers, the next-step block — and otherwise untouched: search cuts a
+ *  hit's text from this. */
 export function saidText(markdown: string): string {
   const body = unmarked(markdown);
   const m = BLOCK.exec(body);

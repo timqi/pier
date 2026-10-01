@@ -375,20 +375,6 @@ describe("workbench server", () => {
     ]);
   });
 
-  // The factory owns the index; the route trims, and asks nothing for nothing.
-  it("searches what was said through the factory, and answers an empty query without asking", async () => {
-    const { app, factory } = setup();
-    const hit = { sessionId: "s1", role: "user" as const, at: 5, snippet: "fix the \u0001parser\u0002" };
-    vi.mocked(factory.search).mockResolvedValue([hit]);
-    const res = await app.request("/api/search?q=%20parser%20");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ hits: [hit] });
-    expect(factory.search).toHaveBeenCalledExactlyOnceWith("parser");
-    expect(await (await app.request("/api/search?q=%20")).json()).toEqual({ hits: [] });
-    expect(await (await app.request("/api/search")).json()).toEqual({ hits: [] });
-    expect(factory.search).toHaveBeenCalledTimes(1);
-  });
-
   // The dot is a number, so the list asks for the numbers once: a finished run
   // and a foreground one are not in flight, and a session that launched
   // nothing says so. The per-session route still reads whole run objects.

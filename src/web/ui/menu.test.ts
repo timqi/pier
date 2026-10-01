@@ -1,5 +1,5 @@
 // The two moves a list answers to, in one place: the anchored menus and the
-// palette must not drift on which keys walk them.
+// composer's command list must not drift on which keys walk them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 import { listStep } from "./menu.js";
@@ -50,6 +50,7 @@ describe("closing", () => {
     Object.defineProperty(ev, "target", { value: target });
     on.dispatchEvent(ev);
   };
+  const isOpen = (): boolean => anchor.getAttribute("aria-expanded") === "true";
   const open = (): FakeElement => {
     const content = doc.createElement("div");
     content.append(doc.createElement("button"));
@@ -59,7 +60,7 @@ describe("closing", () => {
   it("stays open while a pane that does not hold the anchor scrolls, as the transcript does when a reply lands", () => {
     open();
     fire(win, "scroll", pane);
-    expect(menu.menuOpen()).toBe(true);
+    expect(isOpen()).toBe(true);
     expect(anchor.getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -67,16 +68,16 @@ describe("closing", () => {
     const panel = open();
     fire(win, "scroll", panel);
     fire(doc, "wheel", panel.firstElementChild);
-    expect(menu.menuOpen()).toBe(true);
+    expect(isOpen()).toBe(true);
   });
 
   it("closes when a scroll carries the anchor away", () => {
     open();
     fire(win, "scroll", doc);
-    expect(menu.menuOpen()).toBe(false);
+    expect(isOpen()).toBe(false);
     open();
     fire(win, "scroll", anchor.parentElement);
-    expect(menu.menuOpen()).toBe(false);
+    expect(isOpen()).toBe(false);
   });
 
   it("closes when the user wheels, points or focuses outside it, and on Esc", () => {
@@ -88,7 +89,7 @@ describe("closing", () => {
     ]) {
       open();
       act();
-      expect(menu.menuOpen()).toBe(false);
+      expect(isOpen()).toBe(false);
       expect(anchor.hasAttribute("aria-expanded")).toBe(false);
     }
   });
@@ -98,10 +99,10 @@ describe("closing", () => {
     open();
     fire(doc, "pointerdown", anchor);
     fire(doc, "focusin", anchor);
-    expect(menu.menuOpen()).toBe(true);
+    expect(isOpen()).toBe(true);
     anchor.removeAttribute("aria-haspopup");
     fire(doc, "pointerdown", anchor);
-    expect(menu.menuOpen()).toBe(false);
+    expect(isOpen()).toBe(false);
   });
 
   it("leaves nothing listening once closed", () => {
@@ -111,6 +112,6 @@ describe("closing", () => {
     menu.closeMenu();
     fire(doc, "wheel", pane);
     expect(other.dataset.closing).toBe("");
-    expect(menu.menuOpen()).toBe(false);
+    expect(isOpen()).toBe(false);
   });
 });

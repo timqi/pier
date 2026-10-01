@@ -15,7 +15,6 @@ vi.mock("./menu.js", () => ({
   },
 }));
 vi.mock("./notifications.js", () => ({ setUnreadBadge: vi.fn() }));
-vi.mock("./palette.js", () => ({ refreshPalette: vi.fn() }));
 vi.mock("./shortcut.js", () => ({ chord: vi.fn(), modalOpen: vi.fn() }));
 
 type Row = import("./drawer.js").SessionInfo;

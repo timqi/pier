@@ -1,12 +1,10 @@
 // The status panel: what needs you and what is running, counted on the bar's
 // status chip and listed in the panel it opens — the open items and the live
 // sessions no item holds, one row each.
-// The palette borrows the dots.
 
 import { $, agoLabel, h } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
-import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { topicColour } from "./topics.js";
 import { openRunText, waitsOnYou } from "../../core/reply.js";
@@ -128,7 +126,7 @@ export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionIn
   return list.filter((s) => isLive(s) && !members.has(s.id));
 }
 
-/** The conversation's head row, whose dot the `‹` and the palette's Pier row wear. */
+/** The conversation's head row, whose dot the `‹` wears. */
 export const headSession = (): SessionInfo | undefined => {
   const head = deps.chain()[0]?.sessionId;
   return deps.sessions().find((s) => s.id === head);
@@ -311,7 +309,6 @@ export function renderDrawer(): void {
     if (!shown) closeMenu();
     else fill(list);
   }
-  refreshPalette(); // its dots read the same sessions
 }
 
 /** Refill keeping the focused control focused: Escape has to find its way back. */
@@ -335,6 +332,6 @@ export function openDrawer(): void {
 export function initDrawer(d: DrawerDeps): void {
   deps = d;
   chip.onclick = openDrawer;
-  // Stands down under a modal: the palette is in the top layer, so this panel would open behind it.
+  // Stands down under a modal: it is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
 }

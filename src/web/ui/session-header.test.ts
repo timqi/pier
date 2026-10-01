@@ -25,8 +25,6 @@ vi.mock("./drawer.js", () => ({
   // Marked so the chip's title proves it uses the drawer's words, which
   // drawer.test.ts owns, rather than spelling its own second copy.
 }));
-const palette = vi.hoisted(() => ({ togglePalette: vi.fn() }));
-vi.mock("./palette.js", () => palette);
 const systemPrompt = vi.hoisted(() => ({ openSystemPrompt: vi.fn() }));
 vi.mock("./system-prompt.js", () => systemPrompt);
 
@@ -146,18 +144,15 @@ async function menuItems() {
   return vi.mocked(openMenu).mock.lastCall![1];
 }
 
-it("offers Search first on the conversation, and the rest without it on a child", async () => {
+it("offers the same ⋯ items on the conversation and on a child", async () => {
   conversation = true;
   current = session(0);
   header.renderHeader();
   const items = await menuItems();
-  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "System prompt", "Browse files", "Model & reasoning…", "Settings"]);
-  expect(items[0]!.hint).toBe("⌘K");
-  items[0]!.onSelect();
-  expect(palette.togglePalette).toHaveBeenCalledOnce();
-  items[2]!.onSelect();
+  expect(items.map((i) => i.label)).toEqual(["Session info", "System prompt", "Browse files", "Model & reasoning…", "Settings"]);
+  items[1]!.onSelect();
   expect(systemPrompt.openSystemPrompt).toHaveBeenCalledWith(current);
-  items[5]!.onSelect();
+  items[4]!.onSelect();
   expect(openSettings).toHaveBeenCalledOnce();
 
   conversation = false;
@@ -177,7 +172,7 @@ it("keeps ⋯ on a conversation with no session yet, its session actions disable
   expect(byLabel("Session info")).toMatchObject({ disabled: true, hint: "after the first reply" });
   expect(byLabel("System prompt")).toMatchObject({ disabled: true, hint: "after the first reply" });
   expect(byLabel("Model & reasoning…")).toMatchObject({ disabled: true, hint: "after the first reply" });
-  expect(byLabel("Search").disabled).toBeUndefined();
+  expect(byLabel("Settings").disabled).toBeUndefined();
 });
 
 // The ‹ is the way back from a child, wearing the head's dot while the

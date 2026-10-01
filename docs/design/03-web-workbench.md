@@ -30,7 +30,6 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
-| `GET /api/search?q=` | content hits for the palette (below): `{hits}`, empty for an empty query |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
 | `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`not loaded — <why>`); `<agentDir>/extensions/rtk.ts` is left out, being the rtk tool's (`PUT` on it is 404); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
@@ -145,7 +144,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 `.select`, `.md`, …). `npm run dev:web` gives HMR with an `/api` proxy to
 :3141; `tsconfig.web.json` is the typecheck gate.
 
-`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Unread state lives in `web/session-state.ts`.
+`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Unread state lives in `web/session-state.ts`.
 
 ### Data flow
 
@@ -181,29 +180,21 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
 - The status chip reads `N running · M needs you`, the panel's `running` and `waiting on you` rows counted, and opens the status panel; with rows but neither count (only `pending release`, `stopped` or `queued`) it reads `K open`, the row count; with no rows it is absent and the panel cannot open. The app icon badge counts only a turn to look at — a design not yet reported final and an unread turn (**Unread** above) outside the conversation — plus the conversation's own unread reply.
 - Context chip: Pier shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
-- The ⋯ menu contains Search ⌘K, Session info, System prompt, Browse files, Model & reasoning…, and Settings; Search is shown on Pier only. Session info, System prompt and model actions are disabled before the first reply.
+- The ⋯ menu contains Session info, System prompt, Browse files, Model & reasoning…, and Settings. Session info, System prompt and model actions are disabled before the first reply.
 - The status panel is the one place the web shows what is going on: one flat list, no group heads, the rows `waiting on you` first and the rest after in `/status`'s order ([10 §Open items](10-continuous-session.md#open-items)).
 - One row per session: the open items (`GET /api/continuous/open`), then its unlisted runs, then the live sessions outside Pier none of them holds. A session is live while streaming, while a run targets it or while runs it launched are in flight, while its last turn is unread, or while its design waits on Finalize. A failed run's callback reaches the head, so a failure is the head's unread, never a row.
 - Every row reads the same: a dot, the name (an item's problem, a run's or session's title) and one second line with where it stands, then a status tag on the right unless the row is `running`: `waiting on you` (white on amber-700, the one solid tag, the one that asks something), `pending release`, `stopped` or `queued`. A row sorts first only with `waiting on you` (`waitsOnYou`, a session's by its mark), and the chip and badge count by the same predicate. An item's status is the server's (`openStatus`, [10 §Open items](10-continuous-session.md#open-items)).
 - An item's dot is its topic's colour and an unlisted run's grey, pulsing while one of its runs is `running`; its second line is its stage, or its runs (`run <id8>… <state> <age>`) when it names none; the runs, who works them and their cwd are the row's tooltip. A session's dot is its mark (`stateDot`), its who (`lead · <phase>`, an IM session's channel) a tag, its second line `working`, `N subagents running`, `run queued`, `turn finished — not viewed yet` or `design — finalize when it is ready` with `active <age>`.
 - Re-read on `sessions-changed`, `task-run-changed`, `open-items-changed`, and a state change of a session an item holds.
-- An item row opens the conversation, waits for a load already on its way, and reveals its topic's latest reply on screen (`revealTopic`, the search hit's ring); with none on screen the row opens its first run's session, or with none the pane scrolls to its tail. An item that waits in a child session (`waitsIn`) opens that session. A reader who opened another session meanwhile is left there. Any other row opens its session in the column (`#/session/<id>`), an unlisted run with no session the conversation. Either closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
+- An item row opens the conversation, waits for a load already on its way, and reveals its topic's latest reply on screen (`revealTopic`, a ring that fades); with none on screen the row opens its first run's session, or with none the pane scrolls to its tail. An item that waits in a child session (`waitsIn`) opens that session. A reader who opened another session meanwhile is left there. Any other row opens its session in the column (`#/session/<id>`), an unlisted run with no session the conversation. Either closes the panel; viewing marks it read, so an amber row leaves. Reload lands where the hash says; a bare or unknown hash is the conversation. A child session takes messages on `POST /api/sessions/:id/messages` like any session.
 - The panel is a 32rem popover under the status chip at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The chip or ⌘⇧P opens it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the chip.
-- Counts and rows share `drawer.ts` state; session and open-item changes refresh the panel and the palette's dots.
-
-### Search palette (`palette.ts`, ⌘K)
-
-- Empty query: Pier, Recent and Actions; what is running is the status panel's, not the palette's. Pier is always first, with the head's dot — the one way back from anywhere. Recent is the sessions not live (finished leads, IM sessions, earlier chain members); Actions is Settings and its topics. On a phone the palette is the ⋯ menu's first item.
-- Typed query: Pier when "pier" or "conversation" matches, Settings actions, named sessions, then content hits from `GET /api/search?q=`. Content hits search user messages and replies, not steps.
-- Whitespace splits the query into terms; every term must match. Local rows render immediately and content search starts after 80ms.
-- A content hit opens the session at the matched turn when it remains in the transcript.
-- Keys: ↑↓ / ⌃N ⌃P / ⌃J ⌃K move; ↵ opens; Esc or backdrop closes.
+- Counts and rows share `drawer.ts` state; session and open-item changes refresh the panel.
 
 ### Menus (`menu.ts`, `model-picker.ts`)
 
 - One menu primitive allows one open panel at a time. Outside pointerdown, wheel or focus, Esc, and a scroll that moves its anchor close it; the page's own scrolling (the transcript pinning a reply) does not. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
-- The bar menu provides Search, Session info, System prompt, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- The bar menu provides Session info, System prompt, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 - System prompt (`system-prompt.ts`) is a read-only modal dialog: the estimated total, one block per source with its label, path and share, and a Copy of the whole text; it opens before the read lands and says in place why it has nothing to show. ✕ or Esc closes it.
 
@@ -364,7 +355,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   The textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills, a
   tap on a row does the same without blurring the textarea (a finger that
   moved is a scroll, not a pick), Esc closes the
-  list until the draft changes. Rows are the palette's (`.palette-row`, the
+  list until the draft changes. Rows are `.list-row`s (the Files dialog's
   `bg-indigo-50` selection), word in mono, line truncated, `role=listbox`/
   `option` with `aria-selected`, 44px on touch; past eight rows the list
   scrolls inside itself.

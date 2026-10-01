@@ -35,10 +35,10 @@ truth.
 
 - Pier is one conversation, on the web and in the home chat (below): the
   status chip opens the status panel — what is running over the open items;
-  the rest is in ⌘K. Its current session, the head, runs in `$PIER_HOME/home`,
+  the ⋯ menu holds the rest. Its current session, the head, runs in `$PIER_HOME/home`,
   which holds memory only: `MEMORY.md` and daily notes in `memory/`.
-- Recall: `rg` over `memory/`; `pier search <words>` over every earlier
-  session's transcript.
+- Recall: `rg` over `memory/`; `pier search --in pier <words>` over what the
+  user and Pier said; `--since` narrows a time such as last week.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
   session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
   and the last exchanges.

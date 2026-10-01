@@ -25,7 +25,7 @@ export interface SocketHosts {
   /** `pier web`'s search or fetch, on the instance's model auth; the caller's
    *  session names the active model. */
   web: (params: unknown, callerSessionId: string) => Promise<unknown>;
-  /** `pier search`: the transcripts by what was said in them (`core/search.ts`). */
+  /** `pier search`: the messages said in Pier and every other session (`core/search.ts`). */
   search: (params: unknown, callerSessionId: string) => Promise<unknown>;
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */

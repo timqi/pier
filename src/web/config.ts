@@ -9,7 +9,7 @@ import { managedRefusal } from "./config-sync.js";
 import { guarded } from "./route.js";
 
 interface ConfigRouteDeps {
-  factory: AgentFactory;
+  factory: Pick<AgentFactory, "list">;
   config: ConfigStore;
   /** An agent file is read when a session opens; idle ones are recycled after a save. */
   onConfigWritten?: () => void;

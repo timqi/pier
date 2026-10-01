@@ -6,7 +6,7 @@ import type { AgentFactory } from "../core/types.js";
 import { PackageError, type PackageErrorReason, type PackageStore, type PackageSwitch } from "../agent/types.js";
 
 interface PackageRouteDeps {
-  factory: AgentFactory;
+  factory: Pick<AgentFactory, "list">;
   packages: PackageStore;
   /** Packages are read when a session opens; idle ones are recycled after a write. */
   onConfigWritten?: () => void;

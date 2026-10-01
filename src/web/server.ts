@@ -118,7 +118,7 @@ export const withAccentIcon = (svg: string, accent: string): string =>
   svg.replace(`fill="${ICON_PLATE}"`, `fill="${ACCENTS[accent || DEFAULT_ACCENT]}"`);
 
 interface WebDeps {
-  factory: AgentFactory;
+  factory: Omit<AgentFactory, "search">;
   router: Router;
   hub: EventHub;
   sessions: SessionStateStore;
@@ -148,8 +148,8 @@ interface WebDeps {
   parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** `TaskStore.leads`: every lead session, tagged by its phase in the session list and
-   *  the palette, `runLive` while a run targeting it is queued or running,
+  /** `TaskStore.leads`: every lead session, tagged by its phase in the session list,
+   *  `runLive` while a run targeting it is queued or running,
    *  `designOpen` while a design of it waits on the user to finalize. */
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean; designOpen: boolean }>;
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
@@ -325,14 +325,6 @@ export function createServer(
     const summary = (await listSessions()).find((s) => s.id === id);
     if (!summary) return c.json({ error: `no session ${id}` }, 404);
     return c.json(present(summary, state.flags().get(id), activeRuns(), leads?.() ?? new Map()));
-  });
-
-  // What was said, across every session: the palette's Messages section. The
-  // factory owns the index and the ranking; an empty query is an empty answer,
-  // not a listing of everything.
-  app.get("/api/search", async (c) => {
-    const q = (c.req.query("q") ?? "").trim();
-    return c.json({ hits: q ? await factory.search(q) : [] });
   });
 
   app.post("/api/sessions/:id/read", (c) => {

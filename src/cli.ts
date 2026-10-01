@@ -32,7 +32,7 @@ Usage
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
   pier task <command> ...     subagents and scheduled tasks from a shell (pier task --help)
   pier web search|fetch ...   the public web through the provider's hosted tools (pier web --help)
-  pier search <q...> ...      earlier sessions by what was said in them (skills/pier-search)
+  pier search <q...> ...      earlier messages by what was said, Pier's first (skills/pier-search)
   pier --version | --help
 
 Options for "service install"

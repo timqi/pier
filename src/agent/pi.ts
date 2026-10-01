@@ -27,6 +27,7 @@ import type {
   ContextUsage,
   ModelRef,
   SearchHit,
+  SearchScope,
   SessionEventPayload,
   SessionState,
   SessionSummary,
@@ -947,8 +948,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   }
 
   /** After a listing, so a transcript that grew is indexed before it is asked about. */
-  async search(query: string, limit?: number): Promise<SearchHit[]> {
+  async search(query: string, scope: SearchScope): Promise<SearchHit[]> {
     await this.listed();
-    return this.listings.search?.(query, limit) ?? [];
+    return this.listings.search?.(query, scope) ?? [];
   }
 }

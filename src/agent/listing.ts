@@ -2,12 +2,12 @@
 // byte once: Pi's own listing parses every file whole (~250ms for 30MB) and
 // every surface asks. Rows live in pier.db keyed by path and validated by
 // (size, mtime); a file that grew resumes where the last scan stopped. The same
-// pass indexes what was said into `session_fts` for the palette.
+// pass indexes what was said into `session_fts` for `pier search`.
 
 import { createReadStream, promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import type { SearchHit } from "../core/types.js";
+import type { SearchHit, SearchScope } from "../core/types.js";
 import { pierDb, statements, transact } from "../db.js";
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
@@ -32,7 +32,7 @@ export interface SessionRecord {
 export interface SessionListing {
   scan(): Promise<SessionRecord[]>;
   audit?(native: () => Promise<NativeInfo[]>): Promise<number>;
-  search?(query: string, limit?: number): SearchHit[];
+  search?(query: string, scope: SearchScope): SearchHit[];
 }
 
 /** Declared rather than imported: this file must not see the SDK. */
@@ -154,39 +154,24 @@ function fold(
   return acc;
 }
 
-/** A picker, not a results page. */
-const SEARCH_LIMIT = 8;
-
-/** Characters of context a snippet keeps around its first match. */
-const SNIPPET_CHARS = 64;
+/** Characters of the message a hit keeps around its first match: enough to
+ *  answer from without opening the session. */
+const TEXT_CHARS = 600;
 
 /** Whitespace splits a query: a space is "and this too", not a character to
  *  find. A term is quoted where it has to be, so a phrase is still findable. */
 const termsOf = (query: string): string[] => query.split(/\s+/).filter(Boolean);
 
 /** Cut here rather than by FTS `snippet()`, which can only cut the indexed
- *  text, markup and all. Each match delimited \u0001 … \u0002, `…` for a cut;
- *  every term is marked where it first appears inside the window. A match only
- *  inside stripped markup leaves the message's opening. */
+ *  text, markup and all. `…` for a cut; a match only inside stripped markup
+ *  leaves the message's opening. */
 function around(text: string, terms: string[]): string {
   const lower = text.toLowerCase();
-  const found = terms
-    .map((term) => ({ at: lower.indexOf(term.toLowerCase()), length: term.length }))
-    .filter((mark) => mark.at >= 0)
-    .sort((a, b) => a.at - b.at);
-  const first = found[0];
-  if (!first) return text.length > SNIPPET_CHARS ? `${text.slice(0, SNIPPET_CHARS)}…` : text;
-  const start = Math.max(0, first.at - SNIPPET_CHARS / 2);
-  const end = Math.min(text.length, first.at + first.length + SNIPPET_CHARS / 2);
-  let out = start ? "…" : "";
-  let at = start;
-  for (const mark of found) {
-    // Terms that overlap one another, or reach past the window, mark once.
-    if (mark.at < at || mark.at + mark.length > end) continue;
-    out += `${text.slice(at, mark.at)}\u0001${text.slice(mark.at, mark.at + mark.length)}\u0002`;
-    at = mark.at + mark.length;
-  }
-  return `${out}${text.slice(at, end)}${end < text.length ? "…" : ""}`;
+  const first = Math.min(...terms.map((term) => lower.indexOf(term.toLowerCase())).filter((at) => at >= 0));
+  if (!Number.isFinite(first)) return text.length > TEXT_CHARS ? `${text.slice(0, TEXT_CHARS)}…` : text;
+  const start = Math.max(0, Math.min(first - TEXT_CHARS / 2, text.length - TEXT_CHARS));
+  const end = Math.min(text.length, start + TEXT_CHARS);
+  return `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
 interface FtsRow {
@@ -206,7 +191,7 @@ export class IndexedListing implements SessionListing {
     /** Handed in rather than imported: the header rule is core's, and agent/
      *  does not import core at runtime. */
     private readonly clean: (text: string) => string = (text) => text,
-    /** Chat markup off what was said, before a snippet is cut (core/reply.ts):
+    /** Chat markup off what was said, before a hit's text is cut (core/reply.ts):
      *  applied at search time, so rows indexed before it are covered too. */
     private readonly plain: (text: string) => string = (text) => text,
   ) {
@@ -321,37 +306,41 @@ export class IndexedListing implements SessionListing {
   /** Every term must appear, in any order, anywhere in the one message. Under
    *  three code points the trigram tokenizer has nothing to match, and a
    *  two-character term is what a CJK word often is: substring scan instead —
-   *  one short term puts the whole query on that path. */
-  search(query: string, limit = SEARCH_LIMIT): SearchHit[] {
-    const sql = this.#sql();
+   *  one short term puts the whole query on that path. The scope filters the
+   *  UNINDEXED columns; an id list travels as one JSON parameter, so the
+   *  statement text stays one per filter shape. */
+  search(query: string, scope: SearchScope): SearchHit[] {
     const terms = termsOf(query);
-    if (!terms.length) return [];
-    const rows = terms.every((term) => [...term].length >= 3)
+    if (!terms.length || scope.sessions?.length === 0) return [];
+    const where: string[] = [];
+    const params: (string | number)[] = [];
+    const short = !terms.every((term) => [...term].length >= 3);
+    if (short) {
+      where.push(...terms.map(() => "text LIKE ? ESCAPE '\\'"));
+      params.push(...terms.map((term) => `%${term.replaceAll(/[\\%_]/g, "\\$&")}%`));
+    } else {
+      where.push("text MATCH ?");
       // Quoted: a term is a string to find, never FTS syntax.
-      ? sql(
-        `SELECT session_id, role, at, text
-         FROM session_fts WHERE text MATCH ? ORDER BY bm25(session_fts), at DESC`,
-      ).iterate(terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND "))
-      : sql(
-        `SELECT session_id, role, at, text FROM session_fts WHERE ${
-          terms.map(() => "text LIKE ? ESCAPE '\\'").join(" AND ")
-        } ORDER BY at DESC`,
-      ).iterate(...terms.map((term) => `%${term.replaceAll(/[\\%_]/g, "\\$&")}%`));
-    const hits: SearchHit[] = [];
-    const seen = new Set<string>();
-    // Walked, not fetched: a chatty session has hundreds of rows for one hit.
-    for (const row of rows as Iterable<FtsRow>) {
-      if (seen.has(row.session_id)) continue;
-      seen.add(row.session_id);
-      hits.push({
-        sessionId: row.session_id,
-        role: row.role,
-        at: row.at,
-        snippet: around(this.plain(row.text), terms),
-      });
-      if (hits.length >= limit) break;
+      params.push(terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND "));
     }
-    return hits;
+    const filter = (clause: string, value: string | number): void => {
+      where.push(clause);
+      params.push(value);
+    };
+    if (scope.since !== undefined) filter("at >= ?", scope.since);
+    if (scope.role) filter("role = ?", scope.role);
+    if (scope.sessions) filter("session_id IN (SELECT value FROM json_each(?))", JSON.stringify(scope.sessions));
+    if (scope.exclude?.length) filter("session_id NOT IN (SELECT value FROM json_each(?))", JSON.stringify(scope.exclude));
+    const rows = this.#sql()(
+      `SELECT session_id, role, at, text FROM session_fts WHERE ${where.join(" AND ")}
+       ORDER BY ${short ? "" : "bm25(session_fts), "}at DESC LIMIT ?`,
+    ).all(...params, scope.limit) as unknown as FtsRow[];
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      role: row.role,
+      at: row.at,
+      text: around(this.plain(row.text), terms),
+    }));
   }
 
   async #files(): Promise<{ path: string; size: number; modified: number }[]> {

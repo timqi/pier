@@ -436,8 +436,8 @@ main {
   .activity-log details > summary { min-height: 28px; }
   .activity-log { gap: 0; max-height: 20rem; }
 }
-/* One selection vocabulary: the palette's rows and the Files dialog's. */
-.palette-row.bg-indigo-50, #files-dialog button.bg-indigo-50 {
+/* One selection vocabulary: the command list's rows and the Files dialog's. */
+.list-row.bg-indigo-50, #files-dialog button.bg-indigo-50 {
   color: var(--color-indigo-700);
   font-weight: 500;
   background-color: var(--color-indigo-100);
@@ -495,7 +495,7 @@ main {
     max(1rem, calc((100% - 58rem) / 2))
     calc(var(--dock-h, 4rem) + 0.5rem);
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
-     heading instead of landing behind it (chat.ts revealTurn). */
+     heading instead of landing behind it (chat.ts reveal). */
   scroll-padding-block: calc(var(--head-h) + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
   overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
   /* The fade is complete across the heading's 8px inset (margin above): a row
@@ -719,29 +719,15 @@ main {
 }
 /* A transformed modal would rebase fixed menus positioned in viewport space. */
 dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
-/* The ⌘K palette: a solid panel with the floating chrome's edge and raised
-   shadow. Rows are flat pills — hover is its own grey and never moves the
-   keyboard's selection (palette.ts), which is the indigo tint plus weight. */
-#palette {
-  border-color: var(--glass-edge);
-  box-shadow: var(--glass-shadow-raised);
-}
-.palette-row { transition: background-color 120ms; }
-.palette-row:not(.bg-indigo-50):hover { background-color: var(--color-neutral-100); }
-/* The tile takes the selection's ink and a deeper tint, so the selected row is
-   one object rather than a grey square on a blue pill. */
-#palette .palette-row.bg-indigo-50 > span:first-child {
-  background-color: color-mix(in oklab, var(--color-indigo-500) 18%, transparent);
-  color: inherit;
-}
+/* List rows are flat pills — hover is its own grey and never moves the
+   keyboard's selection, which is the indigo tint plus weight. */
+.list-row { transition: background-color 120ms; }
+.list-row:not(.bg-indigo-50):hover { background-color: var(--color-neutral-100); }
 @media (pointer: coarse) {
-  .palette-row { min-height: 44px; }
+  .list-row { min-height: 44px; }
   #command-menu { max-height: calc(8 * 44px + 0.5rem); }
-  /* A thumb has no arrows and no Esc key, and the backdrop is how it closes the
-     palette. The count stays: that is an answer, not an instruction. */
-  #palette kbd, #palette-keys { display: none; }
 }
-/* Where a search hit landed: a ring that fades, on the row and only there. */
+/* Where a reveal landed: a ring that fades, on the row and only there. */
 @keyframes turn-reveal {
   from { outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   to { outline: 3px solid transparent; outline-offset: 3px; }

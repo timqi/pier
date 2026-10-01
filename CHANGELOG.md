@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Search: the ⌘K palette is gone; `pier search` is the one search surface, one hit per message, with `--in/--since/--role` scopes.
 - The merge is the main session's own on the user's yes: it checks the worktree's HEAD is the clean review's sha and its tree clean, then runs `wt -C <worktree> merge <target>` and the project's checks.
 - A run result and a goal's review end with one status line, the last non-blank line outside code blocks, plain text: `Verdict: clean`, `Verdict: findings`, `Verdict: blocked — <why>` or `Needs your decision — <question>`. A bolded, bulleted or fenced verdict is no verdict; a second status line ends the goal `failed` (`several status lines`); `Verdict: blocked` ends it `failed — blocked — <why>`.
 - `--until` is gone: `--rounds <n>` roots a goal of n reviews (1–9, `0` none) on a fresh `--prompt` run, a stored `until` reads as 3, and `pier task run --run <root> --prompt <answer> --rounds <n>` resumes an ended goal's root as a new goal.

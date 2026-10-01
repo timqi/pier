@@ -26,7 +26,7 @@ import { pierDb } from "./db.js";
 import { deliverLedger, RestartLedger, resumeTurns, stopForExit, trackTurns, TurnsInFlight } from "./stop.js";
 import { surfacePrompt } from "./agent/roles.js";
 import { Router } from "./core/router.js";
-import { searchSessions } from "./core/search.js";
+import { searchMessages } from "./core/search.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
@@ -428,7 +428,7 @@ servePier({
     note(`done ${JSON.stringify(result.details)}`);
     return result;
   },
-  search: searchSessions(factory),
+  search: searchMessages(factory, () => chain.members().map((m) => m.sessionId)),
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
   login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,

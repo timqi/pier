@@ -108,8 +108,8 @@ export function letterKey(
   });
 }
 
-/** Capture phase and `preventDefault` first: ⌘K is Firefox's search bar, and a
- *  focused composer must not swallow the chord. `unless` is how an open
+/** Capture phase and `preventDefault` first: the browser owns most ⌘ chords
+ *  (⌘I is Firefox's Page Info), and a focused composer must not swallow the chord. `unless` is how an open
  *  surface takes the chord back, checked before `preventDefault`. No hover
  *  card: the affordance is a menu row. Never unbound. */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {

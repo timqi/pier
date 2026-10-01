@@ -17,7 +17,6 @@ const menu = vi.hoisted(() => ({
 vi.mock("./menu.js", () => menu);
 const badge = vi.hoisted(() => vi.fn());
 vi.mock("./notifications.js", () => ({ setUnreadBadge: badge }));
-vi.mock("./palette.js", () => ({ refreshPalette: vi.fn() }));
 const chords = vi.hoisted(() => new Map<string, [() => void, (() => boolean) | undefined]>());
 vi.mock("./shortcut.js", () => ({
   chord: (key: string, run: () => void, unless?: () => boolean) => chords.set(key, [run, unless]),

@@ -77,7 +77,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
   the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
-  is `rg` over `memory/` and `pier search <q>` over the transcripts
+  is `rg` over `memory/` and `pier search --in pier <q>` over what the user
+  and Pier said; `--since` narrows a time such as last week
   ([08](08-cli-socket.md)); no vector store.
 
 ## Head lifecycle
@@ -228,8 +229,8 @@ never opened.
 
 - The status panel's sessions are the live ones less the sessions making up the head;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
-- The head's ⋯ menu is Search, Session info, Browse files, Model & reasoning,
-  Settings; no Rename or New session here.
+- The head's ⋯ menu is Session info, Browse files, Model & reasoning,
+  Settings; search is `pier search`, not a web surface.
 
 ## Not built
 

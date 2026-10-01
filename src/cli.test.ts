@@ -314,29 +314,44 @@ describe("pier vault run", () => {
   it("prints one line per `pier search` hit, `no hits`, the object with --json, and a refusal as one search: line", async () => {
     const at = Date.UTC(2025, 0, 2, 3, 4);
     const hits = [
-      { sessionId: "s1", title: "Fix the\nparser", role: "user", at, snippet: "the \u0001parser\u0002 broke" },
-      { sessionId: "s2", title: "Please look at why the build fails on CI since Monday", role: "assistant", at, snippet: "fixed" },
+      { sessionId: "p1", place: "Pier", pier: true, role: "user", at, text: "the parser\nbroke" },
+      { sessionId: "s2", place: "Fix the\nbuild", pier: false, role: "assistant", at, text: "fixed" },
     ];
     const { home, asked } = await fakePier(200, { result: { hits } });
     const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: home, TZ: "UTC" };
-    const lines = await run(["search", "the", "parser", "--limit", "5"], { env });
-    expect(lines.stdout).toBe("s1 \u00b7 Fix the parser \u00b7 user \u00b7 2025-01-02 03:04: the parser broke\ns2 \u00b7 Please look at why the build\u2026 \u00b7 assistant \u00b7 2025-01-02 03:04: fixed\n");
+    const lines = await run(["search", "the", "parser", "--limit", "5", "--in", "pier", "--role", "user", "--since", "2025-01-01"], { env });
+    expect(lines.stdout).toBe("2025-01-02 03:04 \u00b7 Pier \u00b7 user: the parser broke\n2025-01-02 03:04 \u00b7 Fix the build \u00b7 assistant: fixed\n");
     expect(lines.code).toBe(0);
-    expect(asked).toEqual([{ method: "POST", url: "/search", body: { params: { q: "the parser", limit: 5 }, sessionId: "sess-1" } }]);
+    expect(asked).toEqual([{ method: "POST", url: "/search", body: {
+      params: { q: "the parser", limit: 5, in: "pier", role: "user", since: Date.UTC(2025, 0, 1) }, sessionId: "sess-1",
+    } }]);
     const json = await run(["search", "parser", "--json"], { env });
     expect(JSON.parse(json.stdout)).toEqual({ hits });
+    const before = Date.now();
+    await run(["search", "parser", "--since", "2d"], { env });
+    const since = (asked[2] as { body: { params: { since: number } } }).body.params.since;
+    expect(since).toBeGreaterThanOrEqual(before - 2 * 86_400_000);
+    expect(since).toBeLessThanOrEqual(Date.now() - 2 * 86_400_000);
 
     const none = await fakePier(200, { result: { hits: [] } });
     const empty = await run(["search", "nothing"], { env: { ...env, PIER_HOME: none.home } });
     expect(empty).toEqual({ code: 0, stdout: "no hits\n", stderr: "" });
 
-    const refused = await fakePier(422, { error: "limit must be an integer" });
+    const refused = await fakePier(422, { error: "limit must be an integer from 1 to 50" });
     const denied = await run(["search", "x", "--limit", "a"], { env: { ...env, PIER_HOME: refused.home } });
     expect(denied.code).toBe(1);
-    expect(denied.stderr).toBe("search: limit must be an integer\n");
-    // Usage never touches the socket.
+    expect(denied.stderr).toBe("search: limit must be an integer from 1 to 50\n");
+    // Usage and a bad scope never touch the socket.
     const bare = await run(["search"], { env: { ...env, PIER_HOME: refused.home } });
     expect(bare.code).toBe(2);
+    for (const [flag, value, why] of [["--since", "last week", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--since", "2025-02-30", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--role", "tool", "--role takes user or assistant"]]) {
+      const bad = await run(["search", "x", flag!, value!], { env: { ...env, PIER_HOME: refused.home } });
+      expect(bad.code).toBe(2);
+      expect(bad.stderr.startsWith(`search: ${why!}\nusage: pier search`)).toBe(true);
+    }
+    const twice = await run(["search", "x", "--in", "pier", "--in", "s2"], { env: { ...env, PIER_HOME: refused.home } });
+    expect(twice.code).toBe(2);
+    expect(twice.stderr).toContain("search: --in takes one place");
     expect(refused.asked).toHaveLength(1);
   });
 

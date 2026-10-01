@@ -341,7 +341,7 @@ function setCommandActive(index: number): void {
   if (!commandRows.length) return;
   commandActive = (index + commandRows.length) % commandRows.length;
   for (const [i, el] of commandRows.entries()) {
-    el.classList.toggle("bg-indigo-50", i === commandActive); // the palette's selection vocabulary (style.css)
+    el.classList.toggle("bg-indigo-50", i === commandActive); // the list rows' selection vocabulary (style.css)
     el.setAttribute("aria-selected", String(i === commandActive));
   }
   commandRows[commandActive]!.scrollIntoView({ block: "nearest" }); // past eight rows the list scrolls
@@ -359,7 +359,7 @@ function pickCommand(row: CommandRow): void {
 function renderCommandMenu(): void {
   const matches = commandMatches();
   commandRows = matches.map((row) => {
-    const li = h("li", "palette-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-[14px] leading-5 text-neutral-800",
+    const li = h("li", "list-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-[14px] leading-5 text-neutral-800",
       h("span", "font-mono", row.word),
       h("span", "min-w-0 truncate text-[13px] text-neutral-500", row.line));
     li.setAttribute("role", "option");

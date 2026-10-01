@@ -233,15 +233,6 @@ export function scrollBottom(force = false): void {
  *  too because reduced motion draws the mark without an animation to end. */
 const REVEAL_MS = 1200;
 
-/** How a search hit lands (ui/palette.ts). `false` when no row has the stamp:
- *  compacted away, edited out, or trimmed off the top. */
-export function revealTurn(role: "user" | "assistant", at: number): boolean {
-  const row = turnsPane.querySelector<HTMLElement>(`[data-kind="${role}"][data-at="${at}"]`);
-  if (!row) return false;
-  reveal(row);
-  return true;
-}
-
 /** A topic's newest reply on screen, or the newest above `from`. */
 function lastOfTopic(problem: string, from?: HTMLElement): HTMLElement | null {
   const rows = [...turnsPane.children] as HTMLElement[];

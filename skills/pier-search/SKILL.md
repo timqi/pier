@@ -1,27 +1,34 @@
 ---
 name: pier-search
-description: Finding what was said in an earlier session, beyond memory, with `pier search`.
+description: Finding what the user and Pier said, or a message in another session, with `pier search`.
 ---
 
-# Earlier sessions from the shell
+# Recall from the shell
 
-For something said in an earlier session — a decision, an error, a name —
-that `MEMORY.md` and the daily notes do not hold. `memory/` is `rg`'s, not
-this; tool steps are never indexed, only messages and replies.
+Use `pier search` when a decision, error or name is not in memory. `--in pier`
+searches what the user and Pier said; `--since` narrows a time such as last
+week. `memory/` stays `rg`'s.
 
 ```sh
-pier search the parser regression --limit 5
+pier search parser regression --in pier --since 7d
 pier search 部署 --json
 ```
 
-- The words are the query: every one must appear in the same message, in
-  any order. `--limit` 1–50, default 20; at most one hit per session, best
-  first.
-- One line per hit:
-  `<sessionId> · <title> · <role> · <YYYY-MM-DD HH:MM>: <snippet>`; the
-  title is cut to 30 characters with `…`, the snippet is the message around
-  the match with Pier's chat markup off (`<open>`, `<done>`, `<silent>`, the
-  next-step buttons); `--json` prints `{hits}` instead, the title whole. Nothing found is `no hits`, exit 0; a
-  refusal is one `search:` line, exit 1.
-- A hit names a session: the web opens it at `/app/#/session/<id>`; link
-  that for the user rather than pasting the transcript.
+All flags are optional and ANDed:
+
+| Flag | Values |
+| --- | --- |
+| `--in` | `pier` or `<sessionId>` |
+| `--since` | `<N>h`, `<N>d`, `YYYY-MM-DD` |
+| `--role` | `user` or `assistant` |
+| `--limit` | 1–50, default 10 |
+
+Pier's messages come first, then other sessions'. One line per message:
+`<YYYY-MM-DD HH:MM> · <place> · <role>: <text>`. Place is `Pier` for the
+conversation or a session's title. `--json` prints
+`{hits:[{sessionId, at, role, place, pier, text}]}`. Nothing found is `no hits`,
+exit 0. A `--limit` outside 1–50 is refused, never clamped: one `search:`
+line, exit 1. A `--since` or `--role` value off the table, or a second `--in`,
+prints the usage, exit 2.
+
+Quote the time and the words, never a session id.

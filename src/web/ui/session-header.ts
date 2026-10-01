@@ -11,7 +11,6 @@ import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { openSystemPrompt } from "./system-prompt.js";
-import { togglePalette } from "./palette.js";
 import { chord, chordLabel, modalOpen } from "./shortcut.js";
 import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
 
@@ -388,17 +387,8 @@ function barMenu(anchor: HTMLElement): void {
   const conversation = deps.continuousOpen();
   const later = s ? {} : { disabled: true, hint: "after the first reply" };
   const items: MenuItem[] = [
-    ...(conversation ? [{
-      label: "Search",
-      hint: chordLabel("k"),
-      onSelect: () => {
-        closeMenu();
-        togglePalette();
-      },
-    }] : []),
     {
       label: "Session info",
-      separatorBefore: conversation,
       onSelect: () => s && sessionInfo(anchor, s, () => barMenu(anchor)),
       ...later,
     },

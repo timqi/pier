@@ -288,7 +288,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     return el;
   }
 
-  /** The palette's and Agent's nav both say "selected" this way. */
+  /** Agent's nav says "selected" this way too. */
   function markSelected(row: HTMLElement): void {
     selectedRow?.classList.remove("bg-indigo-50", "font-medium", "text-indigo-700");
     selectedRow = row;
