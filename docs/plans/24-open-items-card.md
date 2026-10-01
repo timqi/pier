@@ -1,6 +1,6 @@
 # Open items 卡片：实现状态
 
-定稿契约：[/home/qiqi/code/dev/pier.open-items-card/docs/plans/24-open-items-card.md](/home/qiqi/code/dev/pier.open-items-card/docs/plans/24-open-items-card.md)。实现必须完整遵循该文档；本文件记录本实现分支的交接状态。
+定稿契约：[定稿文档](./24-open-items-card.design.md)。实现必须完整遵循该文档；本文件记录本实现分支的交接状态。
 
 - 基线：main `69b53ad37d43dfba5e0a7bd4541065df8ef9e963`，实现分支 `build-open-items-card`，已快进，禁止合入 main、重启及移除工作树。
 - 用户要求 astra 实现；代码简洁、复用现有逻辑，以关键端到端用户流程为主，避免细碎内部断言。
