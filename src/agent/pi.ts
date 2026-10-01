@@ -397,11 +397,12 @@ export class PiSession implements AgentSession {
     // A turn may have started since the caller read the state. Bare, Pi throws
     // "already processing" and the message is gone (§5); queued, it is the
     // same "delivered when idle" core/queue.ts picks for a mid-turn message.
-    let refused = false;
+    // Pi reports only an accepted prompt; a throw before that is a refusal.
+    let accepted = false;
     try {
-      await this.pi.prompt(text, { streamingBehavior: "followUp", preflightResult: (ok) => { refused = !ok; } });
+      await this.pi.prompt(text, { streamingBehavior: "followUp", preflightResult: () => { accepted = true; } });
     } catch (error) {
-      if (refused) this.recordRefusal(text, error);
+      if (!accepted) this.recordRefusal(text, error);
       throw error;
     }
   }
@@ -429,12 +430,12 @@ export class PiSession implements AgentSession {
 
   async steer(text: string): Promise<void> {
     this.live();
-    return this.pi.steer(text);
+    await this.pi.steer(text);
   }
 
   async followUp(text: string): Promise<void> {
     this.live();
-    return this.pi.followUp(text);
+    await this.pi.followUp(text);
   }
 
   async systemInput(
@@ -747,7 +748,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       }
     };
     try {
-      const committed = await (await this.authRuntime()).login(providerId, type, interaction);
+      // Sign in with ChatGPT names this installation; Pi keeps the id in settings.json.
+      const getDeviceId = () => SettingsManager.create(defaultAgentDir(), defaultAgentDir()).getOrCreateDeviceId();
+      const committed = await (await this.authRuntime()).login(providerId, type, interaction, { getDeviceId });
       return () => restore(committed as ProviderCredential);
     } catch (err) {
       if (err instanceof CredentialSynchronizationError && err.credential) {
