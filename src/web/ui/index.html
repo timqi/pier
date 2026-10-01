@@ -132,6 +132,12 @@
         </div>
       </div>
     </form>
+    <!-- The status panel's list docked beside the chat from 80rem (style.css,
+         drawer.ts); absent while it has no rows. -->
+    <aside id="status-side" aria-label="Status" data-empty class="min-h-0 flex-col font-sans text-sm">
+      <h2 id="status-side-head" class="flex-none px-3 pb-1 pt-3 text-[12px] font-medium text-neutral-500"></h2>
+      <ul id="status-side-list" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pb-2"></ul>
+    </aside>
   </main>
 
   <!-- Full-size view of a thumbnail; a click on the image zooms about the

@@ -1,14 +1,14 @@
 // The status panel: what needs you and what is running, counted on the bar's
-// status chip and listed in the panel it opens — the open items and the live
-// sessions no item holds, one row each.
+// status chip and listed in the panel it opens, or docked beside the chat on a
+// wide window — the open items and the live sessions no item holds, one row each.
 
 import { $, agoLabel, h } from "./dom.js";
-import { closeMenu, openPanel } from "./menu.js";
+import { closeMenu, listStep, openPanel, walkRows } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { topicColour } from "./topics.js";
 import { openRunText, waitsOnYou } from "../../core/reply.js";
-import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
+import { NOT_IN_LEDGER, type ChainMember, type LeadPhase, type SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun, OpenStatus } from "../../tasks/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
@@ -54,6 +54,13 @@ interface DrawerDeps {
 let deps: DrawerDeps;
 
 const chip = $("#status-chip");
+const side = $("#status-side");
+const sideHead = $("#status-side-head");
+const sideList = $("#status-side-list");
+
+/** Where the list docks instead of floating; style.css `#status-side` holds the same width. */
+const WIDE = "(width >= 80rem)";
+let wide: MediaQueryList;
 
 // --- marks -------------------------------------------------------------------------------
 
@@ -219,22 +226,27 @@ function sessionRow(s: SessionInfo, mark: Mark): PanelRow {
   return {
     id: s.id, dot: stateDot(s)[0]!, label: s.title ?? "untitled", who: whoOf(s), status,
     detail: `${says(s)} · active ${agoLabel(lastActive(s))}`,
-    title: [s.cwd, `created ${new Date(s.createdAt).toLocaleDateString()}`, ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : [])].join("\n"),
+    title: [...(s.title ? [s.title] : []), s.cwd, `created ${new Date(s.createdAt).toLocaleDateString()}`, ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : [])].join("\n"),
     open: () => deps.select(s.id),
   };
 }
 
-/** An open item: its problem and its stage — its runs where it names none, and
- *  on the tooltip with who runs them. It lands in the child session it waits in,
+/** An open item: its short title and its stage — its runs where it names
+ *  none; the problem in the user's words heads the tooltip, and is the name
+ *  when nothing shorter names it. It lands in the child session it waits in,
  *  else on the topic's latest reply, else its first run's session. */
 function itemRow(i: OpenItem, now: number): PanelRow {
   const runs = i.runs.map((r) => openRunText(r, now)).join(" · ");
   const run = i.runs.find((r) => r.targetSessionId);
   const target = run?.targetSessionId ?? undefined;
-  const who = run ? whoOf(deps.sessions().find((s) => s.id === target)) || (run.workers ? "lead" : "worker") : "";
+  const session = deps.sessions().find((s) => s.id === target);
+  const who = run ? whoOf(session) || (run.workers ? "lead" : "worker") : "";
+  // The session keeps its creating run's `--name`; the run listed is its newest,
+  // and a resume without `--name` is named by its prompt.
+  const named = session?.title ?? (run ?? i.runs.find((r) => r.state !== NOT_IN_LEDGER))?.name;
   return {
     id: target ?? `item:${i.problem}`, dot: runDot(i.problem, i.runs.some((r) => r.state === "running")),
-    label: i.problem, who: "", detail: i.stage || runs, status: i.status,
+    label: named || i.problem, who: "", detail: i.stage || runs, status: i.status,
     title: [i.problem, i.stage, runs, who, ...i.runs.flatMap((r) => (r.cwd ? [r.cwd] : []))].filter(Boolean).join("\n"),
     open: () => {
       if (i.waitsIn) deps.select(i.waitsIn);
@@ -301,11 +313,14 @@ export function renderDrawer(): void {
   const counts = [...(runningCount ? [`${runningCount} running`] : []), ...(waiting ? [`${waiting} needs you`] : [])];
   const shown = rows.length > 0;
   chip.textContent = counts.join(" · ") || (shown ? `${rows.length} open` : "");
+  sideHead.textContent = chip.textContent;
+  side.toggleAttribute("data-empty", !shown);
   chip.classList.toggle("hidden", !shown);
   chip.classList.toggle("block", shown);
   chip.classList.toggle("text-amber-700", waiting > 0);
   chip.classList.toggle("text-neutral-600", waiting === 0);
-  if (list?.isConnected && !list.closest("[inert]")) {
+  if (wide.matches) fill(sideList);
+  else if (list?.isConnected && !list.closest("[inert]")) {
     if (!shown) closeMenu();
     else fill(list);
   }
@@ -319,8 +334,10 @@ function fill(into: HTMLElement): void {
   rows.find((r) => r.dataset.sessionId === focusId)?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
 }
 
-/** Nothing to show is the chip's absence, not an empty panel. */
+/** Nothing to show is the chip's absence, not an empty panel; docked, opening
+ *  is focusing its first row. */
 export function openDrawer(): void {
+  if (wide.matches) return sideList.querySelector<HTMLElement>(".session-open")?.focus();
   if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!rows.length) return;
   list = h("ul", "");
@@ -332,6 +349,17 @@ export function openDrawer(): void {
 export function initDrawer(d: DrawerDeps): void {
   deps = d;
   chip.onclick = openDrawer;
+  wide = window.matchMedia(WIDE);
+  // One list, moved: docking takes the rows out of any panel still open.
+  wide.addEventListener("change", () => {
+    if (!wide.matches) return;
+    closeMenu();
+    fill(sideList);
+  });
+  sideList.onkeydown = (ev) => {
+    const to = listStep(ev);
+    if (to !== undefined && walkRows(sideList, to)) ev.preventDefault();
+  };
   // Stands down under a modal: it is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
 }

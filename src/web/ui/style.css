@@ -331,6 +331,9 @@ main {
      Everything that pads by the heading reads it from here — the dock's own
      footprint is the same idea, measured live into --dock-h by composer.ts. */
   --head-h: calc(3rem + 8px);
+  /* The reading column — transcript, queue card, composer: 35–45 CJK
+     characters a line in a bubble. */
+  --read-w: 44rem;
 }
 /* Explicit column on everything: auto-placement would push an overlapping
    item into an implicit second column rather than stack it. */
@@ -340,6 +343,26 @@ main > section, #turns { grid-row: 1 / -1; }
 #queue-panel { grid-row: 2; }
 #composer { grid-row: 3; }
 :is(#bar, #queue-panel, #composer) { position: relative; z-index: 1; }
+/* The status panel's list, docked as a second column where the window has
+   room for it beside the reading column (drawer.ts `WIDE`); gone with no rows
+   and under a Console view, whose open hides the bar. */
+#status-side {
+  display: none;
+  border: 1px solid var(--glass-edge);
+  border-radius: 18px;
+  box-shadow: var(--glass-shadow);
+}
+@media (width >= 80rem) {
+  main { grid-template-columns: minmax(0, 1fr) auto; }
+  main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
+    display: flex;
+    grid-column: 2;
+    grid-row: 1 / -1;
+    width: 17.5rem;
+    margin: 8px 8px 8px 0;
+  }
+  main:has(#status-side:not([data-empty])) #status-chip { display: none; }
+}
 /* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the
    composer's top padding already leaves between it and the input.
@@ -347,7 +370,7 @@ main > section, #turns { grid-row: 1 / -1; }
    and hide its top border in two more states, for a seam either way. */
 #queue-panel {
   width: calc(100% - 2rem);
-  max-width: 58rem;
+  max-width: var(--read-w);
   margin-inline: auto;
   border: 1px solid var(--glass-edge);
   border-radius: 1.25rem;
@@ -444,7 +467,7 @@ main {
   box-shadow: none;
 }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #bar, .pagehead) {
+:is(.glass, #bar, .pagehead, #status-side) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
   backdrop-filter: blur(28px) saturate(1.4);
@@ -492,7 +515,7 @@ main {
 #turns {
   padding:
     calc(var(--head-h) + 0.75rem)
-    max(1rem, calc((100% - 58rem) / 2))
+    max(1rem, calc((100% - var(--read-w)) / 2))
     calc(var(--dock-h, 4rem) + 0.5rem);
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts reveal). */
@@ -693,7 +716,7 @@ main {
 /* The one control on the coloured gradient; `.glass` below picks the token up. */
 #composer > div {
   --glass-shadow: var(--glass-shadow-raised);
-  max-width: 58rem;
+  max-width: var(--read-w);
   margin-inline: auto;
 }
 #composer > div:focus-within {
@@ -769,7 +792,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, .glass-menu, #bar, #queue-panel, .pagehead) {
+  :is(.glass, .glass-menu, #bar, #queue-panel, .pagehead, #status-side) {
     background: var(--color-white);
     backdrop-filter: none;
     border-color: var(--color-neutral-400);
@@ -1084,10 +1107,13 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 
   /* Code should read as a patch of canvas, not a slab: prose's near-black pre
      background is swapped for a faint tint that keeps the page's light weight,
-     and inline code loses prose's literal backtick pseudo-elements. */
+     and inline code loses prose's literal backtick pseudo-elements. A line
+     keeps its shape and the block scrolls sideways in its own box, as a table
+     does; contain keeps that scroll off the back-swipe. */
   .md pre {
-    @apply overflow-x-hidden whitespace-pre-wrap rounded-xl border border-neutral-200/70 bg-neutral-50 px-4 py-3 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
-    overflow-wrap: anywhere;
+    @apply overflow-x-auto whitespace-pre rounded-xl border border-neutral-200/70 bg-neutral-50 px-4 py-3 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
+    overflow-wrap: normal;
+    overscroll-behavior-x: contain;
     color: var(--color-neutral-800);
   }
   .md pre code {

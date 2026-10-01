@@ -33,6 +33,7 @@ let sessions: Row[] = [];
 beforeEach(async () => {
   vi.resetModules();
   doc = installPage();
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
   drawer = await import("./drawer.js");
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
@@ -73,11 +74,11 @@ const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
 // failed unlisted run is not in progress.
 it("lists each open item once, what waits on you first, with who runs it and where it stands", () => {
   state.chain = [member("h1")];
-  sessions = [row("h1"), row("s-lead1abcdef", { phase: "design", runLive: true })];
+  sessions = [row("h1"), row("s-lead1abcdef", { title: "open items 视图", phase: "design", runLive: true })];
   state.items = {
     items: [
       { problem: "open items 视图", stage: "lead designing", status: "running", runs: [
-        ledgerRun("lead1abcdef", { workers: { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } }),
+        ledgerRun("lead1abcdef", { name: "open items 视图", workers: { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } }),
       ] },
       { problem: "model menu", stage: "waiting on you: merge?", status: "waiting on you", runs: [ledgerRun("gone1", { state: NOT_IN_LEDGER, targetSessionId: null })] },
       { problem: "auth review", stage: "worker running", status: "running", runs: [ledgerRun("w1", { name: "Review src/auth" })] },

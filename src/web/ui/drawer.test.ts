@@ -1,7 +1,7 @@
 // The status panel on index.html: its order and marks, the status chip's
 // counts, and the panel the chip opens — what waits on you over what runs.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ChainMember } from "../../core/types.js";
+import { NOT_IN_LEDGER, type ChainMember } from "../../core/types.js";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
 
 const menu = vi.hoisted(() => ({
@@ -13,8 +13,12 @@ const menu = vi.hoisted(() => ({
     document.body.append(panel);
     return panel;
   }),
+  walkRows: vi.fn(() => true),
 }));
-vi.mock("./menu.js", () => menu);
+// The list keys are the menu primitive's own (`listStep`), so the docked list walks like the panel.
+vi.mock("./menu.js", async (actual) => ({ ...(await actual<typeof import("./menu.js")>()), ...menu }));
+/** The `(width >= 80rem)` query: docked beside the chat when it matches. */
+const wide = { matches: false, change: () => {}, addEventListener(_: "change", fn: () => void) { this.change = fn; } };
 const badge = vi.hoisted(() => vi.fn());
 vi.mock("./notifications.js", () => ({ setUnreadBadge: badge }));
 const chords = vi.hoisted(() => new Map<string, [() => void, (() => boolean) | undefined]>());
@@ -42,6 +46,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   chords.clear();
   doc = installPage();
+  wide.matches = false;
+  vi.stubGlobal("window", { matchMedia: () => wide });
   drawer = await import("./drawer.js");
   sessions = [];
   chain = [];
@@ -200,17 +206,17 @@ it("lists what waits on you first, in one list, each session once, an item as pr
   const run = (runId: string, over: Partial<import("../../tasks/types.js").OpenRun> = {}) =>
     ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
   sessions = [
-    row("s-lead1abcdef", { title: "多入口统一对话", phase: "design", designOpen: true, state: "streaming", createdAt: 3 }),
+    row("s-lead1abcdef", { title: "子任务 thread", phase: "design", designOpen: true, state: "streaming", createdAt: 3 }),
     row("s-free", { title: "free", unread: true, createdAt: 2 }),
     row("s-q", { title: "queued lead", phase: "build", runLive: true, createdAt: 1 }),
   ];
   open = {
     items: [
       { problem: "子任务 thread", stage: "design lead narrowing scope (running)", status: "waiting on you",
-        runs: [run("lead1abcdef", { state: "succeeded", finishedAt: 0 })] },
+        runs: [run("lead1abcdef", { name: "子任务 thread", state: "succeeded", finishedAt: 0 })] },
       { problem: "0.2.1 清理上线", stage: "merged", status: "pending release", runs: [] },
       { problem: "gone", stage: "", status: "stopped", runs: [] },
-      { problem: "auth review", stage: "worker running", status: "running", runs: [run("w1", { queuedAt: 5 * 60_000 })] },
+      { problem: "auth review", stage: "worker running", status: "running", runs: [run("w1", { name: "auth review", queuedAt: 5 * 60_000 })] },
     ],
     unlisted: [run("q1", { name: "Queued one", state: "queued", targetSessionId: null, queuedAt: 9 * 60_000 })],
   };
@@ -233,7 +239,7 @@ it("lists what waits on you first, in one list, each session once, an item as pr
   expect(tag("waiting on you").classList.contains("bg-amber-700")).toBe(true);
   expect(tag("queued").classList.contains("bg-amber-700")).toBe(false);
   // The lead's session is the item's row, not a row of its own.
-  expect(labels()).not.toContain("多入口统一对话");
+  expect(labels().filter((l) => l === "子任务 thread")).toHaveLength(1);
   // The runs and who runs them are the tooltip's.
   expect(doc.querySelector("[data-session-id='s-w1']")!.title).toBe("auth review\nworker running\nrun w1 running 5m\nworker");
 });
@@ -309,4 +315,85 @@ it("has no Recently done group, and no chip without a row", () => {
   open = { items: [], unlisted: [] };
   drawer.renderDrawer();
   expect(chip().classList.contains("hidden")).toBe(true);
+});
+
+// The user's words are long; the row is named by the run's `--name` and the words are its tooltip.
+it("names an item by its run's --name, with the problem on the tooltip, and falls back to the problem", () => {
+  const ask = "把状态卡片在宽屏上常驻右侧，没有任务时自动收起，手机上改成底部 sheet";
+  const run = (over: Partial<import("../../tasks/types.js").OpenRun>) =>
+    ({ runId: "r1", name: "status-sidebar", state: "running", targetSessionId: "s-r1", cwd: null, queuedAt: 0, finishedAt: null, ...over });
+  open = {
+    items: [
+      { problem: ask, stage: "worker running", status: "running", runs: [run({})] },
+      // A run no ledger knows is named by its id, which is no title.
+      { problem: "model menu", stage: "", status: "stopped", runs: [run({ runId: "gone1", name: "gone1", state: NOT_IN_LEDGER, targetSessionId: null })] },
+      { problem: "no runs yet", stage: "", status: "waiting on you", runs: [] },
+    ],
+    unlisted: [],
+  };
+  sessions = [row("s-free", { title: "free-form first message", unread: true })];
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  expect(labels()).toEqual(["no runs yet", "free-form first message", "status-sidebar", "model menu"]);
+  expect(doc.querySelector("[data-session-id='s-r1']")!.title.split("\n")[0]).toBe(ask);
+  expect(doc.querySelector("[data-session-id='s-free']")!.title.split("\n")[0]).toBe("free-form first message");
+  // A resumed session lists its newest run, named by the steering prompt; the session keeps the creating `--name`.
+  open = { ...open, items: [{ problem: ask, stage: "lead building", status: "running", runs: [run({ runId: "r2", name: "The user answered: 80K, go ahead and build it" })] }] };
+  sessions = [row("s-r1", { title: "status-sidebar", phase: "build" })];
+  drawer.renderDrawer();
+  expect(labels()).toEqual(["status-sidebar"]);
+  expect(doc.querySelector("[data-session-id='s-r1']")!.title.split("\n")[0]).toBe(ask);
+  open = { ...open, items: [{ problem: "no runs yet", stage: "", status: "waiting on you", runs: [] }] };
+  sessions = [];
+  drawer.renderDrawer();
+  // A fallback name truncates rather than wraps.
+  expect(panelRows()[0]!.querySelector(".truncate")!.textContent).toBe("no runs yet");
+});
+
+// On a wide window the list is docked beside the chat: same rows, no panel.
+it("docks the list beside the chat on a wide window, empties with no rows, and walks with the arrows", () => {
+  wide.matches = true;
+  const side = doc.querySelector("#status-side")!;
+  const sideRows = () => side.querySelectorAll(".session-open");
+  drawer.renderDrawer();
+  expect(side.hasAttribute("data-empty")).toBe(true);
+
+  sessions = [row("a", { state: "streaming" }), row("b", { unread: true })];
+  drawer.renderDrawer();
+  expect(side.hasAttribute("data-empty")).toBe(false);
+  expect(doc.querySelector("#status-side-head")!.textContent).toBe("1 running · 1 needs you");
+  expect(sideRows().map((b) => cells(b)[0])).toEqual(["b", "a"]);
+
+  // Opening is focusing the docked list, never a panel over it; the arrows walk it.
+  drawer.openDrawer();
+  expect(menu.openPanel).not.toHaveBeenCalled();
+  expect(doc.activeElement).toBe(sideRows()[0]);
+  const key = (k: string) => {
+    const ev = { key: k, preventDefault: vi.fn() };
+    doc.querySelector("#status-side-list")!.onkeydown?.(ev as never);
+    return ev.preventDefault;
+  };
+  expect(key("ArrowDown")).toHaveBeenCalled();
+  expect(menu.walkRows).toHaveBeenLastCalledWith(doc.querySelector("#status-side-list"), 1);
+  expect(key("a")).not.toHaveBeenCalled();
+  sideRows()[1]!.onclick?.();
+  expect(select).toHaveBeenCalledWith("a");
+
+  sessions = [];
+  drawer.renderDrawer();
+  expect(side.hasAttribute("data-empty")).toBe(true);
+  expect(chip().classList.contains("hidden")).toBe(true);
+});
+
+// Narrowing the window floats the list again; widening takes the rows back out of any open panel.
+it("moves the rows between the panel and the dock as the window crosses the width", () => {
+  sessions = [row("a", { state: "streaming" })];
+  drawer.renderDrawer();
+  drawer.openDrawer();
+  expect(menu.openPanel).toHaveBeenCalledOnce();
+  expect(doc.querySelector("#status-side")!.querySelectorAll(".session-open")).toHaveLength(0);
+  wide.matches = true;
+  wide.change();
+  expect(menu.closeMenu).toHaveBeenCalled();
+  expect(doc.querySelector("#status-side")!.querySelectorAll(".session-open").map((b) => cells(b)[0])).toEqual(["a"]);
 });

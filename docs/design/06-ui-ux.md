@@ -42,9 +42,9 @@ updates this document.
 
 ## Layout
 
-- **One column**: the conversation fills the width without a permanent rail.
+- **One column**: the conversation is a 44rem reading column (`--read-w`: transcript, queue card, composer) centred in the pane; from 80rem the status panel docks as the one rail beside it, only while it has rows.
 - **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's `waiting on you` rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
-- **Status panel**: one flat list, one row per session, what waits on you first — a dot (a topic's colour, pulsing while its run is live), the name, a second line for where it stands, and a worded status tag unless it is running, `waiting on you` the one solid tag, white on amber-700 — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
+- **Status panel**: one flat list, one row per session, what waits on you first — a dot (a topic's colour, pulsing while its run is live), the name, a second line for where it stands, and a worded status tag unless it is running, `waiting on you` the one solid tag, white on amber-700 — a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive. From 80rem it is a docked glass column right of the chat instead, the chip's counts its head; the name is the session's `--name`, the user's words its tooltip.
 - **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. A draft past one line takes the composer's full width, `+` and send/stop on a row under it; the line count is read at the one-line width, so the mode never flips as the wider box rewraps, and read again when the width changes.
 - **Menus**: labels align without a reserved selection column; only selectable
@@ -76,7 +76,7 @@ updates this document.
 - User messages: bounded mist-blue surface, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
 - Assistant replies: solid reading surface, comfortable width; on a phone the
-  full column. A table scrolls sideways in its own box, columns as wide as
+  full column. A fenced code block keeps its lines and scrolls sideways in its own box; a table scrolls sideways in its own box, columns as wide as
   their text up to a bounded cell, an edge shade on the side with more; a
   short one stays content-sized. A lone image is a 4:3 contained preview up to
   17.5rem, its space held before it loads; several stay 64px tiles.
