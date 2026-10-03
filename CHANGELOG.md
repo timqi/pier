@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.6 — 2026-10-03
+
+### Changed
+
+- Open items: a design lead is an item only through the head's `<open>` naming its run, and `<done>` ends it; a design whose newest run did not succeed reads `stopped`, and the session list no longer marks designs as waiting to finalize.
+- Open items: an item's second line says what you are needed for — `Needs you · <question>`, `Needs you · merge?`, `Needs you · decision: <reason>`, `Needs you · review cap reached · findings remain`, or `Needs you in the design session`; `Finalize design` is gone.
+- Open items: rows have no Details; a row is one control that opens where its item happened (design session, the session it waits in, the head's topic, or its newest run's session).
+- Open items keep creation order; an `<open>` that replaces an item keeps its place. `<done>` takes its key as `<open>` does, and a `<done>` naming no open item is logged.
+- Web: from 80rem the session bar spans the full width, with the open items column below it.
+
 ## 0.4.5 — 2026-10-02
 
 ### Changed
