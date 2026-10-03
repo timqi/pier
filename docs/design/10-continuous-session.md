@@ -130,6 +130,10 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   and dropped, and a `<done>` naming no open item is logged as a warning.
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
+- A run is behind one item: an `<open>` takes its run tokens off every other
+  item (`TaskStore.markOpenItems`); the first one left with no run is renamed to
+  the new problem in its place, the rest are deleted, and one that still has
+  other runs keeps them.
 - `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session
   (`TaskStore.getRun`) and shows that session's newest run (`latestRunForTarget`),
   however old, so a lead woken again stays the same item; a token naming no run

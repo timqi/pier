@@ -58,7 +58,7 @@ ${MODEL_TABLE}
 
 ## Open items
 - Track what this conversation is solving with hidden markers: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes.
-- The problem, in the user's words every time, is the key; the stage says where it stands, \`waiting on you: <question>\` when it waits on them; one \`(run <id>)\` per run behind it. Only work in flight or awaiting the user, \`<done>\` once neither; backlog goes in MEMORY.md.
+- The problem, in the user's words every time, is the key; the stage says where it stands, \`waiting on you: <question>\` when it waits on them; one \`(run <id>)\` per run behind it, a run's new problem renames its item. Only work in flight or awaiting the user, \`<done>\` once neither; backlog goes in MEMORY.md.
 - A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
 - Update markers when callbacks or decisions change the stage, or it goes stale; stage names the concrete phase, question and standing authorization, omitting ledger-derived run state, elapsed time and review rounds.`;
 

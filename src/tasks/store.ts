@@ -453,10 +453,27 @@ export class TaskStore {
 
   /** Main's markers, in reply order, as one write; answers the rows each marker changed. */
   markOpenItems(markers: OpenItemMarker[], now: number): number[] {
-    return this.transact(() => markers.map((m) => Number(m.op === "open"
-      ? this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
+    return this.transact(() => markers.map((m) => m.op === "open"
+      ? this.claimRuns(m.problem, m.runIds, now) + Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
           ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
-        .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes
-      : this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes)));
+        .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes)
+      : Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes)));
+  }
+
+  /** A run is behind one item: an `<open>` takes its runs off every other item. One left
+   *  with no run was this item under an older key — the first becomes it in place, the rest go. */
+  private claimRuns(problem: string, runIds: string[], now: number): number {
+    let changed = 0;
+    let renamed = !!this.sql("SELECT 1 FROM open_items WHERE problem = ?").get(problem);
+    for (const row of this.openItems()) {
+      if (row.problem === problem || !row.runIds.some((id) => runIds.includes(id))) continue;
+      const kept = row.runIds.filter((id) => !runIds.includes(id));
+      if (kept.length) this.sql("UPDATE open_items SET run_ids = ?, updated_at = ? WHERE problem = ?").run(JSON.stringify(kept), now, row.problem);
+      else if (!renamed) this.sql("UPDATE open_items SET problem = ? WHERE problem = ?").run(problem, row.problem);
+      else this.sql("DELETE FROM open_items WHERE problem = ?").run(row.problem);
+      renamed ||= !kept.length;
+      changed++;
+    }
+    return changed;
   }
 }

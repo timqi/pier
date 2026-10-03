@@ -395,6 +395,35 @@ describe("the open items", () => {
     expect(r.store.openItems().map((i) => [i.problem, i.stage])).toEqual([["first", "a2"], ["second", "b"]]);
   });
 
+  // The head restates an item's problem with the user's added asks: one run, one item.
+  it("renames the item a run is behind when an <open> names it under a new key", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "investigating", runIds });
+    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    r.store.markOpenItems([open("before"), open("VM pairing", "rt1"), open("after", "rt9")], 1);
+    expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2)).toEqual([2]);
+    expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3)).toEqual([2]);
+    expect(rows()).toEqual([["before", []], ["VM pairing, logs and retry", ["rt1"]], ["after", ["rt9"]]]);
+    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing" }, { op: "done", problem: "VM pairing, also check logs" }], 4)).toEqual([0, 0]);
+  });
+
+  it("collapses every item a run is behind into the one an <open> names, and leaves other runs where they are", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
+    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    // Rows written before the rule: one run behind three keys.
+    for (const p of ["dup 1", "dup 2", "dup 3"]) r.item(p, "", ["rt1"], 1);
+    r.store.markOpenItems([open("pair", "rt2", "rt3")], 1);
+    expect(r.store.markOpenItems([open("dup 2", "rt1")], 2)).toEqual([3]);
+    expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
+    r.store.markOpenItems([open("pair", "rt2", "rt3")], 3);
+    expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
+    r.store.markOpenItems([open("split", "rt3")], 4);
+    expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2"]], ["split", ["rt3"]]]);
+    r.store.markOpenItems([open("pair, restated", "rt2", "rt3")], 5);
+    expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair, restated", ["rt2", "rt3"]]]);
+  });
+
   it("says nothing is open when nothing is, and counts no workers when no lead is shown", () => {
     const r = rig();
     expect(openItemsStatus(r.list([]), r.now).text).toBe("Nothing open.");
