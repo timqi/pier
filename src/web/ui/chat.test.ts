@@ -2,8 +2,8 @@
 // callbacks, delegations and runs are chips of the reply's bubble, each
 // opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openItemPresentation } from "../../core/open-items.js";
-import type { SystemInputOrigin } from "../../core/types.js";
+import { isOpenItemsSnapshot, openItemPresentation } from "../../core/open-items.js";
+import type { OpenItemsSnapshot, SystemInputOrigin } from "../../core/types.js";
 import { STREAM_PAINT_MS } from "./dom.js";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
@@ -64,7 +64,7 @@ it("draws the same links from a reloaded transcript, and none for an answer with
   expect(card().textContent).toContain(text);
 });
 
-it("replays fixed status rows with separate details and full targets, without guessing ambiguous old links", () => {
+it("replays fixed status rows as one control each, the full problem as its tooltip, without guessing ambiguous old links", () => {
   const p = openItemPresentation({ problem: "original problem", title: "Stable title", stage: "waiting on you: merge only this branch?",
     status: "waiting on you", designSessionId: "full-design-session", runs: [{ runId: "full-run", name: "a later prompt", state: "running", targetSessionId: "full-design-session", queuedAt: 0, finishedAt: null, cwd: "/repo" }] }, 120_000);
   const origin: SystemInputOrigin = { kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [p] } };
@@ -73,15 +73,10 @@ it("replays fixed status rows with separate details and full targets, without gu
   expect(card().textContent).toContain("Waiting on you · 1");
   expect(card().querySelector(".open-item-stage")!.textContent).toBe("merge only this branch?");
   expect(card().querySelector(".open-item-meta")!.textContent).toBe("elapsed 2m");
-  const disclosure = card().querySelector(".open-item-toggle")!;
-  disclosure.onclick?.();
-  expect(disclosure.getAttribute("aria-expanded")).toBe("true");
-  expect(openItem).not.toHaveBeenCalled();
-  expect(card().querySelector(".open-item-details")!.textContent).toContain("original problem");
+  expect(card().querySelector(".open-item")!.querySelectorAll("button").length).toBe(1);
+  expect(card().querySelector(".session-open")!.title).toBe("original problem");
   card().querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(p);
-  card().querySelectorAll(".open-item-link").find((b) => b.textContent === "Session full-design-session")!.onclick?.();
-  expect(select).toHaveBeenCalledWith("full-design-session");
   chat.appendSystemInput("run shared12… failed", { kind: "chat-command", command: "status", sessions: { "shared12-first": "one", "shared12-second": "two" } });
   expect(links()).toEqual([]);
   expect(card().textContent).toContain("ambiguous run prefix");
@@ -89,6 +84,16 @@ it("replays fixed status rows with separate details and full targets, without gu
   expect(card().textContent).toContain("Original status");
   expect(card().textContent).toContain("Invalid snapshot");
   vi.restoreAllMocks();
+});
+
+it("renders every card of a version-1 snapshot written with per-run details", () => {
+  const item = (problem: string) => ({ key: `item:${problem}`, problem, title: problem, status: "running", statusLabel: "", stage: "", metadata: [],
+    runs: [{ runId: `r-${problem}`, targetSessionId: null }], details: [{ text: problem, summary: "old", runId: `r-${problem}` }] });
+  const statusSnapshot: unknown = { version: 1, items: [item("one"), item("two")] };
+  expect(isOpenItemsSnapshot(statusSnapshot)).toBe(true);
+  chat.renderSnapshot([{ role: "system", text: "old", origin: { kind: "chat-command", command: "status", statusSnapshot: statusSnapshot as OpenItemsSnapshot } }], "idle", []);
+  expect(card().querySelectorAll(".open-item-title").map((t) => t.textContent)).toEqual(["one", "two"]);
+  expect(card().querySelector(".session-open")!.hasAttribute("title")).toBe(false);
 });
 
 /** A cause chip (`data-kind="system"` on the chip) and the detail it opens. */

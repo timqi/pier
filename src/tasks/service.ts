@@ -400,16 +400,8 @@ export class TaskService {
     return { days, rows: sorted };
   }
 
-  /** Design leads no run of which has reported `Design final:`, by their creating run: the user's to finalize. */
-  openDesigns(): LedgerRun[] {
-    return [...this.store.leads().values()].flatMap((lead) => {
-      const run = lead.designOpen ? this.store.getRun(lead.runId) : undefined;
-      return run ? [ledgerRun(run)] : [];
-    });
-  }
-
   openItems(): OpenItems {
-    return openItems(this.store, this.router, this.instance.continuous.members().map((m) => m.sessionId), this.openDesigns());
+    return openItems(this.store, this.router, this.instance.continuous.members().map((m) => m.sessionId));
   }
 
   activeBackgroundRunCounts(): Map<string, number> {

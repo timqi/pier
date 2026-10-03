@@ -197,8 +197,10 @@ export type SystemInputOrigin = {
 /** A status row's navigation facts; a design entrance is independent of waiting. */
 export interface OpenItemTarget {
   problem: string;
+  status: "running" | "queued" | "waiting on you" | "pending release" | "stopped";
   designSessionId?: string;
   waitsIn?: string;
+  /** Newest first, by queue time: the first with a session is where the item last happened. */
   runs: { runId: string; targetSessionId: string | null }[];
   /** Unlisted runs and independent sessions open directly, with no topic lookup. */
   direct?: boolean;
@@ -208,11 +210,9 @@ export interface OpenItemTarget {
 export interface OpenItemPresentation extends OpenItemTarget {
   key: string;
   title: string;
-  status: "running" | "queued" | "waiting on you" | "pending release" | "stopped";
   statusLabel: string;
   stage: string;
   metadata: string[];
-  details: { text: string; summary?: string; runId?: string; targetSessionId?: string }[];
 }
 
 export interface OpenItemsSnapshot {

@@ -127,7 +127,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`
   listener, when the session is `members()[0]`) and broadcasts
   `open-items-changed` when a row changed; a marker with no problem is logged
-  and dropped.
+  and dropped, and a `<done>` naming no open item is logged as a warning.
+- Items list in creation order (`TaskStore.openItems`); an `<open>` that
+  replaces an item keeps its place.
 - `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session
   (`TaskStore.getRun`) and shows that session's newest run (`latestRunForTarget`),
   however old, so a lead woken again stays the same item; a token naming no run
@@ -135,7 +137,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
   and running runs in no item's session; no listing window or cap applies.
 - Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem, on every surface.
-- Optional `designSessionId` is the first associated run target in `openDesigns`, independent of status or `waitsIn`; it changes navigation only, and disappears from fresh projections once the existing design lifecycle records `Design final:`.
+- A design lead is an item only through the head's `<open>` naming its run; `<done>` is its end.
+- Optional `designSessionId` is the first associated run target whose design lead has not reported `Design final:` (`TaskStore.leads` `designOpen`), independent of status or `waitsIn`; it changes navigation only.
 - Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading
   of its run tree — each run, its session, a lead's workers (workers never
   delegate, so that is the whole tree) — and its stage; first match wins:
@@ -143,12 +146,12 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | status | when |
   | --- | --- |
   | `running` | a run's goal live; else a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
-  | `waiting on you` | a run's goal ended `decision`, `cap` or `done` (clean, the merge the user's); else the stage says `waiting on you`, or its session's design awaits Finalize |
+  | `waiting on you` | a run's goal ended `decision`, `cap` or `done` (clean, the merge the user's); else the stage says `waiting on you`, or a run's session is a design lead not reported final whose newest run `succeeded` |
   | `pending release` | every run `succeeded`, none a goal's root still carrying its goal, unless a legacy `merge` step ended it `done` |
   | `stopped` | a goal ended `failed`; else a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
 
 - A `waiting on you` item's `waitsIn` is the child session the answer is given
-  in, from the same reason: a design awaiting Finalize → its lead's session; a
+  in, from the same reason: a design lead not reported final → its session; a
   stage's `waiting on you` or a goal's `decision`/`cap`/`done` → absent, the chat.
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
   `core/reply.ts`): `/status`'s first group, the status panel's, its chip's
@@ -157,19 +160,27 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - A goal root's goal is read from the ledger (`TaskStore.goalOf`,
   by the run's session), never from the stage; a run queued in that session
   after the goal ended (the user's answer, the merge) carries it no more.
-- Every design lead not closed whose runs have not reported `Design final:`
-  (`TaskService.openDesigns` over `TaskStore.leads`) is an item after main's,
-  named by its creating run and keyed by its design session in both live rows and command snapshots,
-  unless an item or an unlisted run already holds its session; separate marker items may share that session.
-- `core/open-items.ts` builds the shared browser-safe presentation: title, necessary status, full stage/question, metadata, complete details and full run/session targets; only a waiting item's leading `waiting on you:` display prefix is omitted.
-- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview, including IM's multi-run summaries, while its goal is live; multiple runs read `N runs` with individual times in Details.
-- Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker failures/interruptions stay visible while all worker counts remain in Details.
-- `openItemsStatus` returns compact `text`, a complete `seed` retaining original problem/stage and full run/session identities, and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
+- `core/open-items.ts` builds the shared browser-safe presentation: title, status label, second line, metadata and run/session targets, runs newest first.
+- The second line says what the user is needed for:
+
+  | status | second line |
+  | --- | --- |
+  | waiting, answered in the chat (the stage says `waiting on you`) | `Needs you · <question>`, the prefix dropped |
+  | waiting on an ended goal, stage without `waiting on you` | `Needs you · merge?` (clean review), `Needs you · decision: <reason>`, `Needs you · review cap reached · findings remain`; the goal wording leaves the metadata |
+  | waiting, answered in the design session (`waitsIn`) | `Needs you in the design session`, then ` · <stage>` when there is one |
+  | running / queued | the stage; queued as `Queued · <stage>` |
+  | pending release / stopped | `Pending release · <stage>` / `Stopped · <stage>` |
+
+  Grouped cards and IM's `Waiting on you` group omit `Needs you`, keeping `in the design session`.
+- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview while its goal is live; multiple runs read `N runs · <newest run's time>`.
+- Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker metadata names only running, failed and interrupted workers.
+- `openItemsStatus` returns compact `text`, a `seed` and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
+- The seed is one line per item, the full problem kept as the `<done>` key: `- <problem> — <stage> (run <id> · session <id>, run …) · <status>`; an empty stage drops ` — <stage>`, a run with no session drops `· session`.
 - Compact text and command cards group waiting rows under `Waiting on you`, running/queued under `In progress`, and pending release/stopped under `Other open`, with counts and no empty groups; IM separates title/status, stage and metadata by lines, with no non-clickable run IDs.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, kept out of the model's context (`agent/pi.ts`), its origin
-  carrying `sessions`, run id → session id, and optional `statusSnapshot` with fixed display text and targets; replay validates the snapshot and logs a malformed one, retaining original text and a visible fallback notice. Old commands keep their text and uniquely resolvable run links; any
+  carrying `sessions`, run id → session id, and optional `statusSnapshot` with fixed display text and targets; replay validates the snapshot, ignoring keys it does not read, and logs a malformed one, retaining original text and a visible fallback notice. Old commands keep their text and uniquely resolvable run links; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card, and the web's status panel, opened by the bar's
   status chip — the same statuses as rows, `waiting on you` first in one list (`GET /api/continuous/open`),

@@ -26,7 +26,6 @@ let doc: FakeDocument;
 let drawer: typeof import("./drawer.js");
 const state = { chain: [] as ChainMember[], current: null as string | null, items: null as OpenItems | null };
 const openContinuous = vi.fn();
-const select = vi.fn();
 const openItem = vi.fn();
 let sessions: Row[] = [];
 
@@ -37,7 +36,7 @@ beforeEach(async () => {
   drawer = await import("./drawer.js");
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
-    sessions: () => sessions, currentId: () => state.current, select, chain: () => state.chain, openContinuous, open: () => state.items,
+    sessions: () => sessions, currentId: () => state.current, chain: () => state.chain, openContinuous, open: () => state.items,
     openItem,
   });
 });
@@ -60,10 +59,10 @@ it("keeps a finished lead in progress while unread and drops it once viewed", ()
   const rows = [
     lead("viewed"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
     lead("workers", { activeRuns: 1 }), lead("talking", { state: "streaming", unread: true }),
-    lead("awaiting", { designOpen: true }), row("built", { phase: "build" }), row("built-unread", { phase: "build", unread: true }),
+    row("built", { phase: "build" }), row("built-unread", { phase: "build", unread: true }),
   ];
   const ids = drawer.inProgress(rows, []).map((s) => s.id);
-  expect(ids.sort()).toEqual(["awaiting", "built-unread", "queued", "talking", "unread", "workers"]);
+  expect(ids.sort()).toEqual(["built-unread", "queued", "talking", "unread", "workers"]);
   expect(ids).toEqual(rows.filter(drawer.isLive).map((s) => s.id).sort());
 });
 
@@ -90,7 +89,7 @@ it("lists each open item once, what waits on you first, with who runs it and whe
   expect(ids).toEqual(["item:model menu", "item:open items 视图", "item:auth review", "run:q1"]);
   const byId = (id: string) => doc.querySelectorAll("[data-row-key]").find((el) => el.dataset.rowKey === id)!;
   expect(byId("item:open items 视图").querySelector(".open-item-stage")!.textContent).toBe("lead designing");
-  expect(byId("item:open items 视图").textContent).toContain("workers: 1 running, 1 succeeded");
+  expect(byId("item:open items 视图").querySelector(".open-item-meta")!.textContent).toContain("workers: 1 running");
   expect(byId("item:model menu").textContent).toContain("not in the ledger");
   byId("item:auth review").querySelector("button")!.onclick?.();
   expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "auth review" }));

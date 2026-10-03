@@ -3,7 +3,7 @@
 import { openItemMarkers } from "../core/reply.js";
 import { openItemPresentation, openItemsText } from "../core/open-items.js";
 import type { Router } from "../core/router.js";
-import { NOT_IN_LEDGER, NOTHING_OPEN, TASK_RUN_STATES, type LedgerRun, type OpenItemsStatus, type TaskRunState } from "../core/types.js";
+import { NOT_IN_LEDGER, NOTHING_OPEN, TASK_RUN_STATES, type OpenItemsStatus, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
 import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
@@ -46,7 +46,8 @@ export function openStatus(
   // The head relays a stage's or a goal's question and the user answers it in the chat; a clean goal asks for the merge.
   const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap" || (r.goal?.outcome === "done" && r.goal.step !== "merge"));
   if (asksInChat) return { status: "waiting on you" };
-  const design = runs.find((r) => r.targetSessionId && session.designOpen(r.targetSessionId));
+  // A design waits only while its newest run succeeded: a failed or cancelled one is stopped, the head's to resume or close.
+  const design = runs.find((r) => r.targetSessionId && session.designOpen(r.targetSessionId) && r.state === "succeeded");
   if (design?.targetSessionId) return { status: "waiting on you", waitsIn: design.targetSessionId };
   // An ended goal still on its run has not landed, unless a legacy merge step ended it: its root run succeeded, the review ran in another session.
   const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" && r.goal.step === "merge" : phaseOf(r.state) === "succeeded");
@@ -56,9 +57,8 @@ export function openStatus(
 /** The store reads the list is joined against. */
 export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
-/** `members`: the chain, newest first; `designs`: the open designs of sessions not closed. */
-export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], designs: LedgerRun[]): OpenItems {
-  const awaiting = new Set(designs.flatMap((d) => (d.targetSessionId ? [d.targetSessionId] : [])));
+/** `members`: the chain, newest first. */
+export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[]): OpenItems {
   // A session's newest run stands for it, so a lead woken again stays the same item.
   const newest = (sessionId: string | null) => (sessionId ? store.latestRunForTarget(sessionId) : undefined);
   const tracked = new Set<string>();
@@ -71,19 +71,14 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
     return { problem: row.problem, stage: row.stage, runs: named };
   });
   const unlisted = store.inFlightRuns().filter((r) => members.includes(r.invokedBySessionId ?? "") && !tracked.has(r.targetSessionId ?? r.id)).map(ledgerRun);
-  for (const r of unlisted) tracked.add(r.targetSessionId ?? r.runId);
-  const unheld = designs.filter((d) => !tracked.has(d.targetSessionId ?? d.runId)).map((d): Unrated => {
-    const run = newest(d.targetSessionId);
-    return { key: `design:${d.targetSessionId ?? d.runId}`, problem: d.name, stage: "", runs: [run ? ledgerRun(run) : d] };
-  });
-  const all = [...items, ...unheld];
   const leads = store.leads();
-  const targets = [...new Set([...all.flatMap((i) => i.runs), ...unlisted].flatMap((r) => r.targetSessionId ?? []))].filter((id) => !leads.has(id));
+  const awaiting = new Set([...leads].flatMap(([id, lead]) => (lead.designOpen ? [id] : [])));
+  const targets = [...new Set([...items.flatMap((i) => i.runs), ...unlisted].flatMap((r) => r.targetSessionId ?? []))].filter((id) => !leads.has(id));
   const titles = targets.length ? store.creationTitles(targets) : new Map<string, string>();
   for (const [id, lead] of leads) titles.set(id, lead.title);
   // Every shown lead's workers in one read: a read per lead grows with the list.
   const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
-  const shown = new Set([...all.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
+  const shown = new Set([...items.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
   const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
@@ -99,7 +94,7 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   };
   const session = { streaming: (id: string) => router.stateOf(id) === "streaming", designOpen: (id: string) => awaiting.has(id) };
   return {
-    items: all.map((i) => {
+    items: items.map((i) => {
       const rated = { ...i, runs: i.runs.map(joined) };
       const title = i.runs.map((r) => titles.get(r.targetSessionId ?? "")).find(Boolean);
       const designSessionId = i.runs.find((r) => r.targetSessionId && awaiting.has(r.targetSessionId))?.targetSessionId;
@@ -113,18 +108,23 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
 export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): boolean {
   const { markers, dropped } = openItemMarkers(text);
   for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
-  return markers.length > 0 && store.markOpenItems(markers, now) > 0;
+  if (!markers.length) return false;
+  const changed = store.markOpenItems(markers, now);
+  markers.forEach((m, i) => { if (m.op === "done" && !changed[i]) log.warn(`open items: <done> named no open item: ${m.problem}`); });
+  return changed.some((n) => n > 0);
 }
 
 /** Complete identities for the model; compact text and Web history share the same presentation. */
 export function openItemsStatus(open: OpenItems, now: number): OpenItemsStatus {
   const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted];
   const sessions = Object.fromEntries(runs.flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
+  const unlisted = open.unlisted.map((r) => ({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" as const : "running" as const }));
   const snapshot = { version: 1 as const, items: [
     ...open.items.map((i) => openItemPresentation(i, now)),
-    ...open.unlisted.map((r) => ({ ...openItemPresentation({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" : "running" }, now, `run:${r.runId}`), direct: true })),
+    ...unlisted.map((i) => ({ ...openItemPresentation(i, now, `run:${i.runs[0]!.runId}`), direct: true })),
   ] };
-  const seed = snapshot.items.map((i) => `- ${i.problem} (${i.status})\n${i.details.map((d) =>
-    `${d.text}${d.targetSessionId ? `\nsession ${d.targetSessionId}` : ""}`).join("\n")}`).join("\n\n") || NOTHING_OPEN;
+  // The full problem is the key the head's `<done>` names.
+  const seed = [...open.items, ...unlisted].map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.length
+    ? ` (${i.runs.map((r) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`).join(", ")})` : ""} · ${i.status}`).join("\n") || NOTHING_OPEN;
   return { text: openItemsText(snapshot), seed, snapshot, sessions };
 }

@@ -206,7 +206,7 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
     if (m[1] === undefined) {
-      const body = m[4] === undefined ? oneLine(m[2] ?? m[3] ?? "") : openLine(m[4]).problem;
+      const body = m[3] !== undefined ? oneLine(m[3]) : openLine(m[2] ?? m[4] ?? "").problem;
       if (!body) dropped.push(m[0].trim());
       else if (m[4] !== undefined) topic ??= body;
       else if (m[2] === undefined) notes.push(body);

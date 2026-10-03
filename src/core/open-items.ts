@@ -1,7 +1,7 @@
 // Open-item presentation shared by live Web rows, command snapshots and IM.
 
 import { agoLabel, relTime, waitsOnYou, workerCounts } from "./reply.js";
-import { NOT_IN_LEDGER, NOTHING_OPEN, type LedgerRun, type OpenItemPresentation, type OpenItemsSnapshot, type TaskRunState } from "./types.js";
+import { NOT_IN_LEDGER, NOTHING_OPEN, type LedgerRun, type OpenItemPresentation, type OpenItemsSnapshot, type OpenItemTarget, type TaskRunState } from "./types.js";
 
 interface Goal {
   step: "work" | "review" | "merge";
@@ -13,7 +13,6 @@ interface Goal {
 
 type Run = LedgerRun & { workers?: Record<TaskRunState, number>; goal?: Goal };
 interface Item {
-  key?: string;
   problem: string;
   title?: string;
   stage: string;
@@ -44,34 +43,47 @@ const time = (r: Run, now: number): string => {
   return r.finishedAt === null ? r.state : `${r.state} ${agoLabel(r.finishedAt, now)}`;
 };
 
-/** Titles arrive resolved by tasks; neither session lookup nor free-text stage guessing belongs here. */
-export function openItemPresentation(i: Item, now: number, key = i.key ?? `item:${i.problem}`): OpenItemPresentation {
+/** What an ended goal asks of the user, as a waiting item's second line. */
+const goalAsk = (g: Goal): string =>
+  g.outcome === "done" && g.step !== "merge" ? "merge?" : g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
+
+/** Titles arrive resolved by tasks; neither session lookup nor free-text stage guessing belongs here.
+ *  A waiting item's stage answers what the user is needed for: the stage's question, else an ended
+ *  goal's ask, prefixed by where it is answered when that is a design session. */
+export function openItemPresentation(i: Item, now: number, key = `item:${i.problem}`): OpenItemPresentation {
   const title = i.title || i.runs.find((r) => r.state !== NOT_IN_LEDGER && r.targetSessionId)?.name
     || i.runs.find((r) => r.state !== NOT_IN_LEDGER)?.name || i.problem;
-  const stage = waitsOnYou(i.status) ? i.stage.replace(/^waiting on you:\s*/i, "") : i.stage;
-  const metadata = i.runs.length > 1 ? [`${i.runs.length} runs`] : [];
-  const details: OpenItemPresentation["details"] = [{ text: title }];
-  if (i.problem !== title) details.push({ text: i.problem });
-  if (i.stage) details.push({ text: i.stage });
+  const waiting = waitsOnYou(i.status);
+  const question = waiting ? i.stage.replace(/^waiting on you:\s*/i, "") : i.stage;
+  const asked = waiting && !i.waitsIn && !/\bwaiting on you\b/i.test(i.stage) ? i.runs.map((r) => (r.goal ? goalAsk(r.goal) : "")).find(Boolean) ?? "" : "";
+  const stage = asked || (waiting && i.waitsIn ? ["in the design session", question].filter(Boolean).join(" · ") : question);
+  // Reversed first: of runs queued together, the later named is the newer.
+  const runs = [...i.runs].reverse().sort((a, b) => b.queuedAt - a.queuedAt);
+  // An ended root's time is no news while its goal's review runs elsewhere.
+  const reviewing = (r: Run): boolean => r.goal?.outcome === null && r.state !== "running" && r.state !== "queued";
+  const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) ? [] : [time(runs[0]!, now)])] : [];
   for (const r of i.runs) {
     const goal = r.goal ? goalText(r.goal) : "";
-    const overviewTime = r.goal?.outcome === null && r.state !== "running" && r.state !== "queued" ? "" : time(r, now);
-    if (i.runs.length === 1 && overviewTime) metadata.push(overviewTime);
-    if (goal && goal !== "waiting on you" && !metadata.includes(goal)) metadata.push(goal);
+    if (i.runs.length === 1 && !reviewing(r)) metadata.push(time(r, now));
+    const moved = !!asked && !!r.goal && goalAsk(r.goal) === asked;
+    if (goal && goal !== "waiting on you" && !moved && !metadata.includes(goal)) metadata.push(goal);
     if (r.workers) {
       const important = Object.fromEntries(["running", "failed", "interrupted"].map((s) => [s, r.workers![s as TaskRunState]])) as Record<TaskRunState, number>;
       if (Object.values(important).some((n) => n > 0)) metadata.push(`workers: ${workerCounts(important)}`);
     }
-    const name = r.state === NOT_IN_LEDGER ? "run" : r.name;
-    details.push({ text: [`${name} · ${r.state === "running" || r.state === "queued" ? `${r.state} · ` : ""}${time(r, now)}`, `run ${r.runId}`, r.cwd, goal,
-      r.workers ? `workers: ${workerCounts(r.workers)}` : ""].filter(Boolean).join("\n"),
-    summary: [name, r.state === "running" || r.state === "queued" ? r.state : "", overviewTime].filter(Boolean).join(" · "), runId: r.runId,
-    ...(r.targetSessionId ? { targetSessionId: r.targetSessionId } : {}) });
   }
-  return { key, problem: i.problem, title, status: i.status, statusLabel: LABELS[i.status],
-    stage: stage || (waitsOnYou(i.status) && i.designSessionId ? "Finalize design" : ""), metadata, details,
-    runs: i.runs.map(({ runId, targetSessionId }) => ({ runId, targetSessionId })),
+  return { key, problem: i.problem, title, status: i.status, statusLabel: LABELS[i.status], stage, metadata,
+    runs: runs.map(({ runId, targetSessionId }) => ({ runId, targetSessionId })),
     ...(i.designSessionId ? { designSessionId: i.designSessionId } : {}), ...(i.waitsIn ? { waitsIn: i.waitsIn } : {}) };
+}
+
+/** Where a row's main click lands, the place the item happened: `topic` is tried in the
+ *  conversation first, then `session`; neither is the conversation's tail. */
+export function openItemDestination(t: OpenItemTarget): { session: string | null; topic: string | null } {
+  const run = t.runs.find((r) => r.targetSessionId)?.targetSessionId ?? null;
+  const own = t.designSessionId ?? t.waitsIn;
+  if (own) return { session: own, topic: null };
+  return { session: run, topic: !t.direct && waitsOnYou(t.status) ? t.problem : null };
 }
 
 export function openItemGroups(items: OpenItemPresentation[]): { title: string; items: OpenItemPresentation[] }[] {
@@ -85,7 +97,6 @@ export function openItemGroups(items: OpenItemPresentation[]): { title: string; 
 export function openItemsText(snapshot: OpenItemsSnapshot): string {
   return openItemGroups(snapshot.items).map((g) => `${g.title} · ${g.items.length}\n\n${g.items.map((i) => [
     [i.title, waitsOnYou(i.status) ? "" : i.statusLabel].filter(Boolean).join(" · "), i.stage, i.metadata.join(" · "),
-    ...(i.runs.length > 1 ? i.details.filter((d) => d.runId).map((d) => d.summary) : []),
   ].filter(Boolean).join("\n")).join("\n\n")}`).join("\n\n") || NOTHING_OPEN;
 }
 
@@ -98,6 +109,5 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
     && optional(i, "designSessionId") && optional(i, "waitsIn") && (i.direct === undefined || typeof i.direct === "boolean")
-    && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string"))
-    && Array.isArray(i.details) && i.details.every((d: unknown) => record(d) && typeof d.text === "string" && optional(d, "summary") && optional(d, "runId") && optional(d, "targetSessionId")));
+    && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
 }

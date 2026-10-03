@@ -8,6 +8,7 @@ import { initIcons } from "./icons.js";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
+import { openItemDestination } from "../../core/open-items.js";
 import { coalesce, failure, getJson, mustGetJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
@@ -176,9 +177,8 @@ const cancelNavigation = (): void => { ++navigation; };
 async function openItem(target: OpenItemTarget): Promise<void> {
   const intent = ++navigation;
   const current = (): boolean => intent === navigation && isChatVisible();
-  const runSession = target.runs.find((r) => r.targetSessionId)?.targetSessionId;
-  const direct = target.designSessionId ?? target.waitsIn ?? (target.direct ? runSession : null);
-  if (direct) return select(direct, false);
+  const { session, topic } = openItemDestination(target);
+  if (session && !topic) return select(session, false);
   const head = headId();
   if (!head) return openContinuous(false);
   await select(head, false);
@@ -188,9 +188,9 @@ async function openItem(target: OpenItemTarget): Promise<void> {
     if (!current()) return;
   }
   if (!snapshotReady || !continuousOpen()) return;
-  if (!target.direct && revealTopic(target.problem)) return;
+  if (topic && revealTopic(topic)) return;
   if (!current()) return;
-  if (runSession) await select(runSession, false);
+  if (session) await select(session, false);
   else scrollBottom(true);
 }
 
@@ -651,7 +651,6 @@ initComposer({
 initDrawer({
   sessions: () => sessions,
   currentId: () => currentId,
-  select: (id) => void select(id),
   chain: () => chain,
   openContinuous,
   open: () => openItems,

@@ -32,8 +32,6 @@ export interface SessionInfo {
   phase?: LeadPhase;
   /** That lead's: a run targeting its session is queued or running. */
   runLive?: true;
-  /** A design lead's that has not reported `Design final:`: the user finalizes it. */
-  designOpen?: true;
 }
 
 /** Everything the drawer needs from the orchestrator (main.ts). */
@@ -41,7 +39,6 @@ interface DrawerDeps {
   /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   currentId: () => string | null;
-  select: (id: string) => void;
   /** The continuous conversation's sessions, newest first; its row is the bar's title, not a drawer row. */
   chain: () => ChainMember[];
   openContinuous: () => void;
@@ -72,24 +69,22 @@ const lastActive = (s: SessionInfo): number => s.modified ?? s.createdAt;
 const waitingForYou = (s: SessionInfo): boolean => s.unread;
 
 /** A session with something going on in it: running, waiting for a look,
- *  subagents in flight, a lead's run queued, or a design waiting on the user
- *  to finalize — what the dot marks, and what the drawer lists. */
+ *  subagents in flight or a lead's run queued — what the dot marks, and what the drawer lists. */
 export const isLive = (s: SessionInfo): boolean =>
-  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.runLive === true || s.designOpen === true;
+  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.runLive === true;
 
 /** The dot's colour, in precedence order; the chip counts by the same answer. */
-type Mark = "working" | "unread" | "runs" | "queued" | "design";
+type Mark = "working" | "unread" | "runs" | "queued";
 
 function markOf(s: SessionInfo): Mark | null {
   if (s.state === "streaming") return "working";
   if (waitingForYou(s)) return "unread";
   if (s.activeRuns > 0) return "runs";
-  if (s.runLive) return "queued";
-  return s.designOpen ? "design" : null;
+  return s.runLive ? "queued" : null;
 }
 
 /** Green = running, amber = waiting for a look, sky = subagents in flight,
- *  grey = a lead's run queued or its design waiting on you. Idle has no mark or slot. */
+ *  grey = a lead's run queued. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   const mark = markOf(s);
   if (!mark) return [];
@@ -100,7 +95,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : mark === "runs"
           ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
-          : ["bg-neutral-400", mark === "queued" ? "lead — run queued" : "design — waiting for you to finalize"],
+          : ["bg-neutral-400", "lead — run queued"],
   );
 }
 
@@ -151,7 +146,6 @@ const MARK_ROW: Record<Mark, [RowStatus, (s: SessionInfo) => string]> = {
   unread: ["waiting on you", () => "turn finished — not viewed yet"],
   runs: ["running", (s) => `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`],
   queued: ["queued", () => "run queued"],
-  design: ["waiting on you", () => "Finalize design"],
 };
 
 /** A session's mark read as a row status, so a session and an item wait on you by one rule. */
@@ -161,8 +155,7 @@ function sessionRow(s: SessionInfo, mark: Mark): OpenItemPresentation {
   const [status, says] = MARK_ROW[mark];
   const p = openItemPresentation({ problem: s.title ?? "untitled", stage: says(s), status, runs: [] }, Date.now(), `session:${s.id}`);
   return { ...p, direct: true, runs: [{ runId: s.id, targetSessionId: s.id }],
-    metadata: [whoOf(s), `active ${agoLabel(lastActive(s))}`].filter(Boolean),
-    details: [...p.details, { text: `${s.cwd}\ncreated ${new Date(s.createdAt).toLocaleDateString()}` }] };
+    metadata: [whoOf(s), `active ${agoLabel(lastActive(s))}`].filter(Boolean) };
 }
 
 const itemRow = (i: OpenItem, now: number): OpenItemPresentation => openItemPresentation(i, now);
@@ -194,7 +187,6 @@ function listed(now: number): { rows: HTMLElement[]; waiting: number; runningCou
     const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target); },
-      select: (id) => { closeMenu(); deps.select(id); },
     }, rowNodes.get(p.key));
     rowNodes.set(p.key, node);
     return node;
@@ -221,7 +213,7 @@ export function renderDrawer(): void {
   drawn = key;
   const { waiting, runningCount, sessions, ...got } = listed(Date.now());
   rows = got.rows;
-  // The app icon counts a turn to look at — unread, or a design to finalize —
+  // The app icon counts a turn to look at — an unread one —
   // plus the conversation's own unread reply, which the bar stands for instead of a row.
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
   // The rows open the panel; the counts are only its copy, and a row neither counts is still an entrance.
@@ -257,7 +249,7 @@ export function openDrawer(): void {
   if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!rows.length) return;
   list = h("ul", "");
-  list.dataset.list = "status"; // the arrows' walk (menu.ts listIn)
+  list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fill(list);
   openPanel(chip, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", list)).setAttribute("aria-label", "Status");
 }

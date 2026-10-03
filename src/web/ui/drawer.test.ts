@@ -37,7 +37,6 @@ let sessions: Row[] = [];
 let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
-const select = vi.fn();
 const openItem = vi.fn();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
@@ -45,7 +44,7 @@ beforeEach(async () => {
   vi.stubGlobal("window", { matchMedia: () => wide });
   drawer = await import("./drawer.js");
   sessions = []; chain = []; current = null; open = null;
-  drawer.initDrawer({ sessions: () => sessions, currentId: () => current, select, chain: () => chain,
+  drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
     openContinuous: vi.fn(), open: () => open, openItem });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -62,7 +61,6 @@ it("keeps independent session marks and phase tags", () => {
   expect(dot({ activeRuns: 2 }).title).toBe("2 subagents running");
   expect(drawer.stateDot(row("x", { phase: "design" }))).toEqual([]);
   expect(dot({ phase: "design", runLive: true }).title).toBe("lead — run queued");
-  expect(dot({ phase: "design", designOpen: true }).title).toBe("design — waiting for you to finalize");
   expect(drawer.phaseTag(row("x"))).toEqual([]);
   expect(fake(drawer.phaseTag(row("x", { phase: "build" }))[0]).title).toBe("lead — building per the design");
 });
@@ -74,7 +72,7 @@ it("counts running and needs-you, omits zero halves, and keeps a chip for other 
   expect(badge).toHaveBeenLastCalledWith(0);
   sessions = [row("run", { state: "streaming" }), row("q", { runLive: true }), row("idle")];
   drawer.renderDrawer(); expect(chip().textContent).toBe("1 running");
-  sessions = [row("done", { unread: true }), row("design", { designOpen: true })];
+  sessions = [row("done", { unread: true }), row("design", { phase: "design", unread: true })];
   drawer.renderDrawer(); expect(chip().textContent).toBe("2 needs you");
   expect(badge).toHaveBeenLastCalledWith(2);
   sessions.push(row("run", { state: "streaming" }));
@@ -100,7 +98,7 @@ it("leaves the chain off the list and counts the head's unread on the app badge"
   expect(drawer.inProgress(sessions, chain).map((s) => s.id)).toEqual(["c"]);
 });
 
-it("uses one flat list, short titles, visible questions and metadata, with complete details", async () => {
+it("uses one flat list, short titles, visible questions and metadata, one control a row with the full wording as its tooltip", async () => {
   const { topicColour } = await import("./topics.js");
   vi.spyOn(Date, "now").mockReturnValue(10 * 60_000);
   sessions = [row("s-lead", { state: "streaming" }), row("free", { unread: true }), row("queued", { phase: "build", runLive: true })];
@@ -124,17 +122,16 @@ it("uses one flat list, short titles, visible questions and metadata, with compl
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
   expect(dot("run:q").classList.contains("animate-pulse")).toBe(false);
   expect(item("session:free").querySelector(".open-item-stage")!.textContent).toBe("Needs you · turn finished — not viewed yet");
-  const detail = item("item:原始完整问题").querySelector(".open-item-toggle")!;
-  detail.onclick?.();
-  expect(detail.getAttribute("aria-expanded")).toBe("true");
-  expect(item("item:原始完整问题").textContent).toContain("原始完整问题");
-  expect(openItem).not.toHaveBeenCalled();
-  item("item:原始完整问题").querySelectorAll(".open-item-link").find((b) => !b.classList.contains("hidden"))!.onclick?.();
-  expect(select).toHaveBeenCalledWith("s-lead");
+  expect(doc.querySelectorAll(".open-item").every((li) => li.querySelectorAll("button").length === 1)).toBe(true);
+  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题");
+  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
+  expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
+  item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }));
   expect(menu.closeMenu).toHaveBeenCalled();
 });
 
-it("keeps controls, focus and expansion on problem identity across title and state refreshes", () => {
+it("keeps controls and focus on problem identity across title and state refreshes", () => {
   wide.matches = true;
   open = { items: [
     { problem: "first", title: "short", stage: "", status: "running", runs: [run("r")] },
@@ -142,58 +139,54 @@ it("keeps controls, focus and expansion on problem identity across title and sta
   ], unlisted: [] };
   drawer.renderDrawer();
   const second = item("item:second");
-  const control = second.querySelector(".open-item-toggle")!;
-  control.onclick?.(); control.focus();
+  const control = second.querySelector(".session-open")!;
+  control.focus();
   open.items[1] = { ...open.items[1]!, stage: "new phase", runs: [run("r2", { name: "a long steering prompt", targetSessionId: "s-r" })] };
   drawer.renderDrawer();
   expect(item("item:second")).toBe(second);
   expect(doc.activeElement).toBe(control);
-  expect(control.getAttribute("aria-expanded")).toBe("true");
   expect(second.querySelector(".open-item-title")!.textContent).toBe("short");
   second.querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "second", runs: [{ runId: "r2", targetSessionId: "s-r" }] }));
   expect(second.querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
-it.each([false, true])("retains same-named designs and a matching marker on refresh, expansion and navigation (docked: %s)", (docked) => {
+it.each([false, true])("retains same-titled designs on refresh, focus and navigation (docked: %s)", (docked) => {
   wide.matches = docked;
   const name = "Same design name";
   open = { items: ["held", "first", "second"].map((id) => ({
-    ...(id === "held" ? {} : { key: `design:${id}` }),
-    problem: name, title: name, stage: "", status: "waiting on you", designSessionId: id,
+    problem: id, title: name, stage: "", status: "waiting on you", designSessionId: id,
     runs: [run(`root-${id}`, { name, state: "succeeded", targetSessionId: id })],
   })), unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(chip().textContent).toBe("3 needs you");
   expect(labels()).toEqual([name, name, name]);
-  const first = item("design:first");
-  const control = first.querySelector(".open-item-toggle")!;
-  control.onclick?.(); control.focus();
-  expect(openItem).not.toHaveBeenCalled();
+  const first = item("item:first");
+  const control = first.querySelector(".session-open")!;
+  control.focus();
   open.items[1] = { ...open.items[1]!, runs: [run("followup", { name: "New steering title", state: "succeeded", targetSessionId: "first" })] };
   open.items.reverse();
   drawer.renderDrawer();
   expect(labels()).toEqual([name, name, name]);
-  expect(item("design:first")).toBe(first);
+  expect(item("item:first")).toBe(first);
   expect(doc.activeElement).toBe(control);
-  expect(control.getAttribute("aria-expanded")).toBe("true");
-  expect(first.textContent).toContain("New steering title");
-  expect(first.textContent).not.toContain("root-first");
   for (const id of ["first", "second", "held"]) {
     if (id !== "first") drawer.openDrawer();
-    const node = item(id === "held" ? `item:${name}` : `design:${id}`);
-    const toggle = node.querySelector(".open-item-toggle")!;
-    if (id !== "first") {
-      expect(toggle.getAttribute("aria-expanded")).toBe("false");
-      toggle.onclick?.();
-    }
-    node.querySelectorAll(".open-item-link").find((b) => !b.classList.contains("hidden"))!.onclick?.();
-    expect(select).toHaveBeenLastCalledWith(id);
-    drawer.openDrawer();
+    const node = item(`item:${id}`);
     node.querySelector(".session-open")!.onclick?.();
-    expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: name, designSessionId: id,
+    expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: id, designSessionId: id,
       runs: [{ runId: id === "first" ? "followup" : `root-${id}`, targetSessionId: id }] }));
   }
+});
+
+it("says where a design's wait is answered, the place read as part of the label", () => {
+  open = { items: [
+    { problem: "rail", stage: "two layouts", status: "waiting on you", designSessionId: "d", waitsIn: "d", runs: [run("r", { state: "succeeded", finishedAt: 0, targetSessionId: "d" })] },
+    { problem: "bare", stage: "", status: "waiting on you", designSessionId: "e", waitsIn: "e", runs: [run("q", { state: "succeeded", finishedAt: 0, targetSessionId: "e" })] },
+  ], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  expect(item("item:rail").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · two layouts");
+  expect(item("item:bare").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -205,6 +198,17 @@ it("forwards design and waiting entrances without inferring a current session fr
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }));
   expect(button.getAttribute("aria-current")).toBe("page");
   expect(chip().textContent).toBe("1 running");
+});
+
+it("marks a row current where its click lands: the newest run's session, never a run of an item answered in the chat", () => {
+  current = "s-new";
+  open = { items: [
+    { problem: "work", stage: "", status: "running", runs: [run("old", { queuedAt: 1, targetSessionId: "s-old" }), run("new", { queuedAt: 2 })] },
+    { problem: "ask", stage: "waiting on you: which?", status: "waiting on you", runs: [run("new", { queuedAt: 2, state: "succeeded" })] },
+  ], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  expect(item("item:work").querySelector(".session-open")!.getAttribute("aria-current")).toBe("page");
+  expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
 it("moves the same rows between popover and dock, returning focus to the chip on narrowing", () => {

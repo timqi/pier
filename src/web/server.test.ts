@@ -452,7 +452,7 @@ describe("workbench server", () => {
     await lead("build-run", "builder", undefined, true);
     expect(await (await app.request("/api/sessions")).json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 1, channel: "web" },
-      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design", designOpen: true },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design" },
       { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "build", runLive: true },
     ]);
   });

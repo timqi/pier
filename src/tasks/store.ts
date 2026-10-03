@@ -255,7 +255,7 @@ export class TaskStore {
   /** Every lead session with its phase (as `leadPhaseOf`), its creating run,
    *  whether a run targeting it is queued or running, and — a design lead's —
    *  whether no run of it has reported `Design final:` yet, which leaves the
-   *  design on the user; in one statement for the session list's listing. */
+   *  design on the user; in one statement for the session list and the open items. */
   leads(): Map<string, { phase: LeadPhase; runId: string; title: string; runLive: boolean; designOpen: boolean }> {
     const rows = this.sql(`
       SELECT c.id, c.run_id, c.title, c.design, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
@@ -445,18 +445,18 @@ export class TaskStore {
     return this.#many<TaskRun>("SELECT json FROM task_runs WHERE state IN ('queued', 'running') ORDER BY queued_at");
   }
 
-  /** The continuous conversation's open items, oldest first; `runIds` as main wrote them. */
+  /** The continuous conversation's open items in creation order — an upsert keeps its place; `runIds` as main wrote them. */
   openItems(): { problem: string; stage: string; runIds: string[] }[] {
-    return (this.sql("SELECT problem, stage, run_ids FROM open_items ORDER BY updated_at, rowid").all() as { problem: string; stage: string; run_ids: string }[])
+    return (this.sql("SELECT problem, stage, run_ids FROM open_items ORDER BY rowid").all() as { problem: string; stage: string; run_ids: string }[])
       .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[] }));
   }
 
-  /** Main's markers, in reply order, as one write; answers how many rows changed. */
-  markOpenItems(markers: OpenItemMarker[], now: number): number {
-    return this.transact(() => markers.reduce((n, m) => n + Number(m.op === "open"
+  /** Main's markers, in reply order, as one write; answers the rows each marker changed. */
+  markOpenItems(markers: OpenItemMarker[], now: number): number[] {
+    return this.transact(() => markers.map((m) => Number(m.op === "open"
       ? this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
           ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
         .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes
-      : this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes), 0));
+      : this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes)));
   }
 }

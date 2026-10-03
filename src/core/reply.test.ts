@@ -302,6 +302,12 @@ describe("open-item markers", () => {
     expect(streamBody(raw)).toBe("Merged.");
   });
 
+  // A `<done>` keys like the `<open>` it closes: the problem before the dash.
+  it("reads a done's key as an open's: the problem before ` — `", () => {
+    expect(openItemMarkers("<done>a — b</done>").markers).toEqual([{ op: "done", problem: "a" }]);
+    expect(openItemMarkers("<open>a — b</open><done>a — b</done>").markers.map((m) => m.problem)).toEqual(["a", "a"]);
+  });
+
   it("keeps a parenthetical that is not a run token in the stage, and a stageless item", () => {
     expect(openItemMarkers("<open>review\n src/auth — proposed (not applied)</open><open>just a problem</open>").markers).toEqual([
       { op: "open", problem: "review src/auth", stage: "proposed (not applied)", runIds: [] },

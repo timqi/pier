@@ -304,7 +304,7 @@ export interface OpenRun extends LedgerRun {
  *  `running` while a run's goal is live, a run is queued or running, its session
  *  streams or a lead's workers are queued or running; `waiting on you` while a
  *  goal ended `decision`, `cap` or `done` short of a legacy merge, its stage says so
- *  or its session's design awaits Finalize; `pending release` when every run succeeded
+ *  or its session's design is not final and its newest run succeeded; `pending release` when every run succeeded
  *  and carries no goal but one a legacy merge ended; else `stopped` — a run failed, was cancelled, interrupted,
  *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
 export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
@@ -313,8 +313,6 @@ export type OpenStatus = "running" | "waiting on you" | "pending release" | "sto
  *  a `waiting on you` item is answered in, derived beside the status; absent
  *  when the answer is given in the main chat. */
 export interface OpenItem {
-  /** Automatic designs use their session identity; marker items default to their problem. */
-  key?: string;
   problem: string;
   stage: string;
   runs: OpenRun[];
@@ -330,9 +328,7 @@ export interface OpenItem {
  *  (docs/design/10-continuous-session.md#open-items). Items keep their problem identity
  *  even when several hold the same session. */
 export interface OpenItems {
-  /** Main's items by `updated_at`, oldest first; then each design lead that has
-   *  not reported `Design final:`, is not closed and no item holds, named by its
-   *  creating run: the user decides when each is final. */
+  /** Main's items in creation order, oldest first. */
   items: OpenItem[];
   /** Chain runs in flight in no item's session. */
   unlisted: OpenRun[];

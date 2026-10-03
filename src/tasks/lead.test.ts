@@ -106,13 +106,11 @@ describe("a feature lead", () => {
       [build.targetSessionId!, { phase: "build", runId: build.id, title: build.context.definition.name, runLive: false, designOpen: false }],
       [direct.targetSessionId!, { phase: "build", runId: direct.id, title: direct.context.definition.name, runLive: false, designOpen: false }],
     ]));
-    expect(service.openDesigns().map((r) => [r.runId, r.targetSessionId])).toEqual([[run.id, run.targetSessionId]]);
     // Only a line that opens with it is the milestone; one mid-sentence is not.
     store.saveRun({ ...run, id: "mention", queuedAt: run.queuedAt + 1, sessionMode: "reuse", result: { type: "agent", text: "not yet: Design final: comes later", sessionId: run.targetSessionId! } });
     expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(true);
     store.saveRun({ ...run, id: "final", queuedAt: run.queuedAt + 2, sessionMode: "reuse", result: { type: "agent", text: "Agreed.\nDesign final: /repo/design.md", sessionId: run.targetSessionId! } });
     expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(false);
-    expect(service.openDesigns()).toEqual([]);
     await expect(service.handle({ operation: "run", prompt: "x", launch: { model: "test/model", role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
     await expect(service.handle({ operation: "run", prompt: "x", launch: { model: "test/model", design: true } }, "main")).rejects.toThrow(/design must be true, on a lead/);
   });
@@ -333,7 +331,6 @@ describe("a feature lead", () => {
       state: "succeeded", sessionMode: "reuse", resumedFromRunId: "lead-run", callbackSessionId: "main", callbackState: "delivered",
     });
     expect(store.leads().get("lead")?.designOpen).toBe(false);
-    expect(service.openDesigns()).toEqual([]);
     expect(item().problem).toBe("Keep the original design question");
     expect(item().designSessionId).toBeUndefined();
     expect(item().waitsIn).toBeUndefined();

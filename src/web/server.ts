@@ -149,9 +149,8 @@ interface WebDeps {
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
   /** `TaskStore.leads`: every lead session, tagged by its phase in the session list,
-   *  `runLive` while a run targeting it is queued or running,
-   *  `designOpen` while a design of it waits on the user to finalize. */
-  leads?: () => Map<string, { phase: LeadPhase; runLive: boolean; designOpen: boolean }>;
+   *  `runLive` while a run targeting it is queued or running. */
+  leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
   openItems?: () => OpenItems;
   /** The IM channel that durably owns a session. Not push.ts's question, which
@@ -299,8 +298,8 @@ export function createServer(
   };
 
   // `modified` is for the row's tooltip and orders nothing.
-  const leadOf = (lead: { phase: LeadPhase; runLive: boolean; designOpen: boolean } | undefined) =>
-    (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}), ...(lead.designOpen ? { designOpen: true } : {}) } : {});
+  const leadOf = (lead: { phase: LeadPhase; runLive: boolean } | undefined) =>
+    (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}) } : {});
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>, lead: ReturnType<NonNullable<WebDeps["leads"]>>) => ({
     ...s,
     state: router.stateOf(s.id) ?? "idle",
