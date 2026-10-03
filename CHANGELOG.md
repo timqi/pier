@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7 — 2026-10-03
+
+### Changed
+
+- Tasks: an `<open>` claims only runs from other items, so each run belongs to one open item.
+
 ## 0.4.6 — 2026-10-03
 
 ### Changed
