@@ -87,8 +87,11 @@ function fakePi() {
    *  would build for the next request, diffed against what is recorded. */
   const transcript: PiMessage[] = [];
   const state = { messages: [] as PiMessage[] };
+  /** What `sendCustomMessage` was handed, as Pi would later emit it. */
+  const custom: unknown[] = [];
   return {
     calls,
+    custom,
     promptOptions,
     transcript,
     emit: (event: PiEvent) => {
@@ -142,8 +145,9 @@ function fakePi() {
         calls.push("followUp");
         return Promise.resolve();
       },
-      sendCustomMessage: () => {
+      sendCustomMessage: (message: unknown) => {
         calls.push("sendCustomMessage");
+        custom.push(message);
         return Promise.resolve();
       },
       getSteeringMessages: () => [] as string[],
@@ -174,6 +178,28 @@ describe("a chat command's answer", () => {
     const preparation = { messagesToSummarize: messages, turnPrefixMessages: [input("chat-command")] };
     await handlers.get("session_before_compact")!({ type: "session_before_compact", preparation });
     expect(preparation).toEqual({ messagesToSummarize: kept, turnPrefixMessages: [] });
+  });
+
+  it("is shown while a turn runs, and not again when Pi records it after the turn", async () => {
+    const { fake, session: s } = session();
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const origin = { kind: "chat-command", command: "status" } as const;
+    fake.pi.isStreaming = true;
+    await s.systemInput("2 running", origin, "append");
+    expect(seen).toMatchObject([{ type: "system-input", text: "2 running", origin }]);
+    // Pi's flush after the turn: the same message, `details` the same origin.
+    fake.emit({ type: "message_start", message: { role: "custom", ...(fake.custom[0] as object), timestamp: 2 } as PiMessage });
+    expect(seen).toHaveLength(1);
+    expect(await s.pendingSystemInputs()).toEqual([]);
+  });
+
+  it("is left to Pi's own message when no turn runs", async () => {
+    const { session: s } = session();
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    await s.systemInput("nothing running", { kind: "chat-command", command: "stop" }, "append");
+    expect(seen).toEqual([]);
   });
 });
 
@@ -427,14 +453,29 @@ describe("a turn the provider never answered", () => {
     // Pi retried this one four times in a row on a real outage. Each attempt
     // ends an agent run of its own; only the last of them ended the turn.
     fake.emit({ type: "agent_end", willRetry: true, messages: [final] });
-    expect(seen).toEqual([]);
+    expect(seen).toEqual([{ type: "error", message: `model request failed (${outage}) — retrying` }]);
     fake.emit({ type: "agent_end", willRetry: false, messages: [final] });
     fake.emit({ type: "agent_settled" });
-    expect(seen).toMatchObject([
+    expect(seen.slice(1)).toMatchObject([
       { type: "turn-end", text: "", error: outage },
       { type: "error", message: outage },
       { type: "state", state: "idle" },
     ]);
+  });
+
+  it("tells the chat once that a failed request is being retried", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const timeout = { ...stopped(), errorMessage: "Request timed out." };
+    fake.emit({ type: "agent_end", willRetry: true, messages: [timeout] });
+    fake.emit({ type: "agent_end", willRetry: true, messages: [timeout] });
+    expect(seen).toEqual([{ type: "error", message: "model request failed (Request timed out.) — retrying" }]);
+    fake.emit({ type: "agent_settled" });
+    // The next run's retries are news again.
+    fake.emit({ type: "agent_end", willRetry: true, messages: [timeout] });
+    expect(seen.filter((e) => e.type === "error")).toHaveLength(2);
   });
 
   it("settles as aborted when retry backoff is cancelled", () => {
@@ -447,7 +488,7 @@ describe("a turn the provider never answered", () => {
     fake.emit({ type: "agent_end", willRetry: true, messages: [attempt] });
     fake.emit({ type: "auto_retry_end" });
     fake.emit({ type: "agent_settled" });
-    expect(seen).toMatchObject([
+    expect(seen.slice(1)).toMatchObject([
       { type: "turn-end", text: "" },
       { type: "state", state: "idle" },
     ]);

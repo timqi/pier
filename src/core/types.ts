@@ -504,7 +504,8 @@ export interface AgentSession {
    * triggers settles — immediately for a queued mode the recipient is already
    * streaming through. Resolution is not an acceptance signal: callers that
    * need "the session took it" must not wait for this promise. `append` starts
-   * no turn: the input enters the context and the next prompt carries it. */
+   * no turn: the input enters the context and the next prompt carries it, and
+   * its `system-input` is emitted at once, a running turn or not. */
   systemInput(text: string, origin: SystemInputOrigin, mode: "prompt" | "steer" | "followUp" | "append"): Promise<void>;
   abort(): Promise<void>;
   /** Emits payloads only; core/hub.ts owns seq/ts stamping. */

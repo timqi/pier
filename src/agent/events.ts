@@ -155,7 +155,7 @@ function inputSource(value: unknown): SystemInputSource | undefined {
 const isAnswer = (m: PiMessage | undefined): boolean =>
   m?.role === "assistant" && m.stopReason === "stop" && !hasToolCalls(m);
 
-function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
+export function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]?.role === "assistant") return messages[i];

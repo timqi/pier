@@ -132,7 +132,7 @@ exists to catch.
 | `tasks/` | 3.75k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, and the `--worktree` seam |
 | root `src/*.ts` | 3.55k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch; the home chat's status refresh, one debounce on the hub the instance layer wires, is the lines past 3.5k |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
-| one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK |
+| one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `agent/pi.ts` to 760 — an appended input shown while a turn runs and the retry notice are the lines past 750 |
 | channel adapter file | 460 | transport, render and panel counted separately, each serving the thread and the home chat's main flow; Lark's quote of the message a main-flow reply answers is the lines past 450 |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.

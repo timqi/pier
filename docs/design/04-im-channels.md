@@ -77,7 +77,8 @@ buttons. Kept apart: the renderers, the user-name memos, the `discovered` sets.
   `core/reply.ts` (`45s · 32K tok`).
 
 `Router` posts every error into the conversation as a `{kind:"error"}` note —
-session errors, a rejected prompt, a failed delivery. Shared and automatic; an
+session errors, a rejected prompt, a failed delivery, and a model request Pi
+is retrying (once per run, `model request failed (<reason>) — retrying`). Shared and automatic; an
 adapter must not reimplement it. Notes are trimmed to 600 characters; a notify
 that itself fails is reported to the hub once, never retried.
 

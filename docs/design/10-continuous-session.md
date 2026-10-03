@@ -193,7 +193,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 ## Chat commands
 
 The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
-input, mode `append`, no turn); an unknown `/word` is a message, never an
+input, mode `append`, no turn, shown at once even while the head replies and
+recorded after that turn); an unknown `/word` is a message, never an
 error: the composer is not a shell.
 
 The commands, their spelling (`/` or `%`) and what each answers on the head

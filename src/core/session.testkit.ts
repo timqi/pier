@@ -191,8 +191,8 @@ export function fakeSession(id = "s1", opts: FakeSessionOptions = {}): FakeSessi
       session.calls.push(`systemInput:${origin.kind}:${mode}:${text}`);
       session.systemInputs.push({ text, origin, mode });
       if (opts.scripted) return;
-      // Pi appends it to the context at once and starts nothing.
-      if (mode === "append" && state === "idle") {
+      // Pi appends it to the context and starts nothing; it is shown at once.
+      if (mode === "append") {
         transcript.push({ role: "system", text, origin, at: Date.now() });
         emit({ type: "system-input", text, origin, at: Date.now() });
         return;

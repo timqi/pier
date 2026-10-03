@@ -52,6 +52,7 @@ import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
 import { DISPATCHER, lead, WORKER } from "./roles.js";
 import {
+  lastAssistant,
   textOf,
   toChatTurns,
   toSessionEvents,
@@ -448,6 +449,12 @@ export class PiSession implements AgentSession {
     const queued = this.pi.isStreaming && mode !== "append";
     if (queued) this.queuedInputs.push(origin);
     else if (mode !== "append") this.loadSystemPrompt();
+    else if (this.pi.isStreaming) {
+      // Pi records it only after the running turn; a /status answer that waits
+      // for the reply it asks about is no answer. Its later message_start is skipped.
+      this.shownEarly.add(origin);
+      for (const fn of this.listeners) fn({ type: "system-input", text, origin, at: Date.now() });
+    }
     try {
       // Without a turn Pi appends it now, or after a running turn's tool results.
       return await this.pi.sendCustomMessage(
@@ -476,21 +483,33 @@ export class PiSession implements AgentSession {
     return this.pi.abort();
   }
 
+  /** Every subscriber, for the payloads that start here rather than in Pi. */
+  private readonly listeners = new Set<(e: SessionEventPayload) => void>();
+  /** Appended inputs already emitted, keyed by the origin Pi carries back as `details`. */
+  private readonly shownEarly = new WeakSet<object>();
+
   subscribe(fn: (e: SessionEventPayload) => void): () => void {
     let retryPending = false;
-    return this.pi.subscribe((event) => {
+    this.listeners.add(fn);
+    const unsubscribe = this.pi.subscribe((event) => {
       const piEvent = event as PiEvent;
-      if (piEvent.type === "agent_end") retryPending = piEvent.willRetry === true;
+      if (piEvent.type === "agent_end") {
+        // Pi's backoff is otherwise silent: a timed-out request reads as a hung reply (§5).
+        if (piEvent.willRetry && !retryPending) fn({ type: "error", message: `model request failed (${lastAssistant(piEvent.messages)?.errorMessage || "unknown error"}) — retrying` });
+        retryPending = piEvent.willRetry === true;
+      }
       if (piEvent.type === "agent_settled" && retryPending) {
         // Aborting Pi during retry backoff produces no final agent_end.
         retryPending = false;
         fn({ type: "turn-end", text: "", meta: this.lastTurnMeta() });
       }
+      if (piEvent.type === "message_start" && this.shownEarly.has(piEvent.message?.details as object)) return;
       for (const payload of toSessionEvents(piEvent)) {
         fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
         if (payload.type === "turn-end" && !payload.error) this.autoTitle(payload.text, fn);
       }
     });
+    return () => { this.listeners.delete(fn); unsubscribe(); };
   }
 
   /** Several subscribers see every turn-end; this is what makes the request one. */

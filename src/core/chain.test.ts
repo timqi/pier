@@ -468,4 +468,16 @@ describe("a send under a chat's key", () => {
     expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "session-seed", reason: "idle" })]);
     expect(r.sessions.get("m2")!.prompts[0]).toContain("back");
   });
+
+  it("answers `/status` in the chat while the head is still replying", async () => {
+    const r = rig({ head: "h1" });
+    const im = lark();
+    r.router.registerChannel(im.channel);
+    const h1 = r.existing("h1", r.clock.now, { hold: true });
+    await send(r, "go");
+    expect(h1.state).toBe("streaming");
+    expect(await send(r, "/status")).toEqual({ sessionId: "h1", command: "status" });
+    expect(h1.state).toBe("streaming");
+    expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "chat-command", command: "status" })]);
+  });
 });
