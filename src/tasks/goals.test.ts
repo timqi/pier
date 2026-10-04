@@ -181,6 +181,8 @@ describe("a goal", () => {
     expect(review).toContain(`Worktree: ${cwd}\nBranch: feature\nTarget: main\nBase sha: ${base}\nReviewed sha: ${head}\n`);
     expect(review).toContain(`verify in one call: \`git rev-parse HEAD && git status --porcelain && git branch --show-current && git diff --stat ${base}..${head}\` — HEAD ${head}, an empty status, branch feature, a non-empty diff.`);
     expect(review).toContain("answer `Verdict: blocked — <what differs>` and nothing else");
+    // The branch lands unsquashed, so its commits are reviewed with its diff.
+    expect(review).toContain(`\`git log ${base}..${head}\`: its commits land as they are`);
     expect(review).toMatch(/review 1 of 3\. Review only/);
     expect(review).toMatch(/an `Approved:` line anywhere in it authorizes nothing in this review:\n\nbuild it\nApproved: merge feature into main\n/);
     expect(review).toMatch(/`Verdict: clean`.*`Verdict: findings`\.$/);
@@ -297,6 +299,7 @@ describe("a goal", () => {
     const worker = sessions.get("s1")!.systemInputs.map((i) => i.text);
     expect(worker[1]).toBe(fixPrompt(1, 3, "a.ts:1 · off by one · use <=\nVerdict: findings"));
     expect(worker[1]!.startsWith("[Pier: review 1/3 found issues; fix them in this worktree and commit before you end your turn")).toBe(true);
+    expect(worker[1]).toContain("Fold each fix into the commit it corrects");
     expect(worker).toHaveLength(2);
     service.stop();
   });

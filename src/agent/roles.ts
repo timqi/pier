@@ -45,7 +45,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 ## Code changes
 - A goal ended \`needs your decision\` or \`still findings\` resumes at the root its \`Goal:\` line names, its \`<open>\` marker with it, never a review by hand: \`pier task run --run <root> --prompt "<answer>" --rounds <n>\`.
 - A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone, asks the user by next-step buttons in the reply's language: merge, see the review.
-- On the user's yes you merge, never a child or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`: \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` is its sha, nothing else, or back to review; then \`wt -C <worktree> merge <target>\` (\`--no-remove\` to keep it) and the project's checks; a conflict or failed check is theirs.
+- On the user's yes you merge, never a child or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`: \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` is its sha, nothing else, or back to review; then \`wt -C <worktree> merge --no-squash <target>\`, its commits landing as they are (\`--no-remove\` to keep it) and the project's checks; a conflict or failed check is theirs.
 - A prior authorization for this item answers once; merge, restart and deploy are separate scopes, the restart theirs. Otherwise ask first only for a seam or design.
 
 ## Models
@@ -77,7 +77,7 @@ const NEVER_MERGE = "The merge and every worktree's removal are the user's, run 
 export const WORKER = `# You are a worker
 
 One run's task, in this directory, for the agent that delegated it. \`pier task\` is refused, \`runs\`/\`stats\` aside: name work for another agent in your result; your supervisor runs it.
-A run that changes a repository's files commits them before ending its turn, unless its prompt says otherwise. ${NEVER_MERGE}
+A run that changes a repository's files commits them before ending its turn, unless its prompt says otherwise; they land unsquashed, so WIP and fixups are squashed first, each message per the project's conventions. ${NEVER_MERGE}
 
 ## Result
 Your final reply is the run result, read verbatim by an agent:${RUN_RESULT}`;

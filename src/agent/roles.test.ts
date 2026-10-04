@@ -17,7 +17,7 @@ describe("the dispatcher contract", () => {
       '`--name "<a few words>"`',
       '`pier task run --run <root> --prompt "<answer>" --rounds <n>`',
       "`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain`",
-      "`wt -C <worktree> merge <target>`",
+      "`wt -C <worktree> merge --no-squash <target>`",
       "`→ <target> in <worktree>`",
       "`--no-remove`",
     ]) expect(DISPATCHER).toContain(line);
@@ -79,6 +79,8 @@ describe("the worker contract", () => {
     expect(WORKER).toContain(RUN_RESULT);
     expect(WORKER).toContain("`pier task` is refused");
     expect(WORKER).toContain("`wt merge`/`wt remove`");
+    // The head merges with `--no-squash`: the worker's commits are the history that lands.
+    expect(WORKER).toContain("they land unsquashed");
     expect(WORKER).not.toContain("Next-step buttons");
   });
 
@@ -123,8 +125,8 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_275],
-    ["WORKER", WORKER, 325],
+    ["DISPATCHER", DISPATCHER, 1_290],
+    ["WORKER", WORKER, 355],
     ['lead("build")', lead("build"), 550],
     ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {

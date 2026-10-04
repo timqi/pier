@@ -154,7 +154,7 @@ non-obvious consequence — in one or two lines. Nothing else:
 
 - Green before every commit: `npm run check && npm run lint && npm test`.
 - rtk runs `npm run lint` as `rtk lint` (ESLint) unless rtk's `[hooks] exclude_commands` lists it, which `pier tools sync` does (`src/tools.ts`); ESLint output from `npm run lint` means that exclusion is missing.
-- `wt merge` removes the worktree it runs in and Pi refuses every later command in a session whose cwd is gone, so a merge runs from the main checkout (`wt -C <worktree> merge main`), never from the worktree's own session.
+- `wt merge` removes the worktree it runs in and Pi refuses every later command in a session whose cwd is gone, so a merge runs from the main checkout (`wt -C <worktree> merge --no-squash main`), never from the worktree's own session.
 - Strict TypeScript; no `any` at seams. Changing a seam is a design decision.
 - Test the seams: adapter golden tests (mocked clients), core queue/schedule
   units. Hermetic — no real `$HOME`, creds, or network.
