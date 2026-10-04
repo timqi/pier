@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.8 — 2026-10-04
+
+### Changed
+
+- `/status` answers mid-turn instead of waiting for the turn to end; a retried model request is told once.
+- IM status: `/status` posts the new card first and deletes the old one off the reply's path, about one platform write faster.
+
 ## 0.4.7 — 2026-10-03
 
 ### Changed
