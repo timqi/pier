@@ -22,7 +22,7 @@ afterEach(() => {
 
 const view = (text: string): OpenItemsView => ({ text, items: [] });
 
-const rig = (fail: { edit?: boolean; post?: boolean } = {}) => {
+const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) => {
   const calls: string[] = [];
   const logged: string[] = [];
   const handed: OpenItemsView[] = [];
@@ -36,7 +36,7 @@ const rig = (fail: { edit?: boolean; post?: boolean } = {}) => {
       calls.push(`edit ${id} ${body}`);
       return fail.edit ? Promise.reject(new Error("message_not_found")) : Promise.resolve();
     },
-    delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
+    delete: (chat, id) => (calls.push(`delete ${id}`), fail.delete ? Promise.reject(new Error("timeout")) : Promise.resolve()),
   }, { items: (v) => (handed.push(v), Promise.resolve()) }, (m) => logged.push(m), (t) => `> ${t}`);
   return { status, calls, logged, handed };
 };
@@ -56,7 +56,7 @@ describe("the status message", () => {
     const { status, calls, handed } = rig();
     await status.show("D1", view("In progress · 1\n\na\nelapsed <1m"));
     expect(await status.answer("D1", "In progress · 1\n\na\nelapsed 1m")).toBe(true);
-    expect(calls).toEqual(["post D1 > In progress · 1\n\na\nelapsed <1m", "delete m1", "post D1 > In progress · 1\n\na\nelapsed 1m"]);
+    expect(calls).toEqual(["post D1 > In progress · 1\n\na\nelapsed <1m", "post D1 > In progress · 1\n\na\nelapsed 1m", "delete m1"]);
     expect(handed[0]!.text).toBe("In progress · 1\n\na\nelapsed <1m");
   });
 
@@ -64,7 +64,7 @@ describe("the status message", () => {
     const { status, calls } = rig();
     await status.show("D1", view("a"));
     expect(await status.answer("D1", "b")).toBe(true);
-    expect(calls).toEqual(["post D1 > a", "delete m1", "post D1 > b"]);
+    expect(calls).toEqual(["post D1 > a", "post D1 > b", "delete m1"]);
     // Nothing open, another chat, or no view yet: the note answers.
     expect(await status.answer("D1", NOTHING_OPEN)).toBe(false);
     expect(await status.answer("D2", "b")).toBe(false);
@@ -79,7 +79,7 @@ describe("the status message", () => {
     await Promise.resolve();
     const [, answered] = await Promise.all([running, status.answer("D1", "c"), status.show("D1", view("d"))]);
     expect(answered).toBe(true);
-    expect(calls).toEqual(["post D1 > a", "edit m1 > b", "delete m1", "post D1 > d"]);
+    expect(calls).toEqual(["post D1 > a", "edit m1 > b", "post D1 > d", "delete m1"]);
   });
 
   it("/status whose re-post fails leaves the answer to the note", async () => {
@@ -88,6 +88,32 @@ describe("the status message", () => {
     expect(await status.answer("D1", "a")).toBe(false);
     expect(calls).toEqual(["post D1 > a", "post D1 > a"]);
     expect(logged).toHaveLength(2);
+  });
+
+  it("/status posts the new card before deleting the old, and does not wait for the delete", async () => {
+    const { status, calls, logged } = rig({ delete: true });
+    await status.show("D1", view("a"));
+    expect(await status.answer("D1", "b")).toBe(true);
+    expect(calls).toEqual(["post D1 > a", "post D1 > b", "delete m1"]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(logged).toEqual(["status: delete failed: Error: timeout"]);
+    await status.show("D1", view("c"));
+    expect(calls.at(-1)).toBe("edit m2 > c");
+  });
+
+  it("/status whose re-post fails keeps the old card", async () => {
+    let failPost = false;
+    const calls: string[] = [];
+    const status = new StatusMessage("slack", db, {
+      post: (chat, body) => (calls.push(`post ${body}`), failPost ? Promise.reject(new Error("429")) : Promise.resolve("m1")),
+      edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
+      delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
+    }, { items: () => Promise.resolve() }, () => undefined, (t) => t);
+    await status.show("D1", view("a"));
+    failPost = true;
+    expect(await status.answer("D1", "b")).toBe(false);
+    await status.show("D1", view("c"));
+    expect(calls).toEqual(["post a", "post b", "edit m1 c"]);
   });
 
   it("is deleted when nothing is open, and not posted for nothing", async () => {
@@ -103,7 +129,7 @@ describe("the status message", () => {
     const edits = rig({ edit: true });
     await edits.status.show("D1", view("a"));
     await edits.status.show("D1", view("b"));
-    expect(edits.calls).toEqual(["post D1 > a", "edit m1 > b", "delete m1", "post D1 > b"]);
+    expect(edits.calls).toEqual(["post D1 > a", "edit m1 > b", "post D1 > b", "delete m1"]);
     expect(edits.logged[0]).toMatch(/^status: edit failed/);
 
     db.exec("DELETE FROM status_messages");

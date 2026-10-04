@@ -175,8 +175,9 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   and old text-only `/status` notes retain the legacy `withoutRunIds` transform. Same text as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
   none). Replies, notes and thread roots never move it; only `/status` in the
-  main flow deletes it and posts it anew at the bottom, with the answer's text
-  (`StatusMessage.answer`); `startChannels` refreshes once, after the restart
+  main flow posts it anew at the bottom, with the answer's text
+  (`StatusMessage.answer`), then deletes the old one without waiting; a failed
+  re-post keeps the old one; `startChannels` refreshes once, after the restart
   note. One refresh runs at a time; the newest waiting view replaces
   the older. A home moved within the platform loses the old chat's card on the
   next refresh; moved across platforms, the old card stays until that adapter

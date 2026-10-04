@@ -38,9 +38,17 @@ export class StatusMessage {
    *  answer to the note. */
   async answer(chatId: string, text: string): Promise<boolean> {
     if (this.last?.chatId !== chatId || text === NOTHING_OPEN) return false;
+    const before = this.messageId(chatId);
     await this.show(chatId, { ...this.last.view, text }, this.last.seen, true);
-    // The re-post forgets the old row first, so a row now is the one it posted.
-    return this.db.prepare("SELECT 1 FROM status_messages WHERE platform = ? AND chat_id = ?").get(this.platform, chatId) !== undefined;
+    // A failed re-post keeps the old row, so only a new id is the one it posted.
+    const after = this.messageId(chatId);
+    return after !== undefined && after !== before;
+  }
+
+  private messageId(chatId: string): string | undefined {
+    const row = this.db.prepare("SELECT message_id FROM status_messages WHERE platform = ? AND chat_id = ?")
+      .get(this.platform, chatId) as { message_id: string } | undefined;
+    return row?.message_id;
   }
 
   /** One refresh at a time; one arriving mid-run waits, and a newer view
@@ -74,11 +82,14 @@ export class StatusMessage {
         .then(() => true, (err: unknown) => void this.log(`status: edit failed, posting anew: ${String(err)}`));
       if (edited) return this.save(chatId, row.message_id, view.text);
     }
-    if (row) await this.forget(chatId, row.message_id);
-    if (empty) return;
+    if (row && empty) return this.forget(chatId, row.message_id);
     const posted = await this.api.post(chatId, body)
       .catch((err: unknown) => void this.log(`status: post failed: ${String(err)}`));
-    if (posted) this.save(chatId, posted, view.text);
+    if (!posted) return;
+    this.save(chatId, posted, view.text);
+    // Off the reply's path: the new card already answers; a failed delete leaves only a stale copy.
+    if (row) void this.api.delete(chatId, row.message_id)
+      .catch((err: unknown) => this.log(`status: delete failed: ${String(err)}`));
   }
 
   private async forget(chatId: string, messageId: string): Promise<void> {
