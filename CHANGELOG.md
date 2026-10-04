@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.9 — 2026-10-04
+
+### Changed
+
+- Code changes: a branch merges with `--no-squash`, its commits landing as they are; workers squash WIP and fixups before their run ends, a fix round folds into the commit it corrects, and a review flags a WIP or fixup commit.
+
 ## 0.4.8 — 2026-10-04
 
 ### Changed
