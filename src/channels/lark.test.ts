@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
+import { openItemPresentation } from "../core/open-items.js";
 import { splitReply } from "../core/reply.js";
 import { openDb } from "../db.js";
 import type {
@@ -13,6 +14,7 @@ import type {
   ConversationKey,
   InboundMessage,
   ModelRef,
+  OpenItemPresentation,
   SessionState,
   ThinkingLevel,
 } from "../core/types.js";
@@ -1081,16 +1083,18 @@ describe("the home chat", () => {
   // docs/design/11-im-conversation.md §Status
   describe("status", () => {
     const meta = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 10, model: "m" };
-    const view = (text: string, items: [string, string][] = []) =>
-      ({ text, items: items.map(([problem, status]) => ({ problem, status })) });
+    const snapshot = (items: [string, OpenItemPresentation["status"], string?][]) => ({ version: 1 as const, items: items.map(([problem, status, stage = ""]) =>
+      openItemPresentation({ problem, stage, status, runs: [] }, 0)) });
+    const view = (text: string, items: [string, OpenItemPresentation["status"]][] = []) =>
+      ({ text, snapshot: snapshot(items), items: items.map(([problem, status]) => ({ problem, status })) });
 
     it("keeps one labelled card, edited in place under later posts, and only in the home chat", async () => {
-      await channel.status(HOME, view("storage — running"));
-      expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([[HOME, "*▤ open items*\nstorage — running"]]);
-      await channel.status(HOME, view("storage — waiting on you"));
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
+      expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([[HOME, "*▤ open items*\n<font color='grey'>In progress · 1</font>\n**storage**"]]);
+      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
       expect(client.patched.at(-1)!.messageId).toBe("om_900");
-      expect(bodyText(client.patched.at(-1)!.card)).toBe("*▤ open items*\nstorage — waiting on you");
-      await channel.status(HOME, view("storage — waiting on you"));
+      expect(bodyText(client.patched.at(-1)!.card)).toBe("*▤ open items*\n<font color='grey'>Waiting on you · 1</font>\n**storage**");
+      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
       expect(client.patched).toHaveLength(1);
       // A reply, a note and a topic root never move it: no card after every turn.
       await channel.send(HOME, { text: "done", suggestions: [] });
@@ -1107,13 +1111,16 @@ describe("the home chat", () => {
     });
 
     it("/status is answered once: the card re-posted at the bottom, or the note when nothing is open", async () => {
-      const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: { version: 1 as const, items: [] } };
-      const text = `Waiting on you · 1\n\n${"A & B · run literal12… ".repeat(12)}\n是否合并 <scope>？\nsucceeded 2m ago\n\nIn progress · 1\n\nBuild\nelapsed <1m`;
-      await channel.status(HOME, view("a"));
+      const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
+      const text = "Waiting on you · 1\n\nA & B\n是否合并 <scope>？\n\nIn progress · 1\n\nBuild";
+      await channel.status(HOME, view("a", [["a", "running"]]));
       await channel.send(HOME, { text: "done", suggestions: [] });
       await channel.notify(HOME, { text, origin });
       expect(client.deleted).toEqual(["om_900"]);
-      expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*▤ open items*\na", "done", `*▤ open items*\n${text}`]);
+      expect(client.sent.map((p) => bodyText(p.card))).toEqual([
+        "*▤ open items*\n<font color='grey'>In progress · 1</font>\n**a**", "done",
+        "*▤ open items*\n<font color='grey'>Waiting on you · 1</font>\n**A & B**\n<font color='orange'>是否合并 <scope>？</font>\n<font color='grey'>In progress · 1</font>\n**Build**",
+      ]);
       await channel.status(HOME, view("Nothing open."));
       await channel.notify(HOME, { text: "Nothing open.", origin });
       expect(client.sent.map((p) => bodyText(p.card)).slice(3)).toEqual(["*/status*\n> Nothing open."]);

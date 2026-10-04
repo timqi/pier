@@ -196,7 +196,7 @@ describe("receipt ledger", () => {
   describe("item receipts", () => {
     // Began after every mark in these tests: its scope takes them all.
     const turn = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 1 };
-    const view = (items: [string, string][]) => ({ text: "x", items: items.map(([problem, status]) => ({ problem, status })) });
+    const view = (items: [string, string][]) => ({ text: "x", snapshot: { version: 1 as const, items: [] }, items: items.map(([problem, status]) => ({ problem, status })) });
 
     it("a turn that opened an item keeps its 👀 and books it under the problem", async () => {
       const { receipts, calls, ledger } = recording();

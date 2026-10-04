@@ -6,6 +6,7 @@
 // literal text, so there is no translation and no escaping.
 
 import { cut } from "../core/reply.js";
+import type { OpenItemsView } from "../core/types.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type {
   LarkActionValue,
@@ -14,6 +15,7 @@ import type {
   LarkElement,
   LarkFormInput,
 } from "./lark-api.js";
+import { statusLayout, type StatusRow } from "./status.js";
 
 /** The binding limit is the card's 30KB request cap in bytes; a CJK character
  *  spends three, so 7000 chars keeps an all-CJK turn near 21KB plus scaffolding. */
@@ -101,3 +103,25 @@ export const OFFER_PREFIX = "sg:";
 
 export const withoutButtons = (cardIn: LarkCard): LarkCard =>
   card(cardIn.body.elements.filter((el) => el.tag !== "column_set" && el.tag !== "button"));
+
+// --- the status message ------------------------------------------------------------
+
+// Lark caps a card at 200 elements; one item is one element.
+const STATUS_ELEMENTS = 100;
+// Cut per field, not per row: a cut through a tag would leave it unclosed.
+const FIELD_MAX = 600;
+
+const statusRow = (r: StatusRow): string => [
+  `**${cut(r.title, FIELD_MAX)}**${r.tag ? ` <text_tag color='neutral'>${r.tag}</text_tag>` : ""}`,
+  r.stage && `<font color='${r.waiting ? "orange" : "grey"}'>${cut(r.stage, FIELD_MAX)}</font>`,
+  [r.meta && `<font color='grey'>${cut(r.meta, FIELD_MAX)}</font>`, r.link && `[Open on web](${r.link})`].filter(Boolean).join(" · "),
+].filter(Boolean).join("\n");
+
+/** The open items as the web sidebar lays them out, one markdown element per item. */
+export const statusCard = (view: OpenItemsView): LarkCard => card([markdown("*▤ open items*"), ...statusLayout<LarkElement>(view, {
+  heading: (text) => [markdown(`<font color='grey'>${text}</font>`)],
+  row: (r) => [markdown(statusRow(r))],
+  more: (n) => [markdown(`<font color='grey'>… ${String(n)} more</font>`)],
+  cost: (els) => els.reduce((sum, el) => sum + (el.tag === "markdown" ? el.content.length : 0) + LARK_MAX / STATUS_ELEMENTS, 0),
+  max: LARK_MAX - LARK_MAX / STATUS_ELEMENTS,
+})]);

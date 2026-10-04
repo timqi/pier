@@ -32,6 +32,7 @@ import type { ChannelControl } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import {
   LarkApi,
+  type LarkCard,
   type LarkCardAction,
   type LarkClient,
   type LarkMessageEvent,
@@ -40,7 +41,7 @@ import {
 } from "./lark-api.js";
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
-import { card, cardText, chunk, LARK_MAX, markdown, OFFER_PREFIX } from "./lark-render.js";
+import { card, cardText, markdown, OFFER_PREFIX, statusCard } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import { StatusMessage } from "./status.js";
@@ -102,7 +103,7 @@ export class LarkChannel implements Channel {
   private readonly discovered = new Set<string>();
   private me = "";
   private readonly out: LarkOutbound;
-  private readonly statusLine: StatusMessage;
+  private readonly statusLine: StatusMessage<LarkCard>;
   private socket?: LarkSocket;
   private running = false;
 
@@ -127,12 +128,11 @@ export class LarkChannel implements Channel {
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
-    // One card, so the text is cut to the budget rather than split.
     this.statusLine = new StatusMessage("lark", ledger.db, {
-      post: async (chatId, body) => (await this.api.sendCard(chatId, card([markdown(body)]))).messageId,
-      edit: (_chatId, messageId, body) => this.api.patchCard(messageId, card([markdown(body)])),
+      post: async (chatId, body) => (await this.api.sendCard(chatId, body)).messageId,
+      edit: (_chatId, messageId, body) => this.api.patchCard(messageId, body),
       delete: (_chatId, messageId) => this.api.deleteMessage(messageId),
-    }, this.receipts, this.log, (text) => chunk(`*▤ open items*\n${text}`, LARK_MAX)[0] ?? "");
+    }, this.receipts, this.log, statusCard);
     if (deps.control) {
       this.panel = new LarkPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -555,7 +555,7 @@ export class LarkChannel implements Channel {
       return logger("lark").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
     // `/status`'s answer is the status message re-posted, never a copy beside it.
-    if ("chatId" in to && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.chatId, note.text))) return;
+    if ("chatId" in to && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.chatId, note.text, note.origin.statusSnapshot))) return;
     const messageId = await this.out.note(to, note);
     if (messageId && awaitsTurn(note.origin)) {
       this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);

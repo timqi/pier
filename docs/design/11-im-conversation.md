@@ -163,19 +163,30 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   that is cleared and forgotten. The stale and startup sweeps skip them.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
   `task-group-changed` and `session-state` on a 1.5 s timer into an
-  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`) and hands it to
+  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text, its
+  snapshot, and Settings' public address as `web`) and hands it to
   `ChannelRuntime.openItems`, which calls `Channel.status` on the home
   platform's live adapter; nothing otherwise.
 - The status message is `▤ open items` in the platform's emphasis over the
-  view's compact shared presentation, one per home chat: counted groups, title/status,
-  the second line saying what the user is needed for (`Needs you` omitted in the
-  `Waiting on you` group, `in the design session` kept), then time/goal/worker
-  metadata, `N runs · <newest>` for several runs, with a blank line between items
-  ([10 §Open items](10-continuous-session.md#open-items)); no run IDs appear,
-  and old text-only `/status` notes retain the legacy `withoutRunIds` transform. Same text as last posted → nothing;
+  view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
+  groups and words ([10 §Open items](10-continuous-session.md#open-items)):
+  `Waiting on you · N`, `In progress · N`, `Other open · N`; per item the title in
+  bold with its status label as a tag (`Queued`, `Stopped`, …; none while
+  running; `Needs you` omitted in the `Waiting on you` group), the stage — for a
+  waiting item what the user is needed for, `in the design session` kept — on its
+  own line, then time/goal/worker metadata and `Open on web`, a link to
+  `<web>/app/#/session/<id>` where the item has a session and `web` is set. Lark:
+  one markdown element per item, the tag a `text_tag`, a waiting item's stage
+  orange, headings and metadata grey; Slack: Block Kit, headings and
+  metadata `context` blocks, the item a `section` with the tag in code and a
+  waiting stage quoted, under the compact text as the message's `text` for
+  notifications. Each field is cut at a fixed length; items past the budget (Lark
+  7000 chars and 100 elements, Slack 50 blocks) are left out whole behind
+  `… N more`. No run IDs appear, and old text-only `/status` notes retain the
+  legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
   none). Replies, notes and thread roots never move it; only `/status` in the
-  main flow posts it anew at the bottom, with the answer's text
+  main flow posts it anew at the bottom, with the answer's text and snapshot
   (`StatusMessage.answer`), then deletes the old one without waiting; a failed
   re-post keeps the old one; `startChannels` refreshes once, after the restart
   note. One refresh runs at a time; the newest waiting view replaces
@@ -327,7 +338,9 @@ through what the head launches (`pier task`), never by a group's message.
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `core/reply.test.ts` `opened`; `channels/receipts.test.ts` the
   join, the state diff, the sweeps, the cap; `channels/status.test.ts` edit,
-  `/status`'s re-post, delete, failures; `channels/slack.test.ts` the join at send,
+  `/status`'s re-post, delete, failures; `channels/lark-render.test.ts`
+  `statusCard` and `channels/slack-render.test.ts` `statusMessage` the layout,
+  the link and the budget; `channels/slack.test.ts` the join at send,
   quiet notes and replies, `status()`; `channels/runtime.test.ts`
   `openItems` to the live home adapter only.
 

@@ -1,21 +1,70 @@
 // Keeping the home chat's one status message current (docs/design/11-im-conversation.md
 // §Status): a refresh edits it in place or deletes it, `/status` re-posts it at
 // the bottom, and each view is handed on to `Receipts.items`. The platform's
-// three calls are injected.
+// three calls and its rendering of the sidebar's layout are injected.
 
 import type { DatabaseSync } from "node:sqlite";
-import { NOTHING_OPEN, type OpenItemsView } from "../core/types.js";
+import { openItemDestination, openItemGroups } from "../core/open-items.js";
+import { waitsOnYou } from "../core/reply.js";
+import { NOTHING_OPEN, type OpenItemsSnapshot, type OpenItemsView } from "../core/types.js";
 import type { Receipts } from "./receipts.js";
 import type { ChannelPlatform } from "./types.js";
 
 /** One main-flow message; `post` answers its id. */
-export interface StatusApi {
-  post(chatId: string, body: string): Promise<string>;
-  edit(chatId: string, messageId: string, body: string): Promise<void>;
+export interface StatusApi<B> {
+  post(chatId: string, body: B): Promise<string>;
+  edit(chatId: string, messageId: string, body: B): Promise<void>;
   delete(chatId: string, messageId: string): Promise<void>;
 }
 
-export class StatusMessage {
+/** One item in the web sidebar's words: `tag` its status label, none under the
+ *  waiting group's heading as in the sidebar's grouped list, `stage` what it
+ *  is at — for a waiting item, the question — and `link` its session on the web. */
+export interface StatusRow {
+  title: string;
+  tag: string;
+  stage: string;
+  waiting: boolean;
+  meta: string;
+  link?: string;
+}
+
+/** A platform's pieces for one heading, row or closing count; `cost` is what the budget counts. */
+export interface StatusLayout<E> {
+  heading(text: string): E[];
+  row(row: StatusRow): E[];
+  more(count: number): E[];
+  cost(pieces: E[]): number;
+  /** Leaves room for `more`'s pieces. */
+  max: number;
+}
+
+/** The sidebar's groups, waiting first, laid out while they fit the budget; the
+ *  items past it are counted, never cut mid-item. */
+export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E[] {
+  const out: E[] = [];
+  let spent = 0;
+  let left = view.snapshot.items.length;
+  for (const group of openItemGroups(view.snapshot.items)) {
+    const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
+    for (const [n, item] of group.items.entries()) {
+      const session = openItemDestination(item).session;
+      const row = layout.row({
+        title: item.title, tag: waitsOnYou(item.status) ? "" : item.statusLabel, stage: item.stage, waiting: waitsOnYou(item.status), meta: item.metadata.join(" · "),
+        ...(view.web && session ? { link: `${view.web}/app/#/session/${encodeURIComponent(session)}` } : {}),
+      });
+      const pieces = n ? row : [...heading, ...row];
+      const cost = layout.cost(pieces);
+      if (spent + cost > layout.max) return [...out, ...layout.more(left)];
+      out.push(...pieces);
+      spent += cost;
+      left--;
+    }
+  }
+  return out;
+}
+
+export class StatusMessage<B = string> {
   /** `repost` survives a newer view replacing this one: `/status` asked for the bottom. */
   private queued?: { chatId: string; view: OpenItemsView; seen: number; repost: boolean };
   private tail: Promise<void> = Promise.resolve();
@@ -25,21 +74,21 @@ export class StatusMessage {
   constructor(
     private readonly platform: ChannelPlatform,
     private readonly db: DatabaseSync,
-    private readonly api: StatusApi,
+    private readonly api: StatusApi<B>,
     private readonly receipts: Pick<Receipts, "items">,
     private readonly log: (message: string) => void,
-    /** The view's text under the platform's label. */
-    private readonly render: (text: string) => string,
+    /** The view under the platform's label. */
+    private readonly render: (view: OpenItemsView) => B,
   ) {}
 
   /** `/status` in the main flow: the status message, re-posted below with the
-   *  answer's text, is the one reply when a view is known and something is
-   *  open; false — nothing open, no view yet, or the post failed — leaves the
-   *  answer to the note. */
-  async answer(chatId: string, text: string): Promise<boolean> {
+   *  answer's text and snapshot, is the one reply when a view is known and
+   *  something is open; false — nothing open, no view yet, or the post failed —
+   *  leaves the answer to the note. */
+  async answer(chatId: string, text: string, snapshot?: OpenItemsSnapshot): Promise<boolean> {
     if (this.last?.chatId !== chatId || text === NOTHING_OPEN) return false;
     const before = this.messageId(chatId);
-    await this.show(chatId, { ...this.last.view, text }, this.last.seen, true);
+    await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, this.last.seen, true);
     // A failed re-post keeps the old row, so only a new id is the one it posted.
     const after = this.messageId(chatId);
     return after !== undefined && after !== before;
@@ -75,18 +124,20 @@ export class StatusMessage {
     const row = this.db.prepare("SELECT message_id, text FROM status_messages WHERE platform = ? AND chat_id = ?")
       .get(this.platform, chatId) as { message_id: string; text: string } | undefined;
     const empty = view.text === NOTHING_OPEN;
-    if (row ? !repost && row.text === view.text : empty) return;
-    const body = this.render(view.text);
+    const body = this.render(view);
+    // The rendered body, not the text: links and layout change without it.
+    const drawn = JSON.stringify(body);
+    if (row ? !repost && !empty && row.text === drawn : empty) return;
     if (row && !repost && !empty) {
       const edited = await this.api.edit(chatId, row.message_id, body)
         .then(() => true, (err: unknown) => void this.log(`status: edit failed, posting anew: ${String(err)}`));
-      if (edited) return this.save(chatId, row.message_id, view.text);
+      if (edited) return this.save(chatId, row.message_id, drawn);
     }
     if (row && empty) return this.forget(chatId, row.message_id);
     const posted = await this.api.post(chatId, body)
       .catch((err: unknown) => void this.log(`status: post failed: ${String(err)}`));
     if (!posted) return;
-    this.save(chatId, posted, view.text);
+    this.save(chatId, posted, drawn);
     // Off the reply's path: the new card already answers; a failed delete leaves only a stale copy.
     if (row) void this.api.delete(chatId, row.message_id)
       .catch((err: unknown) => this.log(`status: delete failed: ${String(err)}`));

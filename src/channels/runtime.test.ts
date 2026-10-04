@@ -278,7 +278,7 @@ describe("ChannelRuntime", () => {
     events.length = 0; openFails = undefined; startGate = Promise.resolve();
     const logged: string[] = [];
     const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } }, (m) => logged.push(m));
-    const view = { text: "storage — running", items: [{ problem: "storage", status: "running" }] };
+    const view = { text: "storage — running", snapshot: { version: 1 as const, items: [] }, items: [{ problem: "storage", status: "running" }] };
     home = { platform: "slack", chatId: "D1" };
     await rt.openItems(view);
     expect(events).toEqual([]);

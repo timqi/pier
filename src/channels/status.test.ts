@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { openItemPresentation } from "../core/open-items.js";
 import { NOTHING_OPEN, type OpenItemsView } from "../core/types.js";
 import { StatusMessage } from "./status.js";
 
@@ -20,7 +21,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const view = (text: string): OpenItemsView => ({ text, items: [] });
+const view = (text: string): OpenItemsView => ({ text, snapshot: { version: 1, items: [] }, items: [] });
 
 const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) => {
   const calls: string[] = [];
@@ -37,7 +38,7 @@ const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) =>
       return fail.edit ? Promise.reject(new Error("message_not_found")) : Promise.resolve();
     },
     delete: (chat, id) => (calls.push(`delete ${id}`), fail.delete ? Promise.reject(new Error("timeout")) : Promise.resolve()),
-  }, { items: (v) => (handed.push(v), Promise.resolve()) }, (m) => logged.push(m), (t) => `> ${t}`);
+  }, { items: (v) => (handed.push(v), Promise.resolve()) }, (m) => logged.push(m), (v) => `> ${v.text}`);
   return { status, calls, logged, handed };
 };
 
@@ -70,6 +71,19 @@ describe("the status message", () => {
     expect(await status.answer("D2", "b")).toBe(false);
     expect(await rig().status.answer("D1", "b")).toBe(false);
     expect(calls).toHaveLength(3);
+  });
+
+  it("/status re-posts the answer's snapshot, not the last refresh's", async () => {
+    const shown: OpenItemsView[] = [];
+    const status = new StatusMessage("slack", db, {
+      post: () => Promise.resolve(`m${String(shown.length)}`),
+      edit: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+    }, { items: () => Promise.resolve() }, () => undefined, (v) => (shown.push(v), v.text));
+    await status.show("D1", { ...view("a"), web: "https://pier.example" });
+    const snapshot = { version: 1 as const, items: [openItemPresentation({ problem: "b", stage: "", status: "running", runs: [] }, 0)] };
+    expect(await status.answer("D1", "b", snapshot)).toBe(true);
+    expect(shown[1]).toMatchObject({ text: "b", snapshot, web: "https://pier.example" });
   });
 
   it("/status during a running refresh still re-posts at the bottom", async () => {
@@ -108,12 +122,25 @@ describe("the status message", () => {
       post: (chat, body) => (calls.push(`post ${body}`), failPost ? Promise.reject(new Error("429")) : Promise.resolve("m1")),
       edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
       delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
-    }, { items: () => Promise.resolve() }, () => undefined, (t) => t);
+    }, { items: () => Promise.resolve() }, () => undefined, (v) => v.text);
     await status.show("D1", view("a"));
     failPost = true;
     expect(await status.answer("D1", "b")).toBe(false);
     await status.show("D1", view("c"));
     expect(calls).toEqual(["post a", "post b", "edit m1 c"]);
+  });
+
+  it("edits when only what the text does not show changed, the link's address", async () => {
+    const calls: string[] = [];
+    const status = new StatusMessage("slack", db, {
+      post: (chat, body) => (calls.push(`post ${body}`), Promise.resolve("m1")),
+      edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
+      delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
+    }, { items: () => Promise.resolve() }, () => undefined, (v) => `${v.text} ${v.web ?? "-"}`);
+    await status.show("D1", view("a"));
+    await status.show("D1", { ...view("a"), web: "https://pier.example" });
+    await status.show("D1", { ...view("a"), web: "https://pier.example" });
+    expect(calls).toEqual(["post a -", "edit m1 a https://pier.example"]);
   });
 
   it("is deleted when nothing is open, and not posted for nothing", async () => {

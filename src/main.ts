@@ -204,7 +204,9 @@ const refreshStatus = (): void => {
     try {
       const open = tasks.openItems();
       const items = open.items.map(({ problem, status }) => ({ problem, status }));
-      void channels.openItems({ text: openItemsStatus(open, Date.now()).text, items });
+      const { text, snapshot } = openItemsStatus(open, Date.now());
+      const web = settings.get().publicUrl;
+      void channels.openItems({ text, snapshot, items, ...(web ? { web } : {}) });
     } catch (err) {
       log.error("status: the open items could not be read", err);
     }

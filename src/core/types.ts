@@ -38,11 +38,15 @@ export interface AgentReply {
 export const NOTHING_OPEN = "Nothing open.";
 
 /** The continuous conversation's open items as a chat's status message shows
- *  them: `text` is `/status`'s one string (`NOTHING_OPEN` when empty), `items`
- *  each item's `problem` key and its status (tasks/types.ts `OpenStatus`). */
+ *  them: `text` is `/status`'s one string (`NOTHING_OPEN` when empty) and the
+ *  plain rendering, `snapshot` the same items structured for a rich one, `items`
+ *  each item's `problem` key and its status (tasks/types.ts `OpenStatus`), and
+ *  `web` the instance's public address an item links into, absent when none is set. */
 export interface OpenItemsView {
   text: string;
+  snapshot: OpenItemsSnapshot;
   items: { problem: string; status: string }[];
+  web?: string;
 }
 
 export interface InboundMessage {

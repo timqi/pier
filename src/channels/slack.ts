@@ -46,7 +46,7 @@ import {
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
-import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
+import { context, escapeMrkdwn, offeredLabel, statusMessage } from "./slack-render.js";
 
 const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
 // The envelope is already acked, so this bounds concurrency (sockets,
@@ -115,7 +115,7 @@ export class SlackChannel implements Channel {
   private me = "";
   private mention?: { leading: RegExp; any: RegExp };
   private readonly out: SlackOutbound;
-  private readonly statusLine: StatusMessage;
+  private readonly statusLine: StatusMessage<{ text: string; blocks: SlackBlock[] }>;
   private socket?: SlackSocket;
   private running = false;
 
@@ -138,10 +138,10 @@ export class SlackChannel implements Channel {
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
     this.statusLine = new StatusMessage("slack", ledger.db, {
-      post: async (channel, text) => (await this.api.postMessage({ channel, text })).ts,
-      edit: (channel, ts, text) => this.api.updateMessage({ channel, ts, text }),
+      post: async (channel, body) => (await this.api.postMessage({ channel, ...body })).ts,
+      edit: (channel, ts, body) => this.api.updateMessage({ channel, ts, ...body }),
       delete: (channel, ts) => this.api.deleteMessage(channel, ts),
-    }, this.receipts, this.log, (text) => `_▤ open items_\n${escapeMrkdwn(text)}`);
+    }, this.receipts, this.log, statusMessage);
     if (deps.control) {
       this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -522,7 +522,7 @@ export class SlackChannel implements Channel {
       return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
     // `/status`'s answer is the status message re-posted, never a copy beside it.
-    if (!to.threadTs && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.channel, note.text))) return;
+    if (!to.threadTs && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.channel, note.text, note.origin.statusSnapshot))) return;
     const ts = await this.out.note(to.channel, to.threadTs, note);
     if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
   }

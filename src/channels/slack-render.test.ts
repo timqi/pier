@@ -2,13 +2,18 @@
 // italic, so the translation has ordering hazards a golden test pins down.
 
 import { describe, expect, it } from "vitest";
+import { openItemPresentation } from "../core/open-items.js";
+import type { OpenItemPresentation, OpenItemsView } from "../core/types.js";
 import {
   actions,
   chunk,
+  context,
   MRKDWN_MAX,
   escapeMrkdwn,
   offeredLabel,
+  section,
   sections,
+  statusMessage,
   toMrkdwn,
 } from "./slack-render.js";
 import type { SlackBlock } from "./slack-api.js";
@@ -170,5 +175,48 @@ describe("next-step buttons", () => {
 describe("escapeMrkdwn", () => {
   it("is what every user-derived string reaching a send goes through", () => {
     expect(escapeMrkdwn('a <b> & "c"')).toBe('a &lt;b&gt; &amp; "c"');
+  });
+});
+
+// docs/design/11-im-conversation.md §Status
+describe("statusMessage", () => {
+  const item = (title: string, status: OpenItemPresentation["status"], stage: string, extra: Partial<OpenItemPresentation> = {}): OpenItemPresentation =>
+    ({ ...openItemPresentation({ problem: title, stage, status, runs: [] }, 0), ...extra });
+  const view = (items: OpenItemPresentation[], web?: string): OpenItemsView =>
+    ({ text: "Waiting on you · 1\n\nA & B", snapshot: { version: 1, items }, items: [], ...(web ? { web } : {}) });
+
+  it("lays the items out as the sidebar does, under the plain text notifications show", () => {
+    const sent = statusMessage(view([
+      item("Build", "running", "worker running", { metadata: ["elapsed 3m"], runs: [{ runId: "r1", targetSessionId: "s1" }] }),
+      item("A & B", "waiting on you", "merge <scope>?", { metadata: ["succeeded 2m ago"], runs: [{ runId: "r2", targetSessionId: "s2" }] }),
+      item("Docs", "queued", ""),
+    ], "https://pier.example"));
+    expect(sent.text).toBe("_▤ open items_\nWaiting on you · 1\n\nA &amp; B");
+    expect(sent.blocks).toEqual([
+      context("_▤ open items_"),
+      context("*Waiting on you · 1*"),
+      section("*A &amp; B*\n> merge &lt;scope&gt;?"),
+      context("succeeded 2m ago · <https://pier.example/app/#/session/s2|Open on web>"),
+      context("*In progress · 2*"),
+      section("*Build*\nworker running"),
+      context("elapsed 3m · <https://pier.example/app/#/session/s1|Open on web>"),
+      section("*Docs*  `Queued`"),
+    ]);
+  });
+
+  it("links nothing without a public address, and stays within Slack's 50 blocks", () => {
+    expect(statusMessage(view([item("Build", "running", "", { runs: [{ runId: "r1", targetSessionId: "s1" }] })])).blocks.at(-1))
+      .toEqual(section("*Build*"));
+    const many = statusMessage(view(Array.from({ length: 60 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(5000), { metadata: ["elapsed 1m"] }))));
+    expect(many.blocks.length).toBeLessThanOrEqual(50);
+    const shown = many.blocks.filter((b) => b.type === "section").length;
+    expect(many.blocks.at(-1)).toEqual(context(`… ${String(60 - shown)} more`));
+    for (const b of many.blocks) if (b.type === "section") expect(b.text.text.length).toBeLessThanOrEqual(3000);
+    // Escaping grows `<` fivefold-ish: the cap holds on what is sent.
+    const escaped = statusMessage(view([item("<&>".repeat(1000), "running", "<&>".repeat(1000), { metadata: ["&".repeat(3000)] })])).blocks;
+    for (const b of escaped) {
+      if (b.type === "section") expect(b.text.text.length).toBeLessThanOrEqual(3000);
+      if (b.type === "context") expect(b.elements[0]!.text.length).toBeLessThanOrEqual(3000);
+    }
   });
 });

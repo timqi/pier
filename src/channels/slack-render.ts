@@ -4,8 +4,10 @@
 // syntax to literal text rather than rejecting the message.
 
 import { cut } from "../core/reply.js";
+import type { OpenItemsView } from "../core/types.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
+import { statusLayout, type StatusRow } from "./status.js";
 
 /** Slack caps `markdown` blocks at 12,000 cumulative chars per message. */
 export const MARKDOWN_MAX = 11_000;
@@ -142,3 +144,32 @@ export function offeredLabel(
   }
   return undefined;
 }
+
+// --- the status message ------------------------------------------------------
+
+const STATUS_LABEL = "_▤ open items_";
+// Cut per field, not per block: a cut through `<url|label>` would leave it unclosed.
+// Escaped first: an entity is up to five times its character, and the cap is on what is sent.
+const FIELD_MAX = 900;
+const field = (text: string): string => cut(escapeMrkdwn(text), FIELD_MAX);
+
+function statusRow(r: StatusRow): SlackBlock[] {
+  const tag = r.tag ? `  \`${field(r.tag)}\`` : "";
+  const stage = r.stage ? `\n${r.waiting ? "> " : ""}${field(r.stage)}` : "";
+  const meta = [field(r.meta), r.link ? `<${r.link}|Open on web>` : ""].filter(Boolean).join(" · ");
+  return [section(`*${field(r.title)}*${tag}${stage}`), ...(meta ? [context(meta)] : [])];
+}
+
+/** The open items as the web sidebar lays them out in Block Kit, under the
+ *  plain text Slack shows where blocks are not rendered (notifications). */
+export const statusMessage = (view: OpenItemsView): { text: string; blocks: SlackBlock[] } => ({
+  text: `${STATUS_LABEL}\n${escapeMrkdwn(cut(view.text, MRKDWN_MAX))}`,
+  blocks: [context(STATUS_LABEL), ...statusLayout<SlackBlock>(view, {
+    heading: (text) => [context(`*${escapeMrkdwn(text)}*`)],
+    row: statusRow,
+    more: (n) => [context(`… ${String(n)} more`)],
+    cost: (blocks) => blocks.length,
+    // Slack's 50 blocks, less the label and the closing count.
+    max: 48,
+  })],
+});

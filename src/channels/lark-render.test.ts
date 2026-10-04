@@ -3,7 +3,9 @@
 // broke other adapters.
 
 import { describe, expect, it } from "vitest";
-import { button, card, cardText, chunk, footer, markdown, withFooter } from "./lark-render.js";
+import { openItemPresentation } from "../core/open-items.js";
+import type { OpenItemPresentation, OpenItemsView } from "../core/types.js";
+import { button, card, cardText, chunk, footer, LARK_MAX, markdown, statusCard, withFooter } from "./lark-render.js";
 
 describe("chunk", () => {
   it("returns short text whole", () => {
@@ -89,5 +91,41 @@ describe("cardText", () => {
     const sent = card([markdown("part one"), withFooter("- last item", "opus · 3s"), button("Deploy", { key: "sg:0", root: "" })]);
     expect(cardText(sent)).toBe("part one\n- last item");
     expect(cardText(card([footer("no reply · opus")]))).toBe("");
+  });
+});
+
+// docs/design/11-im-conversation.md §Status
+describe("statusCard", () => {
+  const item = (title: string, status: OpenItemPresentation["status"], stage: string, extra: Partial<OpenItemPresentation> = {}): OpenItemPresentation =>
+    ({ ...openItemPresentation({ problem: title, stage, status, runs: [] }, 0), ...extra });
+  const view = (items: OpenItemPresentation[], web?: string): OpenItemsView =>
+    ({ text: "x", snapshot: { version: 1, items }, items: [], ...(web ? { web } : {}) });
+
+  it("lays the items out as the sidebar does: waiting first and highlighted, then in progress, linked to their session", () => {
+    const sent = statusCard(view([
+      item("Build", "running", "worker running", { metadata: ["elapsed 3m"], runs: [{ runId: "r1", targetSessionId: "s1" }] }),
+      item("Parser", "waiting on you", "merge?", { metadata: ["succeeded 2m ago"], runs: [{ runId: "r2", targetSessionId: "s 2" }] }),
+      item("Docs", "queued", ""),
+    ], "https://pier.example"));
+    expect(sent.body.elements.map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
+      "*▤ open items*",
+      "<font color='grey'>Waiting on you · 1</font>",
+      "**Parser**\n<font color='orange'>merge?</font>\n<font color='grey'>succeeded 2m ago</font> · [Open on web](https://pier.example/app/#/session/s%202)",
+      "<font color='grey'>In progress · 2</font>",
+      "**Build**\n<font color='grey'>worker running</font>\n<font color='grey'>elapsed 3m</font> · [Open on web](https://pier.example/app/#/session/s1)",
+      "**Docs** <text_tag color='neutral'>Queued</text_tag>",
+    ]);
+  });
+
+  it("links nothing without a public address, and counts what the card's budget leaves out", () => {
+    expect(statusCard(view([item("Build", "running", "", { runs: [{ runId: "r1", targetSessionId: "s1" }] })])).body.elements.at(-1))
+      .toEqual(markdown("**Build**"));
+    const many = statusCard(view(Array.from({ length: 300 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(2000)))));
+    const contents = many.body.elements.map((el) => (el.tag === "markdown" ? el.content : ""));
+    expect(contents.join("").length).toBeLessThanOrEqual(LARK_MAX);
+    expect(many.body.elements.length).toBeLessThan(200);
+    expect(contents.at(-1)).toMatch(/^<font color='grey'>… \d+ more<\/font>$/);
+    const shown = contents.filter((c) => c.startsWith("**")).length;
+    expect(contents.at(-1)).toContain(`… ${String(300 - shown)} more`);
   });
 });
