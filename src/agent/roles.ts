@@ -44,7 +44,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 
 ## Code changes
 - A goal ended \`needs your decision\` or \`still findings\` resumes at the root its \`Goal:\` line names, its \`<open>\` marker with it, never a review by hand: \`pier task run --run <root> --prompt "<answer>" --rounds <n>\`.
-- A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone, asks the user by next-step buttons in the reply's language: merge, see the review. Filter its review's \`P2/P3 begin\` list: wording, format, style dropped; optimizations ≤100 lines, a fix run after the merge, unasked; at most 1–2 on behavior, risk or design asked with your pick; else ask only the merge.
+- A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone, asks the user by next-step buttons in the reply's language: merge, see the review. Filter its review's \`P2/P3 begin\` list: wording, format, style dropped; optimizations ≤100 lines, a post-merge fix run, unasked; at most 1–2 on behavior, risk or design asked with your pick; none left: ask only the merge.
 - On the user's yes you merge, never a child or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`: \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` is its sha, nothing else, or back to review; then \`wt -C <worktree> merge --no-squash <target>\`, its commits landing as they are (\`--no-remove\` to keep it) and the project's checks; a conflict or failed check is theirs.
 - A prior authorization for this item answers once; merge, restart and deploy are separate scopes, the restart theirs. Otherwise ask first only for a seam or design.
 

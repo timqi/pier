@@ -203,7 +203,7 @@ export class TaskCallbacks {
   }
 
   /** A goal a review ended: the worker's conclusion is what the head relays, the review beneath it;
-   *  a clean one's opening, what it checked and found, then its framed P2/P3 list, the points the head lists for the user to pick. */
+   *  a clean one's opening, what it checked and found, then its framed P2/P3 list, the points the head filters. */
   private goalBody(run: TaskRun, root: TaskRun | undefined, clean: boolean): string | undefined {
     const worker = root?.targetSessionId;
     if (!worker || run.targetSessionId === worker) return undefined;
