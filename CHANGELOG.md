@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.12 — 2026-10-06
+
+### Changed
+
+- Tasks: review severity follows the reviewed repository's stated threat model; a clean review's P2/P3 list is filtered by the head instead of relayed verbatim.
+- Tasks: the review runs the project's checks and installs without touching a tracked file, leaving the tree as found; a small or follow-up fix gets one review round, and `--rounds 0` on `--run` resumes plainly.
+- Tasks: the head reruns the checks before merging past the reviewed sha or after `wt merge` reports `Rebased onto`.
+
 ## 0.4.11 — 2026-10-06
 
 ### Changed
