@@ -663,7 +663,7 @@ describe("the continuous conversation's seam", () => {
     expect(await injected("/tmp/elsewhere")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
   });
 
-  it("compacts a main session at 100K and a run's child at 150K, and no other session", async () => {
+  it("compacts a main session at 100K, a worker at 180K and a lead at 200K, and no other session", async () => {
     const home = join(process.env.PIER_HOME!, "home");
     const path = () => join(mkdtempSync(join(tmpdir(), "pier-cap-")), "f.jsonl");
     const factory = new PiAgentFactory(() => "", [], undefined, undefined, undefined,
@@ -676,10 +676,9 @@ describe("the continuous conversation's seam", () => {
       return opened.at(-1)!.overrides;
     };
     const main = [{ compaction: { reserveTokens: 300_000 } }];
-    const child = [{ compaction: { reserveTokens: 250_000 } }];
     expect(await reserves(factory.create({ cwd: home }))).toEqual(main);
-    expect(await reserves(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(child);
-    expect(await reserves(factory.resume("worker-1"))).toEqual(child);
+    expect(await reserves(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual([{ compaction: { reserveTokens: 200_000 } }]);
+    expect(await reserves(factory.resume("worker-1"))).toEqual([{ compaction: { reserveTokens: 220_000 } }]);
     // Decided by what the session is, not by who opens it: a run reusing a
     // chain member leaves it at main's cap, and a user's session uncapped.
     expect(await reserves(factory.resume("member"))).toEqual(main);

@@ -97,7 +97,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
   one at a time, so a race rotates once.
 - Compaction, decided at open (`agent/pi.ts`): a
-  session in the home at 100K, a lead's or worker's at 150K (under the 200K
+  session in the home at 100K, a worker's at 180K, a lead's at 200K (the
   price tier; a lead's state is its doc), any other at the instance's
   setting; `reserveTokens = window − cap`, never later than the instance's
   reserve, recomputed on `setModel`. Children never rotate.

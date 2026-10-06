@@ -209,11 +209,11 @@ export const chatCommandsOffContext = (pi: ExtensionAPI) => {
 const branchMessages = (sessionManager: SessionManager): PiMessage[] =>
   sessionManager.getBranch().flatMap((entry) => sessionEntryToContextMessages(entry)) as PiMessage[];
 
-/** Where a session compacts — a main session
- *  and a session a run launched from a session made (a lead or a worker, which
- *  never rotate); above 200K input, 1M-context models price higher. */
+/** Where a session compacts — a main session, a worker and a lead (children
+ *  never rotate); above 200K input, 1M-context models price higher, so the
+ *  lead, whose state is its doc, stops at that tier. */
 const MAIN_COMPACTION_CAP = 100_000;
-const CHILD_COMPACTION_CAP = 150_000;
+const CHILD_COMPACTION_CAP = { worker: 180_000, lead: 200_000 } as const;
 
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
@@ -845,7 +845,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     // The home is where the continuous conversation's sessions run: only they
     // dispatch, and they compact at main's cap.
     const main = realPath(cwd) === realPath(pierPath("home"));
-    const cap = main ? MAIN_COMPACTION_CAP : role ? CHILD_COMPACTION_CAP : undefined;
+    const cap = main ? MAIN_COMPACTION_CAP : role ? CHILD_COMPACTION_CAP[role] : undefined;
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
     await this.credentials?.assertUnlocked();
