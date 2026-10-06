@@ -114,6 +114,17 @@ export function clipResult(text: string, max: number, runId: string): string {
   return `${text.slice(0, head)}\n${omitted}\n${text.slice(text.length - (max - head))}`;
 }
 
+/** The plain lines a clean review frames its P2/P3 list in (`reviewPrompt`); matched whole, never by wording. */
+export const PICKS = { begin: "P2/P3 begin", end: "P2/P3 end" } as const;
+
+/** The first framed P2/P3 list, its marker lines included; an unclosed frame is none. */
+export function picks(text: string): string | null {
+  const lines = text.split("\n");
+  const begin = lines.findIndex((line) => line.trim() === PICKS.begin);
+  const end = begin < 0 ? -1 : lines.findIndex((line, i) => i > begin && line.trim() === PICKS.end);
+  return end < 0 ? null : lines.slice(begin, end + 1).join("\n");
+}
+
 export class TaskCallbacks {
   private readonly outbox: Outbox<TaskRun>;
 
@@ -184,18 +195,23 @@ export class TaskCallbacks {
         `Task "${run.context.definition.name}" finished with state: ${run.state}`,
         runRef(run),
         "",
-        this.goalBody(run, root) ?? runResultText(run),
+        this.goalBody(run, root, goal?.outcome === "done") ?? runResultText(run),
       ].join("\n");
     });
     if (sections.length === 1) return sections[0]!;
     return [`${String(sections.length)} task callbacks`, "", sections.join("\n\n---\n\n")].join("\n");
   }
 
-  /** A goal a review ended: the worker's conclusion is what the head relays, the review beneath it. */
-  private goalBody(run: TaskRun, root: TaskRun | undefined): string | undefined {
+  /** A goal a review ended: the worker's conclusion is what the head relays, the review beneath it;
+   *  a clean one's opening, what it checked and found, then its framed P2/P3 list, the points the head lists for the user to pick. */
+  private goalBody(run: TaskRun, root: TaskRun | undefined, clean: boolean): string | undefined {
     const worker = root?.targetSessionId;
     if (!worker || run.targetSessionId === worker) return undefined;
     const latest = this.store.latestRunForTarget(worker);
-    return latest ? `${runResultText(latest, 3000)}\n\nReview:\n${runResultText(run, 1000)}` : undefined;
+    const text = run.result?.type === "agent" ? run.result.text : "";
+    const framed = clean ? picks(text) : null;
+    const opening = framed ? text.slice(0, text.indexOf(framed)).trim() : "";
+    const review = framed ? `${opening ? `${clipResult(opening, 300, run.id)}\n\n` : ""}${clipResult(framed, 3000, run.id)}` : runResultText(run, 1000);
+    return latest ? `${runResultText(latest, 3000)}\n\nReview:\n${review}` : undefined;
   }
 }

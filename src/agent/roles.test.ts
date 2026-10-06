@@ -32,6 +32,8 @@ describe("the dispatcher contract", () => {
     for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
       expect(DISPATCHER).toContain(line);
     }
+    // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
+    expect(DISPATCHER).toContain("`P2/P3 begin` list");
   });
 
   it("guards the regressions a rewording could bring back", () => {
@@ -125,7 +127,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_290],
+    ["DISPATCHER", DISPATCHER, 1_340],
     ["WORKER", WORKER, 355],
     ['lead("build")', lead("build"), 550],
     ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
