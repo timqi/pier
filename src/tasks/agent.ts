@@ -32,7 +32,7 @@ const preamble = (run: TaskRun, role: AgentRole | undefined): string => {
   if (role) return `${tag}\n\n`;
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
-    ? "read by the agent that launched this run"
+    ? "read by your supervisor"
     : run.callbackSessionId
       ? "read by the agent session it is delivered to"
       : "read by the operator";

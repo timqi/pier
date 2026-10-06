@@ -261,10 +261,10 @@ Who may call `pier task`, by the caller's session; each refusal exits 1:
   `--role lead`, a saved lead definition, a lead batch member — refused before
   anything is filed (`task: a feature lead cannot launch a lead; …`);
 - a worker's (made by any other run launched from a session): never, in its
-  run or after it (`task: a worker's session never delegates, …`);
+  run or after it (`task: a worker's session never launches a run, …`);
 - any other while a supervised run (a `callbackSessionId`, its own or its
-  group's) is `running` on it: refused (`task: a delegated run cannot
-  delegate; …`); a queued run gates nothing;
+  group's) is `running` on it: refused (`task: a run cannot launch a
+  run; …`); a queued run gates nothing;
 - otherwise — a top-level session, a cron or watch run's — may.
 
 `runs` and `stats` are read-only and open to a worker's session and a

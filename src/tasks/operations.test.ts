@@ -214,7 +214,7 @@ describe("task operations", () => {
   });
 
   // The caller is the run's own session (`targetSessionId: "s1"`), still running.
-  const REFUSAL = "a delegated run cannot delegate; ask in your result and let your supervisor run it";
+  const REFUSAL = "a run cannot launch a run; ask in your result and let your supervisor run it";
   const live = (id: string, over: Partial<TaskRun> = {}) =>
     run(id, { state: "running", targetSessionId: "s1", sessionMode: "reuse", callbackState: null, finishedAt: null, result: null, ...over });
 

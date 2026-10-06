@@ -126,7 +126,7 @@ describe("a feature lead", () => {
 
     const worker = await agent("worker");
     store.saveRun({ ...store.getRun("lead-run")!, id: "worker-run", taskId: worker.id, targetSessionId: "worker", invokedBySessionId: "lead", callbackSessionId: "lead", context: { definition: worker } });
-    await expect(service.handle({ operation: "run", prompt: "deeper" }, "worker")).rejects.toThrow(/delegated run cannot delegate/);
+    await expect(service.handle({ operation: "run", prompt: "deeper" }, "worker")).rejects.toThrow(/a run cannot launch a run/);
     service.stop();
   });
 
@@ -449,8 +449,8 @@ describe("a session's role, kept for its life", () => {
     expect(created.at(-1)!.phase).toBeUndefined();
     expect(run.context.renderedPrompt).not.toContain("`pier task`");
     expect(store.roleOf(worker)).toBe("worker");
-    await expect(service.handle({ operation: "run", prompt: "deeper" }, worker)).rejects.toThrow(/worker's session never delegates, in a run or after it/);
-    await expect(service.handle({ operation: "list" }, worker)).rejects.toThrow(/worker's session never delegates/);
+    await expect(service.handle({ operation: "run", prompt: "deeper" }, worker)).rejects.toThrow(/worker's session never launches a run, in a run or after it/);
+    await expect(service.handle({ operation: "list" }, worker)).rejects.toThrow(/worker's session never launches a run/);
     service.stop();
   });
 

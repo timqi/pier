@@ -220,8 +220,8 @@ export async function handleTask(
   const gate = delegated ?? (role === "worker" ? store.creatorOf(callerSessionId) : undefined);
   // Read-only, so a delegated run reads the whole instance's ledger: it launches nothing of its own.
   if (gate && (input.operation === "runs" || input.operation === "stats")) return readLedger(host, null, input);
-  if (delegated) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
-  if (role === "worker") throw new Error("a worker's session never delegates, in a run or after it; say what needs another agent and let the session that launched it run it");
+  if (delegated) throw new Error("a run cannot launch a run; ask in your result and let your supervisor run it");
+  if (role === "worker") throw new Error("a worker's session never launches a run, in a run or after it; say what needs another agent and let your supervisor run it");
   // Read off a draft before it is filed; a saved definition has the same shape under `action`.
   const notLead = <T>(draft: T): T => {
     const role = record(record(draft)?.launch)?.role ?? record(record(record(draft)?.action)?.launch)?.role;

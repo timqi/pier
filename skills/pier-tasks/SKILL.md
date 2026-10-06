@@ -10,7 +10,7 @@ line, `<state> <runId> · <where the result goes>` (`--json`: the whole
 receipt); the others one line of JSON; exit 0; a refusal is a `task:` line, exit 1; a bad flag is
 `task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
-## Delegate, then end your turn
+## Launch, then end your turn
 
 ```sh
 pier task run --name "auth review" --model balanced --prompt "Review src/auth/*.ts. Return file:line, issue, fix."
@@ -56,7 +56,7 @@ A goal callback opens with one of four lines, each naming its root `(run <root>)
 `--model` and `--thinking` (`off/minimal/low/medium/high/xhigh/max`) follow
 your launching contract's table. A review's model is `--review-model` on a
 goal, `--model` on a review you launch yourself: your judgement of the task,
-the loop reads no diffs.
+the goal reads no diffs.
 
 A name that is not a tier (`hardest`, `balanced`, `cheap`) is a substring of
 provider or id ("let gpt review it" is `--model gpt`); none or several hits
@@ -90,7 +90,7 @@ work, is what to read back to the user.
 `--role lead` on a fresh `--prompt` run launches a feature lead: a long-lived
 run in the feature's worktree that builds with workers; `--design` beside it
 makes it a design lead, which designs with the user until they finalize. It is
-the one delegated run that may delegate, never to a lead; only
+the one run that may launch runs, never a lead; only
 its reply to the last result owed to it reaches its supervisor.
 
 ## Saved definitions
@@ -123,9 +123,9 @@ fails the run. The action does not see the script's output. Without
 
 ## Limits
 
-- A worker does not delegate: `pier task` is refused in a session a delegated
-  run created (a lead's aside), in its run and after it, and in any run someone
-  waits on — say what needs another agent; the supervisor runs it. Only
+- A worker does not launch runs: `pier task` is refused in a session a run
+  created (a lead's aside), in its run and after it, and in any run someone
+  waits on — say what needs another agent; your supervisor runs it. Only
   `runs` and `stats` stay open there, both over the whole instance.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
   those slots; the rest queue until cancelled. A restart resumes agent runs on

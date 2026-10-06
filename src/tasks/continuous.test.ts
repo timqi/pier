@@ -152,8 +152,8 @@ describe("tasks under the continuous conversation", () => {
       { operation: "cancel", run_id: "ours" },
       { operation: "recover", run_id: "ours", reason: "x" },
     ]) {
-      await expect(service.handle(input, "cron")).rejects.toThrow(/a delegated run cannot delegate/);
-      await expect(service.handle(input, "worker")).rejects.toThrow(/a worker's session never delegates/);
+      await expect(service.handle(input, "cron")).rejects.toThrow(/a run cannot launch a run/);
+      await expect(service.handle(input, "worker")).rejects.toThrow(/a worker's session never launches a run/);
     }
     await expect(service.handle({ operation: "stats", days: 0 }, "cron")).rejects.toThrow(/days must be/);
   });
