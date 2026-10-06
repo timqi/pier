@@ -168,6 +168,12 @@ export class SettingsStore {
     };
   }
 
+  /** Workers get Pi's `codemode` tool. A trial with no Console switch, kept
+   *  off the settings DTO: on unless the `workerCodemode` row reads `"0"`. */
+  workerCodemode(): boolean {
+    return this.#value("workerCodemode") !== "0";
+  }
+
   /** A malformed row is named, not silently served as the empty value (§5). */
   #json<T>(key: string, normalize: (raw: unknown) => T | null, expected: string): T | null {
     const raw = this.#value(key);

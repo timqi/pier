@@ -16,12 +16,12 @@ type Runtime = { providers: Set<string>; registerProvider(name: string): void; s
 const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
-const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string } }[] = [];
+const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string; getDefaultTools(): string[] | undefined } }[] = [];
 /** Whether the mocked Pi still has the privates the prompt loadout shim uses. */
 let shim = true;
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
-type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
+type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files; extensionFactories: { name: string }[] };
 /** What each open handed Pi's resource loader. */
 const loaders: LoaderOptions[] = [];
 
@@ -49,7 +49,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
     constructor(options: unknown) { loaders.push(options as LoaderOptions); }
     async reload(): Promise<void> {}
   },
-  createAgentSession: async ({ cwd, modelRuntime, settingsManager }: { cwd: string; modelRuntime: Runtime; settingsManager: { getFollowUpMode(): string } }) => {
+  createAgentSession: async ({ cwd, modelRuntime, settingsManager }: { cwd: string; modelRuntime: Runtime; settingsManager: { getFollowUpMode(): string; getDefaultTools(): string[] | undefined } }) => {
     // Pi extensions register providers onto the runtime handed to this session.
     modelRuntime.registerProvider(cwd);
     const session = {
@@ -287,6 +287,23 @@ describe("the pier package's skills off-list", () => {
     // A lead with no recorded phase builds.
     expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Build"]);
     expect(await opened(factory.create({ cwd: "/tmp/wt" }))).toEqual(["pier-tasks", "pier-help", "surface for anyone"]);
+  });
+});
+
+describe("worker codemode", () => {
+  it("loads and switches on Pi's codemode for a worker only, and not once the setting is off", async () => {
+    let on = true;
+    const factory = new PiAgentFactory(undefined, [], undefined, undefined, undefined, () => ({ skillsOff: [], workerCodemode: on }));
+    const codemode = async (role?: AgentRole) => {
+      await (await factory.create({ cwd: "/tmp/cm", ...(role ? { role } : {}) })).dispose();
+      const loaded = loaders.at(-1)!.extensionFactories.some((e) => e.name === "codemode");
+      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false];
+    };
+    expect(await codemode("worker")).toEqual([true, true]);
+    expect(await codemode("lead")).toEqual([false, false]);
+    expect(await codemode()).toEqual([false, false]);
+    on = false;
+    expect(await codemode("worker")).toEqual([false, false]);
   });
 });
 

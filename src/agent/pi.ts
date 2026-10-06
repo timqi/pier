@@ -6,6 +6,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import {
   createAgentSession,
+  createCodemodeExtension,
   CredentialSynchronizationError,
   DefaultResourceLoader,
   ModelRegistry,
@@ -567,8 +568,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly credentials?: CredentialStore,
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
-    /** The built-in `pier` package's one switch list: Pier's own skills switched off. */
-    private readonly pier: () => { skillsOff: string[] } = () => ({ skillsOff: [] }),
+    /** The built-in `pier` package's one switch list: Pier's own skills switched off;
+     *  and whether a worker gets Pi's `codemode` tool. */
+    private readonly pier: () => { skillsOff: string[]; workerCodemode?: boolean } = () => ({ skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -794,7 +796,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
   }
 
-  private async resourceLoader(cwd: string, { role, phase }: Pick<AgentLaunchOptions, "role" | "phase">, dispatcher: boolean): Promise<DefaultResourceLoader> {
+  private async resourceLoader(cwd: string, { role, phase }: Pick<AgentLaunchOptions, "role" | "phase">, dispatcher: boolean, codemode: boolean): Promise<DefaultResourceLoader> {
     // A worker never delegates (tasks/operations.ts refuses it), so it is not taught how.
     const skillsOff = role === "worker" ? [...this.pier().skillsOff, "pier-tasks"] : this.pier().skillsOff;
     const loader = new DefaultResourceLoader({
@@ -813,6 +815,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       extensionFactories: [
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
+        // Registered inactive; `defaultTools` in openSnapshot switches it on.
+        ...(codemode ? [{ name: "codemode", factory: createCodemodeExtension() }] : []),
       ],
       agentsFilesOverride: (current) => {
         const content = this.instructions(role);
@@ -858,15 +862,17 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     // N turns. An in-memory override on this session's own manager; Pi reads
     // it at creation, and `setFollowUpMode` would write settings.json.
     const settingsManager = SettingsManager.create(cwd, defaultAgentDir());
-    settingsManager.applyOverrides({ followUpMode: "all" });
-    const created = await createAgentSession({
+    // Only a worker: its result is read by an agent, so a script's batched
+    // calls change nothing a person sees.
+    const codemode = role === "worker" && this.pier().workerCodemode === true;
+    settingsManager.applyOverrides({ followUpMode: "all", ...(codemode ? { defaultTools: ["+codemode"] } : {}) });
+    const { session: live } = await createAgentSession({
       cwd,
       sessionManager,
       settingsManager,
       modelRuntime: runtime,
-      resourceLoader: await this.resourceLoader(cwd, { role, phase }, main),
+      resourceLoader: await this.resourceLoader(cwd, { role, phase }, main, codemode),
     });
-    const live = created.session;
     try {
       assertPromptLoadout(live);
     } catch (error) {
