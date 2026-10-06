@@ -198,8 +198,8 @@ describe("a goal", () => {
     // Only a P0 or P1 earns another fix and review; P2/P3 are left to the head to filter, never fixed by the goal.
     for (const level of ["- P0: ", "- P1: ", "- P2: ", "- P3: "]) expect(review).toContain(level);
     expect(review).toContain("or a commit cannot land as it is (a WIP or fixup commit, a message off the project's conventions).");
-    // The review owns the project's checks; the head reruns them only after a rebase.
-    expect(review).toContain("Run the project's checks once (its AGENTS.md names them), installing missing dependencies first; a failing check is a P0.");
+    // The review owns the project's checks and leaves the tree as found; the head reruns them only past the reviewed sha or after a rebase.
+    expect(review).toContain("Run the project's checks once (its AGENTS.md names them), installing missing dependencies first by a command that changes no tracked file (`npm ci`, never `npm install`), and end with `git status --porcelain` as empty as you found it; a failing check is a P0.");
     expect(review).toContain("With no P0 or P1, list the P2 and P3 issues between two plain lines of their own, `P2/P3 begin` and `P2/P3 end`, under two headings, `Minor issues` (fixable in this code) and `Design suggestions`");
     expect(review).toMatch(/`Verdict: findings` when any P0 or P1 is found, else `Verdict: clean`\.$/);
     expect(store.getTask(runs[1]!.context.definition.id)?.timeoutSeconds).toBe(120);

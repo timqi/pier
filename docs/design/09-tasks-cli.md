@@ -63,8 +63,9 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   clean review with the merge left to the user; a findings review that is the
   `n`th ends it `cap`, a review ending `Verdict: blocked — <why>` ends it
   `failed`. A review runs the project's checks once (a failing one is a
-  P0), ranks each issue P0–P3 and answers `findings` only for a P0 or P1;
-  P2/P3 alone are `clean`, listed between whole lines
+  P0), installing dependencies without changing a tracked file and leaving
+  the tree as it found it, ranks each issue P0–P3 and answers `findings`
+  only for a P0 or P1; P2/P3 alone are `clean`, listed between whole lines
   `P2/P3 begin` and `P2/P3 end` under `Minor issues` and
   `Design suggestions`, never fixed by the goal. A clean goal's callback
   carries the review's opening before it (300 chars) and that framed list

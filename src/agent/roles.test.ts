@@ -35,7 +35,7 @@ describe("the dispatcher contract", () => {
     // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
     expect(DISPATCHER).toContain("`P2/P3 begin` list");
     // The dispatcher filters that list rather than relaying it whole.
-    for (const rule of ["format, style dropped", "≤100 lines, a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "the project's checks only if it rebased", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
+    for (const rule of ["format, style dropped", "≤100 lines, a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
   });
 
   it("guards the regressions a rewording could bring back", () => {
