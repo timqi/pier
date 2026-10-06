@@ -165,7 +165,7 @@ describe("a feature lead", () => {
     expect(service.backgroundRuns("main").find((r) => r.runId === resumed.id)?.byPier).toBe(true);
     expect(lead.systemInputs.at(-1)).toMatchObject({
       origin: { kind: "task-delegation", runId: resumed.id },
-      text: expect.stringMatching(/^\[Pier: the last result owed you follows[\s\S]*second/),
+      text: expect.stringMatching(/^\[Pier: the last result owed to you follows[\s\S]*second/),
     });
     expect(main.systemInputs[0]!.text).toContain("lead says done");
     expect(store.getRun(a.id)!.callbackState).toBe("delivered");

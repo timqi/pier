@@ -17,7 +17,7 @@ pier task run --name "auth review" --model balanced --prompt "Review src/auth/*.
 ```
 
 The prompt is the whole handoff (goal, constraints, absolute paths, output
-format); the child sees nothing of your conversation. `--cwd` defaults to
+format); the run sees nothing of your conversation. `--cwd` defaults to
 yours; `--timeout` (default 3600 s) starts when the run does.
 
 **Callbacks are the only delivery; there is no status query.** The result
@@ -41,7 +41,7 @@ own shell, where `&` and `wait` already run several at once. Raise `--timeout` p
 or it is killed and reported as timed out. A non-zero exit still delivers what
 it printed.
 
-A child's result ends on the final state it verified, which you trust; a
+A run's result ends on the final state it verified, which you trust; a
 status line, only when one is needed, is its last line:
 `Needs your decision — <the question>`, or a review's `Verdict: clean` ·
 `Verdict: findings` · `Verdict: blocked — <why>`; a goal's callback opens on
@@ -88,10 +88,10 @@ a lead off `hardest`, or names under a tier that read like another tier's
 work, is what to read back to the user.
 
 `--role lead` on a fresh `--prompt` run launches a feature lead: a long-lived
-child in the feature's worktree that builds with workers; `--design` beside it
+run in the feature's worktree that builds with workers; `--design` beside it
 makes it a design lead, which designs with the user until they finalize. It is
 the one delegated run that may delegate, never to a lead; only
-its reply to the last result owed it reaches its supervisor.
+its reply to the last result owed to it reaches its supervisor.
 
 ## Saved definitions
 

@@ -461,7 +461,7 @@ describe("task service", () => {
     // A user's session has no role prompt, so the message carries the contract and what of the chat surface does not apply.
     const manual = await service.waitForRun(service.run(task.id).id);
     expect(manual.context.renderedPrompt).toBe(`[Pier task run ${manual.id} — "review"] Your final reply is recorded verbatim as the run result, read by the operator; next-step buttons and file:// attachments do not render there.${RUN_RESULT}\n\nReview the PR`);
-    expect(RUN_RESULT).toContain("the answer resumes this session");
+    expect(RUN_RESULT).toContain("The answer resumes this session");
     // The refusal a supervised run meets is the CLI's, not the message's.
     const owed = await service.waitForRun(service.run(task.id, null, "agent", null, { callbackSessionId: "s9" }).id);
     expect(owed.context.renderedPrompt).toContain("read by the agent session it is delivered to; next-step buttons");

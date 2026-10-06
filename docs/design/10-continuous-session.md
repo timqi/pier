@@ -47,6 +47,26 @@ delivery.
 - Models are `MODEL_TABLE` (`agent/roles.ts`), carried by `DISPATCHER` and `lead("build")`.
 - A rule has one owner, the lowest layer every reader of it loads: the reply language is `surfacePrompt`'s, what stops a run and the `Approved:` line lifting it the baseline's Working style (`agent/pi.ts`), the result's shape `RUN_RESULT`'s, the merge being the user's `DISPATCHER`'s — `WORKER` and `lead("build")` carry it as one clause.
 
+### Prompt vocabulary
+
+The role contracts, `reviewPrompt`, `fixPrompt` and Pier's `[Pier: …]` notes use one word per concept; a sentence holds one rule, names who acts, and stays within ~25 words.
+
+| Word | Means | Not |
+| --- | --- | --- |
+| user | the human in the conversation | them, the requester |
+| main session | the continuous conversation's current session, "you" in `DISPATCHER` | head (code and docs only), dispatcher |
+| supervisor | the session that launched a run and reads its result: the main session or a build lead | the agent that delegated it, parent |
+| run | one `pier task run` and the agent working it; `worker` or `lead` when the role matters | child, job |
+| launch | start a run; the main session's launch is a dispatch | delegate, spawn |
+| result | a run's final reply, read verbatim | report |
+| reader | whoever reads a result: the supervisor, else the session it is delivered to or the operator | — |
+| owed | a result is owed to a session while a run whose callback names it is in flight | due, pending |
+| milestone | a lead's reply to the last result owed to it, which its supervisor reads | — |
+| goal | a worker run reviewed and fixed until clean, from its root run | loop |
+| item | one `<open>` entry: its problem is the key, its stage where it stands | task, topic |
+| phase | a lead's: `design` or `build` | stage |
+| default | `MODEL_TABLE`'s thinking cell: no `--thinking`, the tier's own level | the pin |
+
 ### Milestones
 
 Every run or group callback owed to a lead session asks `TaskService.milestone`
@@ -55,7 +75,7 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 - another result still owed the lead (a run in flight whose callback, or whose
   unfinished group's, names it): a plain callback, a lead turn outside any run;
 - the result that leaves nothing owed: resumes the lead's last run, prompted
-  `[Pier: the last result owed you follows; …]` (`MILESTONE`), and that run's
+  `[Pier: the last result owed to you follows; …]` (`MILESTONE`), and that run's
   callback reaches the head once; the resume and the `delivered` marks commit in
   one transaction;
 - the lead's last run still running: pending, asked again in 10 s;

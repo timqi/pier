@@ -35,7 +35,7 @@ describe("the dispatcher contract", () => {
     // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
     expect(DISPATCHER).toContain("`P2/P3 begin` list");
     // The dispatcher filters that list rather than relaying it whole.
-    for (const rule of ["format, style dropped", "≤100 lines, a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
+    for (const rule of ["drop wording, format, style", "≤100 lines become a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
   });
 
   it("guards the regressions a rewording could bring back", () => {
@@ -48,6 +48,10 @@ describe("the dispatcher contract", () => {
     expect(DISPATCHER).not.toContain("Reply in the language");
     expect(DISPATCHER).not.toContain("Needs your decision");
     expect(MODEL_TABLE).not.toContain("finishing");
+    // One word per concept (docs/design/10-continuous-session.md §Prompt vocabulary).
+    for (const contract of [DISPATCHER, WORKER, lead("design"), lead("build")]) {
+      for (const synonym of ["child", "the pin", "owed you", "delegated"]) expect(contract).not.toContain(synonym);
+    }
   });
 });
 
@@ -84,7 +88,7 @@ describe("the worker contract", () => {
     expect(WORKER).toContain("`pier task` is refused");
     expect(WORKER).toContain("`wt merge`/`wt remove`");
     // The head merges with `--no-squash`: the worker's commits are the history that lands.
-    expect(WORKER).toContain("they land unsquashed");
+    expect(WORKER).toContain("Commits land unsquashed");
     expect(WORKER).not.toContain("Next-step buttons");
   });
 
@@ -130,7 +134,7 @@ describe("the surface prompt", () => {
 describe("prompt sizes", () => {
   it.each([
     ["DISPATCHER", DISPATCHER, 1_340],
-    ["WORKER", WORKER, 355],
+    ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 550],
     ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
