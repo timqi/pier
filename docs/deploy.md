@@ -148,7 +148,7 @@ pier tools sync                 # install/update the managed CLI tools
     other key stay at Pi's defaults by omission, on purpose.
   An existing file is never touched, whatever it holds.
 - `systemctl --user restart pier` and `pier update` stop the service; running turns and agent runs resume after it starts.
-- Workers get Pi's `codemode` tool unless the `workerCodemode` setting reads `"0"` (`"1"` or no row: on; anything else is logged and read as on). Roll back: `sqlite3 ~/.pier/db/pier.db "INSERT OR REPLACE INTO settings VALUES ('workerCodemode', '0')"`, then `systemctl --user restart pier`.
+- Workers get Pi's `codemode` tool, with a `# Tool calls` section in their system prompt, unless the `workerCodemode` setting reads `"0"` (`"1"` or no row: on; anything else is logged and read as on). Roll back: `sqlite3 ~/.pier/db/pier.db "INSERT OR REPLACE INTO settings VALUES ('workerCodemode', '0')"`, then `systemctl --user restart pier`.
 - One Pier per `$PIER_HOME` (the pid in `~/.pier/pier.lock`): a start whose
   directory another live Pier holds logs `another Pier (pid N) owns …` and
   exits before opening the database. Kept

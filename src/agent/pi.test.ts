@@ -21,7 +21,7 @@ const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings:
 let shim = true;
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
-type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files; extensionFactories: { name: string }[] };
+type LoaderOptions = { systemPromptOverride: (user?: string) => string; skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files; extensionFactories: { name: string }[] };
 /** What each open handed Pi's resource loader. */
 const loaders: LoaderOptions[] = [];
 
@@ -296,14 +296,17 @@ describe("worker codemode", () => {
     const factory = new PiAgentFactory(undefined, [], undefined, undefined, undefined, () => ({ skillsOff: [], workerCodemode: on }));
     const codemode = async (role?: AgentRole) => {
       await (await factory.create({ cwd: "/tmp/cm", ...(role ? { role } : {}) })).dispose();
-      const loaded = loaders.at(-1)!.extensionFactories.some((e) => e.name === "codemode");
-      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false];
+      const loader = loaders.at(-1)!;
+      const loaded = loader.extensionFactories.some((e) => e.name === "codemode");
+      // Pi's own guideline for the tool is in the section the override drops.
+      const guided = loader.systemPromptOverride().includes("# Tool calls\n- Use codemode to batch");
+      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false, guided];
     };
-    expect(await codemode("worker")).toEqual([true, true]);
-    expect(await codemode("lead")).toEqual([false, false]);
-    expect(await codemode()).toEqual([false, false]);
+    expect(await codemode("worker")).toEqual([true, true, true]);
+    expect(await codemode("lead")).toEqual([false, false, false]);
+    expect(await codemode()).toEqual([false, false, false]);
     on = false;
-    expect(await codemode("worker")).toEqual([false, false]);
+    expect(await codemode("worker")).toEqual([false, false, false]);
   });
 });
 

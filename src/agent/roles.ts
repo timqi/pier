@@ -82,6 +82,15 @@ A run that changes a repository's files commits them before ending its turn, unl
 ## Result
 Your final reply is the run result, read verbatim by an agent:${RUN_RESULT}`;
 
+/** Pi's codemode guideline sits in the rules section the override drops, so
+ *  a worker with the tool hears it in Pier's baseline (agent/pi.ts), or never calls it. */
+export const WORKER_TOOL_CALLS = `
+
+# Tool calls
+- Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls.
+- Before each call, ask what else you already know you will need; independent reads, greps and inspections of the same file go in one script.
+- A skill that requires serial calls (rate limits, one browser tab) still fits one script: await them in order, with its delays and retry.`;
+
 const LEAD_HEAD = `# You are a feature lead
 
 You own one feature, in this worktree. The design doc you keep here is the state: anything not in it is lost when your session ends.

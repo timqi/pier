@@ -2,7 +2,7 @@
 // back off the transcript and compared with the wire, on a real Pi session and
 // Anthropic's provider, fetch stubbed so nothing leaves the process.
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -79,6 +79,21 @@ describe("a session's system prompt", () => {
 
   it("is unknown for a session that does not exist", async () => {
     expect(await factory.readSystemPrompt("no-such-session")).toBeUndefined();
+  });
+
+  it("splits a codemode worker's baseline, its tool-call guidance included, from the user's SYSTEM.md", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pier-system-prompt-codemode-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "SYSTEM.md"), "user system");
+    const codemode = new PiAgentFactory(() => "", [], undefined, undefined, undefined, () => ({ skillsOff: [], workerCodemode: true }));
+    const session = await codemode.create({ cwd: dir, role: "worker", model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+    await session.prompt("hello").catch(() => {});
+    const blocks = (await codemode.readSystemPrompt(session.id))?.blocks;
+    expect(sent.at(-1)).toContain("# Tool calls\n- Use codemode to batch");
+    expect(blocks?.[0]).toMatchObject({ label: "Pier baseline" });
+    expect(blocks?.[0]?.text).toMatch(/# Tool calls[^]*with its delays and retry\.$/);
+    expect(blocks?.[1]).toEqual({ label: "SYSTEM.md", text: "user system" });
+    await session.dispose();
   });
 
   it("reaches the first request of a session a system input opens \u2014 every task run", async () => {
