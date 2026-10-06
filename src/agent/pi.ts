@@ -816,7 +816,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
         // Registered inactive; `defaultTools` in openSnapshot switches it on.
-        ...(codemode ? [{ name: "codemode", factory: createCodemodeExtension() }] : []),
+        ...(codemode ? [{ name: "codemode", factory: createCodemodeExtension({ models: false }) }] : []),
       ],
       agentsFilesOverride: (current) => {
         const content = this.instructions(role);

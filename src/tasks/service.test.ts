@@ -2131,18 +2131,22 @@ describe("a definition Pier's own code created", () => {
 
 describe("pier task stats", () => {
   it("groups dispatched agent runs in the window by tier, role and model, cancelled apart", async () => {
-    const { cwd, service, store } = setup();
+    const { cwd, factory, service, store } = setup();
     const base = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     const day = 86_400_000;
     const opus = { provider: "anthropic", id: "opus" };
     let n = 0;
-    const seed = (name: string, launch: AgentLaunchPolicy, over: Partial<TaskRun> = {}, model: ModelRef | null = opus, thinking?: ThinkingLevel) => {
+    const seed = (name: string, launch: AgentLaunchPolicy, over: Partial<TaskRun> = {}, model: ModelRef | null = opus, thinking?: ThinkingLevel, sessionId?: string) => {
       const task: TaskDefinition = { ...base, name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name, launch } };
-      store.saveRun(storedRun(`r${String(++n)}`, task, now, { invokedBySessionId: "head", context: { definition: task, model: model ?? undefined, thinking }, finishedAt: now - n * 1000, ...over }));
+      store.saveRun(storedRun(`r${String(++n)}`, task, now, { invokedBySessionId: "head", context: { definition: task, model: model ?? undefined, thinking, sessionId }, finishedAt: now - n * 1000, ...over }));
     };
-    for (let i = 0; i < 7; i++) seed(`review-${String(i)}`, { tier: "hardest" }, {}, opus, "high");
-    seed("review-0", { tier: "hardest" }, { state: "failed" }, opus, "high");
+    // review-0 and its resume share a session, read once; review-1 ran a codemode script.
+    const steps = (...names: string[]): ChatTurn[] => [{ role: "assistant", text: "", steps: names.map((toolName) => ({ kind: "tool", toolName })) }];
+    const transcripts: Record<string, ChatTurn[]> = { s0: steps("read", "bash"), s1: steps("codemode", "read", "read", "bash") };
+    vi.mocked(factory.readHistory).mockImplementation(async (id) => transcripts[id]);
+    for (let i = 0; i < 7; i++) seed(`review-${String(i)}`, { tier: "hardest" }, {}, opus, "high", i < 2 ? `s${String(i)}` : undefined);
+    seed("review-0", { tier: "hardest" }, { state: "failed" }, opus, "high", "s0");
     seed("stopped", { tier: "hardest" }, { state: "cancelled" }, opus, "high");
     seed("restarted", { tier: "hardest" }, { state: "interrupted" }, opus, "high");
     seed("plan", { tier: "hardest", role: "lead" }, { invokedBySessionId: null, triggerSource: "manual" });
@@ -2157,15 +2161,17 @@ describe("pier task stats", () => {
     seed("live", { tier: "cheap" }, { state: "running", finishedAt: null });
     seed("unopened", { tier: "cheap" }, {}, null);
 
-    expect(service.stats(30)).toEqual({ days: 30, rows: [
-      { tier: "hardest", role: "lead", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["plan"] },
+    const none = { toolCalls: 0, codemodeRuns: 0, codemodeRunIds: [] };
+    expect(await service.stats(30)).toEqual({ days: 30, rows: [
+      { tier: "hardest", role: "lead", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["plan"], ...none },
       { tier: "hardest", role: "worker", provider: "anthropic", id: "opus", thinking: "high", runs: 8, cancelled: 2,
-        names: ["review-0", "review-1", "review-2", "review-3", "review-4"] },
-      { tier: "cheap", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["cheap"] },
-      { tier: "named", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["named-a"] },
-      { tier: "named", role: "worker", provider: "openai", id: "gpt", runs: 1, cancelled: 0, names: ["named-b"] },
+        names: ["review-0", "review-1", "review-2", "review-3", "review-4"], toolCalls: 6, codemodeRuns: 1, codemodeRunIds: ["r2"] },
+      { tier: "cheap", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["cheap"], ...none },
+      { tier: "named", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["named-a"], ...none },
+      { tier: "named", role: "worker", provider: "openai", id: "gpt", runs: 1, cancelled: 0, names: ["named-b"], ...none },
     ] });
-    expect(service.stats(40).rows.find((row) => row.tier === "cheap")?.names).toEqual(["cheap", "old"]);
+    expect(vi.mocked(factory.readHistory).mock.calls.map(([id]) => id).sort()).toEqual(["s0", "s1"]);
+    expect((await service.stats(40)).rows.find((row) => row.tier === "cheap")?.names).toEqual(["cheap", "old"]);
     await expect(service.handle({ operation: "stats", days: 0 }, "head")).rejects.toThrow("days must be a positive whole number");
     await expect(service.handle({ operation: "stats", days: 1 }, "head")).resolves.toMatchObject({ days: 1 });
   });

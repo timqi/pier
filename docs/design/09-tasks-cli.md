@@ -189,7 +189,11 @@ session and finished in the window: `tier` is `launch.tier` or `named` for a
 launch with no tier (a model the caller named, or a run from before
 `launch.tier` existed); `role` is lead or worker, a run with no role being
 the head's own; `runs` counts succeeded + failed, `cancelled` cancelled +
-interrupted; `names` the five most recently finished distinct task names.
+interrupted; `names` the five most recently finished distinct task names;
+`toolCalls` the tool steps in the rows' transcripts, each call a codemode
+script made counted beside the script's own, a session resumed by several
+runs read once on its newest; `codemodeRuns` the runs whose transcript called
+`codemode`, `codemodeRunIds` the five newest of them.
 Rows in tier order then lead before worker then `runs` descending. A row is
 a question for the reader (five reviews under `hardest`), never a verdict;
 the verb prints no duration, tokens or cost.

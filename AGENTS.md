@@ -128,7 +128,7 @@ exists to catch.
 | `core/` | 1.8k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
 | `channels/` | 4.8k | two adapters in one shape plus the shared layer that would otherwise be copied between them; the home chat's status message, laid out as the web sidebar in each platform's rich format, and the reaction a message wears for its item, on both adapters, are the lines past 4.6k |
 | `web/` | 14k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
-| `agent/` | 2.95k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
+| `agent/` | 2.96k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts; a codemode script's calls replayed as steps are the lines past 2.95k |
 | `tasks/` | 3.75k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, and the `--worktree` seam |
 | root `src/*.ts` | 3.55k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch; the home chat's status refresh, one debounce on the hub the instance layer wires, is the lines past 3.5k |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |

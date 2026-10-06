@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openDb } from "./db.js";
 import {
   ACCENTS,
@@ -10,6 +10,9 @@ import {
   normalizePublicUrl,
   SettingsStore,
 } from "./settings.js";
+
+const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock("./log.js", () => ({ logger: () => log }));
 
 const EMPTY = {
   publicUrl: "",
@@ -102,6 +105,9 @@ describe("SettingsStore", () => {
     db.prepare("INSERT INTO settings(key, value) VALUES ('workerCodemode', '0')").run();
     expect(store.workerCodemode()).toBe(false);
     expect(store.get()).not.toHaveProperty("workerCodemode");
+    db.prepare("UPDATE settings SET value = 'off' WHERE key = 'workerCodemode'").run();
+    expect(store.workerCodemode()).toBe(true);
+    expect(log.warn).toHaveBeenCalledWith('settings.workerCodemode is not "0" or "1" — ignoring it');
     db.close();
   });
 

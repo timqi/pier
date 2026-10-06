@@ -171,7 +171,9 @@ export class SettingsStore {
   /** Workers get Pi's `codemode` tool. A trial with no Console switch, kept
    *  off the settings DTO: on unless the `workerCodemode` row reads `"0"`. */
   workerCodemode(): boolean {
-    return this.#value("workerCodemode") !== "0";
+    const raw = this.#value("workerCodemode");
+    if (raw !== undefined && raw !== "0" && raw !== "1") log.warn(`settings.workerCodemode is not "0" or "1" — ignoring it`);
+    return raw !== "0";
   }
 
   /** A malformed row is named, not silently served as the empty value (§5). */

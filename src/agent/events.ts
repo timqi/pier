@@ -34,6 +34,8 @@ export interface PiMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  // Calls a tool made itself (codemode scripts); live, each was its own tool-start.
+  nestedCalls?: { calls?: { id?: string; name?: string; arguments?: unknown; status?: string; error?: string }[] };
   // persisted custom messages
   customType?: string;
   details?: unknown;
@@ -231,6 +233,9 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
         step.isError = m.isError ?? false;
         step.done = true;
         pendingTools.delete(m.toolCallId ?? "");
+        const at = steps.indexOf(step) + 1;
+        if (at) steps.splice(at, 0, ...(m.nestedCalls?.calls ?? []).map((call): ActivityStep => ({ kind: "tool", id: call.id, toolName: call.name ?? "",
+          args: call.arguments, ...(call.error ? { output: call.error } : {}), isError: call.status === "error", done: call.status !== "unfinished" })));
       }
       continue;
     }

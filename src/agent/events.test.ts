@@ -382,6 +382,30 @@ describe("toChatTurns", () => {
     ]);
   });
 
+  it("replays a codemode script's calls as steps after its own, as the live stream showed them", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "go", timestamp: 1000 },
+      { role: "assistant", timestamp: 2000, content: [
+        { type: "toolCall", id: "c", name: "codemode", arguments: { code: "…" } },
+        { type: "toolCall", id: "d", name: "read", arguments: { path: "d.ts" } },
+      ] },
+      { role: "toolResult", toolCallId: "c", content: "ran", isError: false, nestedCalls: { calls: [
+        { id: "c/1", name: "read", arguments: { path: "a.ts" }, status: "ok" },
+        { id: "c/2", name: "bash", status: "error", error: "exit 1" },
+        { id: "c/3", name: "bash", status: "unfinished" },
+      ] } },
+      { role: "toolResult", toolCallId: "d", content: "file", isError: false },
+      { role: "assistant", timestamp: 3000, content: [{ type: "text", text: "done" }] },
+    ]);
+    expect(turns[1]?.steps).toEqual([
+      { kind: "tool", id: "c", toolName: "codemode", args: { code: "…" }, output: "ran", isError: false, done: true },
+      { kind: "tool", id: "c/1", toolName: "read", args: { path: "a.ts" }, isError: false, done: true },
+      { kind: "tool", id: "c/2", toolName: "bash", args: undefined, output: "exit 1", isError: true, done: true },
+      { kind: "tool", id: "c/3", toolName: "bash", args: undefined, isError: false, done: false },
+      { kind: "tool", id: "d", toolName: "read", args: { path: "d.ts" }, output: "file", isError: false, done: true },
+    ]);
+  });
+
   it("keeps intermediate text in ordered steps and emits only the final answer", () => {
     const turns = toChatTurns([
       { role: "user", content: "review", timestamp: 1000 },
