@@ -62,8 +62,9 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   reviewed by a run Pier launches, fixed by resuming the worker, ended on a
   clean review with the merge left to the user; a findings review that is the
   `n`th ends it `cap`, a review ending `Verdict: blocked — <why>` ends it
-  `failed`. A review ranks each issue P0–P3 and answers `findings` only for a
-  P0 or P1; P2/P3 alone are `clean`, listed between whole lines
+  `failed`. A review runs the project's checks once (a failing one is a
+  P0), ranks each issue P0–P3 and answers `findings` only for a P0 or P1;
+  P2/P3 alone are `clean`, listed between whole lines
   `P2/P3 begin` and `P2/P3 end` under `Minor issues` and
   `Design suggestions`, never fixed by the goal. A clean goal's callback
   carries the review's opening before it (300 chars) and that framed list
@@ -83,13 +84,13 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   (`task: wt: …`). Alone on a worker it means `--rounds 3`; on a lead, no
   goal. Refused beside `--bash`, `--task-id`, `--session`, in a `--member`
   and on `save`.
-- **`--run <root> --prompt … --rounds <n>`**: accepted only when that run is
-  a goal's root whose goal has ended; the resume opens a new goal of `n`
-  reviews (1–9) on the resumed run, on `--review-model` else the ended goal's;
+- **`--run <root> --prompt … --rounds <n>`**, `n` 1–9: accepted only when
+  that run is a goal's root whose goal has ended; the resume opens a new goal
+  of `n` reviews on the resumed run, on `--review-model` else the ended goal's;
   when a review ended that goal with findings or a decision, its full text
   goes before the prompt, the words after it.
-  Beside any other `--run`, `--rounds` is refused; without it `--run` is a
-  plain resume, out of the goal.
+  Beside any other `--run`, `--rounds` 1–9 is refused; `--rounds 0` is no
+  `--rounds`, and without it `--run` is a plain resume, out of the goal.
 - **`--review-model <tier|model>`**: rides as `launch.reviewModel`, the
   review's model; absent, the root's tier, else its model; refused without
   `--rounds` or `--worktree`.
@@ -240,8 +241,8 @@ while the goal is live is refused (`task: run <id> is in a goal (<step>);
 cancel it or wait for its end`), and `cancel --run` ends the goal.
 The `Goal:` line names the root, `(run <root>)`, with `, <branch> in
 <worktree>` inside once a review has pinned the branch; when
-a review ended the goal the body is the worker's latest result (3000
-characters), then `Review:` and the review's (1000).
+a review ended the goal the body is the worker's latest result (1500
+characters on a clean goal, else 3000), then `Review:` and the review's (1000).
 
 ## Two levels, no tree
 

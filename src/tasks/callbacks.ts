@@ -212,6 +212,6 @@ export class TaskCallbacks {
     const framed = clean ? picks(text) : null;
     const opening = framed ? text.slice(0, text.indexOf(framed)).trim() : "";
     const review = framed ? `${opening ? `${clipResult(opening, 300, run.id)}\n\n` : ""}${clipResult(framed, 3000, run.id)}` : runResultText(run, 1000);
-    return latest ? `${runResultText(latest, 3000)}\n\nReview:\n${review}` : undefined;
+    return latest ? `${runResultText(latest, clean ? 1500 : 3000)}\n\nReview:\n${review}` : undefined;
   }
 }

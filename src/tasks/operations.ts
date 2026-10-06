@@ -366,9 +366,8 @@ export async function handleTask(
     if (goal?.finishedAt === null && isTerminal(run.state)) {
       throw new Error(`run ${run.id} is in a goal (${goalStepText(goal)}); cancel it or wait for its end`);
     }
-    // parseLaunch's own checks; a re-entry is a goal, so 0 is refused, not read as none.
+    // parseLaunch's own checks; 0 reviews is no goal, so `--rounds 0` is the plain resume or steer.
     const again = input.rounds === undefined && input.review_model === undefined ? undefined : parseLaunch({ rounds: input.rounds, reviewModel: input.review_model });
-    if (input.rounds !== undefined && !again?.rounds) throw new Error("rounds must be a whole number from 1 to 9");
     if (again && !isTerminal(run.state)) throw new Error(`run ${run.id} is ${run.state}: --rounds resumes an ended goal's root; steer it without --rounds`);
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
