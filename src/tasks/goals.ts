@@ -62,6 +62,8 @@ export const reviewPrompt = (cwd: string, tree: Worktree, round: number, cap: nu
   "- P2: works as required but weaker than it should be: an edge case the task never named, duplication, a name, comment, doc or test off the project's rules.",
   "- P3: wording, style, a nit.",
   "",
+  "Severity follows the threat model the repository itself states (e.g. its AGENTS.md); where it states none, an issue with no realistic trigger or reproduction, such as a theoretical race, is never a P0 or P1.",
+  "",
   `With no P0 or P1, list the P2 and P3 issues between two plain lines of their own, \`${PICKS.begin}\` and \`${PICKS.end}\`, under two headings, \`Minor issues\` (fixable in this code) and \`Design suggestions\` (better solved by changing the architecture or the product's shape); none of them is fixed in this goal.`,
   "",
   "End your reply with one status line, plain text, the very last line and outside any code block: `Verdict: findings` when any P0 or P1 is found, else `Verdict: clean`.",
