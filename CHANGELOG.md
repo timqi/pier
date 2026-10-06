@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.11 — 2026-10-06
+
+### Changed
+
+- Tasks: only P0/P1 review findings earn another goal-loop round; P2/P3 are returned to the user as review findings and design suggestions.
+
 ## 0.4.9 — 2026-10-04
 
 ### Changed
