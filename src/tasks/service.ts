@@ -4,7 +4,7 @@
 
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { MODEL_TIERS, type AgentFactory, type AgentRole, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
+import { MODEL_TIERS, type AgentFactory, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -19,10 +19,10 @@ import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
-import { INTERRUPTED, type TaskStore } from "./store.js";
+import { INTERRUPTED, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
 import type { CallbackMode, Goal, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
-import { createdRole, isTerminal } from "./types.js";
+import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
@@ -41,22 +41,6 @@ type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSess
 export type TaskChain = Pick<MainChain, "chainOf" | "members">;
 type Waiter = (run: TaskRun) => void;
 
-/** One row of `pier task stats`: `named` is a launch with no tier. */
-interface StatsRow {
-  tier: ModelTier | "named";
-  role: AgentRole;
-  provider: string;
-  id: string;
-  thinking?: string;
-  runs: number;
-  cancelled: number;
-  names: string[];
-  /** Tool steps in the rows' transcripts, a codemode script's calls each counted. */
-  toolCalls: number;
-  codemodeRuns: number;
-  /** The newest five of them. */
-  codemodeRunIds: string[];
-}
 const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
 
 /** Never a shell; a failure throws the tool's own first line, `git <args>: …` or `wt: …`. */
@@ -385,32 +369,9 @@ export class TaskService {
   }
 
   /** Dispatched runs of the last `days` by launch tier, role and the model the
-   *  session settled on; a run with no role is the head's own, not dispatch.
-   *  A session resumed by several runs is counted once, on its newest run. */
-  async stats(days: number): Promise<{ days: number; rows: StatsRow[] }> {
-    const rows = new Map<string, StatsRow>();
-    const read = new Set<string>();
-    for (const run of this.store.finishedAgentRuns(Date.now() - days * 86_400_000)) {
-      const role = createdRole(run);
-      const { definition: { action, name }, model, thinking } = run.context;
-      if (!role || !model || action.type !== "agent") continue;
-      const tier = action.launch?.tier ?? "named";
-      const key = JSON.stringify([tier, role, model.provider, model.id, thinking]);
-      const row = rows.get(key) ?? { tier, role, provider: model.provider, id: model.id, ...(thinking ? { thinking } : {}), runs: 0, cancelled: 0, names: [], toolCalls: 0, codemodeRuns: 0, codemodeRunIds: [] };
-      rows.set(key, row);
-      if (run.state === "succeeded" || run.state === "failed") row.runs++;
-      else row.cancelled++;
-      if (row.names.length < 5 && !row.names.includes(name)) row.names.push(name);
-      const sessionId = run.context.sessionId;
-      if (!sessionId || read.has(sessionId)) continue;
-      read.add(sessionId);
-      const tools = (await this.factory.readHistory(sessionId) ?? []).flatMap((turn) => turn.steps ?? []).filter((step) => step.kind === "tool");
-      row.toolCalls += tools.length;
-      if (!tools.some((step) => step.toolName === "codemode")) continue;
-      row.codemodeRuns++;
-      if (row.codemodeRunIds.length < 5) row.codemodeRunIds.push(run.id);
-    }
-    const sorted = [...rows.values()].sort((a, b) =>
+   *  session settled on; a run with no role is the head's own, not dispatch. */
+  stats(days: number): { days: number; rows: StatsRow[] } {
+    const sorted = this.store.agentRunStats(Date.now() - days * 86_400_000).sort((a, b) =>
       TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.role.localeCompare(b.role) || b.runs - a.runs);
     return { days, rows: sorted };
   }

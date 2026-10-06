@@ -190,10 +190,14 @@ launch with no tier (a model the caller named, or a run from before
 `launch.tier` existed); `role` is lead or worker, a run with no role being
 the head's own; `runs` counts succeeded + failed, `cancelled` cancelled +
 interrupted; `names` the five most recently finished distinct task names;
-`toolCalls` the tool steps in the rows' transcripts, each call a codemode
-script made counted beside the script's own, a session resumed by several
-runs read once on its newest; `codemodeRuns` the runs whose transcript called
-`codemode`, `codemodeRunIds` the five newest of them.
+`toolCalls` the sum of the runs' own counts — each run records, as it ends,
+the tool calls its turn made (`TaskRun.toolCalls`), each call a codemode
+script made counted beside the script's own, so runs resuming one session
+count apart; `codemodeRuns` the runs that called `codemode`,
+`codemodeRunIds` the five newest of them; `uncounted` the runs with no count
+(finished before counts were recorded, or resumed after a restart, whose
+calls before the stop were never saved), outside the other three. One SQL
+statement over the run rows; no transcript is read.
 Rows in tier order then lead before worker then `runs` descending. A row is
 a question for the reader (five reviews under `hardest`), never a verdict;
 the verb prints no duration, tokens or cost.

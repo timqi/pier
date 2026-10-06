@@ -102,7 +102,17 @@ export class AgentTaskRunner {
         // How it ended, too: a provider outage ends with an empty reply, which
         // would otherwise report as a turn that chose to say nothing (§5).
         let failure: string | undefined;
+        // Pi announces each call a codemode script makes as its own tool-start.
+        // A resume after a restart lost the calls before the stop: not counted.
+        if (resumed) {
+          delete run.toolCalls;
+          delete run.codemode;
+        } else Object.assign(run, { toolCalls: 0, codemode: false });
         const unsubscribe = session.subscribe((event) => {
+          if (event.type === "tool-start" && run.toolCalls !== undefined) {
+            run.toolCalls++;
+            if (event.toolName === "codemode") run.codemode = true;
+          }
           if (event.type === "turn-end") {
             text = event.text;
             failure = event.error;
