@@ -83,13 +83,14 @@ A run that changes a repository's files commits them before ending its turn, unl
 Your final reply is the run result, read verbatim by an agent:${RUN_RESULT}`;
 
 /** Pi's codemode guideline sits in the rules section the override drops, so
- *  a worker with the tool hears it in Pier's baseline (agent/pi.ts), or never calls it. */
-export const WORKER_TOOL_CALLS = `
-
-# Tool calls
-- Use codemode to batch independent tool calls (Promise.allSettled), chain them, or filter large output, instead of many separate calls.
+ *  a worker with the tool hears it in Pier's baseline (agent/pi.ts), ahead of
+ *  Working style, or never calls it. */
+export const WORKER_TOOL_CALLS = `# Tool calls
+- A step with two or more tool calls that do not depend on each other is one codemode script (Promise.allSettled); calls that do depend chain in the same script, and large output is filtered there.
 - Before each call, ask what else you already know you will need; independent reads, greps and inspections of the same file go in one script.
-- A skill that requires serial calls (rate limits, one browser tab) still fits one script: await them in order, with its delays and retry.`;
+- Call a tool directly only for a single call, an action awaiting a person's confirmation, or strictly serial steps (one browser tab, a rate limit); a fresh shell per command is not one.
+
+`;
 
 const LEAD_HEAD = `# You are a feature lead
 

@@ -89,9 +89,9 @@ describe("a session's system prompt", () => {
     const session = await codemode.create({ cwd: dir, role: "worker", model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
     await session.prompt("hello").catch(() => {});
     const blocks = (await codemode.readSystemPrompt(session.id))?.blocks;
-    expect(sent.at(-1)).toContain("# Tool calls\n- Use codemode to batch");
+    expect(sent.at(-1)).toContain("# Tool calls\n- A step with two or more");
     expect(blocks?.[0]).toMatchObject({ label: "Pier baseline" });
-    expect(blocks?.[0]?.text).toMatch(/# Tool calls[^]*with its delays and retry\.$/);
+    expect(blocks?.[0]?.text).toMatch(/# Tool calls[^]*strictly serial steps[^]*\n\n# Working style[^]*without running it\.$/);
     expect(blocks?.[1]).toEqual({ label: "SYSTEM.md", text: "user system" });
     await session.dispose();
   });

@@ -170,13 +170,13 @@ const pierBaseline = (role: AgentRole | undefined, codemode = false): string => 
 # Communication
 ${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
 
-# Working style
+${codemode ? WORKER_TOOL_CALLS : ""}# Working style
 - Before touching files: list and search first. Never guess a path or a line number.
 - Read before you edit. Match the surrounding code's style, naming, and comment density.
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.
-- Each bash call is a fresh shell in the working directory, the \`<cwd>\` at the end of this prompt.
+- A shell command starts in a fresh shell in the working directory, the \`<cwd>\` at the end of this prompt.
 - Destructive or irreversible actions on things you didn't create — deleting user files, force push, migrations, deploys, service restarts: ask first; unattended, don't do them and report what you would have done. The one exception: a step your prompt names on an \`Approved: <step>\` line was asked and answered — take that step, and only that one.
-- Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.${codemode ? WORKER_TOOL_CALLS : ""}`;
+- Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.`;
 
 export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole, codemode = false): string =>
   userPrompt ? `${pierBaseline(role, codemode)}\n\n${userPrompt}` : pierBaseline(role, codemode);

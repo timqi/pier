@@ -299,7 +299,7 @@ describe("worker codemode", () => {
       const loader = loaders.at(-1)!;
       const loaded = loader.extensionFactories.some((e) => e.name === "codemode");
       // Pi's own guideline for the tool is in the section the override drops.
-      const guided = loader.systemPromptOverride().includes("# Tool calls\n- Use codemode to batch");
+      const guided = loader.systemPromptOverride().includes("# Tool calls\n- A step with two or more");
       return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false, guided];
     };
     expect(await codemode("worker")).toEqual([true, true, true]);
