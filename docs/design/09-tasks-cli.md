@@ -67,7 +67,7 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   `P2/P3 begin` and `P2/P3 end` under `Minor issues` and
   `Design suggestions`, never fixed by the goal. A clean goal's callback
   carries the review's opening before it (300 chars) and that framed list
-  (3000) for the user to pick, else the review clipped to 1000.
+  (3000) for the dispatcher to filter, else the review clipped to 1000.
   `--rounds 0` is no goal. A stored `until` reads as `rounds` 3.
   A review's requirement is the first prompt, then every resume and delivered
   message the worker's session was given, in order, each under a steering
