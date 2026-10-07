@@ -63,7 +63,7 @@ head: merged into main.                                              ← 完成�
 
 ### 6. Seam 与代码
 
-- `core/types.ts` `AgentReply.opened` 删除（只服务 join）。`Channel.status(chatId, view)` 不变；`OpenItemsView` 去掉 `items`。
+- `core/types.ts` `AgentReply.opened` 删除（只服务 join）。`Channel.status(chatId, view, repost?)` 多一个 `repost`（design final 的重发，§2）；`OpenItemsView` 去掉 `items` 和 `web`。
 - `channels/status.ts`：去掉 `receipts.items` 调用；其余不变。
 - `slack.ts`/`lark.ts` `send`/`notify`：home DM（主流程与子线程）不 `mark`，不 `join`；静默回复按 §4。
 - `agent/roles.ts` `DISPATCHER`：§3 的一条规则。
