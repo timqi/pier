@@ -27,8 +27,8 @@ You are its current session, in a memory-only home directory: you answer, rememb
 ## Who
 - Decide who does a message before any tool call. You answer from context, memory and items, fetching the one fact a reply or dispatch needs (a skill, a known file, \`pier search\`, one read-only query).
 - A run does edits outside this directory, diff review, project commands but the merge's, investigation past one fact, with the evidence so far.
-- A small, clear task is a worker, one run; larger work a lead, \`--role lead --worktree <branch> --cwd <repo>\`, no goal.
-- \`--design\` only for a product or architecture design the user finalizes in the lead's session.
+- A worker does one step with one deliverable; longer or multi-step work, a lead splits: \`--role lead --worktree <branch> --cwd <repo>\`, no goal.
+- \`--design\` only for a design the user finalizes in the lead's session.
 - A scheduled report with topics, destination or layout unsaid is a question first.
 
 ## Launch
@@ -85,11 +85,13 @@ Your final reply is the run result your supervisor reads verbatim:${RUN_RESULT}`
 
 /** Pi's codemode guideline sits in the rules section the override drops, so
  *  a worker with the tool hears it in Pier's baseline (agent/pi.ts), ahead of
- *  Working style, or never calls it. */
-export const WORKER_TOOL_CALLS = `# Tool calls
-- A step with two or more tool calls that do not depend on each other is one codemode script (Promise.allSettled); calls that do depend chain in the same script, and large output is filtered there.
-- Before each call, ask what else you already know you will need; independent reads, greps and inspections of the same file go in one script.
+ *  Working style, or never calls it. A worker's and a lead's tool results
+ *  crowd their context to compaction, so both hear the reading rule. */
+export const toolCalls = (codemode: boolean): string => `# Tool calls
+${codemode ? `- A step with two or more tool calls that do not depend on each other is one codemode script (Promise.allSettled); calls that do depend chain in the same script, and large output is filtered there.
+- Before each call, ask what else you already know you will need; exploration, independent reads, greps and inspections of the same file go in one script.
 - Call a tool directly only for a single call, an action awaiting a person's confirmation, or strictly serial steps (one browser tab, a rate limit); a fresh shell per command is not one.
+` : ""}- Every tool result stays in your context: \`rg -n\` locates, then read only that line range; filter or cap command output in its pipe; a large output goes to a file, read back in parts.
 
 `;
 

@@ -300,13 +300,15 @@ describe("worker codemode", () => {
       const loaded = loader.extensionFactories.some((e) => e.name === "codemode");
       // Pi's own guideline for the tool is in the section the override drops.
       const guided = loader.systemPromptOverride().includes("# Tool calls\n- A step with two or more");
-      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false, guided];
+      // The reading rule holds for every worker and lead, codemode or not.
+      const narrow = loader.systemPromptOverride().includes("- Every tool result stays in your context");
+      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false, guided, narrow];
     };
-    expect(await codemode("worker")).toEqual([true, true, true]);
-    expect(await codemode("lead")).toEqual([false, false, false]);
-    expect(await codemode()).toEqual([false, false, false]);
+    expect(await codemode("worker")).toEqual([true, true, true, true]);
+    expect(await codemode("lead")).toEqual([false, false, false, true]);
+    expect(await codemode()).toEqual([false, false, false, false]);
     on = false;
-    expect(await codemode("worker")).toEqual([false, false, false]);
+    expect(await codemode("worker")).toEqual([false, false, false, true]);
   });
 });
 

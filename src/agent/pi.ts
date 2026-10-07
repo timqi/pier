@@ -51,7 +51,7 @@ import type {
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
-import { DISPATCHER, lead, WORKER, WORKER_TOOL_CALLS } from "./roles.js";
+import { DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
 import {
   lastAssistant,
   textOf,
@@ -170,7 +170,7 @@ const pierBaseline = (role: AgentRole | undefined, codemode = false): string => 
 # Communication
 ${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
 
-${codemode ? WORKER_TOOL_CALLS : ""}# Working style
+${role === "worker" || role === "lead" ? toolCalls(codemode) : ""}# Working style
 - Before touching files: list and search first. Never guess a path or a line number.
 - Read before you edit. Match the surrounding code's style, naming, and comment density.
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.

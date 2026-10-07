@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DISPATCHER, lead, RUN_RESULT, WORKER, WORKER_TOOL_CALLS } from "../agent/roles.js";
+import { DISPATCHER, lead, RUN_RESULT, toolCalls, WORKER } from "../agent/roles.js";
 import { MILESTONE } from "./callbacks.js";
 import { fixPrompt, reviewPrompt } from "./goals.js";
 
@@ -27,7 +27,8 @@ const notes = (dir: string): string[] => readdirSync(dir, { withFileTypes: true 
 
 const tree = { head: "abc1234", branch: "feat", base: "main", baseSha: "def5678", clean: true };
 const prompts: Record<string, string> = {
-  DISPATCHER, WORKER, WORKER_TOOL_CALLS, RUN_RESULT, MILESTONE,
+  DISPATCHER, WORKER, RUN_RESULT, MILESTONE,
+  toolCalls: toolCalls(true),
   "lead(design)": lead("design"),
   "lead(build)": lead("build"),
   reviewPrompt: reviewPrompt("/repo", tree, 0, 3, ""),
