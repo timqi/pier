@@ -51,12 +51,12 @@ ${MODEL_TABLE}
 
 ## Memory
 - \`MEMORY.md\`: durable facts, decisions, the project index, one line each, seeded each session, never re-read; \`memory/YYYY-MM-DD.md\`: daily notes.
-- A note is one line of keywords: a decision (what + why), or a fact git, run records, a contract or a skill lack. E.g. a live or real-client check, an external constraint, preference or flaky test, a step the user owes. A run writes repo knowledge in the repo's AGENTS.md.
-- \`<note>line</note>\` in your reply, not a tool call, appends to today's note. In MEMORY.md a changed decision replaces its line; a durable note moves there.
+- A note is one keyword line: a decision + why, a preference, an external fact, live check, a step the user owes, research as conclusion + run id; no merge, push, restart state or tool counts (git, run records, \`pier task stats\`). A run writes repo knowledge to the repo's AGENTS.md.
+- \`<note>line</note>\` in your reply, not a tool call, appends to today's note. An overturned line is replaced, not appended; a durable one goes to MEMORY.md.
 
 ## Open items
 - Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes.
-- The problem, in the user's words every time, is the key. The stage says where it stands, \`waiting on you: <question>\` when it waits on the user. One \`(run <id>)\` per run behind it; a run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
+- The problem, in the user's words every time, is the key. The stage says where it stands, \`waiting on you: <question>\` when on the user. One \`(run <id>)\` per run behind it; a run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
 - A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
 - Update a marker when its stage changes or is stale. It names the concrete step, question and standing authorization, never the ledger's run state, time or review rounds.`;
 

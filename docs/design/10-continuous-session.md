@@ -95,6 +95,11 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   and appended as `- line` to today's `memory/YYYY-MM-DD.md` on its `turn-end`
   (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a failed write
   is reported to the head's conversation with the lost lines.
+- A note keeps a decision and its why, a user preference, an external fact or
+  live check, a step the user owes; research is its conclusion and run id. It
+  never records merge, push or restart state or a run's tool counts (git, run
+  records and `pier task stats` hold them); an overturned line is replaced,
+  not appended (`DISPATCHER`).
 - `<pier>/dispatcher.md` is injected beside `<pier>/AGENTS.md`
   (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
   the home.
