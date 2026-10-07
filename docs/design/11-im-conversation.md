@@ -140,27 +140,17 @@ thread half only for the home chat; any other is refused.
 | a cut send | ledger note, as today |
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
-- Receipts: the 👀 on a home message is keyed by the home conversation id and
-  comes off with the head's turn-end, as any conversation's — unless that turn
-  opened an item, when it stays as the item's state (§Status). A chat command
-  wears none — its answer is a note, and no turn would take it off — and
-  neither does a `chat-command` or `session-seed` note (`awaitsTurn`): the
-  message that caused a seed already wears its own.
+- Receipts: chats other than the home DM mark a message with 👀 for its turn;
+  the home DM has no reactions in the main flow or threads. A dispatch is
+  answered by the head in one line naming what launched and its stage, beside
+  its `<open>` marker.
 
 ## Status
 
-The home chat's main flow shows the open items in one status message and on
-the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
+The home chat has one status card for open items; it is not a notification.
 
-- `AgentReply.opened` is the problems the reply's `<open>` markers named, in
-  order (`splitReply`). A home main-flow reply with `opened` moves the
-  receipts its turn settles to item receipts under the first problem, silent
-  reply or not; the 👀 stays.
-- An item receipt wears its item's `OpenStatus`: `running` → 👀, `waiting on
-  you` → ❓, gone from the list → ✅ and forgotten; `stopped` and `pending
-  release` keep what they wear, except a 👀, which comes off. A change removes the old reaction and adds the
-  new one; no change, no call. At most 20 messages per item; the oldest past
-  that is cleared and forgotten. The stale and startup sweeps skip them.
+- Changes edit the card in place; an empty list deletes it. Only `/status`
+  posts it again at the bottom of the main flow.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
   `task-group-changed` and `session-state` on a 1.5 s timer into an
   `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text, its
@@ -179,9 +169,8 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   one markdown element per item, the tag a `text_tag`, a waiting item's stage
   orange, headings and metadata grey; Slack: Block Kit, headings and
   metadata `context` blocks, the item a `section` with the tag in code and a
-  waiting stage quoted, under the compact text as the message's `text` for
-  notifications. Each field is cut at a fixed length; items past the budget (Lark
-  7000 chars and 100 elements, Slack 50 blocks) are left out whole behind
+  waiting stage quoted. Each field is cut at a fixed length; items past the
+  budget (Lark 7000 chars and 100 elements, Slack 50 blocks) are left out whole behind
   `… N more`. No run IDs appear, and old text-only `/status` notes retain the
   legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
@@ -193,17 +182,10 @@ the messages that opened them (`channels/status.ts`, `channels/receipts.ts`).
   the older. A home moved within the platform loses the old chat's card on the
   next refresh; moved across platforms, the old card stays until that adapter
   refreshes.
-- A silent head reply in the main flow posts its `stayed silent — <reason>`
-  footer only when its turn settled a message and opened no item; otherwise
-  nothing — the reaction or the status message is the trace.
-- Every platform failure is logged with a `status:` or `reaction` prefix and
-  never thrown into the hub.
-
-| Emoji | Slack | Lark |
-| --- | --- | --- |
-| working | `eyes` | `OnIt` |
-| waiting on you | `question` | `WHAT` |
-| done | `white_check_mark` | `DONE` |
+- A silent turn that settled a user message posts `stayed silent — <reason>`,
+  with or without a marker; a callback-triggered silent turn posts nothing.
+- Every platform failure is logged with a `status:` prefix and never thrown
+  into the hub.
 
 ## Chat commands
 

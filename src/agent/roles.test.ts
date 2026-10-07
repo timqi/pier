@@ -25,11 +25,12 @@ describe("the dispatcher contract", () => {
   });
 
   it("names the markers core/reply.ts strips and the lines the callbacks carry", () => {
-    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<topic>problem</topic>", "<note>line</note>", "<silent>dispatched</silent>"]) {
+    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<topic>problem</topic>", "<note>line</note>", "<silent>"]) {
       expect(DISPATCHER).toContain(syntax);
     }
     // tasks/open-items.ts reads an item as waiting on the user by this stage word.
     expect(DISPATCHER).toContain("`waiting on you: <question>`");
+    expect(DISPATCHER).toContain("A dispatch answers in one line — what was launched and its stage — beside its `<open>` marker, never silent. A callback that only moves the stage is `<silent>`.");
     for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
       expect(DISPATCHER).toContain(line);
     }
