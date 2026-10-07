@@ -533,9 +533,9 @@ export class SlackChannel implements Channel {
     return conversationId(channel, ts);
   }
 
-  async status(channel: string, view: OpenItemsView): Promise<void> {
+  async status(channel: string, view: OpenItemsView, repost?: boolean): Promise<void> {
     if (!this.isHome(channel)) throw new Error(`refusing a status message in ${channel}: not the home DM`);
-    await this.statusLine.show(channel, view);
+    await this.statusLine.show(channel, view, repost);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

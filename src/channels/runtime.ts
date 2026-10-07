@@ -166,11 +166,11 @@ export class ChannelRuntime {
 
   /** The home chat's status message (docs/design/11 §Status), while its adapter
    *  is live; nothing otherwise. A failure is logged, never thrown. */
-  async openItems(view: OpenItemsView): Promise<void> {
+  async openItems(view: OpenItemsView, repost = false): Promise<void> {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
     if (!home || !channel) return;
-    await channel.status(home.chatId, view).catch((err: unknown) =>
+    await channel.status(home.chatId, view, repost).catch((err: unknown) =>
       this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
   }
 

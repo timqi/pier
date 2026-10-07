@@ -1327,6 +1327,15 @@ describe("the home chat", () => {
       await expect(channel.status(CHANNEL, view("x"))).rejects.toThrow(/not the home DM/);
     });
 
+    it("a repost moves the message to the bottom: the old one deleted, a new one posted", async () => {
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]), true);
+      expect(client.updated).toEqual([]);
+      expect(client.deleted).toEqual(["900.000100"]);
+      expect(client.sent.map((p) => p.text)).toEqual(["_▤ open items_\nstorage — running", "done", "_▤ open items_\nstorage — running"]);
+    });
+
     it("/status is answered once: the message re-posted at the bottom, or the note when nothing is open", async () => {
       const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
       const text = `Waiting on you · 1\n\n${"A & B · run literal12… ".repeat(12)}\n是否合并 <scope>？\nsucceeded 2m ago\n\nIn progress · 1\n\nBuild\nelapsed <1m`;

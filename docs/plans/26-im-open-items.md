@@ -29,7 +29,7 @@ reaction 承担三件事：**收到**（👀）、**等你**（❓）、**完成
 
 ### 2. 卡片只改不动
 
-- 任何变化原地编辑，不推送；空则删；只有 `/status` 重发到底部。**没有自动移动**，没有事项行，聊天里的状态消息永远 ≤ 1 条、零撤回占位。
+- 任何变化原地编辑，不推送；空则删；`/status` 重发到底部。**唯一的自动移动是 design final**：design lead 的线程根改成 `✓ <run> · design final` 5 s 后，卡片重发到底部一次（删旧发新，同 `/status`）；没有事项行，聊天里的状态消息永远 ≤ 1 条。
 - 布局、分组、字段、上限不变。`OpenItemsView.items` 删除（只服务 reaction）。
 - 卡片是全貌，按需 `/status` 拉到眼前；它不再是任何事件的通知。
 
@@ -59,7 +59,7 @@ head: review clean at a1b2c3d — merge?   [merge] | [see review]      ← 等�
 head: merged into main.                                              ← 完成；卡片原地改，空则删
 ```
 
-对比今天：少了 reaction API 调用和 `item_receipts`；bot 消息多出派发回执那一句（原本是 👀）。没有撤回占位。
+对比今天：少了 reaction API 调用和 `item_receipts`；bot 消息多出派发回执那一句（原本是 👀）。撤回占位只有 design final 那一个。
 
 ### 6. Seam 与代码
 
@@ -73,7 +73,7 @@ head: merged into main.                                              ← 完成�
 
 ### 7. 不做
 
-- 不发事项行；卡片不自动移动、不 pin；不加 Done 分组。
+- 不发事项行；卡片除 design final 外不自动移动、不 pin；不加 Done 分组。design final 在 Lark 留一个撤回占位，接受。
 - 不用 Slack `assistant.threads.setStatus`/typing 替代 👀（仅 assistant 容器可用，Lark 无对应）。
 - 不给其他聊天去 reaction。
 
@@ -85,6 +85,6 @@ head: merged into main.                                              ← 完成�
 ### 9. 验收
 
 - home DM 全程零 reaction API 调用（mock 断言）；其他聊天的 👀 不变。
-- §5 脚本在两平台各跑一遍：聊天里始终只有一张卡片且从不移动；没有撤回占位。
+- §5 脚本在两平台各跑一遍：聊天里始终只有一张卡片，只在 design final 后移动一次。
 - head 静默派发 → `stayed silent — dispatched`；开口派发 → 一句话，无其他。
 - 真机：Slack 与 Lark 各看一次派发回执和等你回复的推送文案。

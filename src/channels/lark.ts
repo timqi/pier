@@ -568,9 +568,9 @@ export class LarkChannel implements Channel {
     return conversationId(chatId, messageId);
   }
 
-  async status(chatId: string, view: OpenItemsView): Promise<void> {
+  async status(chatId: string, view: OpenItemsView, repost?: boolean): Promise<void> {
     if (!this.isHome(chatId)) throw new Error(`refusing a status message in ${chatId}: not the home chat`);
-    await this.statusLine.show(chatId, view);
+    await this.statusLine.show(chatId, view, repost);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

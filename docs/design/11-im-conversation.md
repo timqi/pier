@@ -108,7 +108,8 @@ Both platforms, the same rule.
   not succeed → `⚠ <run name> · design — <error>`. Any other state the
   thread itself shows. One `designLead(run, state)` hook carries all three
   (`waiting`, `final`, `failed`); a failed edit is an error note in the
-  thread, never silent.
+  thread, never silent. 5 s after the `final` edit, the status card is
+  re-posted at the bottom of the main flow once (§Status).
 - The web: the lead's session lists `channel: <platform>` and takes no unread
   mark or push while bound (a turn delivered to a chat), as any thread session
   opened on the web; the design's needs-you row is the store's and
@@ -150,8 +151,12 @@ thread half only for the home chat; any other is refused.
 ## Status
 
 The home chat's main flow shows the open items in one status message
-(`channels/status.ts`): the whole picture, which no change moves.
+(`channels/status.ts`): the whole picture, which only `/status` and a design
+final move.
 
+- Changes edit the card in place; an empty list deletes it. `/status`, and
+  once a design final (§Child threads), post it again at the bottom of the
+  main flow; on Lark the deleted card leaves a 撤回 placeholder.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
   `task-group-changed` and `session-state` on a 1.5 s timer into an
   `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text, its
@@ -176,9 +181,11 @@ The home chat's main flow shows the open items in one status message
   `… N more`. No run IDs appear, and old text-only `/status` notes retain the
   legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
-  none). Replies, notes and thread roots never move it; only `/status` in the
+  none). Replies, notes and thread roots never move it; `/status` in the
   main flow posts it anew at the bottom, with the answer's text and snapshot
-  (`StatusMessage.answer`), then deletes the old one without waiting; a failed
+  (`StatusMessage.answer`), then deletes the old one without waiting; a
+  design final's refresh, 5 s after the root's edit, does the same with
+  `Channel.status(chat, view, repost)`, the flag ORed across the 1.5 s window; a failed
   re-post keeps the old one; `startChannels` refreshes once, after the restart
   note. One refresh runs at a time; the newest waiting view replaces
   the older. A home moved within the platform loses the old chat's card on the

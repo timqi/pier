@@ -1106,6 +1106,15 @@ describe("the home chat", () => {
       await expect(channel.status(CHAT, view("x"))).rejects.toThrow(/not the home chat/);
     });
 
+    it("a repost moves the card to the bottom: the old one deleted, a new one posted", async () => {
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]), true);
+      expect(client.patched).toEqual([]);
+      expect(client.deleted).toEqual(["om_900"]);
+      expect(client.sent.map((p) => bodyText(p.card).split("\n")[0])).toEqual(["*▤ open items*", "done", "*▤ open items*"]);
+    });
+
     it("/status is answered once: the card re-posted at the bottom, or the note when nothing is open", async () => {
       const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
       const text = "Waiting on you · 1\n\nA & B\n是否合并 <scope>？\n\nIn progress · 1\n\nBuild";

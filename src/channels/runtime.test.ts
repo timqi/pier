@@ -41,9 +41,9 @@ vi.mock("./slack.js", () => ({
       if (openFails) throw openFails;
       events.push(`edit ${conversationId}: ${note.text}`);
     }
-    async status(chatId: string, view: { text: string }): Promise<void> {
+    async status(chatId: string, view: { text: string }, repost?: boolean): Promise<void> {
       if (openFails) throw openFails;
-      events.push(`status ${chatId}: ${view.text}`);
+      events.push(`status ${chatId}: ${view.text}${repost ? " (repost)" : ""}`);
     }
   },
 }));
@@ -288,12 +288,14 @@ describe("ChannelRuntime", () => {
     home = { platform: "slack", chatId: "D1" };
     await rt.openItems(view);
     expect(events.filter((e) => e.startsWith("status"))).toEqual(["status D1: storage — running"]);
+    await rt.openItems(view, true);
+    expect(events.filter((e) => e.startsWith("status")).at(-1)).toBe("status D1: storage — running (repost)");
     openFails = new Error("ratelimited");
     await rt.openItems(view);
     expect(logged.at(-1)).toBe("status: slack did not take the open items: Error: ratelimited");
     openFails = undefined;
     await rt.stop();
     await rt.openItems(view);
-    expect(events.filter((e) => e.startsWith("status"))).toHaveLength(1);
+    expect(events.filter((e) => e.startsWith("status"))).toHaveLength(2);
   });
 });

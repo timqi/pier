@@ -159,7 +159,10 @@ tasks = new TaskService(taskStore, factory, router, hub, {
       name: run.context.definition.name,
       origin: { kind: "task-callback", taskId: run.taskId, runId: run.id, sourceSessionId: run.targetSessionId, source: runSource(run), state: run.state },
       text: state === "failed" ? run.error ?? run.state : runResultText(run),
-    }, state).catch((err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
+    }, state).then(() => {
+      // The user reads the root's ✓ first; the card follows to the bottom.
+      if (state === "final") setTimeout(() => refreshStatus(true), FINAL_REPOST_MS);
+    }, (err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
   },
   // Through the ledger: an interruption is recorded while no chat is connected.
   abnormalEnd: (run) => {
@@ -196,16 +199,21 @@ const channels = new ChannelRuntime(channelStore, router, chain, control, conver
 /** The home chat's status message follows every event that can move an open
  *  item, coalesced: one turn end fires several. */
 const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state"]);
+const FINAL_REPOST_MS = 5000;
 let statusTimer: NodeJS.Timeout | undefined;
-const refreshStatus = (): void => {
+let statusRepost = false;
+const refreshStatus = (repost = false): void => {
+  statusRepost ||= repost;
   if (statusTimer) return;
   statusTimer = setTimeout(() => {
     statusTimer = undefined;
+    const bottom = statusRepost;
+    statusRepost = false;
     try {
       const open = tasks.openItems();
       const { text, snapshot } = openItemsStatus(open, Date.now());
       const web = settings.get().publicUrl;
-      void channels.openItems({ text, snapshot, ...(web ? { web } : {}) });
+      void channels.openItems({ text, snapshot, ...(web ? { web } : {}) }, bottom);
     } catch (err) {
       log.error("status: the open items could not be read", err);
     }
