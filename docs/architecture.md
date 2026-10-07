@@ -239,9 +239,10 @@ mirror them. The seams:
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters
-  react 👀 on each message that entered the turn and clear them when it settles;
-  the pending set is durable (`channels/receipts.ts`), cleared at startup and
-  swept past 10 minutes unless the conversation is still working.
+  react 👀 on each message that entered the turn, outside the home chat, and
+  clear them when it settles; the pending set is durable
+  (`channels/receipts.ts`), cleared at startup and swept past 10 minutes
+  unless the conversation is still working.
 - **IM permission policy** (`channels/config.ts`): one persisted JSON document
   per platform: token, platform-level defaults, bound users, discovered
   chats. `requireMention` and `requireBind` default to true; a new chat

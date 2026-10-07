@@ -10,7 +10,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Session per conversation | One chat (or thread) is one persisted Pi session, stable across restarts | shared (`conversations.ts`) | ✅ | ✅ |
 | Thread-per-request | A message in the parent chat opens a native thread and its own session; replies and commands stay put | shared policy, adapter creates the thread | ✅ | ✅ |
 | Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | ✅ |
-| Progress receipts | Every message that entered a turn wears 👀 until it settles, except in the home DM, which has no reactions in its main flow or threads; no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ |
+| Progress receipts | Every message that entered a turn wears 👀 until it settles, except in the home chat, which wears no reaction in its main flow or threads ([11 §Status](11-im-conversation.md#status)); no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ |
 | Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ |
 | Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as a reply to the message that offered it, in the web's quote (`withQuote`) | shared parse, adapter renders + feeds back | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ |
@@ -68,7 +68,7 @@ buttons. Kept apart: the renderers, the user-name memos, the `discovered` sets.
   `system-input` (task delegation, callback, supervisor message) and
   `{kind:"error"}`. Sent *before* the turn it triggers; never rendered as an
   assistant turn; must not retire the receipts.
-- `status(chatId, view)` — the home chat's status message and item reactions
+- `status(chatId, view)` — the home chat's status message
   ([11 §Status](11-im-conversation.md#status)); any other chat rejects, and
   failures inside are logged, never thrown.
 - `stop()` must **drain in-flight work**: `runtime.reload()` starts a
@@ -320,8 +320,19 @@ ends, require a leading `/` or `%`, lowercase the name, keep args **verbatim**.
 
 ## Reaction receipts
 
-The turn 👀 receipt applies to chats other than the home DM. The home DM has no
-turn or item reactions in its main flow or threads.
+`receipts.ts` is a SQLite table, not a `Map`. An adapter calls `mark`, `settle`
+and `sweep`:
+
+- Book the receipt **synchronously, before dispatching** the message.
+- Clear only what the ending turn was working on: pass `reply.meta` to
+  `settle`/`settleAfter` (one Pi run can end several turns).
+- The reaction API is `addReaction` / `removeReaction`, each naming the emoji.
+- Await the in-flight "add" before issuing the "clear".
+- On `start()`, clear every receipt on the books; an inbound event sweeps, at
+  most once a minute, receipts past 10 minutes whose conversation is not working.
+- A `quiet` chat — the home, main flow and threads — is booked and settled
+  with no reaction call: the books still tell a silent turn whether it settled
+  a message ([11 §Status](11-im-conversation.md#status)).
 
 ## Console surface
 
@@ -474,8 +485,8 @@ Answer these first.
 
 - Never key interaction state on adapter-instance memory: `reload()` rebuilds
   the adapter. Recover from the platform or SQLite.
-- A bot cannot post as the user: echo a tap as `▸ <label>` and put the 👀 on
-  the echo.
+- A bot cannot post as the user: echo a tap as `▸ <label>` and book the
+  receipt on the echo.
 - An empty turn still posts one muted line naming which nothing it was
   (`stayed silent — <reason>` / `no reply`) plus the footer.
 - A per-conversation promise chain needs a `catch` on every link; bound every
