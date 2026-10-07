@@ -1370,6 +1370,8 @@ describe("the home chat", () => {
       // A failed run's trace never depends on the head choosing to speak.
       await channel.notify(HOME, { text: "✗ storage", origin: { ...callback, state: "failed" } });
       expect(client.sent).toHaveLength(2);
+      // The notes a turn awaits are booked, never reacted to.
+      expect(client.reactions).toEqual([]);
     });
   });
 });

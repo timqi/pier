@@ -44,9 +44,9 @@ export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
   [tier, model?.id, thinking].filter(Boolean).join(" \u00b7 ");
 
 /** Is a turn coming once this note is posted? On IM the note is the only
- *  message that turn has to wear the 👀; a receipt on any other would hang
+ *  message that turn has to carry its receipt; a receipt on any other would hang
  *  until the stale sweep: an error reports a turn that already ended, a chat
- *  command's answer starts none, and the message that made a seed wears its own. */
+ *  command's answer starts none, and the message that made a seed carries its own. */
 export const awaitsTurn = (origin: NoteOrigin): boolean =>
   origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed";
 

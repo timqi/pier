@@ -48,7 +48,7 @@ import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
 import { context, escapeMrkdwn, offeredLabel, statusMessage } from "./slack-render.js";
 
-const REACTIONS = "eyes";
+const REACTION = "eyes";
 // The envelope is already acked, so this bounds concurrency (sockets,
 // downloads), not the backlog.
 const MAX_ACTIVE_CHATS = 16;
@@ -133,7 +133,7 @@ export class SlackChannel implements Channel {
       this.api,
       ledger,
       this.log,
-      REACTIONS,
+      REACTION,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),

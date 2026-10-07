@@ -1146,6 +1146,10 @@ describe("the home chat", () => {
       await channel.notify(`${HOME}/om_root`, { text: "✓ storage", origin: callback });
       expect(client.sent).toEqual([]);
       expect(client.replied.map((r) => r.to)).toEqual(["om_root"]);
+      await channel.notify(HOME, { text: "✗ storage", origin: { ...callback, state: "failed" } });
+      expect(client.sent).toHaveLength(1);
+      // The notes a turn awaits are booked, never reacted to.
+      expect(client.reactions).toEqual([]);
     });
   });
 });

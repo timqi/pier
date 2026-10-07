@@ -24,7 +24,7 @@ const receipt = (conversationId: string, messageId: string) => ({
 
 /** A ledger and a `Receipts` over it whose platform double records only the
  *  messages it cleared — which receipt came off is what settling is about. */
-const REACTIONS = "eyes";
+const REACTION = "eyes";
 
 const recording = (quiet?: (chatId: string) => boolean) => {
   const ledger = new ReceiptLedger("slack", db);
@@ -46,7 +46,7 @@ const recording = (quiet?: (chatId: string) => boolean) => {
     },
     ledger,
     (m) => logged.push(m),
-    REACTIONS,
+    REACTION,
     60_000,
     undefined,
     quiet,
@@ -115,7 +115,7 @@ describe("receipt ledger", () => {
       { addReaction: () => Promise.resolve(), removeReaction: (_chatId, messageId) => (cleared.push(messageId), Promise.resolve()) },
       ledger,
       () => {},
-      REACTIONS,
+      REACTION,
       0,
     );
     ledger.add(receipt("C100", "1"));
@@ -144,7 +144,7 @@ describe("receipt ledger", () => {
       },
       ledger,
       () => {},
-      REACTIONS,
+      REACTION,
       60_000,
     );
     receipts.mark("C100", "C100", "1");

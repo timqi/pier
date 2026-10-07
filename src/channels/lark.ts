@@ -46,7 +46,7 @@ import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import { StatusMessage } from "./status.js";
 
-const REACTIONS = "OnIt";
+const REACTION = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
 const MAX_ACTIVE_CHATS = 16;
 /** Only an idle conversation ages out, so this need not cover a long turn. */
@@ -124,7 +124,7 @@ export class LarkChannel implements Channel {
       },
       ledger,
       this.log,
-      REACTIONS,
+      REACTION,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),
