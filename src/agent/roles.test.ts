@@ -20,6 +20,7 @@ describe("the dispatcher contract", () => {
       "`wt -C <worktree> merge --no-squash <target>`",
       "`→ <target> in <worktree>`",
       "`--no-remove`",
+      "`--cwd <its worktree>` (`--rounds <n>` for a goal)",
     ]) expect(DISPATCHER).toContain(line);
   });
 
@@ -35,7 +36,7 @@ describe("the dispatcher contract", () => {
     // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
     expect(DISPATCHER).toContain("`P2/P3 begin` list");
     // The dispatcher filters that list rather than relaying it whole.
-    for (const rule of ["drop wording, format, style", "≤100 lines become a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
+    for (const rule of ["drop wording, format, style", "≤100 lines become a post-merge fix run, unasked", "or past it only by a wording fix the user named, else back to review", "1 for a small or follow-up fix", "an answer, a review fix, a small addition to the change", "a problem failed 2 fixes or the run says it is stuck, it compacted once", "the goal, what was tried, where it failed, the sha", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "at most 1–2", "ask only the merge"]) expect(DISPATCHER).toContain(rule);
   });
 
   it("guards the regressions a rewording could bring back", () => {
@@ -133,7 +134,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_310],
+    ["DISPATCHER", DISPATCHER, 1_365],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
