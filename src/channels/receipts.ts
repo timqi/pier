@@ -160,7 +160,9 @@ export class Receipts {
     if (!all && now - this.sweptAt < SWEEP_EVERY_MS) return Promise.resolve();
     this.sweptAt = now;
     // The startup sweep needs no liveness check: no turn survives the process.
-    return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working));
+    // It also clears a quiet chat: a 👀 booked there before it was quiet (an
+    // upgrade, a home that moved) has no other way off.
+    return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working), all);
   }
 
   /** A slow apply must not let a later receipt clear first. */
@@ -170,9 +172,9 @@ export class Receipts {
     for (const { chatId, messageId } of receipts) this.applying.delete(`${chatId}:${messageId}`);
   }
 
-  private async clear(receipts: Receipt[]): Promise<void> {
+  private async clear(receipts: Receipt[], everywhere = false): Promise<void> {
     await this.landed(receipts);
-    await Promise.all(receipts.filter((r) => !this.quiet(r.chatId)).map((r) =>
+    await Promise.all(receipts.filter((r) => everywhere || !this.quiet(r.chatId)).map((r) =>
       this.api.removeReaction(r.chatId, r.messageId, this.emoji)
         .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`))));
   }

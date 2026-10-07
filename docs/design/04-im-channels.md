@@ -332,7 +332,8 @@ and `sweep`:
   most once a minute, receipts past 10 minutes whose conversation is not working.
 - A `quiet` chat — the home, main flow and threads — is booked and settled
   with no reaction call: the books still tell a silent turn whether it settled
-  a message ([11 §Status](11-im-conversation.md#status)).
+  a message ([11 §Status](11-im-conversation.md#status)). The `start()` sweep
+  clears a quiet chat's receipts too: a 👀 booked before the chat was quiet.
 
 ## Console surface
 

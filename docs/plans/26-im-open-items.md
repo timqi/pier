@@ -46,7 +46,7 @@ Web 一致：静默回合不设未读、不推送（今天的规则），所以�
 
 ### 4. 违约兜底，不加消息
 
-静默回复在 home 主流程的规则简化为今天去掉例外后的样子：**结清了用户消息的静默回合发 `stayed silent — <reason>`，带不带标记都一样**；没结清用户消息的（callback 触发）不发。head 违约静默派发时用户看到 `stayed silent — dispatched`，知道有事发生、可以 `/status`；`<open>` 的 stage 以 `waiting on you` 开头而回合静默时同理。原则 5 满足，代码比今天少一个分支。
+静默回复在 home 主流程的规则简化为今天去掉例外后的样子：**结清了用户消息（或该回合等的一条已发出的 note）的静默回合发 `stayed silent — <reason>`，带不带标记都一样**；没结清用户消息的（callback 触发）不发。head 违约静默派发时用户看到 `stayed silent — dispatched`，知道有事发生、可以 `/status`；`<open>` 的 stage 以 `waiting on you` 开头而回合静默时同理。原则 5 满足，代码比今天少一个分支。
 
 ### 5. 噪音账
 

@@ -205,12 +205,16 @@ describe("receipt ledger", () => {
     expect(settles).toBe(true);
     expect(ledger.booked("D1")).toEqual([]);
     receipts.mark("D1", "D1", "2");
-    await receipts.sweep(true);
+    await receipts.sweep();
     expect(calls).toEqual([]);
     // Another chat on the same adapter still wears its 👀.
     receipts.mark("C100", "C100", "3");
     await receipts.settle("C100");
     expect(calls).toEqual(["+eyes:3", "-eyes:3"]);
+    // The startup sweep takes a 👀 off a quiet chat too: one booked before the
+    // chat was quiet is on the platform with nobody else to clear it.
+    await receipts.sweep(true);
+    expect(calls).toEqual(["+eyes:3", "-eyes:3", "-eyes:2"]);
   });
 
   it("survives a restart and keeps platforms apart", () => {
