@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.13 — 2026-10-07
+
+### Upgrade notes
+
+- The database migrates to schema 38, one-way: it drops `item_receipts`; 0.4.12 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
+
+### Changed
+
+- Upgrade the Pi coding agent dependency to 1.0.4.
+- Workers run with Pi's `codemode` tool and its tool-call guidance, unless the `workerCodemode` setting reads `"0"` ([deploy.md](docs/deploy.md)); `pier task stats` counts each run's tool calls, a codemode script's included.
+- A worker compacts at 180K and a lead at 200K; the role prompts share one vocabulary, a worker gets one step with one deliverable, and the head's notes keep decisions, preferences, external facts and owed steps.
+- Tasks: a `--run` continuation of a compacted or near-full session, or one with `--fresh`, opens a new session briefed with the task, last report, branch and latest review; a concurrent `--run` is refused.
+- Tasks: a review ranks a change not as simple as it can be P1 and code harder to read than it needs P2; the head sends a clean review's behaviour and readability P2s back to the branch before asking the merge.
+- IM home chat: no reactions — the open items card is only edited, a design final re-posts it once after its root was edited, and a silent turn that settled a message says so; the startup sweep clears a leftover 👀 from a quiet chat; open items carry no web links.
+
 ## 0.4.12 — 2026-10-06
 
 ### Changed
