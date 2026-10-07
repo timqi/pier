@@ -154,15 +154,11 @@ The home chat's main flow shows the open items in one status message
 (`channels/status.ts`): the whole picture, which only `/status` and a design
 final move.
 
-- Changes edit the card in place; an empty list deletes it. `/status`, and
-  once a design final (§Child threads), post it again at the bottom of the
-  main flow; on Lark the deleted card leaves a 撤回 placeholder.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
   `task-group-changed` and `session-state` on a 1.5 s timer into an
   `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text
-  and snapshot) and hands it to
-  `ChannelRuntime.openItems`, which calls `Channel.status` on the home
-  platform's live adapter; nothing otherwise.
+  and snapshot) and hands it to `ChannelRuntime.openItems`, which calls
+  `Channel.status` on the home platform's live adapter; nothing otherwise.
 - The status message is `▤ open items` in the platform's emphasis over the
   view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
@@ -180,13 +176,13 @@ final move.
   `… N more`. No run IDs appear, and old text-only `/status` notes retain the
   legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
   `Nothing open.` → deleted; otherwise edited in place (posted when there is
-  none). Replies, notes and thread roots never move it; `/status` in the
-  main flow posts it anew at the bottom, with the answer's text and snapshot
-  (`StatusMessage.answer`), then deletes the old one without waiting; a
-  design final's refresh, 5 s after the root's edit, does the same with
-  `Channel.status(chat, view, repost)`, the flag ORed across the 1.5 s window; a failed
-  re-post keeps the old one; `startChannels` refreshes once, after the restart
-  note. One refresh runs at a time; the newest waiting view replaces
+  none). Two things re-post it at the bottom, then delete the old one without
+  waiting (on Lark the deleted card leaves a 撤回 placeholder): `/status` in the
+  main flow, with the answer's text and snapshot (`StatusMessage.answer`), and
+  once a design final (§Child threads), the refresh 5 s after the root's edit
+  passing `Channel.status(chat, view, repost)`, the flag ORed across the 1.5 s
+  window. A failed re-post keeps the old one; `startChannels` refreshes once,
+  after the restart note. One refresh runs at a time; the newest waiting view replaces
   the older. A home moved within the platform loses the old chat's card on the
   next refresh; moved across platforms, the old card stays until that adapter
   refreshes.
@@ -328,12 +324,14 @@ through what the head launches (`pier task`), never by a group's message.
   `tasks/service.test.ts` (§abnormal-end notice): which ends owe a notice, the
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `channels/receipts.test.ts` a quiet chat booked, settled and
-  swept with no reaction call; `channels/status.test.ts` edit, `/status`'s
-  re-post, delete, failures; `channels/lark-render.test.ts` `statusCard` and
-  `channels/slack-render.test.ts` `statusMessage` the layout, the link and the
-  budget; `channels/slack.test.ts` and `lark.test.ts` no reaction call in the
-  home, a silent turn's footer, notes, `status()`; `channels/runtime.test.ts`
-  `openItems` to the live home adapter only.
+  periodically swept with no reaction call, cleared by the startup sweep;
+  `channels/status.test.ts` edit, `/status`'s re-post, delete, failures;
+  `channels/lark-render.test.ts` `statusCard` and
+  `channels/slack-render.test.ts` `statusMessage` the layout and the budget;
+  `channels/slack.test.ts` and `lark.test.ts` no reaction call in the home, a
+  silent turn's footer, notes, `status()` and its repost;
+  `channels/runtime.test.ts` `openItems` to the live home adapter only, with
+  the repost flag, and `designLead` answering whether it edited the root.
 
 ## Acceptance
 

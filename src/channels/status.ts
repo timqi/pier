@@ -61,7 +61,7 @@ export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E
 }
 
 export class StatusMessage<B = string> {
-  /** `repost` survives a newer view replacing this one: `/status` asked for the bottom. */
+  /** `repost` survives a newer view replacing this one: `/status` or a design final asked for the bottom. */
   private queued?: { chatId: string; view: OpenItemsView; repost: boolean };
   private tail: Promise<void> = Promise.resolve();
   /** The last view shown, so `/status` can re-post it without waiting for an event. */
@@ -118,7 +118,7 @@ export class StatusMessage<B = string> {
       .get(this.platform, chatId) as { message_id: string; text: string } | undefined;
     const empty = view.text === NOTHING_OPEN;
     const body = this.render(view);
-    // The rendered body, not the text: links and layout change without it.
+    // The rendered body, not the text: the snapshot's layout changes without it.
     const drawn = JSON.stringify(body);
     if (row ? !repost && !empty && row.text === drawn : empty) return;
     if (row && !repost && !empty) {
