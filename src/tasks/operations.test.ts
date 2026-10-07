@@ -80,6 +80,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] 
     },
     run: (_taskId: string, _input: unknown, _source: string, _parent: null, prov: Partial<TaskRun>) =>
       run("new", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
+    handoff: async () => undefined,
     resume: (_id: string, _message: string, prov: Partial<TaskRun>) =>
       run("resumed", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
   } as unknown as TaskService;

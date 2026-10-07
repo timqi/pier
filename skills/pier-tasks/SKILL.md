@@ -30,7 +30,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | --- | --- |
 | `--task-id <id>` | a saved definition, as is (run now) |
 | `--session <id> --prompt …` | continue an idle session (it keeps its cwd and model) |
-| `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt says which |
+| `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then), in a new session Pier briefs when the old one compacted or neared it, or on `--fresh` (stuck, new direction). The receipt says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
 | `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--role`/`--design`/`--session` beside it are refused |
 | `--worktree <branch> [--rounds <n>] [--review-model <tier|model>]` | a code worker's default: a new `wt` worktree off `--cwd`'s branch, reviewed n times (3; `0` none, 1–9), fixed between, stopped short of the merge, one callback opening `Goal:`; `--rounds <n>` alone is a goal in `--cwd`; on a `--role lead` run `--worktree` makes the worktree and opens no goal (`--rounds` refused); refused beside `--session`, `--bash`, `--task-id`, `--member`, `save` |

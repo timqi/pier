@@ -10,12 +10,13 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner, type Restart } from "./agent.js";
-import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { contextNote, DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
 import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
+import { planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
@@ -29,6 +30,7 @@ const log = logger("tasks");
 /** Not `renderedPrompt`: that carries the preamble and input wrapper, which the
  *  delegating session did not send. */
 const runPrompt = (run: TaskRun): string | null => {
+  if (run.handoff) return run.handoff.prompt;
   if (run.context.resumePrompt) return run.context.resumePrompt;
   const action = run.context.definition.action;
   return action.type === "agent" ? action.prompt : action.type === "bash" ? action.script : null;
@@ -66,6 +68,21 @@ async function worktree(cwd: string): Promise<Worktree> {
   return { head, branch, base, baseSha, clean };
 }
 
+/** A worktree's commits since its target, as a continuation's handoff shows them (handoff.ts). */
+async function branchLog(cwd: string): Promise<string> {
+  const tree = await worktree(cwd);
+  const range = `${tree.baseSha.slice(0, 7)}..HEAD`;
+  const clip = (out: string): string => {
+    const lines = out.split("\n");
+    return lines.length > 60 ? [...lines.slice(0, 60), `… ${String(lines.length - 60)} more lines`].join("\n") : out || "(none)";
+  };
+  return [
+    `${cwd} on ${tree.branch}, target ${tree.base}${tree.clean ? "" : ", uncommitted changes present"}`,
+    `$ git log --oneline ${range}`, clip(await git(cwd, "log", "--oneline", range)),
+    `$ git diff --stat ${range}`, clip(await git(cwd, "diff", "--stat", range)),
+  ].join("\n");
+}
+
 /** A fresh run's own worktree, `branch` off the one `cwd` has checked out: `.path` of `wt`'s JSON line. */
 async function addWorktree(cwd: string, branch: string): Promise<string> {
   const from = await git(cwd, "branch", "--show-current");
@@ -92,6 +109,7 @@ export class TaskService {
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
+  branchLog = branchLog;
 
   constructor(
     readonly store: TaskStore,
@@ -365,7 +383,10 @@ export class TaskService {
 
   /** The run ledger: runs any of `sessionIds` launched (every run, when null), in flight or finished since `since`, at most 200. */
   ledger(sessionIds: string[] | null, since: number, states?: readonly TaskRunState[]): LedgerRun[] {
-    return this.store.ledgerRuns(sessionIds, since, states).map(ledgerRun);
+    return this.store.ledgerRuns(sessionIds, since, states).map((run) => {
+      const context = contextNote(run);
+      return { ...ledgerRun(run), ...(context ? { context } : {}) };
+    });
   }
 
   /** Dispatched runs of the last `days` by launch tier, role and the model the
@@ -491,23 +512,29 @@ export class TaskService {
     return this.messages.control(run, fromSessionId, mode, message);
   }
 
+  /** The new session a `--run` continues `id` in (handoff.ts), or undefined to resume it in place. */
+  handoff(id: string, message: string, forced: boolean): Promise<Handoff | undefined> {
+    return planHandoff(this.store, (cwd) => this.branchLog(cwd), this.getRun(id), message, forced);
+  }
+
   /** `goal`: `--rounds` beside `--run` — the resumed run roots a new goal of `cap` reviews, on
-   *  `reviewModel`, else the ended goal's. */
+   *  `reviewModel`, else the ended goal's. `handoff`: continued in a new session instead. */
   resume(
     id: string,
     message: string,
     provenance: ResumeProvenance = {},
     goal?: { cap: number; reviewModel?: string },
+    handoff?: Handoff,
   ): TaskRun {
     const prior = this.getRun(id);
     const run = goal
       ? this.store.transact(() => {
         const ended = this.goalAgain(prior);
-        const run = this.prepareResume(prior, message, provenance);
+        const run = this.prepareResume(prior, message, provenance, handoff);
         this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended.reviewModel });
         return run;
       })
-      : this.prepareResume(prior, message, provenance);
+      : this.prepareResume(prior, message, provenance, handoff);
     this.runs.start(run);
     return run;
   }
@@ -528,18 +555,21 @@ export class TaskService {
     prior: TaskRun,
     message: string,
     provenance: ResumeProvenance,
+    handoff?: Handoff,
   ): TaskRun {
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
     if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {
       throw new Error("only persisted Agent runs can be resumed");
     }
     const prompt = requiredString(message, "message");
+    const common = { ...provenance, sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId, resumedFromRunId: prior.id };
+    if (handoff) {
+      return this.runs.prepare(handoff.definition, null, "agent", null, { ...common, sessionMode: "fresh", resumePrompt: handoff.text, handoff: handoff.record });
+    }
     return this.runs.prepare(prior.context.definition, null, "agent", null, {
-      ...provenance,
-      sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId,
+      ...common,
       targetSessionId: prior.targetSessionId,
       sessionMode: "reuse",
-      resumedFromRunId: prior.id,
       resumePrompt: prompt,
     });
   }

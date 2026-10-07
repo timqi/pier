@@ -287,6 +287,8 @@ export interface LedgerRun {
   cwd: string | null;
   queuedAt: number;
   finishedAt: number | null;
+  /** An agent run's context: `peak <n>% of the compaction point, <k> compactions`. */
+  context?: string;
 }
 
 /** The `state` of an open item's run token that names no stored run; its `name` is the id. */

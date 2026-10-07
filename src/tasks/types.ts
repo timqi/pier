@@ -151,6 +151,14 @@ export interface TaskRun extends CallbackFields {
   toolCalls?: number;
   /** The run called `codemode`; absent exactly when `toolCalls` is. */
   codemode?: boolean;
+  /** An agent run's compactions, counted off its session's events; absent means not counted. */
+  compactions?: number;
+  /** The largest context the run's turns reached and where its session compacts, in tokens. */
+  peakTokens?: number;
+  compactAt?: number;
+  /** A `--run` continued in a new session: the session it replaces, why, and the
+   *  supervisor's prompt the handoff (`context.resumePrompt`) ends on. */
+  handoff?: { fromSessionId: string; reason: string; prompt: string };
   queuedAt: number;
   startedAt: number | null;
   finishedAt: number | null;

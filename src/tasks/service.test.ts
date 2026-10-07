@@ -2129,6 +2129,96 @@ describe("a definition Pier's own code created", () => {
   });
 });
 
+describe("continuing a run in a new session", () => {
+  const usage = { tokens: 20_000, contextWindow: 200_000, compactAt: 100_000 };
+
+  it("records a run's compactions and peak context, printed by runs and the callback", async () => {
+    const { cwd, service, factory, session } = setup();
+    const child = fakeSession("counted", { hold: true, contextUsage: usage });
+    vi.mocked(factory.create).mockResolvedValueOnce(child);
+    const task = await service.create({ name: "counted", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" } });
+    const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner", callbackSessionId: session.id, background: true });
+    await vi.waitFor(() => expect(child.systemInputs).toHaveLength(1));
+    child.emit({ type: "turn-end", text: "", meta: { completedAt: 1, durationMs: 1, tokens: 60_000 } });
+    child.emit({ type: "context-compacted", before: 90_000, after: 15_000 });
+    service.cancel(run.id);
+    expect(await service.waitForRun(run.id)).toMatchObject({ compactions: 1, peakTokens: 90_000, compactAt: 100_000 });
+    expect(service.ledger(null, 0)[0]).toMatchObject({ runId: run.id, context: "peak 90% of the compaction point, 1 compaction" });
+    await vi.waitFor(() => expect(session.systemInputs.at(-1)?.text).toContain("Context: peak 90% of the compaction point, 1 compaction"));
+  });
+
+  /** A worker launched by s9 in a fresh session, ended, its record carrying `over`. */
+  async function ended(over: Partial<TaskRun>) {
+    const rig = setup();
+    vi.mocked(rig.factory.create).mockResolvedValueOnce(fakeSession("old", { reply: "Did step one at abc1234." }));
+    rig.service.branchLog = vi.fn(async (dir: string) => `${dir}: 1 commit`);
+    const launched = await rig.service.handle({
+      operation: "run",
+      task: { name: "fix", action: { type: "agent", session: { mode: "fresh", cwd: rig.cwd }, prompt: "Fix the parser", launch: { model: "test/model", thinking: "high" } } },
+    }, "s9") as RunSummary;
+    const done = await rig.service.waitForRun(launched.runId);
+    rig.store.saveRun({ ...done, ...over });
+    vi.mocked(rig.factory.create).mockResolvedValueOnce(fakeSession("new"));
+    return { ...rig, done };
+  }
+  const message = (service: TaskService, runId: string, extra: Record<string, unknown> = {}) =>
+    service.handle({ operation: "message", run_id: runId, message: "Now the lexer", ...extra }, "s9") as Promise<{ delivery: string; reason?: string; run: RunSummary }>;
+
+  it("hands a compacted session's continuation to a new one, briefed, in the same directory, role and model", async () => {
+    const { service, store, done, cwd, factory } = await ended({ compactions: 1, peakTokens: 50_000, compactAt: 100_000 });
+    const answer = await message(service, done.id);
+    expect(answer).toMatchObject({ delivery: "handoff", reason: "the old session compacted 1 time" });
+    const run = await service.waitForRun(answer.run.runId);
+    expect(run).toMatchObject({ targetSessionId: "new", sessionMode: "fresh", resumedFromRunId: done.id, handoff: { fromSessionId: "old", reason: "the old session compacted 1 time", prompt: "Now the lexer" } });
+    expect(store.roleOf("new")).toBe("worker");
+    expect(vi.mocked(factory.create).mock.calls.at(-1)?.[0]).toMatchObject({ cwd, model: { provider: "test", id: "model" }, thinking: "off", role: "worker" });
+    const text = run.context.renderedPrompt!;
+    expect(text).toMatch(/^\[Pier task run \S+ — "fix"\]\n\n\[Pier: this continues run \S+ in a new session, because the old session compacted 1 time\. .*read a file's latest version before you change it\.\]/);
+    for (const part of ["## Original task\n\nFix the parser", `## Last report (run ${done.id})\n\nDid step one at abc1234.`, `## Branch\n\n${cwd}: 1 commit`, "## Continue with\n\nNow the lexer"]) expect(text).toContain(part);
+    expect(text.endsWith("Now the lexer")).toBe(true);
+  });
+
+  it("hands over past 70% of the compaction point, resumes in place below it", async () => {
+    const worn = await ended({ compactions: 0, peakTokens: 71_000, compactAt: 100_000 });
+    expect(await message(worn.service, worn.done.id)).toMatchObject({ delivery: "handoff", reason: "the old session's context peaked at 71% of its compaction point" });
+    const fit = await ended({ compactions: 0, peakTokens: 70_000, compactAt: 100_000 });
+    const answer = await message(fit.service, fit.done.id);
+    expect(answer.delivery).toBe("resume");
+    expect(await fit.service.waitForRun(answer.run.runId)).toMatchObject({ targetSessionId: "old", sessionMode: "reuse" });
+  });
+
+  it("--fresh forces one, names a failed branch summary, and is refused where no run made the session", async () => {
+    const { service, done } = await ended({});
+    service.branchLog = vi.fn(async () => { throw new Error("git log: not a repository"); });
+    const answer = await message(service, done.id, { fresh: true });
+    expect(answer).toMatchObject({ delivery: "handoff", reason: "the supervisor passed --fresh" });
+    expect((await service.waitForRun(answer.run.runId)).context.renderedPrompt).toContain("## Branch\n\nunavailable: git log: not a repository");
+
+    const own = setup();
+    const task = await own.service.create({ name: "chat", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "reuse", sessionId: own.session.id }, prompt: "Go" } });
+    const inChat = await own.service.waitForRun(own.service.run(task.id, null, "agent", null, { invokedBySessionId: "s9" }).id);
+    await expect(message(own.service, inChat.id, { fresh: true })).rejects.toThrow(`--fresh continues a session a run created; session ${own.session.id} is not one`);
+    await expect(message(own.service, inChat.id, { fresh: "yes" })).rejects.toThrow("fresh must be true");
+  });
+
+  it("a session owed a result, its lead's worker still running, resumes in place; --fresh is refused", async () => {
+    const { service, store, done } = await ended({ compactions: 2 });
+    store.saveRun(storedRun("worker", done.context.definition, Date.now(), { state: "running", callbackSessionId: "old", finishedAt: null, result: null }));
+    await expect(message(service, done.id, { fresh: true })).rejects.toThrow("1 run(s) still owe session old a result; --fresh waits for them");
+    const answer = await message(service, done.id);
+    expect(answer.delivery).toBe("resume");
+    expect(await service.waitForRun(answer.run.runId)).toMatchObject({ targetSessionId: "old" });
+  });
+
+  it("refuses --run on a run whose session a handoff replaced, naming the replacing run", async () => {
+    const { service, done } = await ended({ compactions: 1 });
+    const { run } = await message(service, done.id);
+    await service.waitForRun(run.runId);
+    await expect(message(service, done.id)).rejects.toThrow(`session old was continued in a new session by run ${run.runId}; continue the newest run of that session instead`);
+    await expect(message(service, done.id, { fresh: true })).rejects.toThrow(`by run ${run.runId}`);
+  });
+});
+
 describe("pier task stats", () => {
   it("records on the run the calls its own turn made, a codemode script's included, a cancel too", async () => {
     const { cwd, service, factory } = setup();

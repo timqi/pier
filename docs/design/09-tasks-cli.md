@@ -21,7 +21,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 Every command returns at once and prints the receipt as compact JSON on
 stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
 `<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
-a resume `resumed: …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
+a resume `resumed: …`, one in a new session `resumed in a new session (<reason>): …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
 argv errors are the usage line, exit 2, before the socket is touched.
 `--prompt -` reads stdin; nothing else reads it. An empty `--prompt` (stdin
@@ -33,7 +33,7 @@ the one validator of the params object.
 ## `run`
 
 ```
-pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>]] [--task-id <id>] [--session <id>]
+pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>] [--fresh]] [--task-id <id>] [--session <id>]
         [--thinking <level>] [--role lead [--design]] [--worktree <branch>] [--rounds <n>] [--review-model <tier|model>]
         [--cwd <dir>] --name <text> [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
@@ -100,12 +100,12 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   state: running → steer; `--after` → follow-up queued behind its current
   turn, shown in the target's queue panel under the run's name and as `1 queued`
   on the sender's Background Run row while pending; terminal → resumed as a new
-  run on the same session, taking `--callback*` like any new run (`--after`
+  run on the same session, or in a new one (§Continuing a run), taking `--callback*` like any new run (`--after`
   has no turn to wait for and changes nothing). Receipt: `{delivery: "steer" | "follow_up",
-  message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
+  message}`, `{delivery: "resume", run}` or `{delivery: "handoff", reason, run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only; drop them to steer or follow up`). `--run` takes nothing
-  but `--prompt`, `--after`, `--callback*` and, on an ended goal's root,
+  but `--prompt`, `--after`, `--callback*`, `--fresh` and, on an ended goal's root,
   `--rounds` and `--review-model`.
 - **Batch**: the first `--member` switches `run` to a group. Flags before it
   are every member's defaults; each `--member` opens one member whose flags
@@ -113,6 +113,35 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   run flags. `--join` (default `all`), `--callback`, `--callback-session`
   belong before the first `--member`. Members are ordinary argv; at most one
   may read `--prompt -`. Admission is all-or-nothing.
+
+## Continuing a run
+
+A terminal run's `--run` continues in a new session when its session
+compacted (any run's `compactions` ≥ 1), when any run's `peakTokens` passed 70%
+of its `compactAt`, or on `--fresh` (`fresh: true`; refused on a run not
+terminal and beside `--after`) — only for a session a fresh run created, every
+run of it ended, no result owed to it; `--fresh` on any other is refused, the
+automatic case resumes in place (`tasks/handoff.ts`). `--run` on a run whose
+session a handoff replaced is refused, naming the replacing run.
+
+- The new run is `sessionMode: "fresh"` in the creating run's directory, on
+  its definition with `launch.model`/`thinking` the old session's last, its
+  role, phase, worktree and rounds kept; `handoff: {fromSessionId, reason,
+  prompt}` on its record.
+- Its first message, after the run's preamble: the continuation and why, the worktree as the
+  truth (read before changing), the creating run's prompt, the session's last
+  ended result (4000 chars), `git log --oneline` and `git diff --stat` from the
+  merge-base with the target to `HEAD` (60 lines each; a failure is named in
+  its place), the session's latest goal review if one ended there (4000), then
+  the prompt.
+- Its callback says `New session, replacing <session>: <reason>`; a goal's
+  re-entry (`--rounds`) on it carries no second copy of the review, and its
+  reviews' requirement takes the replaced session's steering first.
+
+Every agent run records `compactions` (its session's `context-compacted`
+events), `peakTokens` (the largest of its turn ends' context and a compaction's
+`before`) and `compactAt`; its callback and its `runs` row (`context`) print
+`peak <n>% of the compaction point, <k> compactions`.
 
 ## `save`
 
@@ -166,7 +195,7 @@ pier task runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]
 ```
 
 Any session, a delegated run's included (§Two levels, no tree). Receipt: a
-JSON array of `LedgerRun` (`core/types.ts`), the runs the caller launched —
+JSON array of `LedgerRun` (`core/types.ts`), an agent run's with its `context` (§Continuing a run), the runs the caller launched —
 every chain member's, for a member of the head; every run, for a delegated
 run's — in
 flight plus finished within `--since` (default 24h), only the `--state`s given,

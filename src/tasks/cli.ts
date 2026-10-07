@@ -22,7 +22,7 @@ const OPTIONS = {
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
   group: { type: "string" }, reason: { type: "string" }, role: { type: "string" }, design: { type: "boolean" },
-  worktree: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" },
+  worktree: { type: "string" }, rounds: { type: "string" }, "review-model": { type: "string" }, fresh: { type: "boolean" },
   days: { type: "string" }, state: { type: "string" }, since: { type: "string" }, limit: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
@@ -33,7 +33,7 @@ type Params = Record<string, unknown>;
  *  command accepts are read off it, so the two cannot drift. */
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
-    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>]] [--task-id <id>] [--session <id>]\n" +
+    usage: "run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--run <id> [--after | --rounds <n>] [--fresh]] [--task-id <id>] [--session <id>]\n" +
       "        [--thinking <level>] [--role lead [--design]] [--worktree <branch>] [--rounds <n>] [--review-model <tier|model>]\n" +
       "        [--cwd <dir>] --name <text> [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]… [--json]",
@@ -114,12 +114,12 @@ function segments(argv: string[]): string[][] {
   return out;
 }
 
-type Receipt = { runId?: string; groupId?: string; state?: string; next?: string; members?: { runId: string }[]; delivery?: string; run?: Receipt; message?: { runId: string; state: string; error: string | null } };
+type Receipt = { runId?: string; groupId?: string; state?: string; next?: string; members?: { runId: string }[]; delivery?: string; reason?: string; run?: Receipt; message?: { runId: string; state: string; error: string | null } };
 
 /** A run's receipt in one line: the ids and where the result goes are all a model keeps of it. */
 function receiptLine(result: unknown): string | undefined {
   const r = result as Receipt | null;
-  if (r?.run) return `resumed: ${receiptLine(r.run) ?? JSON.stringify(r.run)}`;
+  if (r?.run) return `${r.reason ? `resumed in a new session (${r.reason})` : "resumed"}: ${receiptLine(r.run) ?? JSON.stringify(r.run)}`;
   if (r?.message) return `${r.delivery ?? "message"} → run ${r.message.runId} · ${r.message.state}${r.message.error ? `: ${r.message.error}` : ""}`;
   if (r?.groupId && r.members) return `${r.state} group ${r.groupId}: ${r.members.map((m) => m.runId).join(", ")} · ${r.next}`;
   return r?.runId ? `${r.state} ${r.runId} · ${r.next}` : undefined;
@@ -247,12 +247,14 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     // Beside --run, --rounds opens a new goal of that many reviews on an ended goal's root.
     if (values.rounds !== undefined && values.after) refuse("--rounds resumes an ended goal's root; --after queues behind a running turn");
     if (values["review-model"] !== undefined && values.rounds === undefined) refuse("--review-model beside --run applies with --rounds");
-    const extra = flagsOf(values).find((flag) => !["run", "after", "rounds", "review-model", "prompt", "callback", "callback-session"].includes(flag));
+    if (values.fresh && values.after) refuse("--fresh continues an ended run; --after queues behind a running turn");
+    const extra = flagsOf(values).find((flag) => !["run", "after", "rounds", "review-model", "fresh", "prompt", "callback", "callback-session"].includes(flag));
     if (extra) refuse(`--${extra} does not apply to an existing run (--run)`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");
-    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, rounds: roundsOf(values), review_model: values["review-model"], ...delivery });
+    return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, rounds: roundsOf(values), review_model: values["review-model"], fresh: values.fresh || undefined, ...delivery });
   }
   if (values.after) refuse("--after applies to --run only");
+  if (values.fresh) refuse("--fresh applies to --run only");
   if (members.length) {
     if (members.length < 2) refuse("a batch needs at least two --member");
     if (values["task-id"] !== undefined) refuse("--task-id names one member's definition; put it after a --member");

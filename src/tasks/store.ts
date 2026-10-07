@@ -326,6 +326,13 @@ export class TaskStore {
     `, sessionId);
   }
 
+  /** The run that continued `sessionId` in a new session (tasks/handoff.ts), if one did. */
+  replacing(sessionId: string): TaskRun | undefined {
+    return this.#one(`
+      SELECT json FROM task_runs WHERE json_extract(json, '$.handoff.fromSessionId') = ? ORDER BY queued_at DESC, rowid DESC LIMIT 1
+    `, sessionId);
+  }
+
   /** A session's runs oldest first: a goal's review reads its worker's steering off them. */
   runsForTarget(sessionId: string): TaskRun[] {
     return this.#many("SELECT json FROM task_runs WHERE json_extract(json, '$.targetSessionId') = ? ORDER BY queued_at, rowid", sessionId);

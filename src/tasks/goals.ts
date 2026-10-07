@@ -120,7 +120,8 @@ export class TaskGoals {
     };
     this.store.saveGoal(goal);
     // The review that ended the last goal reached the head clipped and its worker not at all.
-    const review = again && root.context.resumePrompt && this.endingReview(root);
+    // A handoff's message carries the latest review already (handoff.ts).
+    const review = again && root.context.resumePrompt && !root.handoff && this.endingReview(root);
     if (review) root.context.resumePrompt = reentry(review) + root.context.resumePrompt!;
     root.goalId = goal.id;
     this.store.saveRun(root);
@@ -271,19 +272,24 @@ export class TaskGoals {
 
   /** The first prompt, then every word the worker's session was steered with in order — a
    *  `--run` resume's, a re-entry's without the review Pier put before it, a `--session` run's
-   *  own prompt; Pier's own fix prompts are not steering. */
+   *  own prompt, a handoff's after the replaced session's; Pier's own fix prompts are not steering. */
   private requirement(root: TaskRun, worker: string): string {
     const { action } = root.context.definition;
-    const parts = [action.type === "agent" ? action.prompt : ""];
+    return [action.type === "agent" ? action.prompt : "", ...this.steering(worker)].join("\n\n");
+  }
+
+  private steering(worker: string): string[] {
+    const parts: string[] = [];
     for (const run of this.store.runsForTarget(worker)) {
+      if (run.handoff) parts.push(...this.steering(run.handoff.fromSessionId));
       const own = run.context.definition.action;
-      const said = run.triggerSource === "goal" || run.sessionMode === "fresh" ? undefined
-        : run.context.resumePrompt ?? (own.type === "agent" && own.session.mode === "reuse" ? own.prompt : undefined);
+      const said = run.handoff?.prompt ?? (run.triggerSource === "goal" || run.sessionMode === "fresh" ? undefined
+        : run.context.resumePrompt ?? (own.type === "agent" && own.session.mode === "reuse" ? own.prompt : undefined));
       const review = said && this.endingReview(run);
       if (said) parts.push("Steering from the supervisor, resuming the work:", review && said.startsWith(reentry(review)) ? said.slice(reentry(review).length) : said);
       for (const m of this.store.listMessages(run.id)) if (m.state === "delivered") parts.push("Steering from the supervisor, while the work ran:", m.content);
     }
-    return parts.join("\n\n");
+    return parts;
   }
 
   /** A fresh worker in the root's worktree, pinned to its HEAD, on the model the

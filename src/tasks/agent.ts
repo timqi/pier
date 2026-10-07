@@ -93,8 +93,10 @@ export class AgentTaskRunner {
         // A session already prompted has the prompt in its transcript; one
         // that was not has heard nothing, so it gets the prompt.
         const resumed = restart && run.context.sessionId ? restart : undefined;
-        const prompt = resumed ? restartInput(resumed.at, resumed.downMs, resumed.queued) : run.context.resumePrompt ??
-          `${preamble(run, this.store.roleOf(session.id))}${action.prompt}${input}`;
+        // A handoff is a new session's first message, so it hears the preamble too.
+        const prompt = resumed ? restartInput(resumed.at, resumed.downMs, resumed.queued)
+          : run.context.resumePrompt && !run.handoff ? run.context.resumePrompt
+            : `${preamble(run, this.store.roleOf(session.id))}${run.context.resumePrompt ?? action.prompt}${input}`;
         run.context.sessionId = session.id;
         if (!resumed) run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
@@ -107,15 +109,27 @@ export class AgentTaskRunner {
         if (resumed) {
           delete run.toolCalls;
           delete run.codemode;
-        } else Object.assign(run, { toolCalls: 0, codemode: false });
+        } else Object.assign(run, { toolCalls: 0, codemode: false, compactions: 0 });
+        // Within a turn the context only grows, so its peak is a turn's end or a compaction's start.
+        const usage = session.contextUsage;
+        if (usage) run.compactAt = usage.compactAt;
+        const peak = (tokens: number | null | undefined): void => {
+          if (tokens) run.peakTokens = Math.max(run.peakTokens ?? 0, tokens);
+        };
+        peak(usage?.tokens);
         const unsubscribe = session.subscribe((event) => {
           if (event.type === "tool-start" && run.toolCalls !== undefined) {
             run.toolCalls++;
             if (event.toolName === "codemode") run.codemode = true;
           }
+          if (event.type === "context-compacted") {
+            run.compactions = (run.compactions ?? 0) + 1;
+            peak(event.before);
+          }
           if (event.type === "turn-end") {
             text = event.text;
             failure = event.error;
+            peak(event.meta?.tokens);
           }
         });
         // Cancel the SDK turn, but release our wait even if its abort hangs.

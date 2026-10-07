@@ -40,7 +40,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 
 ## Code changes
 - A goal ended \`needs your decision\` or \`still findings\` resumes at the root its \`Goal:\` line names, with its \`<open>\` marker. Never review by hand: \`pier task run --run <root> --prompt "<answer>" --rounds <n>\`.
-- A NEW run instead, \`--cwd <its worktree>\` (\`--rounds <n>\` for a goal), when a problem failed 2 fixes or the run says it is stuck, it compacted once, or its approach, module or model changes. Its prompt: the goal, what was tried, where it failed, the sha.
+- \`--run <id> --fresh\` instead when a problem failed 2 fixes, the run is stuck, or its approach or module changes; its prompt: what was tried, where it failed, the new direction. A new model is a NEW run, \`--cwd <its worktree>\` (\`--rounds <n>\` for a goal).
 - A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone, asks the user by next-step buttons in the reply's language: merge, see the review. Filter its review's \`P2/P3 begin\` list: drop wording, format, style. Optimizations ≤100 lines become a post-merge fix run, unasked. Ask at most 1–2 on behavior, risk or design with your pick. None left: ask only the merge.
 - On the user's yes, you merge, never a run or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`. \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` shows its sha on a clean tree, or past it only by a wording fix the user named, else back to review. Then \`wt -C <worktree> merge --no-squash <target>\` (\`--no-remove\` to keep it), then the project's checks if HEAD was past its sha or the merge printed \`Rebased onto\`. A conflict or failed check is the user's.
 - A prior authorization for this item answers once. Merge, restart and deploy are separate scopes; the restart is the user's. Otherwise ask first only for a seam or design.
@@ -105,7 +105,7 @@ const LEAD_DESIGN = `
 const LEAD_BUILD = `
 ## Build
 - Started per a doc: read it first; it is the whole state. Started with no doc: plan one here and build it; a plan needing the user's OK is a question in your reply, never a \`Design final:\`.
-- Split it into worker runs, \`pier task run --name "<a few words>"\`, the model per §Models; the prompt is a worker's whole handoff. You never launch a lead.
+- Split it into worker runs, \`pier task run --name "<a few words>"\`, the model per §Models; the prompt is a worker's whole handoff. You never launch a lead. A stuck or redirected worker: \`--run <id> --fresh\`.
 - Workers writing in parallel each take \`--worktree <branch>\` off yours, \`--rounds 0\` unless you want their reviews. A sequential worker may use this tree: you neither edit nor integrate until it returns, the tree clean at each handoff.
 - Integrate with \`git merge <branch>\` in this worktree; its worktree stays.
 - While a result is still owed to you, your replies reach only this session. Your reply to the last one is the milestone your supervisor reads. It is the conclusion ending on the verified state, then any question only the user can answer.

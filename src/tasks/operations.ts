@@ -369,12 +369,16 @@ export async function handleTask(
     // parseLaunch's own checks; 0 reviews is no goal, so `--rounds 0` is the plain resume or steer.
     const again = input.rounds === undefined && input.review_model === undefined ? undefined : parseLaunch({ rounds: input.rounds, reviewModel: input.review_model });
     if (again && !isTerminal(run.state)) throw new Error(`run ${run.id} is ${run.state}: --rounds resumes an ended goal's root; steer it without --rounds`);
+    if (input.fresh !== undefined && input.fresh !== true) throw new Error("fresh must be true");
+    if (input.fresh && !isTerminal(run.state)) throw new Error(`run ${run.id} is ${run.state}: --fresh continues an ended run in a new session; steer a running one`);
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
       const callbackMode = callbackModeOf(input);
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
-      const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true }, again && { cap: again.rounds!, reviewModel: again.reviewModel });
-      return { delivery: "resume", run: receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId) };
+      const handoff = await host.handoff(run.id, message, input.fresh === true);
+      const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true }, again && { cap: again.rounds!, reviewModel: again.reviewModel }, handoff);
+      const summary = receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId);
+      return handoff ? { delivery: "handoff", reason: handoff.record.reason, run: summary } : { delivery: "resume", run: summary };
     }
     if (input.callback !== undefined || input.callback_session_id !== undefined) {
       throw new Error(`run ${run.id} is ${run.state}: callback options apply to a resumed run only; drop them to steer or follow up`);

@@ -544,6 +544,25 @@ describe("a goal", () => {
     service.stop();
   });
 
+  it("re-enters in a new session on --fresh: the review rides in the handoff once, the requirement keeps the old session's steering", async () => {
+    const review = ["a.ts:1 · first · fix", "x".repeat(1500), "Verdict: findings"].join("\n");
+    const { launch, ended, service, store, sessions, cwd, goalOf } = rig({ s1: ["built at abc"], s2: [review], s3: ["fixed"], s4: ["Verdict: clean"] });
+    const root = await launch({ rounds: 1 });
+    await ended(root);
+    const again = await service.handle({ operation: "message", run_id: root.id, message: "fix the first issue", rounds: 1, fresh: true }, "main") as { delivery: string; run: { runId: string } };
+    expect(again.delivery).toBe("handoff");
+    const { text } = await ended(store.getRun(again.run.runId)!, 2);
+    expect(text).toContain("New session, replacing s1: the supervisor passed --fresh");
+    const handoff = sessions.get("s3")!.systemInputs[0]!.text;
+    expect(handoff).toContain(`## Latest review (run ${goalOf(root).currentRunId})\n\n${review}\n\n## Continue with\n\nfix the first issue`);
+    expect(handoff).not.toContain("the review that ended this goal");
+    // The real worktree's commits since main, read by the service's own git.
+    expect(handoff).toContain(`## Branch\n\n${cwd} on feature, target main\n$ git log --oneline `);
+    expect(handoff).toMatch(/\$ git diff --stat \S+\na\.ts \| 1 \+/);
+    expect(sessions.get("s4")!.systemInputs[0]!.text).toContain("\n\nbuild it\n\nSteering from the supervisor, resuming the work:\n\nfix the first issue\n\nFor each issue");
+    service.stop();
+  });
+
   it("refuses --rounds beside --run on a run no goal ever rooted, and on one still running", async () => {
     let release: (text: string) => void = () => {};
     const { service, store, cwd } = rig({ s1: ["plain"], s2: [new Promise<string>((done) => { release = done; })] });

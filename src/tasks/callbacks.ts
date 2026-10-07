@@ -39,6 +39,16 @@ export const runCwd = (run: TaskRun): string | null => {
     (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
 };
 
+/** An agent run's context as `pier task runs` and its callback print it; undefined when not recorded. */
+export const contextNote = (run: TaskRun): string | undefined => {
+  if (!run.peakTokens || !run.compactAt) return undefined;
+  const n = run.compactions ?? 0;
+  return `peak ${String(Math.round((run.peakTokens / run.compactAt) * 100))}% of the compaction point, ${String(n)} compaction${n === 1 ? "" : "s"}`;
+};
+
+/** A goal's end says it too when its root is the run that changed sessions. */
+const handoffLine = (handoff: TaskRun["handoff"]): string[] => handoff ? [`New session, replacing ${handoff.fromSessionId}: ${handoff.reason}`] : [];
+
 /** A run as `pier task runs` prints it. */
 export const ledgerRun = (run: TaskRun): LedgerRun => ({ runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt });
 
@@ -194,6 +204,8 @@ export class TaskCallbacks {
         ...(goal?.outcome ? [goalLine(goal, root ? runCwd(root) : null)] : []),
         `Task "${run.context.definition.name}" finished with state: ${run.state}`,
         runRef(run),
+        ...handoffLine(run.handoff ?? root?.handoff),
+        ...(contextNote(run) ? [`Context: ${contextNote(run)!}`] : []),
         "",
         this.goalBody(run, root, goal?.outcome === "done") ?? runResultText(run),
       ].join("\n");

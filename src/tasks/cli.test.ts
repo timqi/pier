@@ -71,12 +71,14 @@ describe("pier task", () => {
     expect(await run("run", "--run", "r1", "--prompt", "stop")).toBe(0);
     expect(await run("run", "--run", "r1", "--prompt", "then this", "--after")).toBe(0);
     expect(await run("run", "--run", "r1", "--prompt", "again", "--callback", "steer", "--callback-session", "s9")).toBe(0);
+    expect(await run("run", "--run", "r1", "--prompt", "new direction", "--fresh")).toBe(0);
     expect(posted).toEqual([
       { operation: "message", run_id: "r1", message: "stop" },
       { operation: "message", run_id: "r1", message: "then this", after: true },
       { operation: "message", run_id: "r1", message: "again", callback: "steer", callback_session_id: "s9" },
+      { operation: "message", run_id: "r1", message: "new direction", fresh: true },
     ]);
-    expect(out).toEqual(['{"delivery":"steer"}', '{"delivery":"steer"}', '{"delivery":"steer"}']);
+    expect(out).toEqual(Array(4).fill('{"delivery":"steer"}'));
     // The run's state lives on the server: callback options on a running run are its refusal, exit 1.
     const running = rig({ status: 422, body: { error: "run r1 is running: callback options apply to a resumed run only; drop them to steer or follow up" } });
     expect(await running.run("run", "--run", "r1", "--prompt", "again", "--callback", "steer")).toBe(1);
@@ -89,6 +91,7 @@ describe("pier task", () => {
       [{ runId: "r1", taskId: "t1", state: "queued", callbackSessionId: "s1", next }, `queued r1 · ${next}`],
       [{ groupId: "g1", state: "running", members: [{ runId: "a" }, { runId: "b" }], next }, `running group g1: a, b · ${next}`],
       [{ delivery: "resume", run: { runId: "r2", state: "queued", next } }, `resumed: queued r2 · ${next}`],
+      [{ delivery: "handoff", reason: "the old session compacted 1 time", run: { runId: "r3", state: "queued", next } }, `resumed in a new session (the old session compacted 1 time): queued r3 · ${next}`],
       [{ delivery: "steer", message: { id: "m1", runId: "r1", state: "delivered", error: null } }, "steer → run r1 · delivered"],
     ];
     for (const [result, line] of receipts) {
@@ -221,6 +224,8 @@ describe("pier task", () => {
       [["run", "--run", "r1", "--prompt", "x", "--cwd", "/x"], "task: --cwd does not apply to an existing run (--run)"],
       [["run", "--run", "r1", "--prompt", "x", "--member", "--prompt", "y"], "task: --run addresses one existing run; --member starts new ones"],
       [["run", "--prompt", "x", "--after"], "task: --after applies to --run only"],
+      [["run", "--prompt", "x", "--name", "n", "--fresh"], "task: --fresh applies to --run only"],
+      [["run", "--run", "r1", "--prompt", "x", "--fresh", "--after"], "task: --fresh continues an ended run; --after queues behind a running turn"],
       [["run", "--prompt", "x", "--join", "first"], "task: --join applies to a batch (--member)"],
       [["run", "--member", "--prompt", "x"], "task: a batch needs at least two --member"],
       [["run", "--task-id", "t1", "--member", "--prompt", "x", "--member", "--prompt", "y"], "task: --task-id names one member's definition; put it after a --member"],
