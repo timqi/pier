@@ -399,8 +399,8 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX goals_live ON goals(finished_at) WHERE finished_at IS NULL;
   `,
-  // 37 — the home chat's status (docs/design/11-im-conversation.md §Status):
-  // a message's reaction per open item, and the one status message per chat.
+  // 37 — the home chat's status: a message's reaction per open item (dropped
+  // by 38) and the one status message per chat.
   `
   CREATE TABLE item_receipts (
     platform TEXT NOT NULL,
