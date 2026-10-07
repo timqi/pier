@@ -1,13 +1,12 @@
 // Keeping the home chat's one status message current (docs/design/11-im-conversation.md
-// §Status): a refresh edits it in place or deletes it, `/status` re-posts it at
-// the bottom, and each view is handed on to `Receipts.items`. The platform's
-// three calls and its rendering of the sidebar's layout are injected.
+// §Status): a refresh edits it in place or deletes it, and only `/status`
+// re-posts it at the bottom. The platform's three calls and its rendering of
+// the sidebar's layout are injected.
 
 import type { DatabaseSync } from "node:sqlite";
 import { openItemDestination, openItemGroups } from "../core/open-items.js";
 import { waitsOnYou } from "../core/reply.js";
 import { NOTHING_OPEN, type OpenItemsSnapshot, type OpenItemsView } from "../core/types.js";
-import type { Receipts } from "./receipts.js";
 import type { ChannelPlatform } from "./types.js";
 
 /** One main-flow message; `post` answers its id. */
@@ -66,16 +65,15 @@ export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E
 
 export class StatusMessage<B = string> {
   /** `repost` survives a newer view replacing this one: `/status` asked for the bottom. */
-  private queued?: { chatId: string; view: OpenItemsView; seen: number; repost: boolean };
+  private queued?: { chatId: string; view: OpenItemsView; repost: boolean };
   private tail: Promise<void> = Promise.resolve();
   /** The last view shown, so `/status` can re-post it without waiting for an event. */
-  private last?: { chatId: string; view: OpenItemsView; seen: number };
+  private last?: { chatId: string; view: OpenItemsView };
 
   constructor(
     private readonly platform: ChannelPlatform,
     private readonly db: DatabaseSync,
     private readonly api: StatusApi<B>,
-    private readonly receipts: Pick<Receipts, "items">,
     private readonly log: (message: string) => void,
     /** The view under the platform's label. */
     private readonly render: (view: OpenItemsView) => B,
@@ -88,7 +86,7 @@ export class StatusMessage<B = string> {
   async answer(chatId: string, text: string, snapshot?: OpenItemsSnapshot): Promise<boolean> {
     if (this.last?.chatId !== chatId || text === NOTHING_OPEN) return false;
     const before = this.messageId(chatId);
-    await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, this.last.seen, true);
+    await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, true);
     // A failed re-post keeps the old row, so only a new id is the one it posted.
     const after = this.messageId(chatId);
     return after !== undefined && after !== before;
@@ -102,21 +100,19 @@ export class StatusMessage<B = string> {
 
   /** One refresh at a time; one arriving mid-run waits, and a newer view
    *  replaces the one waiting. Never rejects. */
-  show(chatId: string, view: OpenItemsView, seen = Date.now(), repost = false): Promise<void> {
+  show(chatId: string, view: OpenItemsView, repost = false): Promise<void> {
     const idle = !this.queued;
-    this.last = { chatId, view, seen };
+    this.last = { chatId, view };
     this.queued = { ...this.last, repost: repost || (this.queued?.chatId === chatId && this.queued.repost) };
     if (idle) this.tail = this.tail.then(() => {
       const next = this.queued!;
       this.queued = undefined;
-      return this.apply(next.chatId, next.view, next.seen, next.repost).catch((err: unknown) => this.log(`status: refresh failed: ${String(err)}`));
+      return this.apply(next.chatId, next.view, next.repost).catch((err: unknown) => this.log(`status: refresh failed: ${String(err)}`));
     });
     return this.tail;
   }
 
-  private async apply(chatId: string, shown: OpenItemsView, seen: number, repost: boolean): Promise<void> {
-    await this.receipts.items(shown, seen);
-    const view = shown;
+  private async apply(chatId: string, view: OpenItemsView, repost: boolean): Promise<void> {
     // The home moved within the platform: the old chat's card would read as current.
     const stale = this.db.prepare("SELECT chat_id, message_id FROM status_messages WHERE platform = ? AND chat_id <> ?")
       .all(this.platform, chatId) as { chat_id: string; message_id: string }[];

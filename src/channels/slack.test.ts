@@ -1158,13 +1158,11 @@ describe("the home chat", () => {
     homeChannel = HOME;
   });
 
-  it("keys every message by the DM, top-level or in a thread, and 👀 under that key", async () => {
+  it("keys every message by the DM, top-level or in a thread, and wears no reaction", async () => {
     await feed(dm({ text: "morning", ts: "1800.000100" }), dm({ text: "and this", ts: "1800.000200", thread_ts: "1800.000100" }));
     expect(inbound.map((m) => [m.key, m.text])).toEqual([[homeKey, "morning"], [homeKey, "and this"]]);
-    expect(client.reactions.map((r) => r.ts)).toEqual(["1800.000100", "1800.000200"]);
-    // The head's turn-end, delivered under the DM's id, settles both.
     await channel.send(HOME, { text: "hi", suggestions: [] });
-    expect(client.reactions.filter((r) => !r.add).map((r) => r.ts).sort()).toEqual(["1800.000100", "1800.000200"]);
+    expect(client.reactions).toEqual([]);
   });
 
   it("/settings, /s <text> and /stop are the head's text; no panel, no abort; a chat command wears no 👀", async () => {
@@ -1178,15 +1176,14 @@ describe("the home chat", () => {
     expect(inbound.map((m) => m.text)).toEqual(["/settings", "/s fix it", "/stop", "%stop", "%Status"]);
     expect(aborted).toEqual([]);
     expect(client.sent).toEqual([]);
-    // Answered by a note, not a turn: nothing would take the 👀 off a command, or off its answer.
-    expect(client.reactions.map((r) => r.ts)).toEqual(["1801.000100", "1801.000200"]);
+    expect(client.reactions).toEqual([]);
     await channel.notify(HOME, { text: "nothing running", origin: { kind: "chat-command", command: "stop" } });
     await channel.notify(HOME, { text: "seed", origin: { kind: "session-seed", reason: "new", previousSessionId: null } });
     expect(client.sent.map((p) => [p.thread_ts, p.text])).toEqual([
       [undefined, "_/stop_\n> nothing running"],
       [undefined, "_↺ new session · new_\n> seed"],
     ]);
-    expect(client.reactions).toHaveLength(2);
+    expect(client.reactions).toEqual([]);
   });
 
   it("drops a message that is only a mention, loudly", async () => {
@@ -1229,7 +1226,7 @@ describe("the home chat", () => {
     }));
     expect(client.updated.at(-1)!.ts).toBe("900.000100");
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: undefined, text: "▸ Deploy" });
-    expect(client.reactions.at(-1)).toEqual({ channel: HOME, ts: "901.000100", name: "eyes", add: true });
+    expect(client.reactions).toEqual([]);
     expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: expect.stringMatching(/^\[re assistant [^\]]+\]\n> which\?\n\nDeploy$/) });
   });
 
@@ -1286,9 +1283,8 @@ describe("the home chat", () => {
     );
     expect(inbound.map((m) => [m.key, m.text])).toEqual([[child, "use sqlite"], [homeKey, "and the head"]]);
     expect(aborted).toEqual([child.conversationId]);
-    expect(client.reactions.map((r) => r.ts)).toEqual(["1900.000200", "1900.000300"]);
     await channel.send(child.conversationId, { text: "Which storage?", suggestions: ["Finalize design"] });
-    expect(client.reactions.filter((r) => !r.add).map((r) => r.ts)).toEqual(["1900.000200"]);
+    expect(client.reactions).toEqual([]);
     const offer = client.sent.at(-1)!;
     expect(offer.thread_ts).toBe("1900.000100");
     await feed(interaction({
@@ -1306,7 +1302,7 @@ describe("the home chat", () => {
     const snapshot = (items: [string, OpenItemPresentation["status"], string?][]) => ({ version: 1 as const, items: items.map(([problem, status, stage = ""]) =>
       openItemPresentation({ problem, stage, status, runs: [] }, 0)) });
     const view = (text: string, items: [string, OpenItemPresentation["status"]][] = []) =>
-      ({ text, snapshot: snapshot(items), items: items.map(([problem, status]) => ({ problem, status })) });
+      ({ text, snapshot: snapshot(items) });
 
     it("keeps one labelled message, edited in place under later posts, and only in the home chat", async () => {
       await channel.status(HOME, view("storage — running", [["storage", "running"]]));
@@ -1327,6 +1323,7 @@ describe("the home chat", () => {
       expect(client.sent.map((p) => p.text.split("\n")[0])).toEqual(["_▤ open items_", "done", "_⚠ failed_"]);
       await channel.status(HOME, view("Nothing open."));
       expect(client.deleted).toEqual(["900.000100"]);
+      expect(client.reactions).toEqual([]);
       await expect(channel.status(CHANNEL, view("x"))).rejects.toThrow(/not the home DM/);
     });
 
@@ -1350,52 +1347,16 @@ describe("the home chat", () => {
       expect(client.sent.map((p) => p.text).slice(3)).toEqual(["_/status_\n> Nothing open."]);
     });
 
-    it("a turn that opened an item keeps the message's 👀, then ❓ and ✅ as the item moves", async () => {
-      await feed(dm({ text: "design storage", ts: "2000.000100" }));
-      await channel.send(HOME, { text: "on it", suggestions: [], meta, opened: ["storage", "cache"] });
-      expect(client.reactions).toEqual([{ channel: HOME, ts: "2000.000100", name: "eyes", add: true }]);
-      // A view read in the join's millisecond may predate the marker; only a later one says gone.
-      await new Promise((r) => setTimeout(r, 2));
-      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
-      expect(client.reactions).toHaveLength(1);
-      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
-      expect(client.reactions.slice(1)).toEqual([
-        { channel: HOME, ts: "2000.000100", name: "eyes", add: false },
-        { channel: HOME, ts: "2000.000100", name: "question", add: true },
-      ]);
-      await channel.status(HOME, view("Nothing open."));
-      expect(client.reactions.slice(3)).toEqual([
-        { channel: HOME, ts: "2000.000100", name: "question", add: false },
-        { channel: HOME, ts: "2000.000100", name: "white_check_mark", add: true },
-      ]);
-      await channel.status(HOME, view("Nothing open."));
-      expect(client.reactions).toHaveLength(5);
-    });
-
-    it("a silent dispatch keeps the message's 👀 on its item: nothing posted, nothing cleared", async () => {
+    it("a silent turn that settled a message says so, <open> marker or not; one a callback began posts nothing", async () => {
       await feed(dm({ text: "fix the parser", ts: "2002.000100" }));
       await channel.send(HOME, splitReply("<silent>dispatched</silent>\n<open>parser — worker running (run r1)</open>", meta));
-      expect(client.sent).toEqual([]);
-      await new Promise((r) => setTimeout(r, 2));
-      await channel.status(HOME, view("parser — running", [["parser", "running"]]));
-      expect(client.reactions).toEqual([{ channel: HOME, ts: "2002.000100", name: "eyes", add: true }]);
-      await channel.status(HOME, view("Nothing open."));
-      expect(client.reactions.slice(1)).toEqual([
-        { channel: HOME, ts: "2002.000100", name: "eyes", add: false },
-        { channel: HOME, ts: "2002.000100", name: "white_check_mark", add: true },
-      ]);
-    });
-
-    it("a quiet main-flow turn posts its footer only for a settled message that opened nothing", async () => {
-      await channel.send(HOME, { text: "", suggestions: [], meta });
-      expect(client.sent).toEqual([]);
-      await feed(dm({ text: "ok", ts: "2001.000100" }));
-      await channel.send(HOME, { text: "", suggestions: [], meta, opened: ["storage"] });
-      expect(client.sent).toEqual([]);
-      await feed(dm({ text: "thanks", ts: "2001.000200" }));
+      expect(client.sent).toHaveLength(1);
+      expect(JSON.stringify(client.sent[0]!.blocks)).toContain("stayed silent — dispatched");
+      // Nothing booked: the turn answered a callback, and the card shows it.
+      await channel.send(HOME, splitReply("<silent>stage moved</silent>\n<open>parser — review (run r1)</open>", meta));
       await channel.send(HOME, { text: "", suggestions: [], meta });
       expect(client.sent).toHaveLength(1);
-      expect(client.reactions.at(-1)).toEqual({ channel: HOME, ts: "2001.000200", name: "eyes", add: false });
+      expect(client.reactions).toEqual([]);
     });
 
     it("task delegation and callback notes skip the home main flow; its threads still post them", async () => {

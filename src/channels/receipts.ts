@@ -1,20 +1,15 @@
-// Reaction receipts: a 👀 goes on an inbound message and comes off when its
-// turn settles, or stays on as its open item's state when the turn opened one
-// (docs/design/11 §Status). Durable, because the emoji lives on the platform: a
-// process ending between the two halves would leave it with nobody to clear it.
+// Reaction receipts: an inbound message is booked when it arrives and settled
+// when its turn ends, wearing a 👀 meanwhile except in a quiet chat (the home).
+// Durable, because the emoji lives on the platform: a process ending between
+// the two halves would leave it with nobody to clear it.
 
 import type { DatabaseSync } from "node:sqlite";
-import { waitsOnYou } from "../core/reply.js";
-import type { OpenItemsView, TurnMeta } from "../core/types.js";
+import type { TurnMeta } from "../core/types.js";
 import { pierDb } from "../db.js";
 import type { ChannelPlatform } from "./types.js";
 
 /** Adapters ask on every inbound envelope; the books change on the scale of `staleMs`. */
 const SWEEP_EVERY_MS = 60_000;
-/** Messages one item wears its state on; the oldest past it comes clear. */
-const ITEM_CAP = 20;
-/** An item receipt wearing nothing: a `stopped` or `pending release` item takes its 👀 off. */
-const NONE = "";
 
 interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
@@ -29,9 +24,6 @@ interface ReceiptRow {
   chat_id: string;
   message_id: string;
 }
-
-/** A message that opened an open item, wearing `reaction` until the item is done. */
-type ItemReceipt = { chatId: string; messageId: string; problem: string; reaction: string; createdAt: number };
 
 const toReceipt = (row: ReceiptRow): Receipt => ({
   conversationId: row.conversation_id,
@@ -99,45 +91,12 @@ export class ReceiptLedger {
     for (const { chatId, messageId } of claimed) drop.run(this.platform, chatId, messageId);
     return claimed;
   }
-
-  /** Books `receipts` under `problem`, wearing `reaction`; answers that item's
-   *  receipts past `ITEM_CAP`, oldest first, already off the books. */
-  join(receipts: Receipt[], problem: string, reaction: string, at = Date.now()): ItemReceipt[] {
-    const put = this.db.prepare(`
-      INSERT INTO item_receipts(platform, chat_id, message_id, problem, reaction, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(platform, chat_id, message_id) DO UPDATE SET
-        problem = excluded.problem, reaction = excluded.reaction, created_at = excluded.created_at
-    `);
-    for (const { chatId, messageId } of receipts) put.run(this.platform, chatId, messageId, problem, reaction, at);
-    const over = this.items().filter((i) => i.problem === problem).slice(0, -ITEM_CAP);
-    for (const item of over) this.setItem(item, null);
-    return over;
-  }
-
-  /** Oldest first. */
-  items(): ItemReceipt[] {
-    return this.db.prepare(`
-      SELECT chat_id AS chatId, message_id AS messageId, problem, reaction, created_at AS createdAt
-      FROM item_receipts WHERE platform = ? ORDER BY created_at, rowid
-    `).all(this.platform) as unknown as ItemReceipt[];
-  }
-
-  /** `null` forgets the receipt. */
-  setItem({ chatId, messageId }: ItemReceipt, reaction: string | null): void {
-    const where = "platform = ? AND chat_id = ? AND message_id = ?";
-    if (reaction === null) this.db.prepare(`DELETE FROM item_receipts WHERE ${where}`).run(this.platform, chatId, messageId);
-    else this.db.prepare(`UPDATE item_receipts SET reaction = ? WHERE ${where}`).run(reaction, this.platform, chatId, messageId);
-  }
 }
 
 interface ReactionApi {
   addReaction(chatId: string, messageId: string, emoji: string): Promise<void>;
   removeReaction(chatId: string, messageId: string, emoji: string): Promise<void>;
 }
-
-/** The platform's names for a message's states: `working` a turn's, the other two an item's. */
-type Reactions = Record<"working" | "waiting" | "done", string>;
 
 /** A receipt is booked synchronously (an instant turn must not clear an
  *  unbooked one) while the platform call is in flight, and the clear waits for
@@ -150,11 +109,13 @@ export class Receipts {
     private readonly api: ReactionApi,
     private readonly ledger: ReceiptLedger,
     private readonly log: (message: string) => void,
-    private readonly emoji: Reactions,
+    private readonly emoji: string,
     /** After this, a receipt whose conversation is idle is assumed never to
      *  settle. A turn still running keeps its 👀 however long it takes. */
     private readonly staleMs: number,
     private readonly working?: (conversationId: string) => boolean,
+    /** A quiet chat is booked and settled without a reaction call. */
+    private readonly quiet: (chatId: string) => boolean = () => false,
   ) {}
 
   /** `at` is when the turn this receipt belongs to began; it defaults to now,
@@ -163,9 +124,9 @@ export class Receipts {
    *  the turn started — would put it outside that turn's scope and leave the
    *  reaction up until the stale sweep. */
   mark(conversationId: string, chatId: string, messageId: string, at?: number): void {
-    this.applying.set(
+    if (!this.quiet(chatId)) this.applying.set(
       `${chatId}:${messageId}`,
-      this.api.addReaction(chatId, messageId, this.emoji.working)
+      this.api.addReaction(chatId, messageId, this.emoji)
         .catch((err) => this.log(`reaction failed: ${String(err)}`)),
     );
     this.ledger.add({ conversationId, chatId, messageId }, at);
@@ -174,44 +135,23 @@ export class Receipts {
   /** Only the messages *this* turn was working on: a message queued mid-turn
    *  is still owed an answer. `meta` says when the turn began; no meta clears
    *  everything (the refusal paths have no turn to scope by). */
-  settle(conversationId: string, meta?: TurnMeta, joinTo?: string): Promise<void> {
-    const taken = this.ledger.take(conversationId, began(meta));
-    return joinTo ? this.join(taken, joinTo) : this.clear(taken);
+  settle(conversationId: string, meta?: TurnMeta): Promise<void> {
+    return this.clear(this.ledger.take(conversationId, began(meta)));
   }
 
   /** Settles whatever happens; the error still propagates, because a failed
    *  delivery is the router's to report. `deliver` is told whether the turn
-   *  settles any receipt; `joinTo` is the problem the settled ones stay on. */
+   *  settles any receipt. */
   async settleAfter(
     conversationId: string,
     deliver: (settles: boolean) => Promise<void>,
     meta?: TurnMeta,
-    joinTo?: string,
   ): Promise<void> {
     try {
       await deliver(this.ledger.booked(conversationId, began(meta)).length > 0);
     } finally {
-      await this.settle(conversationId, meta, joinTo);
+      await this.settle(conversationId, meta);
     }
-  }
-
-  /** Each item receipt to its item's state in `view`, a gone problem to done
-   *  and forgotten. `seen` is when the view was read: a receipt joined after it
-   *  belongs to an item the view could not yet name. */
-  async items(view: OpenItemsView, seen = Date.now()): Promise<void> {
-    const status = new Map(view.items.map((i) => [i.problem, i.status]));
-    await Promise.all(this.ledger.items().map(async (item) => {
-      const now = status.get(item.problem);
-      if (now === undefined && item.createdAt >= seen) return;
-      // `stopped` and `pending release` wait for the head's next marker, but a 👀
-      // there would say work is still going on.
-      const want = now === undefined ? this.emoji.done
-        : now === "running" ? this.emoji.working
-        : waitsOnYou(now) ? this.emoji.waiting
-        : item.reaction === this.emoji.working ? NONE : item.reaction;
-      this.ledger.setItem(item, now === undefined ? null : want);
-      if (want !== item.reaction) await this.swap(item.chatId, item.messageId, item.reaction, want);
-    }));
   }
 
   /** `all` is the startup sweep: everything on the books is orphaned then. */
@@ -223,17 +163,6 @@ export class Receipts {
     return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working));
   }
 
-  /** The 👀 stays on; only the books move, and an item past its cap comes clear. */
-  private async join(receipts: Receipt[], problem: string): Promise<void> {
-    await this.landed(receipts);
-    await this.clear(this.ledger.join(receipts, problem, this.emoji.working));
-  }
-
-  private async swap(chatId: string, messageId: string, from: string, to: string): Promise<void> {
-    if (from !== NONE) await this.api.removeReaction(chatId, messageId, from).catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`));
-    if (to !== NONE) await this.api.addReaction(chatId, messageId, to).catch((err: unknown) => this.log(`reaction failed: ${String(err)}`));
-  }
-
   /** A slow apply must not let a later receipt clear first. */
   private async landed(receipts: { chatId: string; messageId: string }[]): Promise<void> {
     await Promise.all(receipts.map(({ chatId, messageId }) =>
@@ -241,13 +170,11 @@ export class Receipts {
     for (const { chatId, messageId } of receipts) this.applying.delete(`${chatId}:${messageId}`);
   }
 
-  private async clear(receipts: (Receipt | ItemReceipt)[]): Promise<void> {
+  private async clear(receipts: Receipt[]): Promise<void> {
     await this.landed(receipts);
-    await Promise.all(receipts.map((r) => {
-      const emoji = "reaction" in r ? r.reaction : this.emoji.working;
-      return emoji === NONE ? undefined : this.api.removeReaction(r.chatId, r.messageId, emoji)
-        .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`));
-    }));
+    await Promise.all(receipts.filter((r) => !this.quiet(r.chatId)).map((r) =>
+      this.api.removeReaction(r.chatId, r.messageId, this.emoji)
+        .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`))));
   }
 }
 

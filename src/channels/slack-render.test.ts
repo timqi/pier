@@ -183,7 +183,7 @@ describe("statusMessage", () => {
   const item = (title: string, status: OpenItemPresentation["status"], stage: string, extra: Partial<OpenItemPresentation> = {}): OpenItemPresentation =>
     ({ ...openItemPresentation({ problem: title, stage, status, runs: [] }, 0), ...extra });
   const view = (items: OpenItemPresentation[], web?: string): OpenItemsView =>
-    ({ text: "Waiting on you · 1\n\nA & B", snapshot: { version: 1, items }, items: [], ...(web ? { web } : {}) });
+    ({ text: "Waiting on you · 1\n\nA & B", snapshot: { version: 1, items }, ...(web ? { web } : {}) });
 
   it("lays the items out as the sidebar does, under the plain text notifications show", () => {
     const sent = statusMessage(view([

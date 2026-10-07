@@ -46,7 +46,7 @@ import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import { StatusMessage } from "./status.js";
 
-const REACTIONS = { working: "OnIt", waiting: "WHAT", done: "DONE" };
+const REACTIONS = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
 const MAX_ACTIVE_CHATS = 16;
 /** Only an idle conversation ages out, so this need not cover a long turn. */
@@ -127,12 +127,13 @@ export class LarkChannel implements Channel {
       REACTIONS,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
+      (chatId) => this.isHome(chatId),
     );
     this.statusLine = new StatusMessage("lark", ledger.db, {
       post: async (chatId, body) => (await this.api.sendCard(chatId, body)).messageId,
       edit: (_chatId, messageId, body) => this.api.patchCard(messageId, body),
       delete: (_chatId, messageId) => this.api.deleteMessage(messageId),
-    }, this.receipts, this.log, statusCard);
+    }, this.log, statusCard);
     if (deps.control) {
       this.panel = new LarkPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -257,7 +258,7 @@ export class LarkChannel implements Channel {
     // A command or skill ask is not a reply, as in the web composer: quoted, it would not parse.
     const body = [text, ...markers].filter(Boolean).join("\n");
     const said = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId, body) : body;
-    // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
+    // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
     const answered = home && command && !command.args && isChatCommand(command.name);
     if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
@@ -528,19 +529,17 @@ export class LarkChannel implements Channel {
       await this.receipts.settle(conversation);
       return;
     }
-    // The home's main flow keeps a turn that opened an item wearing its state.
     const main = "chatId" in to;
-    const opened = main ? reply.opened?.[0] : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
-      // The home's quiet turn says so only to a message nothing else answers.
-      if (main && isSilentReply(reply) && (opened || !settles)) return;
+      // The home's quiet turn says so only when it settled a message of the user's.
+      if (main && isSilentReply(reply) && !settles) return;
       await this.out.reply(to, reply);
-    }, reply.meta, opened);
+    }, reply.meta);
   }
 
-  /** The 👀 goes on the note itself: the turn it triggers has no message of
-   *  the user's to carry them. */
+  /** The receipt goes on the note itself: the turn it triggers has no message
+   *  of the user's to carry it. */
   async notify(
     conversation: string,
     note: { text: string; origin: NoteOrigin; at?: number },

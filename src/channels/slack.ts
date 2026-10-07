@@ -48,7 +48,7 @@ import { SlackPanel } from "./slack-panel.js";
 import { sharedBlock } from "./slack-thread.js";
 import { context, escapeMrkdwn, offeredLabel, statusMessage } from "./slack-render.js";
 
-const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
+const REACTIONS = "eyes";
 // The envelope is already acked, so this bounds concurrency (sockets,
 // downloads), not the backlog.
 const MAX_ACTIVE_CHATS = 16;
@@ -136,12 +136,13 @@ export class SlackChannel implements Channel {
       REACTIONS,
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
+      (chatId) => this.isHome(chatId),
     );
     this.statusLine = new StatusMessage("slack", ledger.db, {
       post: async (channel, body) => (await this.api.postMessage({ channel, ...body })).ts,
       edit: (channel, ts, body) => this.api.updateMessage({ channel, ts, ...body }),
       delete: (channel, ts) => this.api.deleteMessage(channel, ts),
-    }, this.receipts, this.log, statusMessage);
+    }, this.log, statusMessage);
     if (deps.control) {
       this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -274,7 +275,7 @@ export class SlackChannel implements Channel {
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
-    // The head answers a chat command with a note, not a turn: nothing would take a 👀 off it.
+    // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
     const answered = home && command && !command.args && isChatCommand(command.name);
     if (!answered) this.receipts.mark(here.conversationId, channel, ts);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
@@ -495,19 +496,17 @@ export class SlackChannel implements Channel {
       await this.receipts.settle(conversation);
       return;
     }
-    // The home's main flow keeps a turn that opened an item wearing its state.
     const main = !to.threadTs;
-    const opened = main ? reply.opened?.[0] : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
-      // The home's quiet turn says so only to a message nothing else answers.
-      if (main && isSilentReply(reply) && (opened || !settles)) return;
+      // The home's quiet turn says so only when it settled a message of the user's.
+      if (main && isSilentReply(reply) && !settles) return;
       await this.out.reply(to.channel, to.threadTs, reply);
-    }, reply.meta, opened);
+    }, reply.meta);
   }
 
-  /** The 👀 goes on the note itself: the turn it triggers has no message of
-   *  the user's to carry them. */
+  /** The receipt goes on the note itself: the turn it triggers has no message
+   *  of the user's to carry it. */
   async notify(
     conversation: string,
     note: { text: string; origin: NoteOrigin; at?: number },

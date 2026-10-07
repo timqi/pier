@@ -21,12 +21,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const view = (text: string): OpenItemsView => ({ text, snapshot: { version: 1, items: [] }, items: [] });
+const view = (text: string): OpenItemsView => ({ text, snapshot: { version: 1, items: [] } });
 
 const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) => {
   const calls: string[] = [];
   const logged: string[] = [];
-  const handed: OpenItemsView[] = [];
   let next = 0;
   const status = new StatusMessage("slack", db, {
     post: (chat, body) => {
@@ -38,27 +37,25 @@ const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) =>
       return fail.edit ? Promise.reject(new Error("message_not_found")) : Promise.resolve();
     },
     delete: (chat, id) => (calls.push(`delete ${id}`), fail.delete ? Promise.reject(new Error("timeout")) : Promise.resolve()),
-  }, { items: (v) => (handed.push(v), Promise.resolve()) }, (m) => logged.push(m), (v) => `> ${v.text}`);
-  return { status, calls, logged, handed };
+  }, (m) => logged.push(m), (v) => `> ${v.text}`);
+  return { status, calls, logged };
 };
 
 // docs/design/11-im-conversation.md §Status
 describe("the status message", () => {
   it("posts once, edits in place, and says nothing when nothing changed", async () => {
-    const { status, calls, handed } = rig();
+    const { status, calls } = rig();
     await status.show("D1", view("a — running"));
     await status.show("D1", view("a — waiting on you"));
     await status.show("D1", view("a — waiting on you"));
     expect(calls).toEqual(["post D1 > a — running", "edit m1 > a — waiting on you"]);
-    expect(handed).toHaveLength(3);
   });
 
-  it("passes the shared compact text through and hands the view on whole", async () => {
-    const { status, calls, handed } = rig();
+  it("passes the shared compact text through", async () => {
+    const { status, calls } = rig();
     await status.show("D1", view("In progress · 1\n\na\nelapsed <1m"));
     expect(await status.answer("D1", "In progress · 1\n\na\nelapsed 1m")).toBe(true);
     expect(calls).toEqual(["post D1 > In progress · 1\n\na\nelapsed <1m", "post D1 > In progress · 1\n\na\nelapsed 1m", "delete m1"]);
-    expect(handed[0]!.text).toBe("In progress · 1\n\na\nelapsed <1m");
   });
 
   it("/status re-posts it at the bottom with the answer's text, as the one reply", async () => {
@@ -79,7 +76,7 @@ describe("the status message", () => {
       post: () => Promise.resolve(`m${String(shown.length)}`),
       edit: () => Promise.resolve(),
       delete: () => Promise.resolve(),
-    }, { items: () => Promise.resolve() }, () => undefined, (v) => (shown.push(v), v.text));
+    }, () => undefined, (v) => (shown.push(v), v.text));
     await status.show("D1", { ...view("a"), web: "https://pier.example" });
     const snapshot = { version: 1 as const, items: [openItemPresentation({ problem: "b", stage: "", status: "running", runs: [] }, 0)] };
     expect(await status.answer("D1", "b", snapshot)).toBe(true);
@@ -122,7 +119,7 @@ describe("the status message", () => {
       post: (chat, body) => (calls.push(`post ${body}`), failPost ? Promise.reject(new Error("429")) : Promise.resolve("m1")),
       edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
       delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
-    }, { items: () => Promise.resolve() }, () => undefined, (v) => v.text);
+    }, () => undefined, (v) => v.text);
     await status.show("D1", view("a"));
     failPost = true;
     expect(await status.answer("D1", "b")).toBe(false);
@@ -136,7 +133,7 @@ describe("the status message", () => {
       post: (chat, body) => (calls.push(`post ${body}`), Promise.resolve("m1")),
       edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
       delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
-    }, { items: () => Promise.resolve() }, () => undefined, (v) => `${v.text} ${v.web ?? "-"}`);
+    }, () => undefined, (v) => `${v.text} ${v.web ?? "-"}`);
     await status.show("D1", view("a"));
     await status.show("D1", { ...view("a"), web: "https://pier.example" });
     await status.show("D1", { ...view("a"), web: "https://pier.example" });

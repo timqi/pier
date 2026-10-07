@@ -269,12 +269,6 @@ describe("open-item markers", () => {
     expect(splitReply("<open>x — y</open>").text).toBe("");
   });
 
-  it("names the problems the reply opened, in order, and nothing when none", () => {
-    const reply = splitReply("<open>storage — design</open>\n<done>old</done>\nOn it.\n<open>cache — spike</open>\n\n---\n[Ok]");
-    expect(reply).toMatchObject({ text: "On it.", suggestions: ["Ok"], opened: ["storage", "cache"] });
-    expect("opened" in splitReply("<done>old</done> fine")).toBe(false);
-  });
-
   it("parses an add with its runs, a replace, and a done, in reply order", () => {
     expect(openItemMarkers(
       "<open>open items 视图 — lead designing (run 1prwm) (RUN w2)</open>\n" +

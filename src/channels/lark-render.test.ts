@@ -99,7 +99,7 @@ describe("statusCard", () => {
   const item = (title: string, status: OpenItemPresentation["status"], stage: string, extra: Partial<OpenItemPresentation> = {}): OpenItemPresentation =>
     ({ ...openItemPresentation({ problem: title, stage, status, runs: [] }, 0), ...extra });
   const view = (items: OpenItemPresentation[], web?: string): OpenItemsView =>
-    ({ text: "x", snapshot: { version: 1, items }, items: [], ...(web ? { web } : {}) });
+    ({ text: "x", snapshot: { version: 1, items }, ...(web ? { web } : {}) });
 
   it("lays the items out as the sidebar does: waiting first and highlighted, then in progress, linked to their session", () => {
     const sent = statusCard(view([

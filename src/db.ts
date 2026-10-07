@@ -420,6 +420,8 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (platform, chat_id)
   );
   `,
+  // 38 — the home chat wears no reactions; its open items' receipts go.
+  "DROP TABLE item_receipts;",
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

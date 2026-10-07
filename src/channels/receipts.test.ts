@@ -24,9 +24,9 @@ const receipt = (conversationId: string, messageId: string) => ({
 
 /** A ledger and a `Receipts` over it whose platform double records only the
  *  messages it cleared — which receipt came off is what settling is about. */
-const REACTIONS = { working: "eyes", waiting: "question", done: "white_check_mark" };
+const REACTIONS = "eyes";
 
-const recording = () => {
+const recording = (quiet?: (chatId: string) => boolean) => {
   const ledger = new ReceiptLedger("slack", db);
   const cleared: string[] = [];
   /** Every platform call, `+name:id` or `-name:id`. */
@@ -48,6 +48,8 @@ const recording = () => {
     (m) => logged.push(m),
     REACTIONS,
     60_000,
+    undefined,
+    quiet,
   );
   return { receipts, cleared, calls, ledger, logged };
 };
@@ -192,90 +194,23 @@ describe("receipt ledger", () => {
     expect(cleared).toEqual(["1", "2"]);
   });
 
-  // docs/design/11-im-conversation.md §Status
-  describe("item receipts", () => {
-    // Began after every mark in these tests: its scope takes them all.
-    const turn = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 1 };
-    const view = (items: [string, string][]) => ({ text: "x", snapshot: { version: 1 as const, items: [] }, items: items.map(([problem, status]) => ({ problem, status })) });
-
-    it("a turn that opened an item keeps its 👀 and books it under the problem", async () => {
-      const { receipts, calls, ledger } = recording();
-      receipts.mark("D1", "D1", "1");
-      let settles: boolean | undefined;
-      await receipts.settleAfter("D1", async (s) => void (settles = s), turn, "storage");
-      expect(settles).toBe(true);
-      expect(calls).toEqual(["+eyes:1"]);
-      expect(ledger.items().map((i) => [i.messageId, i.problem, i.reaction])).toEqual([["1", "storage", "eyes"]]);
-      expect(ledger.take("D1")).toEqual([]);
-      // A turn with nothing on the books is told so.
-      await receipts.settleAfter("D1", async (s) => void (settles = s), turn);
-      expect(settles).toBe(false);
-    });
-
-    it("moves each message to its item's state, and ✅ forgets a gone problem", async () => {
-      const { receipts, calls, ledger } = recording();
-      for (const [id, problem] of [["1", "a"], ["2", "b"], ["3", "c"]] as const) {
-        receipts.mark("D1", "D1", id);
-        await receipts.settle("D1", undefined, problem);
-      }
-      calls.length = 0;
-      const later = Date.now() + 1000;
-      await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "stopped"]]), later);
-      // A stopped item's 👀 would say work is still going on.
-      expect(calls.sort()).toEqual(["+question:2", "-eyes:2", "-eyes:3"]);
-      calls.length = 0;
-      // No change, no call.
-      await receipts.items(view([["a", "running"], ["b", "waiting on you"], ["c", "pending release"]]), later);
-      expect(calls).toEqual([]);
-      // Running again: the ❓ gives way to the 👀.
-      await receipts.items(view([["a", "running"], ["b", "running"], ["c", "stopped"]]), later);
-      expect(calls).toEqual(["-question:2", "+eyes:2"]);
-      await receipts.items(view([["a", "running"], ["c", "stopped"]]), later);
-      expect(calls.slice(2)).toEqual(["-eyes:2", "+white_check_mark:2"]);
-      expect(ledger.items().map((i) => i.messageId)).toEqual(["1", "3"]);
-    });
-
-    it("an item's 👀 comes off once it is stopped", async () => {
-      const { receipts, calls, ledger } = recording();
-      ledger.join([{ conversationId: "D1", chatId: "D1", messageId: "1" }], "a", "eyes");
-      ledger.join([{ conversationId: "D1", chatId: "D1", messageId: "2" }], "b", "eyes");
-      await receipts.items(view([["a", "stopped"], ["b", "waiting on you"]]), Date.now() + 1000);
-      expect(calls.sort()).toEqual(["+question:2", "-eyes:1", "-eyes:2"]);
-      expect(ledger.items().map((i) => i.reaction)).toEqual(["", "question"]);
-    });
-
-    it("a receipt joined after the view was read is not taken for a gone problem", async () => {
-      const { receipts, calls, ledger } = recording();
-      const seen = Date.now() - 1000;
-      receipts.mark("D1", "D1", "1");
-      await receipts.settle("D1", undefined, "new");
-      await receipts.items(view([]), seen);
-      expect(calls).toEqual(["+eyes:1"]);
-      expect(ledger.items()).toHaveLength(1);
-    });
-
-    it("sweeps never touch item receipts", async () => {
-      const { receipts, calls, ledger } = recording();
-      receipts.mark("D1", "D1", "1");
-      await receipts.settle("D1", undefined, "a");
-      await receipts.sweep(true);
-      expect(calls).toEqual(["+eyes:1"]);
-      expect(ledger.takeStale(0)).toEqual([]);
-      expect(ledger.items()).toHaveLength(1);
-    });
-
-    it("an item wears its state on at most 20 messages; the oldest comes clear", async () => {
-      const { receipts, calls, ledger } = recording();
-      for (let i = 0; i < 21; i++) {
-        receipts.mark("D1", "D1", String(i));
-        await receipts.settle("D1", undefined, "a");
-        await new Promise((r) => setTimeout(r, 1));
-        if (i === 19) await receipts.items(view([["a", "waiting on you"]]), Date.now() + 1000);
-      }
-      expect(calls.filter((c) => c.startsWith("-") && !c.startsWith("-eyes"))).toEqual(["-question:0"]);
-      expect(ledger.items()).toHaveLength(20);
-      expect(ledger.items()[0]!.messageId).toBe("1");
-    });
+  it("books and settles a quiet chat's messages without a reaction call", async () => {
+    // The home wears no reactions, but whether a turn settled a message of the
+    // user's still decides if its silence is said (docs/plans/26 §4).
+    const { receipts, calls, ledger } = recording((chatId) => chatId === "D1");
+    receipts.mark("D1", "D1", "1");
+    expect(ledger.booked("D1")).toEqual([receipt("D1", "1")]);
+    let settles: boolean | undefined;
+    await receipts.settleAfter("D1", async (s) => void (settles = s));
+    expect(settles).toBe(true);
+    expect(ledger.booked("D1")).toEqual([]);
+    receipts.mark("D1", "D1", "2");
+    await receipts.sweep(true);
+    expect(calls).toEqual([]);
+    // Another chat on the same adapter still wears its 👀.
+    receipts.mark("C100", "C100", "3");
+    await receipts.settle("C100");
+    expect(calls).toEqual(["+eyes:3", "-eyes:3"]);
   });
 
   it("survives a restart and keeps platforms apart", () => {

@@ -242,8 +242,7 @@ export function silentReason(markdown: string): string | undefined {
 export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   const markdown = streamBody(rawMarkdown);
   const silence = silentReason(rawMarkdown);
-  const opened = openItemMarkers(rawMarkdown).markers.flatMap((o) => (o.op === "open" ? [o.problem] : []));
-  const tags = { meta, silence, ...(opened.length ? { opened } : {}) };
+  const tags = { meta, silence };
   const m = BLOCK.exec(markdown);
   if (!m?.[1]) return { text: markdown, suggestions: [], ...tags };
   const suggestions = [...m[1].matchAll(TOKEN)]
