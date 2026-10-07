@@ -204,9 +204,12 @@ describe("receipt ledger", () => {
     await receipts.settleAfter("D1", async (s) => void (settles = s));
     expect(settles).toBe(true);
     expect(ledger.booked("D1")).toEqual([]);
-    receipts.mark("D1", "D1", "2");
+    // The periodic sweep takes a stale one off the books, still with no call.
+    receipts.mark("D1", "D1", "stale", Date.now() - 120_000);
     await receipts.sweep();
+    expect(ledger.booked("D1")).toEqual([]);
     expect(calls).toEqual([]);
+    receipts.mark("D1", "D1", "2");
     // Another chat on the same adapter still wears its 👀.
     receipts.mark("C100", "C100", "3");
     await receipts.settle("C100");
