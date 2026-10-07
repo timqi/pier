@@ -212,8 +212,7 @@ const refreshStatus = (repost = false): void => {
     try {
       const open = tasks.openItems();
       const { text, snapshot } = openItemsStatus(open, Date.now());
-      const web = settings.get().publicUrl;
-      void channels.openItems({ text, snapshot, ...(web ? { web } : {}) }, bottom);
+      void channels.openItems({ text, snapshot }, bottom);
     } catch (err) {
       log.error("status: the open items could not be read", err);
     }

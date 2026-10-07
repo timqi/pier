@@ -77,10 +77,10 @@ describe("the status message", () => {
       edit: () => Promise.resolve(),
       delete: () => Promise.resolve(),
     }, () => undefined, (v) => (shown.push(v), v.text));
-    await status.show("D1", { ...view("a"), web: "https://pier.example" });
+    await status.show("D1", view("a"));
     const snapshot = { version: 1 as const, items: [openItemPresentation({ problem: "b", stage: "", status: "running", runs: [] }, 0)] };
     expect(await status.answer("D1", "b", snapshot)).toBe(true);
-    expect(shown[1]).toMatchObject({ text: "b", snapshot, web: "https://pier.example" });
+    expect(shown[1]).toMatchObject({ text: "b", snapshot });
   });
 
   it("/status during a running refresh still re-posts at the bottom", async () => {
@@ -125,19 +125,6 @@ describe("the status message", () => {
     expect(await status.answer("D1", "b")).toBe(false);
     await status.show("D1", view("c"));
     expect(calls).toEqual(["post a", "post b", "edit m1 c"]);
-  });
-
-  it("edits when only what the text does not show changed, the link's address", async () => {
-    const calls: string[] = [];
-    const status = new StatusMessage("slack", db, {
-      post: (chat, body) => (calls.push(`post ${body}`), Promise.resolve("m1")),
-      edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
-      delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
-    }, () => undefined, (v) => `${v.text} ${v.web ?? "-"}`);
-    await status.show("D1", view("a"));
-    await status.show("D1", { ...view("a"), web: "https://pier.example" });
-    await status.show("D1", { ...view("a"), web: "https://pier.example" });
-    expect(calls).toEqual(["post a -", "edit m1 a https://pier.example"]);
   });
 
   it("is deleted when nothing is open, and not posted for nothing", async () => {

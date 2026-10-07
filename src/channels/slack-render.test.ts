@@ -182,31 +182,29 @@ describe("escapeMrkdwn", () => {
 describe("statusMessage", () => {
   const item = (title: string, status: OpenItemPresentation["status"], stage: string, extra: Partial<OpenItemPresentation> = {}): OpenItemPresentation =>
     ({ ...openItemPresentation({ problem: title, stage, status, runs: [] }, 0), ...extra });
-  const view = (items: OpenItemPresentation[], web?: string): OpenItemsView =>
-    ({ text: "Waiting on you · 1\n\nA & B", snapshot: { version: 1, items }, ...(web ? { web } : {}) });
+  const view = (items: OpenItemPresentation[]): OpenItemsView =>
+    ({ text: "Waiting on you · 1\n\nA & B", snapshot: { version: 1, items } });
 
   it("lays the items out as the sidebar does, under the plain text notifications show", () => {
     const sent = statusMessage(view([
       item("Build", "running", "worker running", { metadata: ["elapsed 3m"], runs: [{ runId: "r1", targetSessionId: "s1" }] }),
       item("A & B", "waiting on you", "merge <scope>?", { metadata: ["succeeded 2m ago"], runs: [{ runId: "r2", targetSessionId: "s2" }] }),
       item("Docs", "queued", ""),
-    ], "https://pier.example"));
+    ]));
     expect(sent.text).toBe("_▤ open items_\nWaiting on you · 1\n\nA &amp; B");
     expect(sent.blocks).toEqual([
       context("_▤ open items_"),
       context("*Waiting on you · 1*"),
       section("*A &amp; B*\n> merge &lt;scope&gt;?"),
-      context("succeeded 2m ago · <https://pier.example/app/#/session/s2|Open on web>"),
+      context("succeeded 2m ago"),
       context("*In progress · 2*"),
       section("*Build*\nworker running"),
-      context("elapsed 3m · <https://pier.example/app/#/session/s1|Open on web>"),
+      context("elapsed 3m"),
       section("*Docs*  `Queued`"),
     ]);
   });
 
-  it("links nothing without a public address, and stays within Slack's 50 blocks", () => {
-    expect(statusMessage(view([item("Build", "running", "", { runs: [{ runId: "r1", targetSessionId: "s1" }] })])).blocks.at(-1))
-      .toEqual(section("*Build*"));
+  it("stays within Slack's 50 blocks", () => {
     const many = statusMessage(view(Array.from({ length: 60 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(5000), { metadata: ["elapsed 1m"] }))));
     expect(many.blocks.length).toBeLessThanOrEqual(50);
     const shown = many.blocks.filter((b) => b.type === "section").length;

@@ -4,7 +4,7 @@
 // the sidebar's layout are injected.
 
 import type { DatabaseSync } from "node:sqlite";
-import { openItemDestination, openItemGroups } from "../core/open-items.js";
+import { openItemGroups } from "../core/open-items.js";
 import { waitsOnYou } from "../core/reply.js";
 import { NOTHING_OPEN, type OpenItemsSnapshot, type OpenItemsView } from "../core/types.js";
 import type { ChannelPlatform } from "./types.js";
@@ -17,15 +17,14 @@ export interface StatusApi<B> {
 }
 
 /** One item in the web sidebar's words: `tag` its status label, none under the
- *  waiting group's heading as in the sidebar's grouped list, `stage` what it
- *  is at — for a waiting item, the question — and `link` its session on the web. */
+ *  waiting group's heading as in the sidebar's grouped list, and `stage` what
+ *  it is at — for a waiting item, the question. */
 export interface StatusRow {
   title: string;
   tag: string;
   stage: string;
   waiting: boolean;
   meta: string;
-  link?: string;
 }
 
 /** A platform's pieces for one heading, row or closing count; `cost` is what the budget counts. */
@@ -47,10 +46,8 @@ export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E
   for (const group of openItemGroups(view.snapshot.items)) {
     const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
     for (const [n, item] of group.items.entries()) {
-      const session = openItemDestination(item).session;
       const row = layout.row({
         title: item.title, tag: waitsOnYou(item.status) ? "" : item.statusLabel, stage: item.stage, waiting: waitsOnYou(item.status), meta: item.metadata.join(" · "),
-        ...(view.web && session ? { link: `${view.web}/app/#/session/${encodeURIComponent(session)}` } : {}),
       });
       const pieces = n ? row : [...heading, ...row];
       const cost = layout.cost(pieces);

@@ -159,8 +159,8 @@ final move.
   main flow; on Lark the deleted card leaves a 撤回 placeholder.
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
   `task-group-changed` and `session-state` on a 1.5 s timer into an
-  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text, its
-  snapshot, and Settings' public address as `web`) and hands it to
+  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text
+  and snapshot) and hands it to
   `ChannelRuntime.openItems`, which calls `Channel.status` on the home
   platform's live adapter; nothing otherwise.
 - The status message is `▤ open items` in the platform's emphasis over the
@@ -170,8 +170,7 @@ final move.
   bold with its status label as a tag (`Queued`, `Stopped`, …; none while
   running; `Needs you` omitted in the `Waiting on you` group), the stage — for a
   waiting item what the user is needed for, `in the design session` kept — on its
-  own line, then time/goal/worker metadata and `Open on web`, a link to
-  `<web>/app/#/session/<id>` where the item has a session and `web` is set. Lark:
+  own line, then time/goal/worker metadata. Lark:
   one markdown element per item, the tag a `text_tag`, a waiting item's stage
   orange, headings and metadata grey; Slack: Block Kit, headings and
   metadata `context` blocks, the item a `section` with the tag in code and a

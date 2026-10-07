@@ -156,7 +156,7 @@ const field = (text: string): string => cut(escapeMrkdwn(text), FIELD_MAX);
 function statusRow(r: StatusRow): SlackBlock[] {
   const tag = r.tag ? `  \`${field(r.tag)}\`` : "";
   const stage = r.stage ? `\n${r.waiting ? "> " : ""}${field(r.stage)}` : "";
-  const meta = [field(r.meta), r.link ? `<${r.link}|Open on web>` : ""].filter(Boolean).join(" · ");
+  const meta = field(r.meta);
   return [section(`*${field(r.title)}*${tag}${stage}`), ...(meta ? [context(meta)] : [])];
 }
 

@@ -114,7 +114,7 @@ const FIELD_MAX = 600;
 const statusRow = (r: StatusRow): string => [
   `**${cut(r.title, FIELD_MAX)}**${r.tag ? ` <text_tag color='neutral'>${r.tag}</text_tag>` : ""}`,
   r.stage && `<font color='${r.waiting ? "orange" : "grey"}'>${cut(r.stage, FIELD_MAX)}</font>`,
-  [r.meta && `<font color='grey'>${cut(r.meta, FIELD_MAX)}</font>`, r.link && `[Open on web](${r.link})`].filter(Boolean).join(" · "),
+  r.meta && `<font color='grey'>${cut(r.meta, FIELD_MAX)}</font>`,
 ].filter(Boolean).join("\n");
 
 /** The open items as the web sidebar lays them out, one markdown element per item. */

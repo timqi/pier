@@ -35,12 +35,10 @@ export const NOTHING_OPEN = "Nothing open.";
 
 /** The continuous conversation's open items as a chat's status message shows
  *  them: `text` is `/status`'s one string (`NOTHING_OPEN` when empty) and the
- *  plain rendering, `snapshot` the same items structured for a rich one, and
- *  `web` the instance's public address an item links into, absent when none is set. */
+ *  plain rendering, `snapshot` the same items structured for a rich one. */
 export interface OpenItemsView {
   text: string;
   snapshot: OpenItemsSnapshot;
-  web?: string;
 }
 
 export interface InboundMessage {
