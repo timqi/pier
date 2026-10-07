@@ -127,11 +127,11 @@ describe("the open items", () => {
     const now = r.now;
     r.save(
       saved("vdmj112x", { targetSessionId: "lead1", state: "succeeded", queuedAt: now - 3 * DAY, finishedAt: now - 3 * DAY }),
-      saved("k4k3jz55", { name: "lead again", targetSessionId: "lead1", queuedAt: now - 2 * MIN }),
+      saved("k4k3jz55", { name: "lead again", targetSessionId: "lead1", queuedAt: now - 2 * MIN, peakTokens: 45_000, compactAt: 100_000, compactions: 1 }),
     );
     r.item("status 归并", "lead building", ["vdmj112x"], 1);
     const open = r.list();
-    expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
+    expect(open.items[0]!.runs.map((x) => [x.runId, x.context])).toEqual([["k4k3jz55", "peak 45% of the compaction point, 1 compaction"]]);
     expect(open.unlisted).toEqual([]);
     expect(openItemsStatus(open, now).text).toBe("In progress · 1\n\nlead again\nlead building\nelapsed 2m");
   });

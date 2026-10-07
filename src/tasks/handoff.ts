@@ -27,10 +27,16 @@ export function wornOut(runs: TaskRun[]): string | undefined {
   return share > WORN_SHARE ? `the old session's context peaked at ${String(Math.round(share * 100))}% of its compaction point` : undefined;
 }
 
+/** Refuses to continue `session` once a run continued it in a new one: continuing both would fork the work. */
+export function assertNotReplaced(store: Pick<TaskStore, "replacing">, session: string | null | undefined): void {
+  const successor = session && store.replacing(session);
+  if (successor) throw new Error(`session ${session} was continued in a new session by run ${successor.id}; continue the newest run of that session instead`);
+}
+
 /** The handoff `--run` owes `prior`'s session: when `forced` (`--fresh`) or the session is worn out, and only
  *  for a session a run created, every run of it ended, no result owed to it; undefined resumes it in place.
- *  A session already replaced is refused either way: continuing it would fork the work. `branch` renders the
- *  worktree's commits since its target. */
+ *  A session already replaced is refused either way (assertNotReplaced). `branch` renders the worktree's
+ *  commits since its target. */
 export async function planHandoff(
   store: Pick<TaskStore, "runsForTarget" | "goalOf" | "getRun" | "countOwedTo" | "replacing">,
   branch: (cwd: string) => Promise<string>,
@@ -39,8 +45,7 @@ export async function planHandoff(
   forced: boolean,
 ): Promise<Handoff | undefined> {
   const session = prior.targetSessionId;
-  const successor = session && store.replacing(session);
-  if (successor) throw new Error(`session ${session} was continued in a new session by run ${successor.id}; continue the newest run of that session instead`);
+  assertNotReplaced(store, session);
   const runs = session ? store.runsForTarget(session) : [];
   const reason = forced ? "the supervisor passed --fresh" : wornOut(runs);
   if (!reason || !session) return undefined;

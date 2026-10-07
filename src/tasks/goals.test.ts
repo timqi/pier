@@ -38,19 +38,23 @@ function repo(cwd: string): string {
   return git("rev-parse", "HEAD");
 }
 
-/** A turn's answer: its text, a provider failure, or a text the test releases later. */
-type Reply = string | { error: string } | Promise<string>;
+/** A turn's answer: its text, one ending at a context of `tokens`, a provider failure, or a text the test releases later. */
+type Reply = string | { text: string; tokens: number } | { error: string } | Promise<string>;
 
 /** Pi's side played by hand: each turn answers the next scripted reply. */
 function scripted(id: string, replies: Reply[]): FakeSession {
-  const s = fakeSession(id, { scripted: true });
+  const sized = replies.some((r) => typeof r === "object" && "tokens" in r);
+  const s = fakeSession(id, { scripted: true, ...(sized ? { contextUsage: { tokens: 0, contextWindow: 200_000, compactAt: 100_000 } } : {}) });
   const record = s.systemInput.bind(s);
   s.systemInput = async (text, origin, mode) => {
     await record(text, origin, mode);
     s.setState("streaming");
     const next = replies.shift() ?? `${id}: nothing scripted`;
     const reply = next instanceof Promise ? { text: await next } : typeof next === "string" ? { text: next } : next;
-    s.emit({ type: "turn-end", text: "text" in reply ? reply.text : "", ...("error" in reply ? { error: reply.error } : {}) });
+    s.emit({
+      type: "turn-end", text: "text" in reply ? reply.text : "", ...("error" in reply ? { error: reply.error } : {}),
+      ...("tokens" in reply ? { meta: { completedAt: 1, durationMs: 1, tokens: reply.tokens } } : {}),
+    });
     s.setState("idle");
   };
   return s;
@@ -239,6 +243,12 @@ describe("a goal", () => {
     const found = rig({ s1: [built], s2: ["a.ts:1 · off by one · use <=\nVerdict: findings"] });
     const capped = await found.ended(await found.launch({ rounds: 1 }));
     expect(capped.text).toContain(`\n\n${built}\n\nReview:\n`);
+  });
+
+  it("names the worker's context at the goal's end, not the review's", async () => {
+    const { launch, ended } = rig({ s1: [{ text: "built", tokens: 60_000 }], s2: [{ text: "Verdict: clean", tokens: 10_000 }] });
+    const { text, runs } = await ended(await launch());
+    expect(text).toContain(`Run: ${runs[1]!.id} / Session: s2\nContext: peak 60% of the compaction point, 0 compactions\n`);
   });
 
   it("clips a clean review with no framed list as any other", async () => {

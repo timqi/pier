@@ -122,7 +122,9 @@ of its `compactAt`, or on `--fresh` (`fresh: true`; refused on a run not
 terminal and beside `--after`) — only for a session a fresh run created, every
 run of it ended, no result owed to it; `--fresh` on any other is refused, the
 automatic case resumes in place (`tasks/handoff.ts`). `--run` on a run whose
-session a handoff replaced is refused, naming the replacing run.
+session a handoff replaced is refused, naming the replacing run, rechecked in
+the transaction that inserts the new run; a handoff run that ended before its
+session opened replaces nothing, and `--run` on it names the run it continued.
 
 - The new run is `sessionMode: "fresh"` in the creating run's directory, on
   its definition with `launch.model`/`thinking` the old session's last, its
@@ -140,8 +142,9 @@ session a handoff replaced is refused, naming the replacing run.
 
 Every agent run records `compactions` (its session's `context-compacted`
 events), `peakTokens` (the largest of its turn ends' context and a compaction's
-`before`) and `compactAt`; its callback and its `runs` row (`context`) print
-`peak <n>% of the compaction point, <k> compactions`.
+`before`) and `compactAt`; its callback, its `runs` row and an open item's run (`context`)
+print `peak <n>% of the compaction point, <k> compactions`; a goal's end prints
+the worker session's latest run's.
 
 ## `save`
 

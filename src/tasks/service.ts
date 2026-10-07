@@ -10,13 +10,13 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner, type Restart } from "./agent.js";
-import { contextNote, DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
 import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
-import { planHandoff, type Handoff } from "./handoff.js";
+import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
 import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
@@ -383,10 +383,7 @@ export class TaskService {
 
   /** The run ledger: runs any of `sessionIds` launched (every run, when null), in flight or finished since `since`, at most 200. */
   ledger(sessionIds: string[] | null, since: number, states?: readonly TaskRunState[]): LedgerRun[] {
-    return this.store.ledgerRuns(sessionIds, since, states).map((run) => {
-      const context = contextNote(run);
-      return { ...ledgerRun(run), ...(context ? { context } : {}) };
-    });
+    return this.store.ledgerRuns(sessionIds, since, states).map(ledgerRun);
   }
 
   /** Dispatched runs of the last `days` by launch tier, role and the model the
@@ -527,14 +524,14 @@ export class TaskService {
     handoff?: Handoff,
   ): TaskRun {
     const prior = this.getRun(id);
-    const run = goal
-      ? this.store.transact(() => {
-        const ended = this.goalAgain(prior);
-        const run = this.prepareResume(prior, message, provenance, handoff);
-        this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended.reviewModel });
-        return run;
-      })
-      : this.prepareResume(prior, message, provenance, handoff);
+    // Re-checked with the run's insert: a concurrent `--run` may have replaced the session while the handoff was planned.
+    const run = this.store.transact(() => {
+      assertNotReplaced(this.store, prior.targetSessionId);
+      const ended = goal ? this.goalAgain(prior) : undefined;
+      const run = this.prepareResume(prior, message, provenance, handoff);
+      if (goal) this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended!.reviewModel });
+      return run;
+    });
     this.runs.start(run);
     return run;
   }
@@ -558,6 +555,9 @@ export class TaskService {
     handoff?: Handoff,
   ): TaskRun {
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
+    if (prior.handoff && !prior.targetSessionId) {
+      throw new Error(`run ${prior.id} ended before its new session opened; --run ${prior.resumedFromRunId ?? "the run it continued"} to continue that work`);
+    }
     if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {
       throw new Error("only persisted Agent runs can be resumed");
     }

@@ -326,10 +326,13 @@ export class TaskStore {
     `, sessionId);
   }
 
-  /** The run that continued `sessionId` in a new session (tasks/handoff.ts), if one did. */
+  /** The run that continued `sessionId` in a new session (tasks/handoff.ts), if one did; one that
+   *  ended without ever getting a session continued nothing. */
   replacing(sessionId: string): TaskRun | undefined {
     return this.#one(`
-      SELECT json FROM task_runs WHERE json_extract(json, '$.handoff.fromSessionId') = ? ORDER BY queued_at DESC, rowid DESC LIMIT 1
+      SELECT json FROM task_runs WHERE json_extract(json, '$.handoff.fromSessionId') = ?
+        AND (json_extract(json, '$.targetSessionId') IS NOT NULL OR state IN ('queued', 'running'))
+      ORDER BY queued_at DESC, rowid DESC LIMIT 1
     `, sessionId);
   }
 

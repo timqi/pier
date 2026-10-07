@@ -2217,6 +2217,26 @@ describe("continuing a run in a new session", () => {
     await expect(message(service, done.id)).rejects.toThrow(`session old was continued in a new session by run ${run.runId}; continue the newest run of that session instead`);
     await expect(message(service, done.id, { fresh: true })).rejects.toThrow(`by run ${run.runId}`);
   });
+
+  it("a handoff that never opened its session replaces nothing: the old run hands off again, the failed one points at it", async () => {
+    const { service, factory, done } = await ended({ compactions: 1 });
+    vi.mocked(factory.create).mockReset().mockRejectedValueOnce(new Error("no such model")).mockResolvedValueOnce(fakeSession("new"));
+    const failed = await service.waitForRun((await message(service, done.id)).run.runId);
+    expect(failed).toMatchObject({ state: "failed", targetSessionId: null, handoff: { fromSessionId: "old" } });
+    await expect(message(service, failed.id)).rejects.toThrow(`run ${failed.id} ended before its new session opened; --run ${done.id} to continue that work`);
+    const again = await message(service, done.id);
+    expect(again.delivery).toBe("handoff");
+    expect(await service.waitForRun(again.run.runId)).toMatchObject({ targetSessionId: "new" });
+  });
+
+  it("two concurrent --run of one ended run open one new session, the second refused", async () => {
+    const { service, done } = await ended({ compactions: 1 });
+    const [first, second] = await Promise.allSettled([message(service, done.id), message(service, done.id)]);
+    expect(first).toMatchObject({ status: "fulfilled", value: { delivery: "handoff" } });
+    const winner = (first as PromiseFulfilledResult<{ run: RunSummary }>).value.run.runId;
+    expect(second).toMatchObject({ status: "rejected", reason: { message: `session old was continued in a new session by run ${winner}; continue the newest run of that session instead` } });
+    await service.waitForRun(winner);
+  });
 });
 
 describe("pier task stats", () => {

@@ -50,7 +50,10 @@ export const contextNote = (run: TaskRun): string | undefined => {
 const handoffLine = (handoff: TaskRun["handoff"]): string[] => handoff ? [`New session, replacing ${handoff.fromSessionId}: ${handoff.reason}`] : [];
 
 /** A run as `pier task runs` prints it. */
-export const ledgerRun = (run: TaskRun): LedgerRun => ({ runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt });
+export const ledgerRun = (run: TaskRun): LedgerRun => {
+  const context = contextNote(run);
+  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt, ...(context ? { context } : {}) };
+};
 
 /** What a callback's card says about the one run it carries. */
 const oneRun = (run: TaskRun): { source: SystemInputSource; state: TaskRun["state"]; cwd?: string } => {
@@ -200,12 +203,15 @@ export class TaskCallbacks {
     const sections = runs.map((run) => {
       const goal = run.goalId ? this.store.getGoal(run.goalId) : undefined;
       const root = goal?.outcome ? this.store.getRun(goal.rootRunId) : undefined;
+      // A goal's end is the worker's context, as goalBody relays its conclusion, not the reviewer's.
+      const worker = root?.targetSessionId && run.targetSessionId !== root.targetSessionId ? this.store.latestRunForTarget(root.targetSessionId) : undefined;
+      const context = contextNote(worker ?? run);
       return [
         ...(goal?.outcome ? [goalLine(goal, root ? runCwd(root) : null)] : []),
         `Task "${run.context.definition.name}" finished with state: ${run.state}`,
         runRef(run),
         ...handoffLine(run.handoff ?? root?.handoff),
-        ...(contextNote(run) ? [`Context: ${contextNote(run)!}`] : []),
+        ...(context ? [`Context: ${context}`] : []),
         "",
         this.goalBody(run, root, goal?.outcome === "done") ?? runResultText(run),
       ].join("\n");
