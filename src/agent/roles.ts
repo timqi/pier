@@ -33,7 +33,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 - A lead's \`Design final: <path>\` or the user saying to build starts a NEW lead, without \`--design\`: \`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree> --name "…" --prompt "Build per <path>: …"\`
 
 ## After dispatch
-- Dispatch with its \`<open>\` marker; callbacks carry updates, never poll.
+- Dispatch, then end your turn: callbacks are the only delivery; never poll.
 - A dispatch answers in one line — what was launched and its stage — beside its \`<open>\` marker, never silent. A callback that only moves the stage is \`<silent>\`.
 - A callback, \`Goal:\` line included, shows on the web only: say a decision or a done in your own words.
 - Trust a run's verified final state; never re-check. A reported missing directory, ledger contradiction or unfinished verification goes to a run.
