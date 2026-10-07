@@ -133,9 +133,9 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_340],
+    ["DISPATCHER", DISPATCHER, 1_310],
     ["WORKER", WORKER, 360],
-    ['lead("build")', lead("build"), 550],
+    ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);

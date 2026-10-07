@@ -65,7 +65,7 @@ The role contracts, `reviewPrompt`, `fixPrompt` and Pier's `[Pier: …]` notes u
 | goal | a worker run reviewed and fixed until clean, from its root run | loop |
 | item | one `<open>` entry: its problem is the key, its stage where it stands | task, topic |
 | phase | a lead's: `design` or `build` | stage |
-| default | `MODEL_TABLE`'s thinking cell: no `--thinking`, the tier's own level | the pin |
+| default | `MODEL_TABLE`'s missing `--thinking`: the tier's own level | the pin |
 
 ### Milestones
 
