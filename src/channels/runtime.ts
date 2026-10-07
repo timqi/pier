@@ -135,15 +135,16 @@ export class ChannelRuntime {
   /** A design lead waiting on the user gets a thread in the home DM bound to
    *  its session (docs/design/11 §Child threads); its later states edit the
    *  root. No home, its adapter down, or the session already in a chat: nothing
-   *  — the web's needs-you carries it. Every failure is a note in the chat. */
-  async designLead(lead: LeadTurn, state: LeadState): Promise<void> {
+   *  — the web's needs-you carries it. Every failure is a note in the chat.
+   *  Answers whether a later state edited the root. */
+  async designLead(lead: LeadTurn, state: LeadState): Promise<boolean> {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
-    if (!home || !channel) return;
+    if (!home || !channel) return false;
     const note = { text: rootLine(lead, state), origin: lead.origin };
     const bound = this.conversations.keyOf(lead.sessionId);
     if (state === "waiting") {
-      if (bound) return;
+      if (bound) return false;
       let thread: string | undefined;
       try {
         thread = await channel.openThread(home.chatId, note);
@@ -156,12 +157,12 @@ export class ChannelRuntime {
         await this.report(channel, thread ?? home.chatId, `"${lead.name}" waits for you on the web; ${
           thread ? "its turn did not reach this thread" : "its thread could not be opened"}: ${String(err)}`);
       }
-      return;
+      return false;
     }
     // Only a thread of the home chat has a root of ours to edit.
-    if (!bound || bound.channelId !== home.platform || chatOf(bound.conversationId) !== home.chatId) return;
-    await channel.editRoot(bound.conversationId, note).catch((err: unknown) =>
-      this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`));
+    if (!bound || bound.channelId !== home.platform || chatOf(bound.conversationId) !== home.chatId) return false;
+    return channel.editRoot(bound.conversationId, note).then(() => true, (err: unknown) =>
+      this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`).then(() => false));
   }
 
   /** The home chat's status message (docs/design/11 §Status), while its adapter

@@ -236,7 +236,8 @@ describe("ChannelRuntime", () => {
       expect(attached).toEqual([[{ channelId: "slack", conversationId: "D1/1900.1" }, "lead"]]);
       // Bound: a later turn of the user's is the thread's; the root follows the design.
       await rt.designLead(lead("more"), "waiting");
-      await rt.designLead(lead("Design final: /d.md"), "final");
+      // Only an edited root moves the status card (main.ts).
+      expect(await rt.designLead(lead("Design final: /d.md"), "final")).toBe(true);
       await rt.designLead(lead("provider down"), "failed");
       expect(posted().slice(2)).toEqual([
         "edit D1/1900.1: ✓ storage · design final",
@@ -252,7 +253,7 @@ describe("ChannelRuntime", () => {
       home = { platform: "slack", chatId: "D1" };
       bound.set("C9/1.1", "lead");
       await rt.designLead(lead(), "waiting");
-      await rt.designLead(lead(), "final");
+      expect(await rt.designLead(lead(), "final")).toBe(false);
       expect(posted()).toEqual([]);
       bound.clear();
       openFails = new Error("ratelimited");

@@ -159,9 +159,9 @@ tasks = new TaskService(taskStore, factory, router, hub, {
       name: run.context.definition.name,
       origin: { kind: "task-callback", taskId: run.taskId, runId: run.id, sourceSessionId: run.targetSessionId, source: runSource(run), state: run.state },
       text: state === "failed" ? run.error ?? run.state : runResultText(run),
-    }, state).then(() => {
+    }, state).then((edited) => {
       // The user reads the root's ✓ first; the card follows to the bottom.
-      if (state === "final") setTimeout(() => refreshStatus(true), FINAL_REPOST_MS);
+      if (edited && state === "final") setTimeout(() => refreshStatus(true), FINAL_REPOST_MS);
     }, (err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
   },
   // Through the ledger: an interruption is recorded while no chat is connected.
