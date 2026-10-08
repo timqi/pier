@@ -9,8 +9,8 @@ on:
 
 permissions:
   contents: write
-  # Provenance: npm records that this tarball was built by this workflow from
-  # this commit, which is the only part of "trust the package" we can automate.
+  # npm Trusted Publishing: the OIDC token is the publish credential, and
+  # provenance (this tarball was built by this workflow from this commit) comes with it.
   id-token: write
 
 jobs:
@@ -25,6 +25,9 @@ jobs:
           node-version: "24"
           cache: npm
           registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm >= 11.5.1; Node 24's bundled npm may be older,
+      # so an exact version is pinned: the publisher is not a moving range.
+      - run: npm install -g npm@11.21.0
 
       # The footer shows package.json's version, so a tag that disagrees with it
       # would put a number on screen that names no commit.
@@ -66,8 +69,6 @@ jobs:
       # `prepack` rebuilds inside the pack, so what ships is what this job just
       # verified. Access and provenance come from publishConfig in package.json.
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
       - name: Publish the release
