@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DISPATCHER, lead, MODEL_TABLE, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
 
 // What code or the CLI parses back out of these prompts, not their sentences.
-const instance = { boardsDir: "/home/q/.pier/boards", publicUrl: "" };
+const instance = { publicUrl: "" };
 const tokens = (text: string): number => Math.ceil(text.length / 4);
 
 describe("the dispatcher contract", () => {
@@ -106,9 +106,9 @@ describe("the worker contract", () => {
 });
 
 describe("the surface prompt", () => {
-  it("names the real boards folder, the private route and where a published link comes from", () => {
-    const prompt = surfacePrompt({ boardsDir: "/home/q/.pier_test/boards", publicUrl: "https://test-pier.example.com" });
-    for (const fact of ["/home/q/.pier_test/boards/<slug>/", "https://test-pier.example.com", "/boards/<slug>/", "the `url` its manifest carries", "apply_patch"]) {
+  it("names the instance's address", () => {
+    const prompt = surfacePrompt({ publicUrl: "https://test-pier.example.com" });
+    for (const fact of ["https://test-pier.example.com", "apply_patch"]) {
       expect(prompt).toContain(fact);
     }
   });
@@ -128,7 +128,7 @@ describe("the surface prompt", () => {
     }
     const worker = surfacePrompt(instance, "worker");
     for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>"]) expect(worker).not.toContain(gone);
-    for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch", "/home/q/.pier/boards/<slug>/"]) expect(worker).toContain(kept);
+    for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch"]) expect(worker).toContain(kept);
   });
 });
 
@@ -139,7 +139,7 @@ describe("prompt sizes", () => {
     ["DISPATCHER", DISPATCHER, 1_365],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
-    ["surfacePrompt()", surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "https://pier.example.com" }), 700],
+    ["surfacePrompt()", surfacePrompt({ publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);
   });

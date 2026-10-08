@@ -67,7 +67,7 @@ const precompress = (): Plugin => {
 
 export default defineConfig({
   root: "src/web/ui",
-  // The workbench's prefix: the manifest scope must not cover /boards and /p.
+  // The workbench's prefix: the manifest scope must not cover /login.
   base: "/app/",
   plugins: [tailwindcss(), chunkBudget(), precompress()],
   define: { __PIER_VERSION__: JSON.stringify(version) },

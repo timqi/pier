@@ -4,7 +4,6 @@
 
 import { X } from "lucide";
 import { failure, getJson, sendJson } from "./api.js";
-import { createBoardsPane } from "./boards.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { $, agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
@@ -18,7 +17,7 @@ import { escapeKey } from "./shortcut.js";
 import { createTasksPane } from "./tasks.js";
 import { createVaultPane } from "./vault.js";
 
-type Topic = "instance" | "models" | "channels" | "vault" | "tasks" | "boards" | "files" | "security";
+type Topic = "instance" | "models" | "channels" | "vault" | "tasks" | "files" | "security";
 // Setup order: what you need first sits first — what to run on, then what the
 // agent is made of, then where it talks and what it may use, then what it
 // made, then the instance's own facts.
@@ -28,7 +27,6 @@ const TOPICS: [Topic, string][] = [
   ["channels", "Channels"],
   ["vault", "Vault"],
   ["tasks", "Tasks"],
-  ["boards", "Boards"],
   ["instance", "Instance"],
   ["security", "Security"],
 ];
@@ -120,7 +118,7 @@ export function createSettingsView(
     setStatus(
       urlStatus,
       "saved",
-      publicUrl ? `Saved — boards link as ${publicUrl}/boards/<slug>/` : "Cleared.",
+      publicUrl ? `Saved — agents link as ${publicUrl}` : "Cleared.",
     );
   }
   urlSave.onclick = () => void saveUrl();
@@ -133,7 +131,7 @@ export function createSettingsView(
     "Where this Pier is reached from outside — the proxy's address, not the port it listens on.",
     field("Base URL", urlInput, {
       hint:
-        "Agents read it to hand you a clickable board link instead of a path. " +
+        "Agents read it to hand you a clickable link instead of a host they guessed. " +
         "Nothing here changes what Pier serves; leave it empty if Pier is only reachable locally.",
     }),
     h("div", "flex items-center gap-3", urlSave, urlStatus),
@@ -503,8 +501,6 @@ export function createSettingsView(
   const vaultHost = wrap(vaultPane.el);
   const tasksPane = createTasksPane();
   const tasksHost = wrap(tasksPane.el);
-  const boardsPane = createBoardsPane();
-  const boardsHost = wrap(boardsPane.el);
   // The query is the route's: only Vault reads one (`?name=X` prefills its add row).
   const simplePanes: [Topic, HTMLElement, (query?: string) => void][] = [
     ["instance", instancePane, loadInstance],
@@ -514,11 +510,10 @@ export function createSettingsView(
     }],
     ["vault", vaultHost, (query) => vaultPane.show(query)],
     ["tasks", tasksHost, tasksPane.show],
-    ["boards", boardsHost, boardsPane.show],
     ["security", securityPane, () => void loadSecurity()],
   ];
 
-  root.append(head, instancePane, modelsPane, channelsHost, vaultHost, tasksHost, boardsHost, filesHost, securityPane);
+  root.append(head, instancePane, modelsPane, channelsHost, vaultHost, tasksHost, filesHost, securityPane);
 
   function show(arg?: string, query?: string): void {
     if (isTopic(arg)) topic = arg;

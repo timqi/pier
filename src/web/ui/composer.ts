@@ -399,16 +399,16 @@ function commandMenuKey(ev: KeyboardEvent): boolean {
 
 // --- composer drafts -------------------------------------------------------------------
 // Per session, in sessionStorage only: an unsent draft is never the agent's
-// business, and a board's own script runs on this origin (boards/boards.ts) —
-// in another tab, which is what keeps it out of reach.
+// business, and a tab-scoped store is out of reach of any other page on this
+// origin.
 
 const DRAFT_PREFIX = "pier.draft.";
 const draftKey = (id: string): string => `${DRAFT_PREFIX}${id}`;
 let draftVersion = 0;
 
-/** Drafts were kept in localStorage until they became tab-scoped, and a board's
- *  script reads that store on this origin — so an upgraded workbench moves what
- *  is left into this tab and deletes the exposed copies. Storage can be denied
+/** Drafts were kept in localStorage until they became tab-scoped, and any page
+ *  on this origin reads that store — so an upgraded workbench moves what is
+ *  left into this tab and deletes the exposed copies. Storage can be denied
  *  outright (private mode, blocked cookies), which costs the move, not the boot. */
 function adoptStoredDrafts(): void {
   try {

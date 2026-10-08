@@ -64,7 +64,6 @@ function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolea
       calls.push("login");
       return "https://pier.example/login/tok";
     },
-    boards: () => ({ project: "pier-test", base: "https://pier-test.pages.dev" }),
     ...over,
   }, path);
   servers.push(server);
@@ -107,19 +106,6 @@ describe("cli socket", () => {
     expect(await call(path, "{}", "POST", "/login")).toEqual({ status: 200, body: { url: "https://pier.example/login/tok" } });
     expect(await call(path, "[]", "POST", "/login")).toEqual({ status: 400, body: { error: "body must be a JSON object" } });
     expect(calls).toEqual(["login"]);
-  });
-
-  it("names the Pages project for pier boards publish with no session behind the call, or says none is configured", async () => {
-    const { path } = start();
-    await listening(servers[0]!);
-    expect(await call(path, "{}", "POST", "/boards"))
-      .toEqual({ status: 200, body: { project: "pier-test", base: "https://pier-test.pages.dev" } });
-    expect(await call(path, JSON.stringify({ sessionId: "s1" }), "POST", "/boards"))
-      .toEqual({ status: 200, body: { project: "pier-test", base: "https://pier-test.pages.dev" } });
-    const { path: bare } = start(sockPath(), { boards: () => null });
-    await listening(servers[1]!);
-    expect(await call(bare, JSON.stringify({ sessionId: "s1" }), "POST", "/boards"))
-      .toEqual({ status: 422, body: { error: "no Pages project configured — Console → Boards" } });
   });
 
   it("resolves names for the caller and names its session in the log line", async () => {

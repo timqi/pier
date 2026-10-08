@@ -25,7 +25,7 @@ icons:
 size:
     #!/usr/bin/env bash
     count() { cat "$@" | grep -v '^\s*$' | grep -vcE '^\s*(//|/\*|\*)'; }
-    for a in core channels web agent tasks websearch boards; do
+    for a in core channels web agent tasks websearch; do
         printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'))"
     done
     printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -vE '\.test(kit)?\.ts$'))"

@@ -1,10 +1,9 @@
-// Settings → Tasks and → Boards drawn from their GET answers with the small
+// Settings → Tasks drawn from its GET answers with the small
 // DOM double: a switch writes and redraws from the server, a refusal is said,
 // a run's log opens from its row.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { button as buttonIn, installDom, labelled, walk, type FakeElement } from "./dom.testkit.js";
-import { createBoardsPane } from "./boards.js";
+import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
 import { createTasksPane } from "./tasks.js";
 
 let root: FakeElement;
@@ -25,8 +24,6 @@ const run = {
   error: "exit 1", skipReason: null, callbackError: null, probe: null, targetSessionId: null,
   result: { type: "bash", exitCode: 1, stdout: "partial", stderr: "boom", stdoutTruncated: false, stderrTruncated: false },
 };
-const board = { slug: "digest", title: "Weekly", description: "", public: false, updatedAt: new Date().toISOString() };
-const LIVE = "https://pier-test.pages.dev/digest/";
 
 beforeEach(() => {
   root = installDom().createElement("div");
@@ -94,135 +91,5 @@ describe("Settings → Tasks", () => {
     expect(details.textContent).toContain("exit 1");
     expect(details.textContent).toContain("partial");
     expect(details.textContent).toContain("boom");
-  });
-});
-
-describe("Settings → Boards", () => {
-  beforeEach(() => {
-    answers["GET /api/boards"] = () => Response.json([board]);
-    answers["GET /api/settings"] = () => Response.json({ pagesProject: "pier-test", pagesUrl: "" });
-  });
-  const href = (link: FakeElement): string => link.getAttribute("href") ?? (link as unknown as { href: string }).href;
-
-  it("links a private board on the operator's prefix, and a live one on Pages", async () => {
-    await mount(createBoardsPane());
-    const link = walk(root).find((el) => el.localName === "a")!;
-    expect(link.textContent).toBe("Weekly");
-    expect(href(link)).toBe("/boards/digest/");
-    expect(text()).toContain("digest · private");
-    expect(text()).not.toContain("checkbox");
-
-    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
-    const pane = createBoardsPane();
-    await mount(pane);
-    const links = walk(pane.el as unknown as FakeElement).filter((el) => el.localName === "a");
-    expect(links.map(href)).toEqual([LIVE, LIVE]);
-    expect(links[1]!.textContent).toBe(LIVE);
-  });
-
-  it("badges a board live on Pages Public, and only that one", async () => {
-    answers["GET /api/boards"] = () => Response.json([
-      { ...board, slug: "live", title: "Live", public: true, url: LIVE, publishedAt: board.updatedAt },
-      { ...board, slug: "pending", title: "Pending", public: true },
-    ]);
-    await mount(createBoardsPane());
-    const badges = walk(root).filter((el) => el.textContent === "Public" && el.localName === "span");
-    expect(badges).toHaveLength(1);
-    expect(text().indexOf("Public")).toBeLessThan(text().indexOf("Pending"));
-  });
-
-  it("says each of the six states", async () => {
-    const at = board.updatedAt;
-    const earlier = new Date(Date.parse(at) - 60_000).toISOString();
-    answers["GET /api/boards"] = () => Response.json([
-      { ...board, slug: "a" },
-      { ...board, slug: "b", public: true, url: LIVE, publishedAt: at },
-      { ...board, slug: "c", public: true, url: LIVE, publishedAt: earlier },
-      { ...board, slug: "d", public: true },
-      { ...board, slug: "e", public: false, url: LIVE, publishedAt: at },
-      { ...board, slug: "f", public: true, url: LIVE, publishedAt: at, deleted: true },
-    ]);
-    await mount(createBoardsPane());
-    for (const line of ["a · private", "b · published ·", "c · published · changes unpublished", "d · publish pending", "e · unpublish pending", "f · deleted · still live"]) {
-      expect(text()).toContain(line);
-    }
-  });
-
-  it("stores the Pages project and address through PUT /api/settings", async () => {
-    answers["PUT /api/settings"] = () => Response.json({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
-    await mount(createBoardsPane());
-    const [project, address] = walk(root).filter((el) => el.localName === "input");
-    expect(project!.value).toBe("pier-test");
-    project!.value = "pier-g1";
-    address!.value = "boards.example.com";
-    buttonIn(root, "Save")!.onclick!(new Event("click"));
-    await settled();
-    expect(fetcher.mock.calls.find(([, init]) => init?.method === "PUT")?.[1]?.body).toBe('{"pages":{"project":"pier-g1","url":"boards.example.com"}}');
-    expect(address!.value).toBe("https://boards.example.com");
-    expect(text()).toContain("public boards publish to https://boards.example.com/<slug>/");
-  });
-
-  it("copies the absolute link from the row's menu", async () => {
-    const writeText = vi.fn(async () => {});
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
-    await mount(createBoardsPane());
-    labelled(root, "Actions for Weekly")!.onclick!(new Event("click"));
-    buttonIn(document.body as unknown as FakeElement, "Copy link")!.onclick!(new Event("click"));
-    await settled();
-    expect(writeText).toHaveBeenCalledWith("https://pier.test/boards/digest/");
-    expect(text()).toContain("Copied digest's link.");
-  });
-
-  it("deletes once confirmed, and redraws the list; a live board is said to stay live", async () => {
-    answers["DELETE /api/boards/digest"] = () => Response.json({ deleted: "digest" });
-    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
-    await mount(createBoardsPane());
-    answers["GET /api/boards"] = () => Response.json([]);
-    vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
-    labelled(root, "Actions for Weekly")!.onclick!(new Event("click"));
-    buttonIn(document.body as unknown as FakeElement, /^Delete/)!.onclick!(new Event("click"));
-    expect(calls()).not.toContain("DELETE /api/boards/digest");
-    buttonIn(document.body as unknown as FakeElement, /^Delete digest/)!.onclick!(new Event("click"));
-    await settled();
-    expect(text()).toContain("No boards yet");
-    expect(text()).toContain(`Deleted digest — the folder is kept as digest.deleted-<time>. Still live at ${LIVE} until the next publish.`);
-  });
-
-  const sse = (...frames: unknown[]): Response =>
-    new Response(frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
-
-  it("publishes from the card: streams wrangler's output, links what went live, redraws the list", async () => {
-    answers["POST /api/boards/publish"] = () => sse(
-      { log: "Uploading… " }, { log: "done\n" }, { out: `published ${LIVE}` }, { out: "removed stale" },
-      { out: "deployment abcd1234, 1 older deleted" }, { exit: 0 },
-    );
-    await mount(createBoardsPane());
-    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
-    const publish = buttonIn(root, "Publish")!;
-    publish.onclick!(new Event("click"));
-    expect(publish.disabled).toBe(true);
-    await vi.waitFor(() => expect(text()).toContain("Published."));
-    expect(publish.disabled).toBe(false);
-    expect(walk(root).find((el) => el.localName === "pre")!.textContent).toBe("Uploading… done\n");
-    // The result line's link, and the redrawn row's title and address.
-    expect(walk(root).filter((el) => el.localName === "a" && href(el) === LIVE)).toHaveLength(3);
-    expect(text()).toContain("removed stale");
-    expect(text()).toContain("deployment abcd1234, 1 older deleted");
-    expect(text()).toContain("digest · published");
-  });
-
-  it("names the failing step, and the server's refusal of a second publish", async () => {
-    answers["POST /api/boards/publish"] = () => sse({ log: "vt: approval denied\n" }, { err: "boards: project list failed" }, { exit: 1 });
-    await mount(createBoardsPane());
-    buttonIn(root, "Publish")!.onclick!(new Event("click"));
-    await vi.waitFor(() => expect(text()).toContain("vt: approval denied"));
-    expect(text()).toContain("boards: project list failed");
-    expect(text()).toContain("Publish failed");
-
-    answers["POST /api/boards/publish"] = () => Response.json({ error: "a publish is already running" }, { status: 409 });
-    buttonIn(root, "Publish")!.onclick!(new Event("click"));
-    await vi.waitFor(() => expect(text()).toContain("a publish is already running"));
-    expect(text()).not.toContain("vt: approval denied");
   });
 });

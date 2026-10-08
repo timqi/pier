@@ -665,7 +665,7 @@ export function createServer(
 
   // The workbench lives under /app/ (vite.config.ts `base`): a manifest scope
   // is a path prefix with no exclusions, so at `/` an installed Pier would
-  // capture the Show pages at /boards/* and /b/*.
+  // capture every route outside the workbench, /login included.
   app.get("/", (c) => c.redirect("/app/"));
 
   // The tab says which instance this is: mistaking staging for production is

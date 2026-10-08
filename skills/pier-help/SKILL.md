@@ -7,7 +7,7 @@ description: How Pier itself works — sessions, restarts, messages and files fr
 
 Pier is the workspace this session runs in: agent sessions behind chat
 surfaces — a web workbench and IM channels (Slack, Lark) — plus
-scheduled tasks, subagents and boards. Answer from the facts below. If the
+scheduled tasks and subagents. Answer from the facts below. If the
 answer is not here, say you do not know how this instance is configured rather
 than guessing: the Console (Pier's admin web UI) is the operator's source of
 truth.
@@ -192,4 +192,3 @@ improvising.
   already in your context.
 - Delegating and scheduling work: the pier-tasks skill. Reading and posting
   Slack: pier-slack. A command that needs a token or key: pier-vault.
-  Presenting a report as a page: pier-boards.

@@ -86,8 +86,6 @@ const TOOLS = [{
 /** GET /api/settings on a fresh instance. */
 const SETTINGS_JSON = {
   publicUrl: "",
-  pagesProject: "",
-  pagesUrl: "",
   modelMenu: [],
   autoUpdate: false,
   skillsOff: [],
@@ -1224,26 +1222,6 @@ describe("workbench server", () => {
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
   });
 
-  it("writes the Pages project and address, refusing a name Cloudflare would", async () => {
-    const { app, settings } = setup();
-    const put = (pages: unknown) =>
-      app.request("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pages }),
-      });
-    const ok = await put({ project: " pier-g1 ", url: "boards.example.com/" });
-    expect(ok.status).toBe(200);
-    expect(await ok.json()).toMatchObject({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
-    for (const bad of [{ project: "Pier_G1", url: "" }, { project: "pier", url: "not a url" }, { project: "pier" }, "pier"]) {
-      expect((await put(bad)).status).toBe(400);
-    }
-    expect(settings.get()).toMatchObject({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
-    // Empty clears both: the instance then publishes no board.
-    expect((await put({ project: "", url: "" })).status).toBe(200);
-    expect(settings.get()).toMatchObject({ pagesProject: "", pagesUrl: "" });
-  });
-
   it("writes the model menu without disturbing the URL, and rejects a bad one", async () => {
     const { app, settings } = setup();
     settings.setPublicUrl("https://pier.example.com");
@@ -2260,12 +2238,12 @@ describe("the app shell", () => {
     expect(html).toContain('<meta name="mobile-web-app-capable" content="yes" />');
   });
 
-  it("lives under /app/, so an installed Pier never captures the Show pages", async () => {
+  it("lives under /app/, so an installed Pier never captures the routes outside it", async () => {
     const { app } = setup();
     const root = await app.request("/");
     expect(root.status).toBe(302);
     expect(root.headers.get("location")).toBe("/app/");
-    // Every path the manifest names is inside its own scope; /boards and /p are not.
+    // Every path the manifest names is inside its own scope; /login is not.
     const manifest = JSON.parse(readFileSync(new URL("./ui/public/manifest.webmanifest", import.meta.url), "utf8"));
     expect(manifest.scope).toBe("/app/");
     expect(manifest.start_url).toBe("/app/");

@@ -12,8 +12,6 @@ import { CredentialStore } from "./agent/credentials.js";
 import { IndexedListing } from "./agent/listing.js";
 import { PiPackageStore } from "./agent/packages.js";
 import { PiAgentFactory } from "./agent/pi.js";
-import { defaultBoardsDir, registerBoardRoutes, rotateBoardViews } from "./boards/boards.js";
-import { registerPublishRoute, type PagesTarget } from "./boards/publish.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
@@ -113,7 +111,7 @@ const taskStore = new TaskStore(db);
 const factory = new PiAgentFactory(
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
-  (role) => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }, role),
+  (role) => surfacePrompt({ publicUrl: settings.get().publicUrl }, role),
   // Documents Pier's own tools, so it loads only inside a Pier session.
   [skillsDir],
   new CredentialStore(db, secrets),
@@ -353,8 +351,6 @@ app.onError((err, c) => {
 // Before every route: Hono runs middleware in registration order, so a surface
 // added later is covered without knowing this exists.
 const auth = new AuthStore(db);
-// A board page carries no cookie, so the signing key is what a sign-out revokes.
-auth.onRevoke(rotateBoardViews);
 const passkeys = new PasskeyStore(db);
 // First: the listener opens while vt may still be reading the KEK, and routes
 // on every surface read the vault.
@@ -372,12 +368,6 @@ registerConfigSyncRoutes(app, {
 registerTaskRoutes(app, tasks);
 registerChannelRoutes(app, channelStore, { reload: startChannels }, conversations, () => piConfig.readDefaults());
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
-registerBoardRoutes(app);
-const pagesTarget = (): PagesTarget | null => {
-  const { pagesProject, pagesUrl } = settings.get();
-  return pagesProject ? { project: pagesProject, base: pagesUrl || `https://${pagesProject}.pages.dev` } : null;
-};
-registerPublishRoute(app, pagesTarget);
 registerPushRoutes(app, {
   store: new PushStore(db, secrets),
   hub,
@@ -446,7 +436,6 @@ servePier({
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
   login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,
-  boards: pagesTarget,
 });
 
 // Every command a turn runs inherits this env: `NODE_ENV=production` makes an

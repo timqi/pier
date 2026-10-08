@@ -32,14 +32,11 @@ export interface SocketHosts {
   knows: (sessionId: string) => Promise<boolean>;
   /** `pier login`: a one-time sign-in URL for the workbench. */
   login: () => string;
-  /** `pier boards publish`: the Pages project and the address its boards are
-   *  read at; null when the instance has no project configured. */
-  boards: () => { project: string; base: string } | null;
 }
 
 /** Typed by the operator in a terminal as often as by an agent in a turn, and
  *  answering nothing a session scopes: the routes with no session behind them. */
-const ANONYMOUS = new Set(["/login", "/boards"]);
+const ANONYMOUS = new Set(["/login"]);
 
 type Answer = (status: number, body: Record<string, unknown>) => void;
 
@@ -64,11 +61,6 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
     const url = login();
     log.info("sign-in link minted for pier login");
     answer(200, { url });
-  },
-  async "/boards"({ boards }, _body, _sessionId, answer) {
-    const target = boards();
-    if (!target) return answer(422, { error: "no Pages project configured — Console → Boards" });
-    answer(200, target);
   },
 };
 

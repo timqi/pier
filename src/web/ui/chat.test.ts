@@ -1083,19 +1083,19 @@ describe("the turn's bubble", () => {
     activity.renderBackgroundRun(run("root", { goalId: "g1" }));
     chat.completeTurn("Launched.");
     const launched = bubble();
-    chat.appendTurn("user", "and the board?", false, 2);
+    chat.appendTurn("user", "and the report?", false, 2);
     callback("other");
     activity.renderBackgroundRun(run("review", { goalId: "g1", byPier: true }));
     // A step whose goal is not on screen: a closed bubble of its own, above the turn in flight.
     activity.renderBackgroundRun(run("lost", { goalId: "g2", byPier: true }));
-    chat.completeTurn("Board.");
+    chat.completeTurn("Report.");
     expect(names(launched)).toEqual(["run · runningroot", "run · runningreview"]);
     expect(launched.children.find((el) => el.classList.contains("chip-details"))!.children).toHaveLength(3);
     expect(chips()).toEqual(["system"]);
     const lone = pane().querySelectorAll("[data-kind='assistant']").at(-2)!;
     expect(names(lone)).toEqual(["run · runninglost"]);
     expect("pending" in lone.dataset).toBe(false);
-    expect(bubble().children.find((el) => el.classList.contains("md"))!.textContent.trim()).toBe("Board.");
+    expect(bubble().children.find((el) => el.classList.contains("md"))!.textContent.trim()).toBe("Report.");
   });
 
   it("leaves a goal's step out of the turn that finished after it was queued, on a reload", () => {
@@ -1103,8 +1103,8 @@ describe("the turn's bubble", () => {
     chat.renderSnapshot([
       { role: "user", text: "build it", at: 1 },
       { role: "assistant", text: "Launched.", steps, meta: meta(2) },
-      { role: "user", text: "and the board?", at: 3 },
-      { role: "assistant", text: "Board.", steps, meta: meta(10) },
+      { role: "user", text: "and the report?", at: 3 },
+      { role: "assistant", text: "Report.", steps, meta: meta(10) },
     ], "idle", [run("root", { goalId: "g1", queuedAt: 1 }), run("review", { goalId: "g1", byPier: true, queuedAt: 5 })]);
     const [first, second] = pane().querySelectorAll("[data-kind='assistant']");
     expect(chips(first)).toEqual(["activity", "background-run", "background-run"]);

@@ -86,7 +86,7 @@ ${environment("PATH", pathEnv(execPath, shellPath))}
 # whoever reaches this port can drive an agent that runs a shell.
 ${environment("HOST", host)}
 ${environment("PORT", String(port))}
-${pierHome ? `# Where the database, the boards and the password hash live.\n${environment("PIER_HOME", pierHome)}\n` : ""}Restart=always
+${pierHome ? `# Where the database, the sessions and the password hash live.\n${environment("PIER_HOME", pierHome)}\n` : ""}Restart=always
 RestartSec=2
 # The journal is where the first-run password is printed, so keep it readable.
 StandardOutput=journal

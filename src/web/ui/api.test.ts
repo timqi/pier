@@ -46,9 +46,9 @@ describe("getJson", () => {
     // A proxy's login page answering 200 used to reach a view as a
     // SyntaxError quoting "<html…", or as nothing at all.
     answering("<html>hello</html>", 200, "text/html");
-    const got = await getJson("/api/x", "Could not load boards");
+    const got = await getJson("/api/x", "Could not load tasks");
     expect(got.ok).toBe(false);
-    expect(got.ok === false && got.error.startsWith("Could not load boards:")).toBe(true);
+    expect(got.ok === false && got.error.startsWith("Could not load tasks:")).toBe(true);
   });
 
   it("says so when the request never answered", async () => {

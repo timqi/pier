@@ -225,17 +225,13 @@ const hash = (password: string, salt: string): string =>
 
 const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
-/** The login form, the passkey half of it (web/passkeys.ts) and `/b/*` — the
- *  signed prefix `/boards/*` redirects to once this boundary has passed, and
- *  the stylesheet a board links — are the exemptions here (`/config-sync/:token`
- *  is mounted before this middleware, docs/architecture.md names them);
- *  `/boards/*` itself stays behind. */
+/** The login form and the passkey half of it (web/passkeys.ts) are the
+ *  exemptions here (`/config-sync/:token` is mounted before this middleware,
+ *  docs/architecture.md names them). */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
   if (path.startsWith("/login/")) return method === "GET";
-  if (path === "/api/passkeys/login/options" || path === "/api/passkeys/login/verify") return method === "POST";
-  if (method !== "GET" && method !== "HEAD") return false;
-  return path.startsWith("/b/");
+  return (path === "/api/passkeys/login/options" || path === "/api/passkeys/login/verify") && method === "POST";
 }
 
 /** Constant-time equality that also hides length: both sides are digested. */
@@ -330,8 +326,8 @@ export const sessionIdOf = (c: Context): string => (getCookie(c, COOKIE) ?? "").
 
 /** Stamped on the response the route actually returned: a route that hands
  *  back a native `Response` (`Response.json`, `queueResponse`) replaces `c.res`
- *  and loses anything set on the context before it. Absent-only, so a board
- *  keeps the headers it chose (boards/boards.ts). */
+ *  and loses anything set on the context before it. Absent-only, so a route
+ *  keeps the headers it chose (web/fs.ts). */
 function sealBoundary(c: Context): void {
   // Public responses too: the login form must not be frameable either, and a
   // served file must not be sniffed into a type its content-type denies.

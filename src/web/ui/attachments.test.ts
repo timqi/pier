@@ -26,7 +26,7 @@ describe("rewriteFileLinks", () => {
   });
 
   it("leaves the server's own routes, other links and code alone", () => {
-    const kept = "[board](/boards/x/) [web](https://x.test/tmp/a.png) `![x](/tmp/a.png)`";
+    const kept = "[app](/app/x/) [web](https://x.test/tmp/a.png) `![x](/tmp/a.png)`";
     expect(rewriteFileLinks(kept, "s1")).toBe(kept);
   });
 });
@@ -40,7 +40,7 @@ describe("parseFileRef", () => {
   });
 
   it("takes a filesystem root without an extension — a folder is browsable", () => {
-    expect(parseFileRef("~/.pier/boards")).toEqual({ path: "~/.pier/boards", line: undefined });
+    expect(parseFileRef("~/.pier/workspace")).toEqual({ path: "~/.pier/workspace", line: undefined });
     expect(parseFileRef("~")).toEqual({ path: "~", line: undefined });
     expect(parseFileRef("/home/qiqi/code/dev")).toEqual({ path: "/home/qiqi/code/dev", line: undefined });
     expect(parseFileRef("/etc/hosts")).toEqual({ path: "/etc/hosts", line: undefined });

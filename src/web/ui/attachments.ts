@@ -164,7 +164,7 @@ const openInFiles = (sessionId: string, cwd: string | null, path: string, line?:
 
 /** `[x](file:///p)` and `![x](/tmp/p.png)` → the session's files route: the
  *  sanitizer drops `file:`, and a bare path would ask this server for its own
- *  `/tmp`. A bare one only under a filesystem root, so `/boards/x` stays a route.
+ *  `/tmp`. A bare one only under a filesystem root, so `/app/x` stays a route.
  *  Not inside code: an example link is the code the reader asked to see. */
 export function rewriteFileLinks(markdown: string, sessionId: string): string {
   return replaceOutsideCode(markdown, /\]\(\s*<?(file:\/\/)?(\/[^)>\s]*)>?\s*\)/g, (match) => {
@@ -207,7 +207,7 @@ const REF_EXT = new Set([
  *  route. Directories included: the dialog browses one. */
 const FS_ROOT = /^(?:~|\/(?:home|Users|root|tmp|var|opt|etc|srv|mnt|media|data|usr))(?:\/|$)/;
 
-/** `src/web/ui/chat.ts:481`, `chat.ts:481:12`, `/tmp/run.log`, `~/.pier/boards` —
+/** `src/web/ui/chat.ts:481`, `chat.ts:481:12`, `/tmp/run.log`, `~/.pier/workspace` —
  *  path, and the line if one was named. A column is parsed only to be dropped;
  *  off a filesystem root an extension is required, since `src/web/ui` is as
  *  likely a directory as a file. */

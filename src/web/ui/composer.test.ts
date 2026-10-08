@@ -53,8 +53,8 @@ beforeEach(async () => {
     readAsDataURL() { this.onload?.(); }
   });
   vi.stubGlobal("fetch", state.fetch);
-  // Drafts live in sessionStorage: a board's script shares this origin but
-  // never this tab.
+  // Drafts live in sessionStorage: another page shares this origin but never
+  // this tab.
   vi.stubGlobal("sessionStorage", storage(drafts));
   vi.stubGlobal("localStorage", storage(stored));
   composer = await import("./composer.js");
@@ -150,8 +150,7 @@ it("re-reads the draft's mode when the row's width changes, not its height", () 
   expect("multiline" in row.dataset).toBe(true);
 });
 
-// A board's page is active content on this origin (boards/boards.ts), so
-// localStorage is readable by a script the agent wrote; a tab-scoped store is not.
+// localStorage is readable by any script on this origin; a tab-scoped store is not.
 
 it("keeps an unsent draft out of localStorage", () => {
   type("unsent operator secret");
@@ -160,7 +159,7 @@ it("keeps an unsent draft out of localStorage", () => {
 });
 
 // A workbench upgraded mid-draft: what the old build wrote is still readable by
-// a board's script, so the first load after it takes the drafts along and clears
+// any script on this origin, so the first load after it takes the drafts along and clears
 // them. Only drafts — the other pier.* preferences belong in localStorage.
 it("moves drafts left in localStorage into this tab and deletes them", async () => {
   stored.set("pier.draft.a", "pre-upgrade secret");
@@ -594,7 +593,7 @@ describe("the chat-command completion", () => {
 
   const skills = [
     { name: "pier-tasks", description: "Delegate work to a run." },
-    { name: "pier-boards", description: "Publish a Board." },
+    { name: "pier-web", description: "Search the web." },
   ];
 
   it("lists the chain commands, then every skill with its description, as one list", () => {
@@ -603,11 +602,11 @@ describe("the chat-command completion", () => {
     type("/");
     expect(rows()).toEqual([
       "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name",
-      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board.",
+      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-webSearch the web.",
     ]);
     type("/s");
     expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name",
-      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board."]);
+      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-webSearch the web."]);
     // The exact chain word hides the list, skills that would match included.
     composer.setSkills([{ name: "stop-all", description: "x" }]);
     type("/stop");
@@ -619,18 +618,18 @@ describe("the chat-command completion", () => {
     composer.setSkills(skills);
     type("/pier-t");
     expect(rows()).toEqual(["/skill:pier-tasksDelegate work to a run."]);
-    type("/skill:pier-b");
-    expect(rows()).toEqual(["/skill:pier-boardsPublish a Board."]);
-    type("/skill:pier-boards");
-    expect(rows()).toEqual(["/skill:pier-boardsPublish a Board."]);
+    type("/skill:pier-w");
+    expect(rows()).toEqual(["/skill:pier-webSearch the web."]);
+    type("/skill:pier-web");
+    expect(rows()).toEqual(["/skill:pier-webSearch the web."]);
   });
 
   it("fills a skill with a trailing space that closes the list for the ask", () => {
     continuous(true);
     composer.setSkills(skills);
-    type("/pier-b");
+    type("/pier-w");
     key({ key: "Enter" });
-    expect(node("#input").value).toBe("/skill:pier-boards ");
+    expect(node("#input").value).toBe("/skill:pier-web ");
     expect(menu().classList.contains("hidden")).toBe(true);
     expect(state.fetch).not.toHaveBeenCalled();
     type("/pier");
@@ -643,7 +642,7 @@ describe("the chat-command completion", () => {
     continuous(false);
     composer.setSkills(skills);
     type("/");
-    expect(rows()).toEqual(["/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board."]);
+    expect(rows()).toEqual(["/skill:pier-tasksDelegate work to a run.", "/skill:pier-webSearch the web."]);
     type("/status");
     expect(rows()).toEqual([]);
     composer.setSkills([]);

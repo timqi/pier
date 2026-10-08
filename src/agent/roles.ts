@@ -167,19 +167,18 @@ ${role === "worker" ? HEADER_WORKER : HEADER_CHAT}one too short to tell (\`ok\`,
 Reply in the language of the most recent \`lang=\`, the request's own when there is none, never the language of the context around it — seeded exchanges, English tool output or files, callbacks.
 ${role === "worker" ? "" : QUOTE_CHAT}`;
 
-/** Deployment facts an agent cannot discover: a guessed path is wrong wherever
- *  `PIER_HOME` moved and fails as "nothing is configured"; GPT models carry
+/** Deployment facts an agent cannot discover: a guessed host links nowhere
+ *  (a Host header is whatever a proxy passed on); GPT models carry
  *  `apply_patch` from post-training and go hunting for it in the shell. */
-export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }, role?: AgentRole): string {
+export function surfacePrompt(instance: { publicUrl: string }, role?: AgentRole): string {
   const reach = instance.publicUrl
-    ? `Address: ${instance.publicUrl} — a private board's link is that plus ` +
-      "`/boards/<slug>/`; a published board's is the `url` its manifest carries."
+    ? `Address: ${instance.publicUrl} — this instance's web workbench.`
     : "No public address is configured (the user sets one in Console → Settings), " +
       "so give paths and never guess a host.";
   return `${replySurfacePrompt(role)}
 ## This Pier instance
 
-Boards: \`${instance.boardsDir}/<slug>/\` — this path, not \`~/.pier\`. ${reach}
+${reach}
 
 Editing: files change through the \`edit\` tool (exact text replacement) or
 \`write\`. There is no \`apply_patch\` here — not as a tool, not as a command —
