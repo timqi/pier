@@ -23,13 +23,16 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DELETED = /^([a-z0-9][a-z0-9-]{0,63})\.deleted-\d+$/;
 
 /** `public` is the intent, `url` the fact: only `pier boards publish` writes
- *  `url`/`publishedAt`, and having a `url` means being in the live snapshot. */
+ *  `url`/`publishedAt`, and having a `url` means being in the live snapshot.
+ *  `withdrawnAt`: when a publish took the board down; until a week after it,
+ *  each publish redirects its paths away from Pages' stale edge copies. */
 interface BoardManifest {
   title: string;
   description: string;
   public: boolean;
   url?: string;
   publishedAt?: string;
+  withdrawnAt?: string;
 }
 
 /** One row of `GET /api/boards`. `deleted`: a `<slug>.deleted-<ts>` directory
@@ -146,7 +149,7 @@ export async function readManifest(
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  const { url, publishedAt, ...rest } = m;
+  const { url, publishedAt, withdrawnAt, ...rest } = m;
   return {
     ...rest,
     title: typeof m.title === "string" && m.title ? m.title : slug,
@@ -154,6 +157,7 @@ export async function readManifest(
     public: m.public === true,
     ...(typeof url === "string" && url ? { url } : {}),
     ...(typeof publishedAt === "string" && publishedAt ? { publishedAt } : {}),
+    ...(typeof withdrawnAt === "string" && withdrawnAt ? { withdrawnAt } : {}),
   };
 }
 

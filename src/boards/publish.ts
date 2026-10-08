@@ -26,6 +26,16 @@ const USAGE = [
  *  sandbox is Pier's, for a page on the workbench's host; here the host is Pages'. */
 const HEADERS = "/*\n  Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n";
 
+/** Pages' edge keeps answering a path the live deployment no longer has, from
+ *  a copy cached up to its `s-maxage=604800` earlier — past redeploys, deleted
+ *  deployments and purges; only a `_redirects` rule is consulted before it. */
+const STALE_MS = 7 * 24 * 60 * 60_000;
+
+/** 302, not 301: a browser keeps a permanent redirect, and the slug may be
+ *  published again. The target `/` is Pages' 404. */
+const redirects = (slugs: Iterable<string>): string =>
+  [...slugs].map((slug) => `/${slug}/ / 302\n/${slug}/* / 302\n`).join("");
+
 const processIo: BoardsCliIo = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`),
@@ -92,12 +102,21 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     if (await stat(join(dir, name, "site", "index.html")).catch(() => null)) live.push(slug);
     else io.stderr(`boards: ${slug}: no site/index.html, skipped`);
   }
+  // Every slug a publish took down within the week, and every one this publish
+  // takes down: those the redirect hides until Pages' copies have expired.
+  const now = Date.now();
+  const withdrawn = new Set<string>();
+  for (const { slug, manifest } of boards) {
+    if (live.includes(slug)) continue;
+    if (manifest.url || now - Date.parse(manifest.withdrawnAt ?? "") < STALE_MS) withdrawn.add(slug);
+  }
   const tmp = await mkdtemp(join(tmpdir(), "pier-pages-"));
   try {
     for (const slug of live) await cp(join(dir, slug, "site"), join(tmp, slug), { recursive: true });
     await mkdir(join(tmp, "b", "_assets"), { recursive: true });
     await cp(PIER_CSS, join(tmp, "b", "_assets", "pier.css"));
     await writeFile(join(tmp, "_headers"), HEADERS);
+    if (withdrawn.size) await writeFile(join(tmp, "_redirects"), redirects(withdrawn));
 
     const listed = await wrangler(["pages", "project", "list", "--json"], tmp, true);
     const projects = parseJson(listed.stdout);
@@ -111,6 +130,8 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     const url = new RegExp(`https://([a-z0-9]+)\\.${project}\\.pages\\.dev`).exec(deployed.stdout);
     if (deployed.code !== 0 || !url) return fail(io, "deploy");
     const hash = url[1]!;
+    // After the deploy: the last copy Pages can have cached is from before now.
+    const deployedAt = new Date().toISOString();
 
     // Only the deployments older than this one: two publishes racing each
     // other then never delete the newer.
@@ -133,10 +154,11 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     const removed: string[] = [];
     for (const { name, slug, deleted: isDeleted, manifest } of boards) {
       // `token` is the old `/p/` secret; the first publish retires it.
-      const { url: was, publishedAt: _wasAt, token: _token, ...rest } = manifest;
+      const { url: was, publishedAt: _wasAt, withdrawnAt, token: _token, ...rest } = manifest;
+      const out = was ? deployedAt : withdrawnAt;
       const next = live.includes(slug) && !isDeleted
         ? { ...rest, url: `${base}/${slug}/`, publishedAt }
-        : rest;
+        : withdrawn.has(slug) && out ? { ...rest, withdrawnAt: out } : rest;
       if (was && !("url" in next)) removed.push(slug);
       // Same keys in the same order as the read, so a private board untouched
       // by this publish is not rewritten.

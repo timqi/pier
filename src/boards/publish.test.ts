@@ -83,12 +83,14 @@ describe("pier boards publish", () => {
     expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
 
     const snapshot = join(bin, "snapshot");
-    expect(readdirSync(snapshot).sort()).toEqual([".wrangler", "_headers", "b", "digest"]);
+    expect(readdirSync(snapshot).sort()).toEqual([".wrangler", "_headers", "_redirects", "b", "digest"]);
     expect(readdirSync(join(snapshot, "digest")).sort()).toEqual(["img", "index.html"]);
     expect(readFileSync(join(snapshot, "_headers"), "utf8")).toBe(
       "/*\n  Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n",
     );
     expect(readFileSync(join(snapshot, "b", "_assets", "pier.css"), "utf8")).toContain(".kpi");
+    // What was live and is not: Pages' edge would keep serving it from cache.
+    expect(readFileSync(join(snapshot, "_redirects"), "utf8")).toBe("/gone/ / 302\n/gone/* / 302\n/stale/ / 302\n/stale/* / 302\n");
 
     expect(calls()).toEqual([
       "pages project list --json",
@@ -104,8 +106,10 @@ describe("pier boards publish", () => {
     expect(Date.parse(String(published.publishedAt))).toBeGreaterThanOrEqual(started - 1000);
     expect(Date.parse(String(published.publishedAt))).toBeLessThanOrEqual(Date.now());
     // A rewrite is the normalized manifest: title and description always present.
-    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
-    expect(manifest("gone.deleted-1700000000000")).toEqual({ title: "gone.deleted-1700000000000", description: "", public: true });
+    const withdrawnAt = expect.stringMatching(/^\d{4}-\d\d-\d\dT/);
+    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false, withdrawnAt });
+    expect(Date.parse(String(manifest("stale").withdrawnAt))).toBeGreaterThanOrEqual(Date.parse(String(published.publishedAt)));
+    expect(manifest("gone.deleted-1700000000000")).toEqual({ title: "gone.deleted-1700000000000", description: "", public: true, withdrawnAt });
     expect(statSync(join(dir, "draft", "board.json")).mtimeMs).toBe(before);
 
     expect(err).toEqual(["boards: empty: no site/index.html, skipped"]);
@@ -125,9 +129,37 @@ describe("pier boards publish", () => {
     fakeWrangler();
     makeBoard("stale", { public: false, url: `${BASE}/stale/`, publishedAt: "2026-01-01T00:00:00.000Z" });
     expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
-    expect(readdirSync(join(bin, "snapshot")).sort()).toEqual([".wrangler", "_headers", "b"]);
-    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
+    expect(readdirSync(join(bin, "snapshot")).sort()).toEqual([".wrangler", "_headers", "_redirects", "b"]);
+    expect(manifest("stale")).toMatchObject({ public: false, withdrawnAt: expect.any(String) });
+    expect(manifest("stale")).not.toHaveProperty("url");
     expect(out).toEqual(["removed stale", "deployment abcd1234, 1 older deleted"]);
+  });
+
+  it("keeps redirecting a withdrawn slug for a week, then drops it; publishing it again ends the redirect", async () => {
+    fakeWrangler();
+    const day = 24 * 60 * 60_000;
+    const recent = new Date(Date.now() - 3 * day).toISOString();
+    makeBoard("recent", { public: false, description: "", withdrawnAt: recent });
+    makeBoard("old.deleted-1700000000000", { description: "", public: true, withdrawnAt: new Date(Date.now() - 8 * day).toISOString() });
+    makeBoard("back", { public: true, withdrawnAt: recent });
+    const before = statSync(join(dir, "recent", "board.json")).mtimeMs;
+
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
+
+    expect(readFileSync(join(bin, "snapshot", "_redirects"), "utf8")).toBe("/recent/ / 302\n/recent/* / 302\n");
+    expect(manifest("recent").withdrawnAt).toBe(recent);
+    expect(statSync(join(dir, "recent", "board.json")).mtimeMs).toBe(before);
+    expect(manifest("old.deleted-1700000000000")).toEqual({ title: "old.deleted-1700000000000", description: "", public: true });
+    expect(manifest("back")).toMatchObject({ url: `${BASE}/back/` });
+    expect(manifest("back")).not.toHaveProperty("withdrawnAt");
+    expect(out).toEqual([`published ${BASE}/back/`, "deployment abcd1234, 1 older deleted"]);
+  });
+
+  it("writes no _redirects when nothing was withdrawn", async () => {
+    fakeWrangler();
+    makeBoard("digest", { public: true });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
+    expect(readdirSync(join(bin, "snapshot"))).not.toContain("_redirects");
   });
 
   it("leaves every manifest alone when the deploy fails", async () => {
@@ -147,7 +179,7 @@ describe("pier boards publish", () => {
     makeBoard("stale", { public: false, url: `${BASE}/stale/` });
     expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(1);
     expect(manifest("digest")).toMatchObject({ url: `${BASE}/digest/` });
-    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
+    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false, withdrawnAt: expect.any(String) });
     expect(out.at(-1)).toBe("deployment abcd1234, 0 older deleted");
     expect(err).toEqual(["boards: 1 older deployments not deleted — stale may still be reachable at their hash URLs"]);
   });

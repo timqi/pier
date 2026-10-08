@@ -8,7 +8,7 @@
 
 ### Changed
 
-- Boards: `pier boards publish` pushes every public board as one snapshot to the instance's Pages project, prunes older deployments, and writes `url`/`publishedAt` into the manifests; Pier itself serves no board without the password. The Console's public switch and `PATCH /api/boards/:slug` are gone; Console → Boards holds the Pages project and address and names each board's state, a deleted board that is still live included. The stylesheet is at `/b/_assets/pier.css`, the same path inside the snapshot ([05-boards.md](docs/design/05-boards.md)).
+- Boards: `pier boards publish` pushes every public board as one snapshot to the instance's Pages project, prunes older deployments, and writes `url`/`publishedAt` into the manifests; Pier itself serves no board without the password. The Console's public switch and `PATCH /api/boards/:slug` are gone; Console → Boards holds the Pages project and address and names each board's state, a deleted board that is still live included. The stylesheet is at `/b/_assets/pier.css`, the same path inside the snapshot. A withdrawn board's paths are redirected away for 7 days (`withdrawnAt`), because Pages' edge keeps serving a removed path's cached copy that long ([05-boards.md](docs/design/05-boards.md)).
 
 ## 0.4.13 — 2026-10-07
 

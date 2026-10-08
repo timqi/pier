@@ -57,10 +57,14 @@ return the URL; skip layout checks and narration.
   (`site/` newer than `publishedAt`), `deleted · still live`. A pending state
   means a publish is owed: run it.
 - Publish or unpublish: set `public` in `board.json`, keep every other field,
-  run `pier boards publish`, and answer with the resulting URL.
+  run `pier boards publish`, and answer with the resulting URL. Never touch
+  `url`, `publishedAt` or `withdrawnAt`; the publish writes them.
+- After an unpublish, say: "it is offline now; a copy someone already had may
+  stay cached elsewhere" — not that it was erased.
 - When publishing, say: "anyone with the link can read it".
 - Delete: rename the directory to `<slug>.deleted-<unix ms>`, never remove
-  it; if it had a `url`, run `pier boards publish` so it goes offline.
+  it: publishing reads the folder to keep a withdrawn slug redirected for a
+  week. If it had a `url`, run `pier boards publish` so it goes offline.
 
 ## Page
 

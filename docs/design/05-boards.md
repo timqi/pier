@@ -85,6 +85,9 @@ in the live Pages snapshot. Every surface names the state the two make:
 `GET /api/boards` lists a `.deleted-*` folder while it carries a `url`, as
 `deleted: true`; the next publish takes the `url` away and it leaves the list.
 
+`withdrawnAt`, written only by the publish that takes a board down, is the
+deploy's end; it is not a state and no surface shows it.
+
 ## Publishing (`src/boards/publish.ts`)
 
 `pier boards publish`, run from an agent's shell, is the only thing that
@@ -105,7 +108,9 @@ it and never calls Cloudflare.
    sources), `b/_assets/pier.css` ← the shipped stylesheet, `_headers` =
    `Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'` and
    `X-Content-Type-Options: nosniff` on `/*`. No index at the root: `/` is
-   Pages' 404. `publishedAt` is taken here, before the upload.
+   Pages' 404. `publishedAt` is taken here, before the upload. `_redirects`
+   sends `/<slug>/` and `/<slug>/*` to `/` (302) for every slug not in the
+   snapshot that has a `url` or a `withdrawnAt` under 7 days old; none, no file.
 4. `wrangler pages project list --json` lacks the project →
    `wrangler pages project create <project> --production-branch main`.
 5. `wrangler pages deploy <tmp> --project-name <project> --branch main
@@ -115,8 +120,9 @@ it and never calls Cloudflare.
    deployment older than this one is `deployment delete <id> --force`d —
    never a newer one, so two publishes racing cannot delete each other's.
 7. Manifests: each board in the snapshot gets `url` = `<base>/<slug>/` and
-   `publishedAt`; every other manifest with a `url`, `.deleted-*` included,
-   loses `url` and `publishedAt`; a leftover `token` goes on either path; a
+   `publishedAt`, and loses `withdrawnAt`; every other manifest with a `url`,
+   `.deleted-*` included, loses `url` and `publishedAt` and gets `withdrawnAt`;
+   a `withdrawnAt` 7 days old goes; a leftover `token` goes on every path; a
    manifest that would not change is not written.
 8. The snapshot is removed. Output: `published <url>` / `removed <slug>` per
    board, then `deployment <hash>, <n> older deleted`.
@@ -126,7 +132,17 @@ no manifest written — step 7 runs only after a successful deploy. Step 6
 failing is `boards: <k> older deployments not deleted — <slugs> may still be
 reachable at their hash URLs`, exit 1, with step 7 still written, because the
 live snapshot did change. No public board at all deploys a snapshot of only
-`_headers` and the stylesheet: that is how everything is withdrawn.
+`_headers`, the stylesheet and the redirects: that is how everything is withdrawn.
+
+Withdrawing is the redirect, not the redeploy. Pages' edge answers a path the
+live deployment lacks from a copy it cached up to `s-maxage=604800` (7 days)
+earlier, through new deployments, deleted deployments, zone purges and any
+`Cache-Control` in `_headers`; a `_redirects` rule is consulted first, and the
+copy returns once the rule is gone, hence the week. A path still in the
+snapshot is served fresh on the next deploy. Not covered: a file removed from a
+board that stays published, a slug published again within the week (its old
+files' paths), a board folder removed outright — each stays readable at its
+path up to 7 days. Deleting the Pages project ends every copy at once.
 
 No `pagesProject`: `boards: no Pages project configured — Console → Boards`,
 exit 1; the skill then sets `public` back to `false` and hands out the
