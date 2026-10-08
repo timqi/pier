@@ -37,9 +37,9 @@ export interface SocketHosts {
   boards: () => { project: string; base: string } | null;
 }
 
-/** Typed by the operator in a terminal, not by an agent in a turn: the one
- *  route with no session behind it. */
-const ANONYMOUS = new Set(["/login"]);
+/** Typed by the operator in a terminal as often as by an agent in a turn, and
+ *  answering nothing a session scopes: the routes with no session behind them. */
+const ANONYMOUS = new Set(["/login", "/boards"]);
 
 type Answer = (status: number, body: Record<string, unknown>) => void;
 

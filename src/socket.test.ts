@@ -109,9 +109,11 @@ describe("cli socket", () => {
     expect(calls).toEqual(["login"]);
   });
 
-  it("names the Pages project for pier boards publish, or says none is configured", async () => {
+  it("names the Pages project for pier boards publish with no session behind the call, or says none is configured", async () => {
     const { path } = start();
     await listening(servers[0]!);
+    expect(await call(path, "{}", "POST", "/boards"))
+      .toEqual({ status: 200, body: { project: "pier-test", base: "https://pier-test.pages.dev" } });
     expect(await call(path, JSON.stringify({ sessionId: "s1" }), "POST", "/boards"))
       .toEqual({ status: 200, body: { project: "pier-test", base: "https://pier-test.pages.dev" } });
     const { path: bare } = start(sockPath(), { boards: () => null });

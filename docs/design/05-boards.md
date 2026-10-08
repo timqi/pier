@@ -22,8 +22,8 @@ so `public` is a security boundary and the Pages snapshot is the public surface.
    publish`, after any change to what is public; a requested list puts public
    boards first with their `url`, then private boards, each with title and
    age. Publishing says anyone with the link can read it. Settings → Boards
-   ([03](03-web-workbench.md)) holds the Pages project, lists every board with
-   its state, and writes only the delete rename.
+   ([03](03-web-workbench.md)) holds the Pages project, runs the same publish
+   (Publish), lists every board with its state, and writes only the delete rename.
 5. HTML only: no markdown source, no renderer, no content negotiation.
 6. Static and self-contained: `site/index.html` plus relative assets under
    `site/` and the shipped stylesheet; no external resources, network data
@@ -90,17 +90,21 @@ deploy's end; it is not a state and no surface shows it.
 
 ## Publishing (`src/boards/publish.ts`)
 
-`pier boards publish`, run from an agent's shell, is the only thing that
+`pier boards publish` — from an agent's or the operator's shell, or as
+Console → Boards → Publish in Pier's own process — is the only thing that
 changes what is public. Settings (Console → Boards): `pagesProject`, the
 Cloudflare Pages project — `[a-z0-9][a-z0-9-]{0,57}`, empty means this
 instance publishes nothing, one project per instance (two instances on one
 name overwrite each other, undetected) — and `pagesUrl`, the custom domain
-when one is bound, else `https://<pagesProject>.pages.dev`. `wrangler` and its
-credentials are the operator's, on the agent's PATH; Pier does not depend on
-it and never calls Cloudflare.
+when one is bound, else `https://<pagesProject>.pages.dev`. `wrangler` is
+whichever is first on the publisher's PATH — the shell's, or the service's for
+the button — and its credentials are the operator's (a credential shim such as
+vt's injects them per call); Pier does not depend on it, never reads, stores or
+passes a Cloudflare token, and never calls Cloudflare.
 
-1. `POST /boards` on the CLI socket → `{project, base}`; a `422` is one
-   `boards:` line, exit 1.
+1. `POST /boards` on the CLI socket → `{project, base}`; no session needed,
+   so it runs from any shell of Pier's user; a `422` is one `boards:` line,
+   exit 1.
 2. Scan `$PIER_HOME/boards` with the same manifest validation; `public: true`
    with a `site/index.html` goes in; one without prints
    `boards: <slug>: no site/index.html, skipped`.
@@ -148,6 +152,16 @@ No `pagesProject`: `boards: no Pages project configured — Console → Boards`,
 exit 1; the skill then sets `public` back to `false` and hands out the
 private link.
 
+The button is `POST /api/boards/publish`: the steps above with the target read
+from settings, answered as an SSE stream of `{log}` (wrangler's output as it
+arrives), `{out}` (a result line), `{err}` (a `boards:` line) and a last
+`{exit}`, pinged every 15 s while wrangler waits on an approval. One publish at
+a time per Pier process — a second is `409 {error: "a publish is already
+running"}` — and no project is `422`. A closed tab does not stop it. The card
+streams the output, links each published URL, ends on `Published.` or `Publish
+failed`, and redraws the board list. A shell's publish and the button's are not
+serialized against each other; step 6 keeps that race harmless.
+
 ## Shipped stylesheet (`/b/_assets/pier.css`)
 
 [`pier.css`](../../src/boards/pier.css) is served from Pier's package directory
@@ -166,6 +180,7 @@ understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 
 | Route | Behavior |
 | ----- | -------- |
+| `POST /api/boards/publish` | the Console's publish, an SSE stream (Publishing above; `publish.ts`) |
 | `GET /b/_assets/pier.css` | the shipped stylesheet, password-free: a sandboxed board sends no cookie with its own subresources |
 | `GET /boards/:slug/*` | the operator surface: 404 if the board is gone, else 302 to `/b/:slug/:view/*`, path and query kept |
 | `GET /b/:slug/:view/*` | static from `<board>/site/`, **only** if `view` is a live signature for that slug; otherwise 302 back to `/boards/:slug/*`, path and query kept |
@@ -207,11 +222,11 @@ Chromium), so a cookie-authorized board URL would 302 its own stylesheet and
 images to `/login`.
 
 `boards.ts` owns manifest reads, the scan and the routes; `publish.ts` the
-Pages snapshot. `readManifest` is the single place a slug becomes a path and
+Pages snapshot and its button route. `readManifest` is the single place a slug becomes a path and
 is validated; every route and the publish reach the filesystem through it.
 Depends on `node:*`, Hono types and the root `log.ts` / `paths.ts` leaves,
 nothing in core; the routes are registered in `main.ts`, the publish reached
-from `cli.ts`.
+from `cli.ts` and `POST /api/boards/publish`.
 
 ## Agent surface (`skills/pier-boards/SKILL.md`)
 
@@ -231,7 +246,8 @@ tool or `boards.enabled` flag.
   snapshot's contents, project creation, the deploy's flags, only older
   deployments deleted, the write-back on every state, nothing written on a
   failed deploy, written with exit 1 on a failed delete, wrangler missing,
-  the socket's 422.
+  the socket's 422; the route's frames, a denied credential, the 409 while
+  one runs, the 422.
 
 ## Acceptance
 

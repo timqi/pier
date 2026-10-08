@@ -9,6 +9,7 @@
 ### Changed
 
 - Boards: `pier boards publish` pushes every public board as one snapshot to the instance's Pages project, prunes older deployments, and writes `url`/`publishedAt` into the manifests; Pier itself serves no board without the password. The Console's public switch and `PATCH /api/boards/:slug` are gone; Console → Boards holds the Pages project and address and names each board's state, a deleted board that is still live included. The stylesheet is at `/b/_assets/pier.css`, the same path inside the snapshot. A withdrawn board's paths are redirected away for 7 days (`withdrawnAt`), because Pages' edge keeps serving a removed path's cached copy that long ([05-boards.md](docs/design/05-boards.md)).
+- Boards: Console → Boards → Publish runs `pier boards publish`'s flow in the service with the `wrangler` on its PATH, streams wrangler's output and the published URLs, removed slugs and deployment into the card, and refuses a second publish while one runs; Pier never handles a Cloudflare token. `pier boards publish` no longer needs `PIER_SESSION_ID`, so it runs from any shell.
 
 ## 0.4.13 — 2026-10-07
 

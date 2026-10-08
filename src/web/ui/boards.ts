@@ -1,7 +1,7 @@
 // Settings → Boards: where this instance's public boards go (the Pages
-// project), and the pages agents wrote with what is live. Publishing itself is
-// `pier boards publish`, an agent's command; this writes the two settings, or
-// renames a board away.
+// project), and the pages agents wrote with what is live. This writes the two
+// settings, runs `pier boards publish`'s flow in Pier's process, or renames a
+// board away.
 
 import { Check, Ellipsis, X, type IconNode } from "lucide";
 import { failure, getJson, refused, sendJson } from "./api.js";
@@ -23,6 +23,9 @@ interface BoardSummary {
   deleted?: true;
   updatedAt: string;
 }
+
+/** One frame of POST /api/boards/publish (boards/publish.ts `PublishFrame`). */
+type PublishFrame = { out: string } | { err: string } | { log: string } | { exit: number };
 
 /** Where a board is readable: live on Pages at its `url`, else on the
  *  operator's prefix. One answer for the link and the copy. */
@@ -76,14 +79,80 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
     addressInput.value = got.value.pagesUrl;
   }
 
+  // --- Publish: the button's run of pier boards publish ------------------------
+  const publishBtn = button("Publish");
+  const publishStatus = h("span", "text-[11.5px]", "");
+  publishStatus.setAttribute("role", "status");
+  const publishLog = h("pre", "hidden max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-50 p-3 text-[11.5px] leading-snug text-neutral-700");
+  const publishResult = h("div", "flex flex-col gap-1 text-[12px] text-neutral-700");
+
+  function resultLine(line: string): HTMLElement {
+    const url = /^published (https?:\/\/\S+)$/.exec(line)?.[1];
+    if (!url) return h("span", "break-words", line);
+    const link = h("a", "break-all text-indigo-700 hover:underline", url) as HTMLAnchorElement;
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    return h("span", "", "published ", link);
+  }
+
+  /** Draws one frame; the exit code is the stream's last, returned. */
+  function frame(f: PublishFrame): number | undefined {
+    if ("log" in f) {
+      publishLog.classList.remove("hidden");
+      publishLog.textContent += f.log;
+      publishLog.scrollTop = publishLog.scrollHeight;
+    } else if ("out" in f) publishResult.append(resultLine(f.out));
+    else if ("err" in f) publishResult.append(h("span", "break-words text-red-600", f.err));
+    else return f.exit;
+    return undefined;
+  }
+
+  async function publish(): Promise<void> {
+    publishBtn.disabled = true;
+    publishLog.classList.add("hidden");
+    publishLog.textContent = "";
+    publishResult.replaceChildren();
+    setStatus(publishStatus, "saving", "Publishing — wrangler runs on the server; approve its credentials if your phone asks.");
+    let exit: number | undefined;
+    let lost = "";
+    try {
+      const res = await sendJson("/api/boards/publish", {});
+      if (!res.ok || !res.body) return setStatus(publishStatus, "failed", await failure(res, "Could not publish"));
+      // SSE frames over a POST: EventSource cannot send one.
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffered = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffered += value;
+        const frames = buffered.split("\n\n");
+        buffered = frames.pop() ?? "";
+        for (const raw of frames) {
+          const data = raw.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
+          if (data) exit = frame(JSON.parse(data) as PublishFrame) ?? exit;
+        }
+      }
+    } catch (err) {
+      lost = `: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      publishBtn.disabled = false;
+    }
+    if (exit === 0) setStatus(publishStatus, "saved", "Published.");
+    else if (exit === undefined) setStatus(publishStatus, "failed", `Connection lost${lost} — the publish may still be running on the server; the list below shows what it wrote.`);
+    else setStatus(publishStatus, "failed", "Publish failed — the boards: line above says where.");
+    await loadList();
+  }
+  publishBtn.onclick = () => void publish();
+
   async function remove(board: BoardSummary): Promise<void> {
     const error = await refused(`/api/boards/${board.slug}`, "DELETE", `Could not delete ${board.slug}`);
     if (error) setStatus(status, "failed", error);
     else {
       setStatus(status, "saved", `Deleted ${board.slug} — the folder is kept as ${board.slug}.deleted-<time>.` +
-        (board.url ? ` Still live at ${board.url} until an agent runs pier boards publish.` : ""));
+        (board.url ? ` Still live at ${board.url} until the next publish.` : ""));
     }
-    await load();
+    await loadList();
   }
 
   function row(board: BoardSummary): HTMLElement {
@@ -161,6 +230,10 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
 
   async function load(): Promise<void> {
     void loadPages();
+    await loadList();
+  }
+
+  async function loadList(): Promise<void> {
     const got = await getJson<BoardSummary[]>("/api/boards", "Could not load boards");
     if (!got.ok) return void listBox.replaceChildren(empty(got.error));
     listBox.replaceChildren(...(got.value.length
@@ -171,13 +244,16 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
   // The column every Settings topic sits in (vault.ts).
   const el = h("div", "mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-4", card(
     "Publishing",
-    "Public boards are pushed to this Cloudflare Pages project by an agent running pier boards publish. Bind a custom domain in the Cloudflare dashboard and name it here.",
+    "Public boards are pushed to this Cloudflare Pages project by Publish here or pier boards publish in a shell; either runs wrangler from its own PATH. Bind a custom domain in the Cloudflare dashboard and name it here.",
     field("Project", projectInput, { hint: "Empty: this instance publishes no board. One project per instance; two instances on one name overwrite each other." }),
     field("Address", addressInput, { hint: "Optional — the custom domain; empty means https://<project>.pages.dev." }),
     h("div", "flex items-center gap-3", pagesSave, pagesStatus),
+    h("div", "flex items-center gap-3", publishBtn, publishStatus),
+    publishResult,
+    publishLog,
   ), card(
     "Boards",
-    "Static pages agents wrote, freshest first. A private board opens on a link good for 8 hours; a board whose manifest says public: true goes live on the next pier boards publish.",
+    "Static pages agents wrote, freshest first. A private board opens on a link good for 8 hours; a board whose manifest says public: true goes live on the next publish.",
     listBox,
     status,
   ));

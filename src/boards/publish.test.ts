@@ -1,14 +1,16 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runBoardsCli, type BoardsCliIo } from "./publish.js";
+import { registerPublishRoute, runBoardsCli, type BoardsCliIo, type PublishFrame } from "./publish.js";
 
 let dir: string;
 let bin: string;
 let out: string[];
 let err: string[];
-const io: BoardsCliIo = { stdout: (l) => out.push(l), stderr: (l) => err.push(l) };
+let log: string;
+const io: BoardsCliIo = { stdout: (l) => out.push(l), stderr: (l) => err.push(l), wrangler: (chunk) => void (log += chunk) };
 const PROJECT = "pier-test";
 const BASE = "https://pier-test.pages.dev";
 const ok = async () => ({ status: 200, body: { project: PROJECT, base: BASE } });
@@ -59,6 +61,7 @@ beforeEach(() => {
   bin = mkdtempSync(join(tmpdir(), "pier-wrangler-"));
   out = [];
   err = [];
+  log = "";
   savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${savedPath ?? ""}`;
 });
@@ -168,6 +171,7 @@ describe("pier boards publish", () => {
     makeBoard("stale", { public: false, url: `${BASE}/stale/` });
     expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(1);
     expect(err).toEqual(["boards: deploy failed"]);
+    expect(log).toContain("upload failed");
     expect(manifest("digest")).toEqual({ title: "digest", public: true, token: "0123abcd" });
     expect(manifest("stale")).toEqual({ title: "stale", public: false, url: `${BASE}/stale/` });
     expect(calls()).toHaveLength(2);
@@ -208,5 +212,54 @@ describe("pier boards publish", () => {
     expect(await runBoardsCli(["publish", "digest"], ok, io, dir)).toBe(2);
     expect(err[0]).toContain('boards: unknown command "unpublish"');
     expect(err[1]).toContain('boards: unexpected argument "digest"');
+  });
+});
+
+describe("POST /api/boards/publish", () => {
+  const app = (target: { project: string; base: string } | null = { project: PROJECT, base: BASE }): Hono => {
+    const hono = new Hono();
+    registerPublishRoute(hono, () => target, dir);
+    return hono;
+  };
+  const frames = async (res: Response): Promise<PublishFrame[]> =>
+    (await res.text()).split("\n\n").filter((f) => f.startsWith("data: ")).map((f) => JSON.parse(f.slice(6)) as PublishFrame);
+
+  it("streams the same publish as the CLI and ends on its exit code", async () => {
+    fakeWrangler();
+    makeBoard("digest", { public: true });
+    const res = await app().request("/api/boards/publish", { method: "POST" });
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const got = await frames(res);
+    expect(got.filter((f) => "out" in f)).toEqual([{ out: `published ${BASE}/digest/` }, { out: "deployment abcd1234, 1 older deleted" }]);
+    expect(got.some((f) => "log" in f && f.log.includes("Deployment complete"))).toBe(true);
+    expect(got.at(-1)).toEqual({ exit: 0 });
+    expect(manifest("digest")).toMatchObject({ url: `${BASE}/digest/` });
+  });
+
+  it("carries a refused credential as wrangler's output, a boards: line and exit 1", async () => {
+    fakeWrangler({ projects: 'echo "vt: approval denied" >&2; exit 1' });
+    makeBoard("digest", { public: true });
+    const got = await frames(await app().request("/api/boards/publish", { method: "POST" }));
+    expect(got).toEqual([{ log: "vt: approval denied\n" }, { err: "boards: project list failed" }, { exit: 1 }]);
+  });
+
+  it("refuses a second publish while one runs, and takes one again after", async () => {
+    fakeWrangler({ projects: `sleep 0.3; echo '[{"Project Name":"${PROJECT}"}]'` });
+    makeBoard("digest", { public: true });
+    const hono = app();
+    const first = await hono.request("/api/boards/publish", { method: "POST" });
+    const second = await hono.request("/api/boards/publish", { method: "POST" });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: "a publish is already running" });
+    expect((await frames(first)).at(-1)).toEqual({ exit: 0 });
+    expect((await frames(await hono.request("/api/boards/publish", { method: "POST" }))).at(-1)).toEqual({ exit: 0 });
+  });
+
+  it("says no project is configured, before touching wrangler", async () => {
+    fakeWrangler();
+    const res = await app(null).request("/api/boards/publish", { method: "POST" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "no Pages project configured — save one above" });
+    expect(calls()).toEqual([]);
   });
 });

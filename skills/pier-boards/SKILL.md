@@ -32,7 +32,8 @@ Run `pier boards publish` after every change to what is public: setting
 `public` to `true` or `false`, editing `site/` of a board that has a `url`,
 deleting a board that has one. It pushes every public board of this instance
 at once, prints `published <url>` / `removed <slug>` per board, and exits 1
-with one `boards:` line when it could not — relay that line. On `boards: no
+with one `boards:` line when it could not — relay that line. It is the same
+publish as the Publish button in Console → Boards. On `boards: no
 Pages project configured`, set `public` back to `false`, say this instance
 has no public publishing configured, and give the private link.
 

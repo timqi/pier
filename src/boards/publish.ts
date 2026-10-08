@@ -1,17 +1,30 @@
 // `pier boards publish`: every `public: true` board, as one snapshot, to the
 // instance's Cloudflare Pages project, and the manifests told what is live.
-// Runs in the agent's shell — `wrangler` and its credentials are the
-// operator's, never Pier's — and talks to Pier only for the project name.
+// Runs `wrangler` from the PATH of whoever publishes — a shell, or Pier's own
+// process for the Console's button — whose credentials are never Pier's.
 
 import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import { logger } from "../log.js";
 import { defaultBoardsDir, PIER_CSS, scanBoards, writeManifest } from "./boards.js";
+
+const log = logger("boards");
 
 export interface BoardsCliIo {
   stdout(line: string): void;
   stderr(line: string): void;
+  /** wrangler's own output as it arrives: chunks, not lines. */
+  wrangler(chunk: string, stream: "stdout" | "stderr"): void;
+}
+
+/** Where public boards go: the Pages project and the address they are read at. */
+export interface PagesTarget {
+  project: string;
+  base: string;
 }
 
 /** `POST /boards` as cli.ts performs it; the socket's own refusals never return. */
@@ -39,21 +52,25 @@ const redirects = (slugs: Iterable<string>): string =>
 const processIo: BoardsCliIo = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`),
+  wrangler: (chunk, stream) => process[stream].write(chunk),
 };
 
 class WranglerMissing extends Error {}
 
 /** One wrangler call. `quiet` keeps a `--json` answer off the terminal; the
  *  rest streams through as it happens, so a slow upload is seen uploading. */
-function wrangler(args: string[], cwd: string, quiet = false): Promise<{ code: number; stdout: string }> {
+function wrangler(args: string[], cwd: string, io: BoardsCliIo, quiet = false): Promise<{ code: number; stdout: string }> {
   return new Promise((done, reject) => {
     const child = spawn("wrangler", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-      if (!quiet) process.stdout.write(chunk);
+    // Decoded per stream, so a character split across two chunks stays whole.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (!quiet) io.wrangler(chunk, "stdout");
     });
-    child.stderr.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+    child.stderr.on("data", (chunk: string) => io.wrangler(chunk, "stderr"));
     child.on("error", (err: NodeJS.ErrnoException) => reject(err.code === "ENOENT" ? new WranglerMissing() : err));
     child.on("close", (code) => done({ code: code ?? 1, stdout }));
   });
@@ -83,15 +100,20 @@ export async function runBoardsCli(argv: string[], post: BoardsPost, io: BoardsC
     io.stderr(`boards: ${body.error ?? `socket answered ${String(status)}`}`);
     return 1;
   }
+  return publishBoards(dir, { project, base }, io);
+}
+
+/** The whole publish, every failure one `boards:` line and exit 1. */
+export async function publishBoards(dir: string, target: PagesTarget, io: BoardsCliIo): Promise<number> {
   try {
-    return await publish(dir, project, base, io);
+    return await publish(dir, target, io);
   } catch (err) {
     io.stderr(err instanceof WranglerMissing ? "boards: wrangler not found on PATH" : `boards: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
 }
 
-async function publish(dir: string, project: string, base: string, io: BoardsCliIo): Promise<number> {
+async function publish(dir: string, { project, base }: PagesTarget, io: BoardsCliIo): Promise<number> {
   // Taken before the snapshot: an edit landing during the upload is then
   // newer than the publish and shows as unpublished, not silently missed.
   const publishedAt = new Date().toISOString();
@@ -111,6 +133,7 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     if (manifest.url || now - Date.parse(manifest.withdrawnAt ?? "") < STALE_MS) withdrawn.add(slug);
   }
   const tmp = await mkdtemp(join(tmpdir(), "pier-pages-"));
+  const run = (args: string[], quiet = false) => wrangler(args, tmp, io, quiet);
   try {
     for (const slug of live) await cp(join(dir, slug, "site"), join(tmp, slug), { recursive: true });
     await mkdir(join(tmp, "b", "_assets"), { recursive: true });
@@ -118,15 +141,15 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     await writeFile(join(tmp, "_headers"), HEADERS);
     if (withdrawn.size) await writeFile(join(tmp, "_redirects"), redirects(withdrawn));
 
-    const listed = await wrangler(["pages", "project", "list", "--json"], tmp, true);
+    const listed = await run(["pages", "project", "list", "--json"], true);
     const projects = parseJson(listed.stdout);
     if (listed.code !== 0 || !Array.isArray(projects)) return fail(io, "project list");
     if (!projects.some((p: unknown) => (p as Record<string, unknown>)["Project Name"] === project)) {
-      const created = await wrangler(["pages", "project", "create", project, "--production-branch", "main"], tmp);
+      const created = await run(["pages", "project", "create", project, "--production-branch", "main"]);
       if (created.code !== 0) return fail(io, "project create");
     }
 
-    const deployed = await wrangler(["pages", "deploy", tmp, "--project-name", project, "--branch", "main", "--commit-dirty=true"], tmp);
+    const deployed = await run(["pages", "deploy", tmp, "--project-name", project, "--branch", "main", "--commit-dirty=true"]);
     const url = new RegExp(`https://([a-z0-9]+)\\.${project}\\.pages\\.dev`).exec(deployed.stdout);
     if (deployed.code !== 0 || !url) return fail(io, "deploy");
     const hash = url[1]!;
@@ -135,7 +158,7 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
 
     // Only the deployments older than this one: two publishes racing each
     // other then never delete the newer.
-    const listing = await wrangler(["pages", "deployment", "list", "--project-name", project, "--json"], tmp, true);
+    const listing = await run(["pages", "deployment", "list", "--project-name", project, "--json"], true);
     const deployments = parseJson(listing.stdout);
     const ids = Array.isArray(deployments)
       ? deployments.map((d: unknown) => ({ id: String((d as Record<string, unknown>).Id ?? ""), url: String((d as Record<string, unknown>).Deployment ?? "") }))
@@ -145,7 +168,7 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
     let deleted = 0;
     let notDeleted = 0;
     for (const { id } of older ?? []) {
-      const gone = await wrangler(["pages", "deployment", "delete", id, "--project-name", project, "--force"], tmp);
+      const gone = await run(["pages", "deployment", "delete", id, "--project-name", project, "--force"]);
       if (gone.code === 0) deleted++;
       else notDeleted++;
     }
@@ -181,4 +204,45 @@ async function publish(dir: string, project: string, base: string, io: BoardsCli
 function fail(io: BoardsCliIo, step: string): number {
   io.stderr(`boards: ${step} failed`);
   return 1;
+}
+
+/** One SSE frame of `POST /api/boards/publish`: a result line, a `boards:`
+ *  line, wrangler's output, or the exit code that ends the stream. */
+export type PublishFrame = { out: string } | { err: string } | { log: string } | { exit: number };
+
+/** Under a proxy's idle cutoff while wrangler waits on an approval. */
+const PING_MS = 15_000;
+
+/** The Console's Publish button: this same publish in Pier's own process, so
+ *  `wrangler` is the one on the service's PATH. One at a time per process; a
+ *  closed tab does not stop a deploy halfway. */
+export function registerPublishRoute(app: Hono, target: () => PagesTarget | null, dir: string = defaultBoardsDir()): void {
+  let running = false;
+  app.post("/api/boards/publish", (c) => {
+    const pages = target();
+    if (!pages) return c.json({ error: "no Pages project configured — save one above" }, 422);
+    if (running) return c.json({ error: "a publish is already running" }, 409);
+    running = true;
+    log.info(`publish to ${pages.project} started`);
+    return streamSSE(c, async (stream) => {
+      // Hono drops a write to a closed stream; the publish runs on regardless.
+      const send = (frame: PublishFrame): Promise<unknown> => stream.writeSSE({ data: JSON.stringify(frame) });
+      const ping = setInterval(() => void stream.write(": ping\n\n"), PING_MS);
+      try {
+        const code = await publishBoards(dir, pages, {
+          stdout: (line) => void send({ out: line }),
+          stderr: (line) => {
+            log.warn(`publish: ${line}`);
+            void send({ err: line });
+          },
+          wrangler: (chunk) => void send({ log: chunk }),
+        });
+        log.info(`publish to ${pages.project} exited ${String(code)}`);
+        await send({ exit: code });
+      } finally {
+        clearInterval(ping);
+        running = false;
+      }
+    });
+  });
 }

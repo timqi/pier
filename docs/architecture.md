@@ -280,8 +280,8 @@ One line each; the reasoning is in the commit that made it.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
   A public board is a copy of `site/` on Cloudflare Pages, pushed by `pier
-  boards publish` from the agent's shell with the operator's `wrangler`; Pier
-  serves no board without the password.
+  boards publish` from a shell or Console → Boards → Publish, with the
+  `wrangler` on that process's PATH; Pier serves no board without the password.
 - **One writer per instance directory**, enforced before the database opens:
   `$PIER_HOME/pier.lock`, a pid file hard-linked into place from a private
   file so it is never seen empty, held for the process's lifetime, taken over

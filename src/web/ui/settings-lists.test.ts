@@ -173,6 +173,42 @@ describe("Settings → Boards", () => {
     buttonIn(document.body as unknown as FakeElement, /^Delete digest/)!.onclick!(new Event("click"));
     await settled();
     expect(text()).toContain("No boards yet");
-    expect(text()).toContain(`Deleted digest — the folder is kept as digest.deleted-<time>. Still live at ${LIVE} until an agent runs pier boards publish.`);
+    expect(text()).toContain(`Deleted digest — the folder is kept as digest.deleted-<time>. Still live at ${LIVE} until the next publish.`);
+  });
+
+  const sse = (...frames: unknown[]): Response =>
+    new Response(frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+
+  it("publishes from the card: streams wrangler's output, links what went live, redraws the list", async () => {
+    answers["POST /api/boards/publish"] = () => sse(
+      { log: "Uploading… " }, { log: "done\n" }, { out: `published ${LIVE}` }, { out: "removed stale" },
+      { out: "deployment abcd1234, 1 older deleted" }, { exit: 0 },
+    );
+    await mount(createBoardsPane());
+    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
+    const publish = buttonIn(root, "Publish")!;
+    publish.onclick!(new Event("click"));
+    expect(publish.disabled).toBe(true);
+    await vi.waitFor(() => expect(text()).toContain("Published."));
+    expect(publish.disabled).toBe(false);
+    expect(walk(root).find((el) => el.localName === "pre")!.textContent).toBe("Uploading… done\n");
+    expect(walk(root).filter((el) => el.localName === "a" && href(el) === LIVE)).toHaveLength(2);
+    expect(text()).toContain("removed stale");
+    expect(text()).toContain("deployment abcd1234, 1 older deleted");
+    expect(text()).toContain("digest · published");
+  });
+
+  it("names the failing step, and the server's refusal of a second publish", async () => {
+    answers["POST /api/boards/publish"] = () => sse({ log: "vt: approval denied\n" }, { err: "boards: project list failed" }, { exit: 1 });
+    await mount(createBoardsPane());
+    buttonIn(root, "Publish")!.onclick!(new Event("click"));
+    await vi.waitFor(() => expect(text()).toContain("vt: approval denied"));
+    expect(text()).toContain("boards: project list failed");
+    expect(text()).toContain("Publish failed");
+
+    answers["POST /api/boards/publish"] = () => Response.json({ error: "a publish is already running" }, { status: 409 });
+    buttonIn(root, "Publish")!.onclick!(new Event("click"));
+    await vi.waitFor(() => expect(text()).toContain("a publish is already running"));
+    expect(text()).not.toContain("vt: approval denied");
   });
 });
