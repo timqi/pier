@@ -5,12 +5,6 @@
 ### Upgrade notes
 
 - Boards move out of Pier to Corkboard, a separate project installed as a Pi package (Console → Packages): Pier no longer serves `/boards/*` or `/b/*`, the Console has no Boards pane, `pier boards` is gone along with the `pier-boards` skill, and stored Pages settings are ignored.
-- Public boards move to Cloudflare Pages: `/p/<slug>-<token>/` no longer serves anything — an old link meets the login form — and the `token` field is retired. Install `wrangler` with Cloudflare credentials in the shell agents run in, enter the Pages project name in Console → Boards, repoint every board's stylesheet link (`sed -i 's#/p/_assets/pier.css#/b/_assets/pier.css#g' ~/.pier/boards/*/site/*.html`), then have any session run `pier boards publish`; it creates the project, pushes every `public: true` board and writes each manifest's `url`. Links already sent out must be replaced with the new ones.
-
-### Changed
-
-- Boards: `pier boards publish` pushes every public board as one snapshot to the instance's Pages project, prunes older deployments, and writes `url`/`publishedAt` into the manifests; Pier itself serves no board without the password. The Console's public switch and `PATCH /api/boards/:slug` are gone; Console → Boards holds the Pages project and address and names each board's state, a deleted board that is still live included. The stylesheet is at `/b/_assets/pier.css`, the same path inside the snapshot. A withdrawn board's paths are redirected away for 7 days (`withdrawnAt`), because Pages' edge keeps serving a removed path's cached copy that long ([05-boards.md](docs/design/05-boards.md)).
-- Boards: Console → Boards → Publish runs `pier boards publish`'s flow in the service with the `wrangler` on its PATH, streams wrangler's output and the published URLs, removed slugs and deployment into the card, refuses a second publish while one runs, and stops wrangler after 10 minutes without an answer; a board live on Pages is badged Public with its address linked in the list; Pier never handles a Cloudflare token. `pier boards publish` no longer needs `PIER_SESSION_ID`, so it runs from any shell.
 
 ## 0.4.13 — 2026-10-07
 

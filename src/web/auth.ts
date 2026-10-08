@@ -64,7 +64,6 @@ function generatePassword(): string {
 export class AuthStore {
   readonly #db: DatabaseSync;
   readonly #sql: (sql: string) => StatementSync;
-  readonly #revokeListeners = new Set<(id: string) => void>();
   /** In memory only: a link outlives neither the process nor two minutes. */
   readonly #links = new Map<string, number>();
 
@@ -99,7 +98,6 @@ export class AuthStore {
       .get() as { salt: string; hash: string; createdAt: number } | undefined;
   }
 
-  /** Private: callers must also tell the listeners; `revoke(ALL)` is that pair. */
   #dropSessions(): void {
     this.#sql("DELETE FROM web_sessions").run();
   }
@@ -110,7 +108,6 @@ export class AuthStore {
     const swept = this.#sql(
       "DELETE FROM web_sessions WHERE seen_at <= ? OR created_at <= ? RETURNING id",
     ).all(now - TTL_MS, now - MAX_AGE_MS) as unknown as { id: string }[];
-    for (const row of swept) this.#revoked(row.id);
     if (swept.length) log.info(`swept ${String(swept.length)} expired session(s)`);
   }
 
@@ -129,7 +126,6 @@ export class AuthStore {
       this.#dropSessions();
     });
     this.#links.clear();
-    this.#revoked(ALL);
   }
 
   open(ip: string, agent: string): string {
@@ -168,14 +164,12 @@ export class AuthStore {
     return { id, renewed: true };
   }
 
-  /** Listeners hear the same id: a revoked cookie must also close what it opened. */
   revoke(id: string): void {
     // An unspent link is a session about to exist: "sign everyone out" ends it too.
     if (id === ALL) {
       this.#dropSessions();
       this.#links.clear();
     } else this.#sql("DELETE FROM web_sessions WHERE id = ?").run(id);
-    this.#revoked(id);
   }
 
   list(): Device[] {
@@ -203,21 +197,6 @@ export class AuthStore {
     return expiresAt !== undefined && expiresAt > Date.now();
   }
 
-  /** A long-lived authenticated surface (SSE) closes itself when its cookie is revoked. */
-  onRevoke(listener: (id: string) => void): void {
-    this.#revokeListeners.add(listener);
-  }
-
-  /** The row is already gone; a surface that never hears stays open on a dead session. */
-  #revoked(id: string): void {
-    for (const listener of this.#revokeListeners) {
-      try {
-        listener(id);
-      } catch (err) {
-        log.error(`a revocation listener failed for session ${id}`, err);
-      }
-    }
-  }
 }
 
 const hash = (password: string, salt: string): string =>

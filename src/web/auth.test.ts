@@ -442,14 +442,11 @@ describe("changing the password", () => {
     const a = app(s);
     const before = cookieOf(await login(a, password));
     const other = cookieOf(await login(a, password));
-    const revoked: string[] = [];
-    s.onRevoke((id) => revoked.push(id));
 
     const res = await change(a, { current: password, next: "correct-horse" }, before);
     expect(res.status).toBe(200);
     expect(s.verify("correct-horse")).toBe(true);
     expect(s.verify(password)).toBe(false);
-    expect(revoked).toEqual([ALL]);
     expect(s.list()).toEqual([]);
     expect((await a.request("/api/sessions", { headers: { cookie: other } })).status).toBe(401);
 
