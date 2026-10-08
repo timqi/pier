@@ -18,6 +18,11 @@ what they do not say.
 - Node 24 or newer (`node:sqlite` is used unflagged).
 - A user-writable global npm prefix: the updater runs as you.
 - `sqlite3` CLI: optional, for the off-machine backup and password steps below.
+- `wrangler` on the PATH of the shell agents run in, with Cloudflare
+  credentials (`wrangler login`, or `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` in that env): only for publishing boards, which
+  `pier boards publish` does with it; Pier itself never calls Cloudflare. The
+  project name goes in Console → Boards.
 - Pier installed globally. A checkout (`git clone` + `npm ci && npm run build`)
   is the *develop* path; point the unit's `ExecStart` at its `dist/main.js` if
   you run one as the service, and update it with the checkout steps under

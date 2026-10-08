@@ -1,8 +1,9 @@
 // Boards: static pages an agent writes under $PIER_HOME/boards, never
 // registered (docs/design/05-boards.md). Only <board>/site is reachable
-// over HTTP, so a public board leaks nothing about how it was made. Bytes are
-// served on two password-free prefixes, `/p/*` (published) and `/b/*` (a
-// signed prefix the boundary mints), stylesheet included, and run sandboxed.
+// over HTTP, so a board leaks nothing about how it was made. Bytes are served
+// on one password-free prefix, `/b/*` (a signed prefix the boundary mints),
+// stylesheet included, and run sandboxed; a public board is a copy of `site/`
+// on Cloudflare Pages (publish.ts), never served from here.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
@@ -12,27 +13,31 @@ import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
 
 export const defaultBoardsDir = (): string => pierPath("boards");
+/** The one stylesheet every board links, at `/b/_assets/pier.css` here and
+ *  the same path in a Pages snapshot. */
+export const PIER_CSS = new URL("./pier.css", import.meta.url);
 
 /** Deleted boards keep their bytes under `<slug>.deleted-<ts>`, which this
  *  pattern refuses on every route — one rename is the whole delete path. */
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const DELETED = /^([a-z0-9][a-z0-9-]{0,63})\.deleted-\d+$/;
 
-/** Without the 32 bits after the slug, `/p/` could be walked with a dictionary.
- *  Minted the first time a manifest is seen public, by whichever path did it. */
-const TOKEN = /^[a-f0-9]{8}$/;
-const mintToken = (): string => randomBytes(4).toString("hex");
-
+/** `public` is the intent, `url` the fact: only `pier boards publish` writes
+ *  `url`/`publishedAt`, and having a `url` means being in the live snapshot. */
 interface BoardManifest {
   title: string;
   description: string;
   public: boolean;
-  token: string;
+  url?: string;
+  publishedAt?: string;
 }
 
-/** One row of `GET /api/boards`. */
+/** One row of `GET /api/boards`. `deleted`: a `<slug>.deleted-<ts>` directory
+ *  whose board is still on Pages, listed until a publish takes it down. */
 interface BoardSummary extends BoardManifest {
   slug: string;
   updatedAt: string;
+  deleted?: true;
 }
 
 // A board ships fonts and images, so the list is wider than the attachment
@@ -112,20 +117,21 @@ function validView(board: string, view: string): boolean {
   // make one signature valid under several spellings of its own prefix.
   if (!Number.isSafeInteger(expires) || expires.toString(36) !== stamp) return false;
   if (expires <= Date.now()) return false;
-  return sameToken(sign(board, expires), view.slice(cut + 1));
+  return sameSecret(sign(board, expires), view.slice(cut + 1));
 }
 
 /** Malformed boards are reported once, not on every request. */
 const warned = new Set<string>();
 
 /** The one place a slug becomes a path, so it is validated here (`../../etc`,
- *  NUL). Extra keys survive a write. The one write-back is minting a token for
- *  a public board that arrived without one, so the agent's own publish path has a URL. */
-async function readManifest(
+ *  NUL). Extra keys survive a write. `deleted` admits a `<slug>.deleted-<ts>`
+ *  name: the publish path must find the boards it still has to take down. */
+export async function readManifest(
   dir: string,
   slug: string,
+  deleted = false,
 ): Promise<(BoardManifest & Record<string, unknown>) | null> {
-  if (!SLUG.test(slug)) return null;
+  if (!(deleted ? DELETED : SLUG).test(slug)) return null;
   const file = join(dir, slug, "board.json");
   let raw: unknown;
   try {
@@ -140,28 +146,18 @@ async function readManifest(
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  const manifest = {
-    ...m,
+  const { url, publishedAt, ...rest } = m;
+  return {
+    ...rest,
     title: typeof m.title === "string" && m.title ? m.title : slug,
     description: typeof m.description === "string" ? m.description : "",
     public: m.public === true,
-    token: typeof m.token === "string" && TOKEN.test(m.token) ? m.token : "",
+    ...(typeof url === "string" && url ? { url } : {}),
+    ...(typeof publishedAt === "string" && publishedAt ? { publishedAt } : {}),
   };
-  if (manifest.public && !manifest.token) {
-    manifest.token = mintToken();
-    try {
-      await writeManifest(dir, slug, manifest);
-    } catch (err) {
-      // A token that cannot be stored would differ on the next request, so the
-      // board stays unreachable on /p/ rather than handing out a dead link.
-      logger("boards").warn(`cannot mint a public token for ${slug}`, err);
-      manifest.token = "";
-    }
-  }
-  return manifest;
 }
 
-const writeManifest = (dir: string, slug: string, manifest: BoardManifest & Record<string, unknown>) =>
+export const writeManifest = (dir: string, slug: string, manifest: BoardManifest & Record<string, unknown>): Promise<void> =>
   writeFile(join(dir, slug, "board.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 /** Freshness is the site's mtime, not a manifest field — the filesystem
@@ -173,22 +169,43 @@ async function updatedAt(dir: string, slug: string): Promise<string> {
   return (info?.mtime ?? new Date()).toISOString();
 }
 
-async function listBoards(dir: string): Promise<BoardSummary[]> {
-  let entries: string[];
+/** Every board directory, live and deleted, with its manifest: the publish
+ *  path and the Console's list read the same scan. */
+export async function scanBoards(dir: string): Promise<{ name: string; slug: string; deleted: boolean; manifest: BoardManifest & Record<string, unknown> }[]> {
+  let names: string[];
   try {
-    entries = (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.isDirectory() && SLUG.test(e.name))
+    names = (await readdir(dir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory() && (SLUG.test(e.name) || DELETED.test(e.name)))
       .map((e) => e.name);
   } catch (err) {
     // No directory is no boards yet; anything else hides every board at once.
     if ((err as { code?: string }).code !== "ENOENT") logger("boards").warn(`cannot scan ${dir}`, err);
     return [];
   }
-  const boards = await Promise.all(entries.map(async (slug): Promise<BoardSummary | null> => {
-    const manifest = await readManifest(dir, slug);
-    if (!manifest) return null;
-    const { title, description, public: isPublic, token } = manifest;
-    return { slug, title, description, public: isPublic, token, updatedAt: await updatedAt(dir, slug) };
+  const found = await Promise.all(names.map(async (name) => {
+    const deleted = !SLUG.test(name);
+    const manifest = await readManifest(dir, name, deleted);
+    return manifest ? { name, slug: deleted ? DELETED.exec(name)![1]! : name, deleted, manifest } : null;
+  }));
+  // Name order, so the publish's report reads the same on every run.
+  return found.filter((board) => board !== null).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function listBoards(dir: string): Promise<BoardSummary[]> {
+  const boards = await Promise.all((await scanBoards(dir)).map(async ({ name, slug, deleted, manifest }): Promise<BoardSummary | null> => {
+    // A deleted board is only news while it is still live.
+    if (deleted && !manifest.url) return null;
+    const { title, description, public: isPublic, url, publishedAt } = manifest;
+    return {
+      slug,
+      title,
+      description,
+      public: isPublic,
+      ...(url ? { url } : {}),
+      ...(publishedAt ? { publishedAt } : {}),
+      ...(deleted ? { deleted: true as const } : {}),
+      updatedAt: await updatedAt(dir, name),
+    };
   }));
   // Freshest first; slug breaks ties so equal mtimes still list in a stable order.
   return boards
@@ -225,16 +242,9 @@ async function resolveFile(dir: string, slug: string, rest: string): Promise<str
   return info.isFile() ? file : null;
 }
 
-/** `/p/` addresses a board as `<slug>-<token>`; a slug may itself contain
- *  hyphens, so the last one is the cut. */
-function publicKey(key: string): { slug: string; token: string } {
-  const cut = key.lastIndexOf("-");
-  return cut < 1 ? { slug: "", token: "" } : { slug: key.slice(0, cut), token: key.slice(cut + 1) };
-}
-
-/** Digested first: the token is a secret, and a URL's half may be any length
- *  or encoding, which a raw comparison would either leak or throw on. */
-const sameToken = (want: string, got: string): boolean => {
+/** Digested first: the signature is a secret, and a URL's half may be any
+ *  length or encoding, which a raw comparison would either leak or throw on. */
+const sameSecret = (want: string, got: string): boolean => {
   if (!want) return false;
   const digest = (s: string) => createHash("sha256").update(s).digest();
   return timingSafeEqual(digest(want), digest(got));
@@ -248,11 +258,11 @@ async function serveFile(c: Context, dir: string, slug: string, rest: string) {
   const headers: Record<string, string> = {
     "content-type": type,
     "x-content-type-options": "nosniff",
-    // Nothing is cached: both prefixes are revocable (unpublish, sign out,
-    // expiry), and a stored copy would outlive the revocation.
+    // Nothing is cached: the prefix is revocable (sign out, expiry), and a
+    // stored copy would outlive the revocation.
     "cache-control": "no-store",
     "content-security-policy": CSP,
-    // The URL is the credential on both prefixes; an outbound link must not carry it.
+    // The URL is the credential; an outbound link must not carry it.
     "referrer-policy": "no-referrer",
     // A sandboxed page has an opaque origin. Fonts and module scripts need CORS
     // even when their URLs are under the same board.
@@ -264,20 +274,6 @@ async function serveFile(c: Context, dir: string, slug: string, rest: string) {
 export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir()): void {
   app.get("/api/boards", async (c) => c.json(await listBoards(dir)));
 
-  // Publishing is the one manifest field a human owns; the rest is the agent's.
-  app.patch("/api/boards/:slug", async (c) => {
-    const slug = c.req.param("slug");
-    const body = (await c.req.json().catch(() => null)) as { public?: unknown } | null;
-    if (typeof body?.public !== "boolean") return c.json({ error: "public must be a boolean" }, 400);
-    const manifest = await readManifest(dir, slug);
-    if (!manifest) return c.json({ error: "no such board" }, 404);
-    manifest.public = body.public;
-    // readManifest mints only for a manifest it read as public.
-    if (manifest.public && !manifest.token) manifest.token = mintToken();
-    await writeManifest(dir, slug, manifest);
-    return c.json({ public: manifest.public, token: manifest.token });
-  });
-
   // A rename, so the undo is on disk; signed prefixes are bound to the
   // directory's inode (boardOf), so none opens a successor on the same slug.
   app.delete("/api/boards/:slug", async (c) => {
@@ -287,26 +283,14 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
     return c.json({ deleted: slug });
   });
 
-  // Declared before the wildcards below: `_assets` is not a slug.
-  app.get("/p/_assets/pier.css", async (c) => {
-    const file = new URL("./pier.css", import.meta.url);
-    return c.body(await readFile(file), 200, {
+  // On the exempt prefix, not behind the cookie: a sandboxed board has an
+  // opaque origin and sends no cookie with its own stylesheet. Declared before
+  // the wildcards below: `_assets` is not a slug.
+  app.get("/b/_assets/pier.css", async (c) => {
+    return c.body(await readFile(PIER_CSS), 200, {
       "content-type": "text/css; charset=utf-8",
       "cache-control": "max-age=300",
     });
-  });
-
-  // Trailing slash matters: without it a board's relative asset paths resolve
-  // against the prefix instead of the board.
-  app.get("/p/:key", (c) => c.redirect(`/p/${c.req.param("key")}/`));
-  app.get("/p/:key/*", async (c) => {
-    const key = c.req.param("key");
-    const { slug, token } = publicKey(key);
-    const manifest = await readManifest(dir, slug);
-    // 404, never 403: a private board's existence is not public information,
-    // and a wrong token is the same non-answer as a wrong name.
-    if (!manifest || !manifest.public || !sameToken(manifest.token, token)) return c.notFound();
-    return serveFile(c, dir, slug, c.req.path.slice(`/p/${key}/`.length));
   });
 
   // The operator's link, and the one place the password is spent on a board:

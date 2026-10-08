@@ -25,6 +25,12 @@ interface Settings {
   /** Origin plus path prefix, no trailing slash; nothing in the process can
    *  discover it (a Host header is whatever a proxy passed on). Empty when unset. */
   publicUrl: string;
+  /** The Cloudflare Pages project `pier boards publish` deploys to; empty
+   *  means this instance publishes no board. */
+  pagesProject: string;
+  /** Where that project is read, when a custom domain is bound; empty means
+   *  `https://<pagesProject>.pages.dev`. */
+  pagesUrl: string;
   /** Pinned models, in the operator's order; empty falls back to the catalog. */
   modelMenu: ModelMenuEntry[];
   /** Names a session after its first exchange. Unset: the title is the first
@@ -82,6 +88,9 @@ export function normalizePublicUrl(raw: string): string | null {
   if (url.search || url.hash || url.username || url.password) return null;
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
 }
+
+/** Cloudflare's own rule for a project name; `""` clears it. */
+export const isPagesProject = (name: string): boolean => /^[a-z0-9][a-z0-9-]{0,57}$/.test(name);
 
 /** Rejecting rather than repairing: a "fixed" entry would advertise a model the
  *  operator never picked. The refusal names the row (1-based, as the Console
@@ -150,6 +159,8 @@ export class SettingsStore {
     if (accent === null) log.warn("settings.accent is not a preset — ignoring it");
     return {
       publicUrl: this.#value("publicUrl") ?? "",
+      pagesProject: this.#value("pagesProject") ?? "",
+      pagesUrl: this.#value("pagesUrl") ?? "",
       modelMenu: this.#json("modelMenu", (raw) => {
         const menu = parseModelMenu(raw);
         return typeof menu === "string" ? null : menu;
@@ -195,6 +206,12 @@ export class SettingsStore {
   /** Setters take already-normalized values: validation belongs at the boundary. */
   setPublicUrl(publicUrl: string): Settings {
     this.#set("publicUrl", publicUrl);
+    return this.get();
+  }
+
+  setPages(project: string, url: string): Settings {
+    this.#set("pagesProject", project);
+    this.#set("pagesUrl", url);
     return this.get();
   }
 

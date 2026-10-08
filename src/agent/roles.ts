@@ -172,9 +172,8 @@ ${role === "worker" ? "" : QUOTE_CHAT}`;
  *  `apply_patch` from post-training and go hunting for it in the shell. */
 export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }, role?: AgentRole): string {
   const reach = instance.publicUrl
-    ? `Address: ${instance.publicUrl} — a board's link is that plus ` +
-      "`/boards/<slug>/`, or `/p/<slug>-<token>/` once published, where `token` " +
-      "is the random field the manifest carries beside `public`."
+    ? `Address: ${instance.publicUrl} — a private board's link is that plus ` +
+      "`/boards/<slug>/`; a published board's is the `url` its manifest carries."
     : "No public address is configured (the user sets one in Console → Settings), " +
       "so give paths and never guess a host.";
   return `${replySurfacePrompt(role)}

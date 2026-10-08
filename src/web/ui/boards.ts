@@ -1,11 +1,12 @@
-// Settings → Boards: the pages agents wrote, and the one decision a human owns
-// (publish). Everything else belongs to the agent; this writes only `public`,
-// or renames a board away.
+// Settings → Boards: where this instance's public boards go (the Pages
+// project), and the pages agents wrote with what is live. Publishing itself is
+// `pier boards publish`, an agent's command; this writes the two settings, or
+// renames a board away.
 
 import { Check, Ellipsis, X, type IconNode } from "lucide";
 import { failure, getJson, refused, sendJson } from "./api.js";
 import { copy, h, relTime } from "./dom.js";
-import { btn, card, empty, setStatus, toggle } from "./form.js";
+import { btn, button, card, empty, field, input, setStatus } from "./form.js";
 import { icon } from "./icons.js";
 import { closeMenu, openMenu } from "./menu.js";
 
@@ -15,15 +16,25 @@ interface BoardSummary {
   title: string;
   description: string;
   public: boolean;
-  /** Empty until the board is published: the URL's unguessable half. */
-  token: string;
+  /** Present only while the board is in the live Pages snapshot. */
+  url?: string;
+  publishedAt?: string;
+  /** The folder is renamed away, but the board is still on Pages. */
+  deleted?: true;
   updatedAt: string;
 }
 
-/** Where a board is readable: published on the password-free URL its readers
- *  use, the rest on the operator's. One answer for the link and the copy. */
-const boardPath = (board: BoardSummary): string =>
-  board.public && board.token ? `/p/${board.slug}-${board.token}/` : `/boards/${board.slug}/`;
+/** Where a board is readable: live on Pages at its `url`, else on the
+ *  operator's prefix. One answer for the link and the copy. */
+const boardLink = (board: BoardSummary): string => board.url ?? `/boards/${board.slug}/`;
+
+/** The six states of docs/design/05-boards.md: intent (`public`) against fact (`url`). */
+function state(board: BoardSummary): string {
+  if (board.deleted) return "deleted · still live";
+  if (!board.public) return board.url ? "unpublish pending" : "private";
+  if (!board.url) return "publish pending";
+  return board.publishedAt && board.publishedAt < board.updatedAt ? "published · changes unpublished" : "published";
+}
 
 export function createBoardsPane(): { el: HTMLElement; show(): void } {
   const listBox = h("div", "flex flex-col gap-2");
@@ -31,27 +42,56 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
   // Announced: a copy's only other outcome is an icon swap.
   status.setAttribute("role", "status");
 
-  async function publish(board: BoardSummary, isPublic: boolean): Promise<void> {
-    const res = await sendJson(`/api/boards/${board.slug}`, { public: isPublic }, "PATCH");
-    if (!res.ok) setStatus(status, "failed", await failure(res, `Could not change ${board.slug}`));
-    else setStatus(status, "saved", `${board.slug} is ${isPublic ? "public" : "private"}.`);
-    // The URL's token is minted by the write, and a refused switch must flip back.
-    await load();
+  // --- Publishing: the Pages project ------------------------------------------
+  const projectInput = input();
+  projectInput.placeholder = "pier-<instance>";
+  projectInput.autocomplete = "off";
+  projectInput.spellcheck = false;
+  const addressInput = input();
+  addressInput.placeholder = "https://<project>.pages.dev";
+  addressInput.autocomplete = "off";
+  const pagesStatus = h("span", "text-[11.5px]", "");
+  const pagesSave = button("Save", true);
+
+  async function savePages(): Promise<void> {
+    setStatus(pagesStatus, "saving", "saving…");
+    const res = await sendJson("/api/settings", { pages: { project: projectInput.value, url: addressInput.value } }, "PUT");
+    if (!res.ok) return setStatus(pagesStatus, "failed", await failure(res, "Could not save"));
+    const { pagesProject, pagesUrl } = (await res.json()) as { pagesProject: string; pagesUrl: string };
+    projectInput.value = pagesProject;
+    addressInput.value = pagesUrl;
+    setStatus(pagesStatus, "saved", pagesProject ? `Saved — public boards publish to ${pagesUrl || `https://${pagesProject}.pages.dev`}/<slug>/` : "Cleared — this instance publishes no board.");
+  }
+  pagesSave.onclick = () => void savePages();
+  for (const el of [projectInput, addressInput]) {
+    el.onkeydown = (ev) => {
+      if (ev.key === "Enter") void savePages();
+    };
+  }
+
+  async function loadPages(): Promise<void> {
+    const got = await getJson<{ pagesProject: string; pagesUrl: string }>("/api/settings", "Could not load settings");
+    if (!got.ok) return setStatus(pagesStatus, "failed", got.error);
+    projectInput.value = got.value.pagesProject;
+    addressInput.value = got.value.pagesUrl;
   }
 
   async function remove(board: BoardSummary): Promise<void> {
     const error = await refused(`/api/boards/${board.slug}`, "DELETE", `Could not delete ${board.slug}`);
     if (error) setStatus(status, "failed", error);
-    else setStatus(status, "saved", `Deleted ${board.slug} — the folder is kept as ${board.slug}.deleted-<time>.`);
+    else {
+      setStatus(status, "saved", `Deleted ${board.slug} — the folder is kept as ${board.slug}.deleted-<time>.` +
+        (board.url ? ` Still live at ${board.url} until an agent runs pier boards publish.` : ""));
+    }
     await load();
   }
 
   function row(board: BoardSummary): HTMLElement {
     const link = h("a", "min-w-0 truncate text-[12.5px] font-medium text-neutral-700 hover:text-indigo-700", board.title) as HTMLAnchorElement;
-    link.href = boardPath(board);
+    link.href = boardLink(board);
     link.target = "_blank";
     link.rel = "noreferrer";
-    const meta = [board.slug, `updated ${relTime(Date.parse(board.updatedAt))}`];
+    const meta = [board.slug, state(board), `updated ${relTime(Date.parse(board.updatedAt))}`];
     if (board.description) meta.push(board.description);
     const line = h(
       "div",
@@ -59,11 +99,6 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
       link,
       h("span", "truncate text-[11.5px] text-neutral-400", meta.join(" · ")),
     );
-    const sw = toggle("", "", board.public, (v) => void publish(board, v));
-    sw.title = "Public: anyone holding the /p/ link can read it, no password";
-    sw.querySelector("input")?.setAttribute("aria-label", `Public: ${board.title}`);
-    // The track alone is 16px; the finger gets the ⋯'s 44.
-    sw.classList.add("max-md:min-h-11", "max-md:px-2");
     // One trigger instead of a row of words, so the title keeps the width.
     const more = btn("", "icon-btn max-md:h-11 max-md:w-11");
     more.append(icon(Ellipsis));
@@ -85,7 +120,7 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
           onSelect: () => {
             closeMenu();
             // Absolute: a copied link is going to a chat or another machine.
-            void copy(`${location.origin}${boardPath(board)}`).then(() => {
+            void copy(board.url ?? `${location.origin}${boardLink(board)}`).then(() => {
               flash(Check);
               setStatus(status, "saved", `Copied ${board.slug}'s link.`);
             }, (err: unknown) => {
@@ -94,9 +129,10 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
             });
           },
         },
-        {
+        // A deleted board's folder is already renamed; only the publish takes it down.
+        ...(board.deleted ? [] : [{
           label: "Delete",
-          hint: "folder kept",
+          hint: board.url ? "folder kept, stays live" : "folder kept",
           separatorBefore: true,
           // The same menu asks again in place; Cancel first, so the focus it
           // lands on is not the delete.
@@ -104,7 +140,7 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
             { label: "Cancel", onSelect: closeMenu },
             {
               label: `Delete ${board.slug}`,
-              hint: "folder kept",
+              hint: board.url ? `still live at ${board.url}` : "folder kept",
               separatorBefore: true,
               onSelect: () => {
                 closeMenu();
@@ -112,18 +148,19 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
               },
             },
           ], `Delete ${board.title}?`),
-        },
+        }]),
       ], board.title);
     };
     return h(
       "div",
       "flex items-center justify-between gap-2 rounded-lg border border-neutral-200 py-2 pl-3 pr-1.5",
       line,
-      h("div", "flex flex-none items-center gap-1", sw, more),
+      h("div", "flex flex-none items-center gap-1", more),
     );
   }
 
   async function load(): Promise<void> {
+    void loadPages();
     const got = await getJson<BoardSummary[]>("/api/boards", "Could not load boards");
     if (!got.ok) return void listBox.replaceChildren(empty(got.error));
     listBox.replaceChildren(...(got.value.length
@@ -132,9 +169,15 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
   }
 
   // The column every Settings topic sits in (vault.ts).
-  const el = h("div", "mx-auto flex w-full min-w-0 max-w-3xl flex-col", card(
+  const el = h("div", "mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-4", card(
+    "Publishing",
+    "Public boards are pushed to this Cloudflare Pages project by an agent running pier boards publish. Bind a custom domain in the Cloudflare dashboard and name it here.",
+    field("Project", projectInput, { hint: "Empty: this instance publishes no board. One project per instance; two instances on one name overwrite each other." }),
+    field("Address", addressInput, { hint: "Optional — the custom domain; empty means https://<project>.pages.dev." }),
+    h("div", "flex items-center gap-3", pagesSave, pagesStatus),
+  ), card(
     "Boards",
-    "Static pages agents wrote, freshest first. A private board opens on a link good for 8 hours; the switch makes it public, on /p/<slug>-<token>/ for anyone holding it.",
+    "Static pages agents wrote, freshest first. A private board opens on a link good for 8 hours; a board whose manifest says public: true goes live on the next pier boards publish.",
     listBox,
     status,
   ));

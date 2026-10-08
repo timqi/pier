@@ -25,7 +25,8 @@ const run = {
   error: "exit 1", skipReason: null, callbackError: null, probe: null, targetSessionId: null,
   result: { type: "bash", exitCode: 1, stdout: "partial", stderr: "boom", stdoutTruncated: false, stderrTruncated: false },
 };
-const board = { slug: "digest", title: "Weekly", description: "", public: false, token: "", updatedAt: new Date().toISOString() };
+const board = { slug: "digest", title: "Weekly", description: "", public: false, updatedAt: new Date().toISOString() };
+const LIVE = "https://pier-test.pages.dev/digest/";
 
 beforeEach(() => {
   root = installDom().createElement("div");
@@ -99,25 +100,53 @@ describe("Settings → Tasks", () => {
 describe("Settings → Boards", () => {
   beforeEach(() => {
     answers["GET /api/boards"] = () => Response.json([board]);
+    answers["GET /api/settings"] = () => Response.json({ pagesProject: "pier-test", pagesUrl: "" });
   });
+  const href = (link: FakeElement): string => link.getAttribute("href") ?? (link as unknown as { href: string }).href;
 
-  it("links a private board on the operator's prefix", async () => {
+  it("links a private board on the operator's prefix, and a live one on Pages", async () => {
     await mount(createBoardsPane());
     const link = walk(root).find((el) => el.localName === "a")!;
     expect(link.textContent).toBe("Weekly");
-    expect(link.getAttribute("href") ?? (link as unknown as { href: string }).href).toBe("/boards/digest/");
+    expect(href(link)).toBe("/boards/digest/");
+    expect(text()).toContain("digest · private");
+    expect(text()).not.toContain("checkbox");
+
+    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
+    const pane = createBoardsPane();
+    await mount(pane);
+    expect(href(walk(pane.el as unknown as FakeElement).find((el) => el.localName === "a")!)).toBe(LIVE);
   });
 
-  it("publishes, then links the minted /p/ URL", async () => {
-    answers["PATCH /api/boards/digest"] = () => Response.json({ public: true, token: "0123abcd" });
+  it("says each of the six states", async () => {
+    const at = board.updatedAt;
+    const earlier = new Date(Date.parse(at) - 60_000).toISOString();
+    answers["GET /api/boards"] = () => Response.json([
+      { ...board, slug: "a" },
+      { ...board, slug: "b", public: true, url: LIVE, publishedAt: at },
+      { ...board, slug: "c", public: true, url: LIVE, publishedAt: earlier },
+      { ...board, slug: "d", public: true },
+      { ...board, slug: "e", public: false, url: LIVE, publishedAt: at },
+      { ...board, slug: "f", public: true, url: LIVE, publishedAt: at, deleted: true },
+    ]);
     await mount(createBoardsPane());
-    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, token: "0123abcd" }]);
-    checkbox().checked = true;
-    checkbox().onchange!(new Event("change"));
+    for (const line of ["a · private", "b · published ·", "c · published · changes unpublished", "d · publish pending", "e · unpublish pending", "f · deleted · still live"]) {
+      expect(text()).toContain(line);
+    }
+  });
+
+  it("stores the Pages project and address through PUT /api/settings", async () => {
+    answers["PUT /api/settings"] = () => Response.json({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
+    await mount(createBoardsPane());
+    const [project, address] = walk(root).filter((el) => el.localName === "input");
+    expect(project!.value).toBe("pier-test");
+    project!.value = "pier-g1";
+    address!.value = "boards.example.com";
+    buttonIn(root, "Save")!.onclick!(new Event("click"));
     await settled();
-    expect(fetcher.mock.calls.find(([, init]) => init?.method === "PATCH")?.[1]?.body).toBe('{"public":true}');
-    const link = walk(root).find((el) => el.localName === "a")!;
-    expect(link.getAttribute("href") ?? (link as unknown as { href: string }).href).toBe("/p/digest-0123abcd/");
+    expect(fetcher.mock.calls.find(([, init]) => init?.method === "PUT")?.[1]?.body).toBe('{"pages":{"project":"pier-g1","url":"boards.example.com"}}');
+    expect(address!.value).toBe("https://boards.example.com");
+    expect(text()).toContain("public boards publish to https://boards.example.com/<slug>/");
   });
 
   it("copies the absolute link from the row's menu", async () => {
@@ -132,8 +161,9 @@ describe("Settings → Boards", () => {
     expect(text()).toContain("Copied digest's link.");
   });
 
-  it("deletes once confirmed, and redraws the list", async () => {
+  it("deletes once confirmed, and redraws the list; a live board is said to stay live", async () => {
     answers["DELETE /api/boards/digest"] = () => Response.json({ deleted: "digest" });
+    answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
     await mount(createBoardsPane());
     answers["GET /api/boards"] = () => Response.json([]);
     vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
@@ -143,6 +173,6 @@ describe("Settings → Boards", () => {
     buttonIn(document.body as unknown as FakeElement, /^Delete digest/)!.onclick!(new Event("click"));
     await settled();
     expect(text()).toContain("No boards yet");
-    expect(text()).toContain("Deleted digest");
+    expect(text()).toContain(`Deleted digest — the folder is kept as digest.deleted-<time>. Still live at ${LIVE} until an agent runs pier boards publish.`);
   });
 });

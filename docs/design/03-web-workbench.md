@@ -44,15 +44,14 @@ surface owns its routes and is mounted beside it.
 | `GET /api/tasks` | *(served by `tasks/routes.ts`, as are the three below)* `TaskRow[]` (`tasks/types.ts`): every non-archived `kind: "task"` definition with `lastRun` |
 | `GET /api/tasks/:id/runs` | the task's newest 20 `TaskRun`s; 404 unknown task |
 | `POST /api/tasks/:id/pause`, `/resume` | `setEnabled`; answers the definition. 400 unknown, archived-on-resume, or a task Pier owns |
-| `GET /api/boards` | *(served by `boards/boards.ts`, as are the two below)* `[{slug, title, description, public, token, updatedAt}]`, freshest `site/` mtime first |
-| `PATCH /api/boards/:slug` | body `{public: boolean}`, minting the token on first publish; answers `{public, token}`. 400 bad body, 404 unknown slug |
+| `GET /api/boards` | *(served by `boards/boards.ts`, as is the one below)* `[{slug, title, description, public, url?, publishedAt?, deleted?, updatedAt}]`, freshest `site/` mtime first; `url` only while the board is in the live Pages snapshot; a `<slug>.deleted-<ts>` folder still carrying a `url` is listed with `deleted: true` ([05](05-boards.md)) |
 | `DELETE /api/boards/:slug` | renames the folder `<slug>.deleted-<ts>`; answers `{deleted}`, 404 unknown slug |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
 | `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title and the accent onto `<html data-accent>`, `no-cache` |
 | `GET /app/manifest.webmanifest`, `/app/icon.svg` | the shipped files, rendered per instance and `no-cache`: `name`/`short_name` (≤12) are `PIER_TITLE` (`Pier` when unset), `theme_color` and the icon's plate the accent's 600 step (`ACCENTS` in `settings.ts`). Safari and the iOS Home Screen read only the PNG links, so the shell points `icon-32` and `apple-touch-icon` at the preset's pre-rendered `icon-32-<accent>.png` / `icon-touch-192-<accent>.png`; the Dock and launchers read the manifest's PNGs, so its `icons` are rewritten to `icon-192-<accent>.png` / `icon-512-<accent>.png` / `icon-maskable-512-<accent>.png` the same way (all rendered from `icon.svg` by `just icons` — `scripts/render-icons.ts`, `@resvg/resvg-js` fetched by npx, not a dependency). An installed app keeps the icon it was installed with |
-| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*`, `/b/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*`, `/b/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
+| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*` and `/b/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*` and `/b/*` stay where they are, and the cookie's `Path` stays `/` |
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
@@ -74,7 +73,7 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below),
-`channels/routes.ts`, `vault.ts` (`/api/vault*`), `tasks/routes.ts` (`/api/tasks*`), `boards/boards.ts` (`/api/boards*`, `/boards/*`, `/b/*`, `/p/*`).
+`channels/routes.ts`, `vault.ts` (`/api/vault*`), `tasks/routes.ts` (`/api/tasks*`), `boards/boards.ts` (`/api/boards*`, `/boards/*`, `/b/*`).
 
 ## Passkeys (`src/web/passkeys.ts`)
 
@@ -97,6 +96,7 @@ use, at most 100 outstanding.
 | `POST /api/passkeys/login/options` | unauthenticated, on the password's throttle: `{challenge, rpId, allowCredentials, userVerification: "preferred", timeout}`; 409 when disabled or none registered |
 | `POST /api/passkeys/login/verify` | unauthenticated, throttled: `{id, response: {clientDataJSON, authenticatorData, signature}, next?}` → `webauthn.get`, challenge, origin, rpIdHash, UP, signature over `authenticatorData ‖ sha256(clientDataJSON)` with the stored JWK; a sign count `≤` stored, unless both are 0 (an authenticator that never counts), is a cloned authenticator: 401 and an error log line. Success updates `sign_count`/`last_used_at`, opens the session exactly as `POST /login` does (same cookie, same device row) and answers `{next}` (`safeNext`); every refusal counts toward the throttle |
 | `PUT /api/settings {publicUrl}` | 400 `passkeys are bound to <host>; remove them first` when the hostname would change or https drop while a passkey exists (`instance.ts`) |
+| `PUT /api/settings {pages: {project, url}}` | the Pages project `pier boards publish` deploys to and, optionally, its custom domain; 400 for a `project` outside `[a-z0-9][a-z0-9-]{0,57}` or a `url` that is not an http(s) origin; both empty clears |
 
 Security card **Passkeys**: the rows in the device row (label, `added <ago> ·
 last used <ago>|never used · transports`, **Remove**), "No passkey is
@@ -442,9 +442,16 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
   time, source, duration) whose log (error, result, probe, a link to the run's
   session) unfolds in place; defining a task stays `pier task`'s. Boards
-  (`#/settings/boards`): one row per board — title linking where it is
-  readable, slug, age — with an unlabelled Public switch and a ⋯ menu holding
-  Copy link (the ⋯ flashes the outcome) and Delete (a rename, confirmed in the same menu: Cancel, then Delete <slug>). A refused switch redraws from the server and says why. Agent: two panels (what a session is
+  (`#/settings/boards`): a Publishing card first — Project and Address, the
+  two settings `pier boards publish` deploys with (`PUT /api/settings {pages}`) —
+  then one row per board — title linking where it is readable (its `url` when
+  live, else `/boards/<slug>/`), slug, its state (`private`, `published`,
+  `published · changes unpublished`, `publish pending`, `unpublish pending`,
+  `deleted · still live`), age — with a ⋯ menu holding Copy link (the ⋯ flashes
+  the outcome) and, except on a deleted row, Delete (a rename, confirmed in the
+  same menu: Cancel, then Delete <slug>; a live board's confirmation and the
+  status after name the `url` it stays at until the next publish). No public
+  switch: `public` is the agent's field. Agent: two panels (what a session is
   made of / what the selected item affords), Scope in the Console's control
   skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check

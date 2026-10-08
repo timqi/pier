@@ -106,9 +106,9 @@ describe("the worker contract", () => {
 });
 
 describe("the surface prompt", () => {
-  it("names the real boards folder and both board routes", () => {
+  it("names the real boards folder, the private route and where a published link comes from", () => {
     const prompt = surfacePrompt({ boardsDir: "/home/q/.pier_test/boards", publicUrl: "https://test-pier.example.com" });
-    for (const fact of ["/home/q/.pier_test/boards/<slug>/", "https://test-pier.example.com", "/boards/<slug>/", "/p/<slug>-<token>/", "apply_patch"]) {
+    for (const fact of ["/home/q/.pier_test/boards/<slug>/", "https://test-pier.example.com", "/boards/<slug>/", "the `url` its manifest carries", "apply_patch"]) {
       expect(prompt).toContain(fact);
     }
   });

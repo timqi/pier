@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Upgrade notes
+
+- Public boards move to Cloudflare Pages: `/p/<slug>-<token>/` no longer serves anything — an old link meets the login form — and the `token` field is retired. Install `wrangler` with Cloudflare credentials in the shell agents run in, enter the Pages project name in Console → Boards, repoint every board's stylesheet link (`sed -i 's#/p/_assets/pier.css#/b/_assets/pier.css#g' ~/.pier/boards/*/site/*.html`), then have any session run `pier boards publish`; it creates the project, pushes every `public: true` board and writes each manifest's `url`. Links already sent out must be replaced with the new ones.
+
+### Changed
+
+- Boards: `pier boards publish` pushes every public board as one snapshot to the instance's Pages project, prunes older deployments, and writes `url`/`publishedAt` into the manifests; Pier itself serves no board without the password. The Console's public switch and `PATCH /api/boards/:slug` are gone; Console → Boards holds the Pages project and address and names each board's state, a deleted board that is still live included. The stylesheet is at `/b/_assets/pier.css`, the same path inside the snapshot ([05-boards.md](docs/design/05-boards.md)).
+
 ## 0.4.13 — 2026-10-07
 
 ### Upgrade notes

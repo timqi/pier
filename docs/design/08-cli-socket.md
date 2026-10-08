@@ -2,7 +2,7 @@
 
 `$PIER_HOME/pier.sock` is how the `pier` CLI reaches the running instance:
 `pier vault run`, `pier slack` (a vault resolve), `pier task`, `pier web`,
-`pier search` and `pier login`. `node:http`
+`pier search`, `pier boards publish` and `pier login`. `node:http`
 on a Unix socket, mode `0600`, unlinked on start and on exit; the permission
 bits are the whole auth (`src/socket.ts`). Not a workbench route: plaintext
 crosses this socket into a local process of Pier's user and nowhere else.
@@ -38,6 +38,7 @@ for an answer — 120 s on `/web`, the one route that waits on a provider.
 | `/task` | `{sessionId, params}` — `params.operation` is `run`, `message`, `save`, `list`, `pause`, `resume`, `archive`, `runs`, `stats`, `cancel` or `recover` ([09-tasks-cli.md](09-tasks-cli.md)) | `200 {result}`; `422 {error}` with the operation's own message for anything it refused — `handleTask` (`tasks/operations.ts`) is the one validator, and the CLI does none |
 | `/search` | `{sessionId, params: {q, limit?, since?, role?, in?}}` — `q` the words, every term in one message; `limit` 1–50, default 10; `since` ms, messages at or after it; `role` `user` \| `assistant`; `in` `pier` (every `main_chain` member) or one session id | `200 {result: {hits}}`, each hit `{sessionId, at, role, place, pier, text}`: Pier's messages first, then every other session's, each by rank then newest; `place` is `Pier` or the session's title now (its id when gone); `text` the message with chat markup off, cut to 600 characters around its first match with `…` at a cut; `422 {error}` for an empty `q` or a refused scope (a `limit` outside 1–50, a non-integer or negative `since`, another `role`, an `in` that is not a non-empty string). The CLI resolves `--since <N>h\|<N>d\|YYYY-MM-DD` (local midnight) to ms — a bad `--since` or `--role`, or a second `--in`, is a `search:` line and the usage, exit 2, never asking the socket — and prints one line per hit — `<YYYY-MM-DD HH:MM> · <place> · <role>: <text>`, `text` on one line — or the object with `--json`; no hits prints `no hits` and exits 0 |
 | `/login` | `{}` | `200 {url}` — `<publicUrl>/login/<token>` (loopback when no public URL is set); the token is 32 random bytes, single use, dead after two minutes, at most 10 outstanding (oldest evicted); every unspent link dies with a password change or a sign-everyone-out, and the URL is a credential — redact `/login/*` in proxy logs. `GET /login/:token` opens a browser session on the login throttle and redirects to `/app/`; a stale or unknown token is the form with "That sign-in link has expired." (401) and counts as a failed guess; `HEAD` is 405 so a link checker cannot spend it; answers are `no-store`, `no-referrer`. Passkeys do not gate it: the socket's `0600` bits are the door — any process of Pier's user, an agent's shell included, may mint one |
+| `/boards` | `{sessionId}` | `200 {project, base}` — the `pagesProject` setting and `pagesUrl` or `https://<project>.pages.dev`; `422 {error: "no Pages project configured — Console → Boards"}` when the setting is empty. The CLI does the rest in its own process ([05-boards.md](05-boards.md)) |
 | `/web` | `{sessionId, params}` — `params.op` is `search` (`query`, `language_mode?`, `allowed_domains?`, `blocked_domains?`, `backend?`) or `fetch` (`url`, `prompt?`, `mode?`) | `200 {result: {text, details}}`; `422 {error}` for a refused field, no backend with auth, a URL that is not public HTTP(S), or a provider failure — `parseWebParams`/`runWeb` (`websearch/run.ts`) validate, the CLI checks argv shape only; the model auth is the instance's (`WebContext`), the caller's active model a candidate |
 
 ## Failure lines
@@ -54,3 +55,4 @@ for an answer — 120 s on `/web`, the one route that waits on a provider.
 | `task: …` | 1 | a `/task` route answer (`skills/pier-tasks/SKILL.md`) |
 | `web: …` | 1 | a `/web` route answer (`skills/pier-web/SKILL.md`) |
 | `search: …` | 1 | a `/search` route answer |
+| `boards: …` | 1 | a `/boards` route answer, or a `pier boards publish` step that failed ([05-boards.md](05-boards.md)) |

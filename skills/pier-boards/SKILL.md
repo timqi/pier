@@ -21,30 +21,46 @@ Create `<boards folder>/<slug>/board.json` and `site/index.html`:
 Slug: `[a-z0-9][a-z0-9-]{0,63}`, meaningful without random suffixes. Description
 is one line on what the board is for.
 
-`public: true` removes the password. Set it only when this request asks for a
-public/shareable board; otherwise keep it private. Never publish personal data
-or content the user has not seen. Preserve the manifest's token; if missing,
-generate eight hex characters with `openssl rand -hex 4`, never invent/reuse one.
+`public: true` is the intent to publish; what is live is a copy on Cloudflare
+Pages that only `pier boards publish` changes. Set `public` only when this
+request asks for a public/shareable board; otherwise keep it private. Never
+publish personal data or content the user has not seen. Never write `url` or
+`publishedAt` yourself: `pier boards publish` writes them, and a manifest
+with a `url` is live at it.
 
-Return one bare URL using the configured instance address:
+Run `pier boards publish` after every change to what is public: setting
+`public` to `true` or `false`, editing `site/` of a board that has a `url`,
+deleting a board that has one. It pushes every public board of this instance
+at once, prints `published <url>` / `removed <slug>` per board, and exits 1
+with one `boards:` line when it could not — relay that line. On `boards: no
+Pages project configured`, set `public` back to `false`, say this instance
+has no public publishing configured, and give the private link.
 
-- Private: `/boards/<slug>/` (password required).
-- Public: `/p/<slug>-<token>/` (copy the token verbatim; requires `public: true`).
+Return one bare URL:
+
+- Private: `<instance address>/boards/<slug>/` (password required).
+- Public: the `url` from `board.json` after `pier boards publish`.
 
 Never return both URLs, link labels or filesystem paths. Without a configured
-address, return the path and point to Console → Settings; never guess a host.
-For publish-only requests, set visibility/token and return the URL; skip layout
-checks and narration.
+instance address, return the path and point to Console → Settings; never
+guess a host. For publish-only requests, set `public`, run the publish and
+return the URL; skip layout checks and narration.
 
 ## Answering the user
 
-- List: read every `<boards folder>/*/board.json` (skip names with
-  `.deleted-`); public boards first with `/p/<slug>-<token>/`, then private
-  with `/boards/<slug>/`; one row each, title and how long ago `site/` changed.
-- Publish or unpublish: set `public` in `board.json` by the token rule above,
-  keep every other field, and answer with the resulting URL.
+- List: read every `<boards folder>/*/board.json`, names with `.deleted-`
+  included only when they carry a `url` (deleted, still live); boards with a
+  `url` first, then private with `/boards/<slug>/`; one row each, title, how
+  long ago `site/` changed, and a state where it differs from plain
+  private/published: `publish pending` (`public: true`, no `url`),
+  `unpublish pending` (`public: false`, has `url`), `changes unpublished`
+  (`site/` newer than `publishedAt`), `deleted · still live`. A pending state
+  means a publish is owed: run it.
+- Publish or unpublish: set `public` in `board.json`, keep every other field,
+  run `pier boards publish`, and answer with the resulting URL.
 - When publishing, say: "anyone with the link can read it".
-- Delete: rename the directory to `<slug>.deleted-<unix ms>`; never remove it.
+- Delete: rename the directory to `<slug>.deleted-<unix ms>`, never remove
+  it; if it had a `url`, run `pier boards publish` so it goes offline.
 
 ## Page
 
@@ -52,7 +68,7 @@ Semantic HTML, the user's language, no framework. Include doctype, `lang`, UTF-8
 viewport metadata, a descriptive title and:
 
 ```html
-<link rel="stylesheet" href="/p/_assets/pier.css">
+<link rel="stylesheet" href="/b/_assets/pier.css">
 ```
 
 - Lead with the finding; headings state findings. No required sections or emoji chrome.
@@ -67,7 +83,9 @@ viewport metadata, a descriptive title and:
 - Assets belong under `site/`, using relative URLs except the shared stylesheet.
   Illustrate freely with inline SVG or images you draw, render or save into
   `site/`: CSP allows `img-src 'self' data:`. No CDN, external fonts, analytics
-  or network fetches; board CSP blocks them.
+  or network fetches; board CSP blocks them. Links between pages of one board
+  are relative; a published board lives at `<url>`, a private one at
+  `/boards/<slug>/`, and only the stylesheet's absolute path is the same on both.
 - Prefer native links/disclosures. Local JS may sort/filter embedded data;
   keep content readable without JS and hide/disable unavailable controls.
 - Charts must explain something; prefer inline SVG with text/table fallback,

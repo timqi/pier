@@ -56,7 +56,9 @@ src/
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
                also -outbound)
-  boards/      boards.ts (scan + manifest + static serving), pier.css
+  boards/      boards.ts (scan + manifest + static serving), publish.ts
+               (`pier boards publish`: the public boards as one Cloudflare
+               Pages snapshot), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
@@ -259,9 +261,9 @@ mirror them. The seams:
 One line each; the reasoning is in the commit that made it.
 
 - One shared password guards every HTTP surface (`web/auth.ts`); the exemptions
-  are `/p/*`, so a board's `public` flag is a real boundary, `/b/*` (the signed
-  8-hour prefix `/boards/*` redirects to, so no board page is ever served on a
-  cookie-authorized URL, `design/05-boards.md`), the two passkey
+  are `/b/*` (the signed 8-hour prefix `/boards/*` redirects to, so no board
+  page is ever served on a cookie-authorized URL, plus the stylesheet a board
+  links, `design/05-boards.md`), the two passkey
   login routes (`web/passkeys.ts`, on the password's throttle), `/login/:token`
   (the one-time link `pier login` mints over the CLI socket, same throttle) and
   `/config-sync/:token`, guarded by its token. Single-account on purpose: Pier
@@ -277,6 +279,9 @@ One line each; the reasoning is in the commit that made it.
   task`, `pier web`) documented by skills, so no tool schema rides in context.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
+  A public board is a copy of `site/` on Cloudflare Pages, pushed by `pier
+  boards publish` from the agent's shell with the operator's `wrangler`; Pier
+  serves no board without the password.
 - **One writer per instance directory**, enforced before the database opens:
   `$PIER_HOME/pier.lock`, a pid file hard-linked into place from a private
   file so it is never seen empty, held for the process's lifetime, taken over

@@ -120,7 +120,7 @@ export function createSettingsView(
     setStatus(
       urlStatus,
       "saved",
-      publicUrl ? `Saved — boards link as ${publicUrl}/p/<slug>-<token>/` : "Cleared.",
+      publicUrl ? `Saved — boards link as ${publicUrl}/boards/<slug>/` : "Cleared.",
     );
   }
   urlSave.onclick = () => void saveUrl();

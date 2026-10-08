@@ -33,6 +33,7 @@ Usage
   pier task <command> ...     subagents and scheduled tasks from a shell (pier task --help)
   pier web search|fetch ...   the public web through the provider's hosted tools (pier web --help)
   pier search <q...> ...      earlier messages by what was said, Pier's first (skills/pier-search)
+  pier boards publish         push every public board to the Pages project (skills/pier-boards)
   pier --version | --help
 
 Options for "service install"
@@ -65,8 +66,8 @@ const argv = process.argv.slice(2);
 const parsed = (() => {
   try {
     return parseArgs({
-      // `slack`, `task`, `web` and `search` own their options; only the name is parsed here.
-      args: ["slack", "task", "web", "search"].includes(argv[0] ?? "") ? [argv[0]!] : argv,
+      // `slack`, `task`, `web`, `search` and `boards` own their options; only the name is parsed here.
+      args: ["slack", "task", "web", "search", "boards"].includes(argv[0] ?? "") ? [argv[0]!] : argv,
       allowPositionals: true,
       strict: true,
       options: {
@@ -128,6 +129,9 @@ if (values.help || command === "help") {
 } else if (command === "search") {
   const { runSearchCli } = await import("./core/search.js");
   process.exitCode = await runSearchCli(argv.slice(1), (params) => askPier("/search", { params }));
+} else if (command === "boards") {
+  const { runBoardsCli } = await import("./boards/publish.js");
+  process.exitCode = await runBoardsCli(argv.slice(1), () => askPier("/boards", {}));
 } else if (command === "login") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], "pier login");

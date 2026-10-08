@@ -2,11 +2,12 @@
 
 A **Board** is a folder of static files an agent writes to present something at
 a stable URL, readable on a phone, with no server-side runtime. Every surface
-is behind the instance password (`src/web/auth.ts`); `/p/*` (published boards
-plus the stylesheet they link) and `/b/*` (the signed prefix `/boards/*`
-redirects to once the password has been spent) are exempt — the other
-exemption is `/config-sync/:token`, not a board — so `public` is a security
-boundary.
+is behind the instance password (`src/web/auth.ts`); `/b/*` (the signed prefix
+`/boards/*` redirects to once the password has been spent, and the stylesheet
+a board links) is exempt — the other exemption is `/config-sync/:token`, not a
+board. A public board is not served by Pier at all: `pier boards publish`
+copies every `public: true` board's `site/` to one Cloudflare Pages project,
+so `public` is a security boundary and the Pages snapshot is the public surface.
 
 ## Product decisions
 
@@ -17,11 +18,12 @@ boundary.
 3. Private unless asked: `public` defaults `false`; the agent sets it only when
    the user asked for a public board in that request.
 4. The agent is the surface: listing, publishing, unpublishing and deleting are
-   file operations the skill describes; a requested list puts public boards
-   first with their share URL, then private boards, each with title and age.
-   Publishing says anyone with the link can read it. Settings → Boards
-   ([03](03-web-workbench.md)) lists them and writes only `public` or the
-   delete rename.
+   file operations the skill describes, plus one command, `pier boards
+   publish`, after any change to what is public; a requested list puts public
+   boards first with their `url`, then private boards, each with title and
+   age. Publishing says anyone with the link can read it. Settings → Boards
+   ([03](03-web-workbench.md)) holds the Pages project, lists every board with
+   its state, and writes only the delete rename.
 5. HTML only: no markdown source, no renderer, no content negotiation.
 6. Static and self-contained: `site/index.html` plus relative assets under
    `site/` and the shipped stylesheet; no external resources, network data
@@ -51,13 +53,16 @@ $PIER_HOME/boards/
   weekly-digest.deleted-1739…/    # deletes rename in place; the slug rule hides them
 ```
 
-`board.json` — nothing derivable; `token` is minted on the first publish:
+`board.json` — nothing derivable; `url` and `publishedAt` are written by
+`pier boards publish` alone:
 
 ```json
 {
   "title": "Weekly digest — infra",
   "description": "What changed in infra this week and what needs a decision.",
-  "public": false
+  "public": true,
+  "url": "https://pier-g1.pages.dev/weekly-digest/",
+  "publishedAt": "2026-10-08T07:00:00.000Z"
 }
 ```
 
@@ -65,10 +70,73 @@ Slug: `[a-z0-9][a-z0-9-]{0,63}`. Anything else, and any directory with a missing
 or unparsable `board.json`, is logged once and 404s — never half-served.
 Timestamps come from the filesystem (`site/` mtime), not the manifest.
 
-## Shipped stylesheet (`/p/_assets/pier.css`)
+`public` is the intent, `url` the fact: a board has a `url` exactly when it is
+in the live Pages snapshot. Every surface names the state the two make:
 
-[`pier.css`](../../src/boards/pier.css) is served from Pier's package directory;
-it styles semantic HTML with responsive widths, dark mode and optional helpers.
+| `public` | `url` | state |
+| --- | --- | --- |
+| false | — | `private` |
+| true | yes, `publishedAt` ≥ `site/` mtime | `published` |
+| true | yes, `site/` newer than `publishedAt` | `published · changes unpublished` |
+| true | — | `publish pending` |
+| false | yes | `unpublish pending` |
+| folder renamed `<slug>.deleted-<ts>` | yes | `deleted · still live` |
+
+`GET /api/boards` lists a `.deleted-*` folder while it carries a `url`, as
+`deleted: true`; the next publish takes the `url` away and it leaves the list.
+
+## Publishing (`src/boards/publish.ts`)
+
+`pier boards publish`, run from an agent's shell, is the only thing that
+changes what is public. Settings (Console → Boards): `pagesProject`, the
+Cloudflare Pages project — `[a-z0-9][a-z0-9-]{0,57}`, empty means this
+instance publishes nothing, one project per instance (two instances on one
+name overwrite each other, undetected) — and `pagesUrl`, the custom domain
+when one is bound, else `https://<pagesProject>.pages.dev`. `wrangler` and its
+credentials are the operator's, on the agent's PATH; Pier does not depend on
+it and never calls Cloudflare.
+
+1. `POST /boards` on the CLI socket → `{project, base}`; a `422` is one
+   `boards:` line, exit 1.
+2. Scan `$PIER_HOME/boards` with the same manifest validation; `public: true`
+   with a `site/index.html` goes in; one without prints
+   `boards: <slug>: no site/index.html, skipped`.
+3. A temp snapshot: `<slug>/` ← `site/` only (never `board.json`, `README.md`,
+   sources), `b/_assets/pier.css` ← the shipped stylesheet, `_headers` =
+   `Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'` and
+   `X-Content-Type-Options: nosniff` on `/*`. No index at the root: `/` is
+   Pages' 404. `publishedAt` is taken here, before the upload.
+4. `wrangler pages project list --json` lacks the project →
+   `wrangler pages project create <project> --production-branch main`.
+5. `wrangler pages deploy <tmp> --project-name <project> --branch main
+   --commit-dirty=true`, cwd the snapshot (wrangler's `.wrangler/` cache lands
+   there); output streams through; the deployment hash is read off its URL.
+6. `wrangler pages deployment list --project-name <project> --json`; every
+   deployment older than this one is `deployment delete <id> --force`d —
+   never a newer one, so two publishes racing cannot delete each other's.
+7. Manifests: each board in the snapshot gets `url` = `<base>/<slug>/` and
+   `publishedAt`; every other manifest with a `url`, `.deleted-*` included,
+   loses `url` and `publishedAt`; a leftover `token` goes on either path; a
+   manifest that would not change is not written.
+8. The snapshot is removed. Output: `published <url>` / `removed <slug>` per
+   board, then `deployment <hash>, <n> older deleted`.
+
+Any wrangler step failing: its output, `boards: <step> failed`, exit 1, and
+no manifest written — step 7 runs only after a successful deploy. Step 6
+failing is `boards: <k> older deployments not deleted — <slugs> may still be
+reachable at their hash URLs`, exit 1, with step 7 still written, because the
+live snapshot did change. No public board at all deploys a snapshot of only
+`_headers` and the stylesheet: that is how everything is withdrawn.
+
+No `pagesProject`: `boards: no Pages project configured — Console → Boards`,
+exit 1; the skill then sets `public` back to `false` and hands out the
+private link.
+
+## Shipped stylesheet (`/b/_assets/pier.css`)
+
+[`pier.css`](../../src/boards/pier.css) is served from Pier's package directory
+and copied into every Pages snapshot at the same path, so one `<link>` works
+on both; it styles semantic HTML with responsive widths, dark mode and optional helpers.
 Sibling blocks share their responsive container width, which is also the reading
 measure; `.prose` caps that column on an ultrawide canvas, and `.table-scroll`
 keeps full-width native tables scrollable on phones.
@@ -82,15 +150,11 @@ understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /p/_assets/pier.css` | the shipped stylesheet |
+| `GET /b/_assets/pier.css` | the shipped stylesheet, password-free: a sandboxed board sends no cookie with its own subresources |
 | `GET /boards/:slug/*` | the operator surface: 404 if the board is gone, else 302 to `/b/:slug/:view/*`, path and query kept |
 | `GET /b/:slug/:view/*` | static from `<board>/site/`, **only** if `view` is a live signature for that slug; otherwise 302 back to `/boards/:slug/*`, path and query kept |
-| `GET /p/:slug-:token/*` | static from `<board>/site/`, **only** if `public: true` and the token matches; otherwise 404 (never 403 — do not leak existence) |
 
-`token` is 32 random bits: the agent writes it on publish (the skill's
-`openssl rand -hex 4`), or `readManifest` mints it the first time it sees a
-public manifest without one.
-The flag decides; the token only hides the door.
+`/p/*` is gone: an old `/p/<slug>-<token>/` link meets the login form.
 
 `view` is `<expiry in base36>-<HMAC(slug, expiry) truncated to 128 bits>`,
 signed with a process-scoped key and valid for 8 hours. Its own path segment,
@@ -118,7 +182,7 @@ allow-scripts allow-popups allow-popups-to-escape-sandbox; default-src 'self'; i
 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none';
 frame-ancestors 'none'`.
 
-No board gets `allow-same-origin`, published or not — the page is agent-written
+No board gets `allow-same-origin` — the page is agent-written
 script, and on the workbench origin it would read that origin's `localStorage`
 and carry what it read out by top-level navigation, which no CSP directive
 removes. The signed prefix exists to pay for that: an opaque-origin document
@@ -126,10 +190,12 @@ sends no `SameSite=Lax` cookie with its own sub-resources (verified in
 Chromium), so a cookie-authorized board URL would 302 its own stylesheet and
 images to `/login`.
 
-One module owns manifest reads and the routes. `readManifest` is the single
-place a slug becomes a path and is validated; every route reaches the
-filesystem through it. Depends on `node:*`, Hono types and the root `log.ts` /
-`paths.ts` leaves, nothing in core; registered in `main.ts`.
+`boards.ts` owns manifest reads, the scan and the routes; `publish.ts` the
+Pages snapshot. `readManifest` is the single place a slug becomes a path and
+is validated; every route and the publish reach the filesystem through it.
+Depends on `node:*`, Hono types and the root `log.ts` / `paths.ts` leaves,
+nothing in core; the routes are registered in `main.ts`, the publish reached
+from `cli.ts`.
 
 ## Agent surface (`skills/pier-boards/SKILL.md`)
 
@@ -140,19 +206,23 @@ tool or `boards.enabled` flag.
 ## Tests
 
 - Filesystem units in a tmp `PIER_HOME`: slug validation, malformed manifest is
-  skipped + logged (and treated as private), a minted token round-trips with
-  the agent's fields kept, a renamed-away board 404s on every route.
-- Route tests: `/p/:slug` 404 while private and 200 at `<slug>-<token>` after
-  `public: true`, 404 on a missing or wrong token; `..`,
-  absolute-path and symlink escapes rejected on both static prefixes;
-  `board.json`, `README.md` and sources are 404 under both prefixes even though
-  they sit in the board dir.
+  skipped + logged (and treated as private), no manifest is ever written by a
+  read, a renamed-away board 404s on every route and is listed while live.
+- Route tests: `/p/*` serves nothing; `..`, absolute-path and symlink escapes
+  rejected on the signed prefix; `board.json`, `README.md` and sources are 404
+  even though they sit in the board dir.
+- `publish.test.ts` with a fake `wrangler` on `PATH` recording its argv: the
+  snapshot's contents, project creation, the deploy's flags, only older
+  deployments deleted, the write-back on every state, nothing written on a
+  failed deploy, written with exit 1 on a failed delete, wrangler missing,
+  the socket's 422.
 
 ## Acceptance
 
 - An agent creates a board with plain file writes and lists it back when asked.
-- A board created without an explicit public request is unreachable at
-  `/p/<slug>-<token>/`; setting `public: true` makes it reachable.
+- A board created without an explicit public request is on no public URL;
+  setting `public: true` and running `pier boards publish` puts it on Pages
+  at the `url` its manifest then carries.
 - A second, unrelated session edits the same board's content and description.
 - Deleting the session that made it changes nothing about the board.
 - New pages and layout/interaction changes pass the skill's phone/desktop,

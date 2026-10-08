@@ -16,6 +16,8 @@ vi.mock("./log.js", () => ({ logger: () => log }));
 
 const EMPTY = {
   publicUrl: "",
+  pagesProject: "",
+  pagesUrl: "",
   modelMenu: [],
   autoUpdate: false,
   skillsOff: [],

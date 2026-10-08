@@ -8,11 +8,8 @@ import { registerBoardRoutes, rotateBoardViews } from "./boards.js";
 let dir: string;
 let app: Hono;
 
-/** A published board is addressed by `<slug>-<token>`; fixtures pin the token
- *  so a test can build the URL. */
-const TOKEN = "0123abcd";
-const published = { public: true, token: TOKEN };
-const key = (slug: string): string => `${slug}-${TOKEN}`;
+/** A board `pier boards publish` has put on Pages: `url` is the fact. */
+const published = { public: true, url: "https://pier-test.pages.dev/digest/", publishedAt: "2026-10-08T07:00:00.000Z" };
 
 /** The operator prefix hands out a signed prefix instead of bytes; a test
  *  follows that redirect the way a browser does. `/b/<slug>/<view>` without
@@ -58,7 +55,6 @@ describe("which directories are boards", () => {
     makeBoard("Upper", published);
     for (const slug of ["weekly-digest.deleted-1700000000000", "Upper"]) {
       expect((await app.request(`/boards/${slug}/`)).status).toBe(404);
-      expect((await app.request(`/p/${key(slug)}/`)).status).toBe(404);
     }
   });
 });
@@ -131,28 +127,13 @@ describe("serving", () => {
     makeBoard("digest");
     const at = await view("digest");
     expect((await app.request(`${at}?tab=2`)).headers.get("location")).toBe(`${at}/?tab=2`);
-    expect((await app.request("/p/digest")).headers.get("location")).toBe("/p/digest/");
   });
 
-  it("404s a private board on the public prefix and serves it once published", async () => {
-    makeBoard("digest");
-    expect((await app.request("/p/digest/")).status).toBe(404);
-
+  it("serves nothing on the retired public prefix, published or not", async () => {
     makeBoard("digest", published);
-    // The slug alone stays a non-answer: publishing hides the door, it does
-    // not put the board back on a guessable name.
-    expect((await app.request("/p/digest/")).status).toBe(404);
-
-    const res = await app.request(`/p/${key("digest")}/`);
-    expect(res.status).toBe(200);
-    const csp = res.headers.get("content-security-policy");
-    expect(csp).toContain("sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;");
-    expect(csp).not.toContain("allow-same-origin");
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain("frame-src 'none'");
-    expect(csp).toContain("form-action 'none'");
-    expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    for (const path of ["/p/digest/", "/p/digest-0123abcd/", "/p/_assets/pier.css"]) {
+      expect((await app.request(path)).status).toBe(404);
+    }
   });
 
   it("keeps everything outside site/ off the wire", async () => {
@@ -163,27 +144,24 @@ describe("serving", () => {
 
     // Encoded, because a literal `../` is collapsed by URL parsing long before
     // it reaches us — the escape attempt that actually arrives is this one.
-    for (const at of [await view("digest"), `/p/${key("digest")}`]) {
-      expect((await app.request(`${at}/..%2Fboard.json`)).status).toBe(404);
-      expect((await app.request(`${at}/..%2FREADME.md`)).status).toBe(404);
-      expect((await app.request(`${at}/..%2Fsrc%2Findex.html`)).status).toBe(404);
-      expect((await app.request(`${at}/%2e%2e%2fboard.json`)).status).toBe(404);
-    }
+    const at = await view("digest");
+    expect((await app.request(`${at}/..%2Fboard.json`)).status).toBe(404);
+    expect((await app.request(`${at}/..%2FREADME.md`)).status).toBe(404);
+    expect((await app.request(`${at}/..%2Fsrc%2Findex.html`)).status).toBe(404);
+    expect((await app.request(`${at}/%2e%2e%2fboard.json`)).status).toBe(404);
   });
 
   it("refuses a slug that is a path or carries a NUL byte", async () => {
     makeBoard("digest", published);
     writeFileSync(join(dir, "board.json"), '{"public":true}'); // a decoy above the boards
     for (const path of [
-      "/p/..%2F..%2Fetc/index.html",
-      `/p/..%2F..%2Fetc-${TOKEN}/index.html`,
+      "/boards/..%2F..%2Fetc/index.html",
       "/boards/..%2F/index.html",
-      `/p/a%00b-${TOKEN}/index.html`,
+      "/boards/a%00b/index.html",
     ]) {
       expect((await app.request(path)).status).toBe(404);
     }
-    // The decoy above the boards dir must not be readable *or* written: a
-    // public manifest without a token is one a read would mint for.
+    // The decoy above the boards dir must not be readable *or* written.
     expect(readFileSync(join(dir, "board.json"), "utf8")).toBe('{"public":true}');
   });
 
@@ -191,93 +169,52 @@ describe("serving", () => {
     const board = makeBoard("digest", published);
     writeFileSync(join(dir, "outside.html"), "<p>nope</p>");
     symlinkSync(join(dir, "outside.html"), join(board, "site", "link.html"));
-    expect((await app.request(`/p/${key("digest")}/link.html`)).status).toBe(404);
+    expect((await app.request(`${await view("digest")}/link.html`)).status).toBe(404);
   });
 
   it("serves only whitelisted extensions, and caches nothing", async () => {
     const board = makeBoard("digest", published);
     writeFileSync(join(board, "site", "style.css"), "body{}");
     writeFileSync(join(board, "site", "notes.exe"), "x");
-    const viewed = await app.request(`${await view("digest")}/style.css`);
-    const publicAsset = await app.request(`/p/${key("digest")}/style.css`);
+    const at = await view("digest");
+    const viewed = await app.request(`${at}/style.css`);
     expect(viewed.status).toBe(200);
     // Every board URL is revocable, so no copy may outlive the revocation.
     expect(viewed.headers.get("cache-control")).toBe("no-store");
-    // Opaque origin on both prefixes: a font or module asset needs CORS.
+    // Opaque origin: a font or module asset needs CORS.
     expect(viewed.headers.get("access-control-allow-origin")).toBe("*");
-    expect(publicAsset.status).toBe(200);
-    expect(publicAsset.headers.get("cache-control")).toBe("no-store");
-    expect(publicAsset.headers.get("access-control-allow-origin")).toBe("*");
-    expect((await app.request(`/p/${key("digest")}/notes.exe`)).status).toBe(404);
+    expect((await app.request(`${at}/notes.exe`)).status).toBe(404);
   });
 
-  it("404s a wrong, missing or truncated token on a published board", async () => {
-    makeBoard("digest", published);
-    for (const at of [
-      "/p/digest/",
-      "/p/digest-/",
-      "/p/digest-0123abc/",
-      "/p/digest-0123abce/",
-      `/p/digest-${TOKEN.toUpperCase()}/`,
-      `/p/${TOKEN}/`,
-    ]) {
-      expect((await app.request(at)).status).toBe(404);
-    }
-    expect((await app.request(`/p/${key("digest")}/`)).status).toBe(200);
-  });
-
-  it("serves the shipped stylesheet", async () => {
-    const res = await app.request("/p/_assets/pier.css");
+  it("serves the shipped stylesheet on the exempt prefix", async () => {
+    const res = await app.request("/b/_assets/pier.css");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/css");
     expect(await res.text()).toContain(".kpi");
   });
 });
 
-describe("manifest writes", () => {
-  it("mints a token for a board an agent published itself, once and for good", async () => {
-    // The manifest arrives public with no token, the way an agent writing
-    // board.json without the skill's `openssl rand` leaves it.
+describe("manifests", () => {
+  it("never writes one: a public board without a url is pending, not minted for", async () => {
     makeBoard("digest", { public: true, description: "keep me", note: "agent data" });
     expect((await app.request("/boards/digest/")).status).toBe(302);
-    const stored = (): Record<string, unknown> =>
-      JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8")) as Record<string, unknown>;
-    const token = stored().token;
-    expect(token).toMatch(/^[a-f0-9]{8}$/);
-    // Persisted, or the next request would hand out a different URL; the
-    // agent's own fields survive the write.
-    await app.request("/p/digest-00000000/");
-    expect(stored()).toMatchObject({ token, public: true, description: "keep me", note: "agent data" });
-    expect((await app.request(`/p/digest-${String(token)}/`)).status).toBe(200);
-  });
-
-  it("keeps a private board's manifest untouched", async () => {
-    makeBoard("digest");
-    await app.request("/boards/digest/");
-    await app.request(`/p/${key("digest")}/`);
-    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).not.toHaveProperty(
-      "token",
-    );
+    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8")))
+      .toEqual({ title: "digest", public: true, description: "keep me", note: "agent data" });
+    const [board] = (await (await app.request("/api/boards")).json()) as Record<string, unknown>[];
+    expect(board).toMatchObject({ slug: "digest", public: true });
+    expect(board).not.toHaveProperty("url");
   });
 
   it("deletes by renaming, so the bytes survive and every route forgets it", async () => {
     makeBoard("digest", published);
     renameSync(join(dir, "digest"), join(dir, "digest.deleted-1700000000000"));
     expect((await app.request("/boards/digest/")).status).toBe(404);
-    expect((await app.request(`/p/${key("digest")}/`)).status).toBe(404);
     expect(readFileSync(join(dir, "digest.deleted-1700000000000", "site", "index.html"), "utf8")).toBe("<h1>hi</h1>");
   });
 });
 
 describe("the Settings API", () => {
-  const patch = (slug: string, body: unknown) =>
-    app.request(`/api/boards/${slug}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-      headers: { "content-type": "application/json" },
-    });
-
-  it("lists boards freshest first, skipping non-boards and deleted ones", async () => {
+  it("lists boards freshest first, skipping non-boards and deleted ones that are not live", async () => {
     const stale = makeBoard("stale", { description: "old" });
     makeBoard("fresh");
     makeBoard("gone.deleted-1");
@@ -288,28 +225,31 @@ describe("the Settings API", () => {
     expect(boards[1]).toMatchObject({ description: "old", public: false });
   });
 
+  it("carries url and publishedAt, and lists a deleted board that is still live", async () => {
+    makeBoard("digest", published);
+    makeBoard("gone.deleted-1700000000000", { public: true, url: "https://pier-test.pages.dev/gone/", publishedAt: "2026-10-08T07:00:00.000Z" });
+    const boards = (await (await app.request("/api/boards")).json()) as Record<string, unknown>[];
+    expect(boards.find((b) => b.slug === "digest")).toMatchObject(published);
+    expect(boards.find((b) => b.slug === "gone")).toMatchObject({ deleted: true, url: "https://pier-test.pages.dev/gone/" });
+    // Live, with a url: the Console's link, not the private one.
+    expect(boards).toHaveLength(2);
+  });
+
   it("answers an empty list when the boards dir does not exist", async () => {
     const other = new Hono();
     registerBoardRoutes(other, join(dir, "missing"));
     expect(await (await other.request("/api/boards")).json()).toEqual([]);
   });
 
-  it("publishes with a minted token, keeping agent fields, and unpublishes", async () => {
-    makeBoard("digest", { note: "agent data" });
-    const res = await patch("digest", { public: true });
-    const { token } = (await res.json()) as { token: string };
-    expect(token).toMatch(/^[a-f0-9]{8}$/);
-    expect((await app.request(`/p/digest-${token}/`)).status).toBe(200);
-    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).toMatchObject({ note: "agent data" });
-    await patch("digest", { public: false });
-    expect((await app.request(`/p/digest-${token}/`)).status).toBe(404);
-  });
-
-  it("refuses a non-boolean public, an unknown slug and a traversal", async () => {
+  it("has no publish switch: PATCH is gone, and a traversal 404s on DELETE", async () => {
     makeBoard("digest");
-    expect((await patch("digest", { public: "yes" })).status).toBe(400);
-    expect((await patch("nope", { public: true })).status).toBe(404);
-    expect((await patch("..%2F", { public: true })).status).toBe(404);
+    const res = await app.request("/api/boards/digest", {
+      method: "PATCH",
+      body: JSON.stringify({ public: true }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(404);
+    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).toEqual({ title: "digest" });
     expect((await app.request("/api/boards/..%2F", { method: "DELETE" })).status).toBe(404);
   });
 

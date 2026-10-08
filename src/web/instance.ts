@@ -7,6 +7,7 @@ import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
   ACCENTS,
+  isPagesProject,
   normalizeAccent,
   parseModelMenu,
   normalizeModelRef,
@@ -198,6 +199,7 @@ export function registerInstanceRoutes(
     const body = await c.req.json().catch(() => null) as
       | {
         publicUrl?: unknown;
+        pages?: unknown;
         modelMenu?: unknown;
         titleModel?: unknown;
         autoUpdate?: unknown;
@@ -207,11 +209,11 @@ export function registerInstanceRoutes(
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent]
+      ? [body.publicUrl, body.pages, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool or accent required",
+        error: "publicUrl, pages, modelMenu, titleModel, autoUpdate, customTools, tool or accent required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -227,6 +229,15 @@ export function registerInstanceRoutes(
         return refuse(`passkeys are bound to ${bound}; remove them first`);
       }
       writes.push(() => settings.setPublicUrl(publicUrl));
+    }
+    if (body?.pages !== undefined) {
+      const pages = typeof body.pages === "object" && body.pages !== null ? body.pages as Record<string, unknown> : null;
+      if (typeof pages?.project !== "string" || typeof pages.url !== "string") return refuse("pages must be {project, url}");
+      const project = pages.project.trim();
+      if (project && !isPagesProject(project)) return refuse("pages.project must be a Pages project name: [a-z0-9-], 58 characters at most");
+      const url = normalizePublicUrl(pages.url);
+      if (url === null) return refuse("pages.url is not a URL: expected http(s)://host, no query or fragment");
+      writes.push(() => settings.setPages(project, url));
     }
     if (body?.accent !== undefined) {
       if (typeof body.accent !== "string") return refuse("accent must be a string");

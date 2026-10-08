@@ -39,20 +39,20 @@ function app(s: AuthStore): Hono {
   // What queueResponse (server.ts) returns: a native Response, built without
   // the context the boundary set its headers on.
   a.post("/api/native", () => Response.json({ ok: true }));
-  // A published board answers with its own headers, as boards/boards.ts does.
-  a.get("/p/report/", (c) =>
-    c.body("published", 200, {
+  // A board answers with its own headers, as boards/boards.ts does, on the
+  // signed prefix it is served on once this boundary has been passed.
+  a.get("/b/report/1a-sig/", (c) =>
+    c.body("viewed", 200, {
       "content-type": "text/html; charset=utf-8",
       "x-content-type-options": "nosniff",
       "content-security-policy": "sandbox allow-scripts",
     }));
-  a.all("/p/report/", (c) => c.text("published write"));
-  a.get("/p/_assets/pier.css", (c) => c.text("css"));
-  a.all("/p/_assets/pier.css", (c) => c.text("css write"));
-  // The signed prefix a board is served on once this boundary has been passed.
-  a.get("/b/report/1a-sig/", (c) => c.text("viewed"));
   a.all("/b/report/1a-sig/", (c) => c.text("viewed write"));
+  a.get("/b/_assets/pier.css", (c) => c.text("css"));
+  a.all("/b/_assets/pier.css", (c) => c.text("css write"));
   a.get("/boards/report/", (c) => c.text("private"));
+  // The retired public prefix: nothing exempt lives under it any more.
+  a.get("/p/report-0123abcd/", (c) => c.text("published"));
   registerFsRoutes(a);
   return a;
 }
@@ -131,8 +131,8 @@ describe("requireAuth", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("x-frame-options")).toBe("DENY");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-    // A published board sets its own nosniff (boards/boards.ts); one value, not two.
-    const board = await a.request("/p/report/");
+    // A board sets its own nosniff (boards/boards.ts); one value, not two.
+    const board = await a.request("/b/report/1a-sig/");
     expect(board.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
@@ -171,16 +171,18 @@ describe("requireAuth", () => {
     expect(res.status).toBe(401);
   });
 
-  it("serves only read methods for published boards and their stylesheet", async () => {
+  it("serves only read methods on the signed prefix and its stylesheet", async () => {
     const a = app(store().store);
-    for (const path of ["/p/report/", "/p/_assets/pier.css", "/b/report/1a-sig/"]) {
+    for (const path of ["/b/_assets/pier.css", "/b/report/1a-sig/"]) {
       expect((await a.request(path)).status).toBe(200);
       expect((await a.request(path, { method: "HEAD" })).status).toBe(200);
       for (const method of ["POST", "PATCH", "DELETE"]) {
         expect((await a.request(path, { method })).status).toBe(401);
       }
     }
-    expect((await a.request("/p")).headers.get("location")).toBe("/login?next=%2Fp");
+    // An old `/p/` link meets the login form like any other page.
+    expect((await a.request("/p/report-0123abcd/")).headers.get("location")).toBe("/login?next=%2Fp%2Freport-0123abcd%2F");
+    expect((await a.request("/p/_assets/pier.css")).headers.get("location")).toBe("/login?next=%2Fp%2F_assets%2Fpier.css");
     expect((await a.request("/login", { method: "PUT" })).status).toBe(401);
   });
 

@@ -86,6 +86,8 @@ const TOOLS = [{
 /** GET /api/settings on a fresh instance. */
 const SETTINGS_JSON = {
   publicUrl: "",
+  pagesProject: "",
+  pagesUrl: "",
   modelMenu: [],
   autoUpdate: false,
   skillsOff: [],
@@ -1220,6 +1222,26 @@ describe("workbench server", () => {
     expect((await put(42)).status).toBe(400);
     // A rejected write leaves the stored value alone.
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
+  });
+
+  it("writes the Pages project and address, refusing a name Cloudflare would", async () => {
+    const { app, settings } = setup();
+    const put = (pages: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pages }),
+      });
+    const ok = await put({ project: " pier-g1 ", url: "boards.example.com/" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
+    for (const bad of [{ project: "Pier_G1", url: "" }, { project: "pier", url: "not a url" }, { project: "pier" }, "pier"]) {
+      expect((await put(bad)).status).toBe(400);
+    }
+    expect(settings.get()).toMatchObject({ pagesProject: "pier-g1", pagesUrl: "https://boards.example.com" });
+    // Empty clears both: the instance then publishes no board.
+    expect((await put({ project: "", url: "" })).status).toBe(200);
+    expect(settings.get()).toMatchObject({ pagesProject: "", pagesUrl: "" });
   });
 
   it("writes the model menu without disturbing the URL, and rejects a bad one", async () => {

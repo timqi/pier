@@ -1,0 +1,180 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runBoardsCli, type BoardsCliIo } from "./publish.js";
+
+let dir: string;
+let bin: string;
+let out: string[];
+let err: string[];
+const io: BoardsCliIo = { stdout: (l) => out.push(l), stderr: (l) => err.push(l) };
+const PROJECT = "pier-test";
+const BASE = "https://pier-test.pages.dev";
+const ok = async () => ({ status: 200, body: { project: PROJECT, base: BASE } });
+
+/** What a deployment list answers (wrangler's `--json` shape), newest first;
+ *  the deploy answers the middle one, so there is one newer and one older. */
+const DEPLOYMENTS = [
+  { Id: "ffffffff-0000-0000-0000-000000000000", Environment: "Production", Deployment: `https://ffffffff.${PROJECT}.pages.dev`, Status: "Active" },
+  { Id: "abcd1234-0000-0000-0000-000000000000", Environment: "Production", Deployment: `https://abcd1234.${PROJECT}.pages.dev`, Status: "Active" },
+  { Id: "00000001-0000-0000-0000-000000000000", Environment: "Production", Deployment: `https://00000001.${PROJECT}.pages.dev`, Status: "Active" },
+];
+
+/** A `wrangler` on PATH that records argv and replays canned answers; the
+ *  snapshot it was handed is copied aside, since the real one is removed. */
+function fakeWrangler(over: Partial<Record<"projects" | "deploy" | "list" | "delete", string>> = {}): void {
+  const script = `#!/bin/sh
+echo "$@" >> "${join(bin, "calls")}"
+case "$*" in
+  "pages project list --json") ${over.projects ?? `echo '[{"Project Name":"${PROJECT}"}]'`} ;;
+  "pages project create "*) echo "Successfully created the '${PROJECT}' project." ;;
+  "pages deploy "*) mkdir -p "$3/.wrangler"; cp -r "$3" "${join(bin, "snapshot")}"; ${over.deploy ?? `echo "✨ Deployment complete! Take a peek over at https://abcd1234.${PROJECT}.pages.dev"`} ;;
+  "pages deployment list "*) ${over.list ?? `cat "${join(bin, "deployments.json")}"`} ;;
+  "pages deployment delete "*) ${over.delete ?? 'echo "Successfully deleted deployment $4"'} ;;
+  *) echo "unexpected: $*" >&2; exit 9 ;;
+esac
+`;
+  writeFileSync(join(bin, "wrangler"), script);
+  chmodSync(join(bin, "wrangler"), 0o755);
+  writeFileSync(join(bin, "deployments.json"), JSON.stringify(DEPLOYMENTS));
+}
+
+const calls = (): string[] => (existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8").trim().split("\n") : []);
+
+function makeBoard(name: string, manifest: Record<string, unknown>, withIndex = true): string {
+  const board = join(dir, name);
+  mkdirSync(join(board, "site"), { recursive: true });
+  writeFileSync(join(board, "board.json"), JSON.stringify({ title: name, ...manifest }));
+  if (withIndex) writeFileSync(join(board, "site", "index.html"), `<h1>${name}</h1>`);
+  return board;
+}
+
+const manifest = (name: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(join(dir, name, "board.json"), "utf8")) as Record<string, unknown>;
+
+let savedPath: string | undefined;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "pier-boards-"));
+  bin = mkdtempSync(join(tmpdir(), "pier-wrangler-"));
+  out = [];
+  err = [];
+  savedPath = process.env.PATH;
+  process.env.PATH = `${bin}:${savedPath ?? ""}`;
+});
+afterEach(() => {
+  process.env.PATH = savedPath;
+});
+
+describe("pier boards publish", () => {
+  it("snapshots only public boards' site/, deploys, prunes older deployments and writes back", async () => {
+    fakeWrangler();
+    const digest = makeBoard("digest", { public: true, token: "0123abcd", note: "agent data" });
+    writeFileSync(join(digest, "README.md"), "how it was built");
+    mkdirSync(join(digest, "site", "img"));
+    writeFileSync(join(digest, "site", "img", "a.svg"), "<svg/>");
+    makeBoard("draft", { public: false });
+    makeBoard("stale", { public: false, url: `${BASE}/stale/`, publishedAt: "2026-01-01T00:00:00.000Z" });
+    makeBoard("gone.deleted-1700000000000", { public: true, url: `${BASE}/gone/`, publishedAt: "2026-01-01T00:00:00.000Z" });
+    makeBoard("empty", { public: true }, false);
+    const before = statSync(join(dir, "draft", "board.json")).mtimeMs;
+
+    const started = Date.now();
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
+
+    const snapshot = join(bin, "snapshot");
+    expect(readdirSync(snapshot).sort()).toEqual([".wrangler", "_headers", "b", "digest"]);
+    expect(readdirSync(join(snapshot, "digest")).sort()).toEqual(["img", "index.html"]);
+    expect(readFileSync(join(snapshot, "_headers"), "utf8")).toBe(
+      "/*\n  Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n",
+    );
+    expect(readFileSync(join(snapshot, "b", "_assets", "pier.css"), "utf8")).toContain(".kpi");
+
+    expect(calls()).toEqual([
+      "pages project list --json",
+      expect.stringMatching(/^pages deploy \/.+ --project-name pier-test --branch main --commit-dirty=true$/),
+      "pages deployment list --project-name pier-test --json",
+      "pages deployment delete 00000001-0000-0000-0000-000000000000 --project-name pier-test --force",
+    ]);
+
+    const published = manifest("digest");
+    expect(published).toMatchObject({ title: "digest", public: true, note: "agent data", url: `${BASE}/digest/` });
+    expect(published).not.toHaveProperty("token");
+    // The publish's start, not its end: an edit during the upload stays unpublished.
+    expect(Date.parse(String(published.publishedAt))).toBeGreaterThanOrEqual(started - 1000);
+    expect(Date.parse(String(published.publishedAt))).toBeLessThanOrEqual(Date.now());
+    // A rewrite is the normalized manifest: title and description always present.
+    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
+    expect(manifest("gone.deleted-1700000000000")).toEqual({ title: "gone.deleted-1700000000000", description: "", public: true });
+    expect(statSync(join(dir, "draft", "board.json")).mtimeMs).toBe(before);
+
+    expect(err).toEqual(["boards: empty: no site/index.html, skipped"]);
+    expect(out).toEqual([`published ${BASE}/digest/`, "removed gone", "removed stale", "deployment abcd1234, 1 older deleted"]);
+    // The snapshot dir is gone, `.wrangler/` with it.
+    expect(readdirSync(tmpdir()).filter((n) => n.startsWith("pier-pages-"))).toEqual([]);
+  });
+
+  it("creates the project when the account has none by that name", async () => {
+    fakeWrangler({ projects: "echo '[]'" });
+    makeBoard("digest", { public: true });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
+    expect(calls()[1]).toBe("pages project create pier-test --production-branch main");
+  });
+
+  it("publishes an empty snapshot when no board is public: the all-unpublish path", async () => {
+    fakeWrangler();
+    makeBoard("stale", { public: false, url: `${BASE}/stale/`, publishedAt: "2026-01-01T00:00:00.000Z" });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(0);
+    expect(readdirSync(join(bin, "snapshot")).sort()).toEqual([".wrangler", "_headers", "b"]);
+    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
+    expect(out).toEqual(["removed stale", "deployment abcd1234, 1 older deleted"]);
+  });
+
+  it("leaves every manifest alone when the deploy fails", async () => {
+    fakeWrangler({ deploy: 'echo "upload failed" >&2; exit 1' });
+    makeBoard("digest", { public: true, token: "0123abcd" });
+    makeBoard("stale", { public: false, url: `${BASE}/stale/` });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(1);
+    expect(err).toEqual(["boards: deploy failed"]);
+    expect(manifest("digest")).toEqual({ title: "digest", public: true, token: "0123abcd" });
+    expect(manifest("stale")).toEqual({ title: "stale", public: false, url: `${BASE}/stale/` });
+    expect(calls()).toHaveLength(2);
+  });
+
+  it("writes back but exits 1 when an older deployment could not be deleted", async () => {
+    fakeWrangler({ delete: 'echo "nope" >&2; exit 1' });
+    makeBoard("digest", { public: true });
+    makeBoard("stale", { public: false, url: `${BASE}/stale/` });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(1);
+    expect(manifest("digest")).toMatchObject({ url: `${BASE}/digest/` });
+    expect(manifest("stale")).toEqual({ title: "stale", description: "", public: false });
+    expect(out.at(-1)).toBe("deployment abcd1234, 0 older deleted");
+    expect(err).toEqual(["boards: 1 older deployments not deleted — stale may still be reachable at their hash URLs"]);
+  });
+
+  it("says so when wrangler is not on PATH", async () => {
+    process.env.PATH = "/nonexistent";
+    makeBoard("digest", { public: true });
+    expect(await runBoardsCli(["publish"], ok, io, dir)).toBe(1);
+    expect(err).toEqual(["boards: wrangler not found on PATH"]);
+    expect(manifest("digest")).toEqual({ title: "digest", public: true });
+  });
+
+  it("prints the socket's refusal when no project is configured, before touching wrangler", async () => {
+    fakeWrangler();
+    makeBoard("digest", { public: true });
+    const refused = async () => ({ status: 422, body: { error: "no Pages project configured — Console → Boards" } });
+    expect(await runBoardsCli(["publish"], refused, io, dir)).toBe(1);
+    expect(err).toEqual(["boards: no Pages project configured — Console → Boards"]);
+    expect(calls()).toEqual([]);
+  });
+
+  it("knows only publish", async () => {
+    expect(await runBoardsCli([], ok, io, dir)).toBe(2);
+    expect(await runBoardsCli(["--help"], ok, io, dir)).toBe(0);
+    expect(await runBoardsCli(["unpublish"], ok, io, dir)).toBe(2);
+    expect(await runBoardsCli(["publish", "digest"], ok, io, dir)).toBe(2);
+    expect(err[0]).toContain('boards: unknown command "unpublish"');
+    expect(err[1]).toContain('boards: unexpected argument "digest"');
+  });
+});
