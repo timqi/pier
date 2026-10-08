@@ -123,7 +123,7 @@ unreadable on phones. Reuse helpers before adding CSS:
 
 | Helpers | Purpose |
 | --- | --- |
-| `.hero`, `.lede` | opening panel, answer |
+| `.hero`, `.lede` | opening block (leading `.tag` eyebrow, title), answer |
 | `.grid`, `.card`, `.kpi` | responsive metric cards |
 | `.split` | two columns that stack |
 | `.prose`, `.table-scroll` | page reading column, scrollable table |
