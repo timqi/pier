@@ -6,7 +6,7 @@
 import { Check, Ellipsis, X, type IconNode } from "lucide";
 import { failure, getJson, refused, sendJson } from "./api.js";
 import { copy, h, relTime } from "./dom.js";
-import { btn, button, card, empty, field, input, setStatus } from "./form.js";
+import { badge, btn, button, card, empty, field, input, setStatus } from "./form.js";
 import { icon } from "./icons.js";
 import { closeMenu, openMenu } from "./menu.js";
 
@@ -30,6 +30,15 @@ type PublishFrame = { out: string } | { err: string } | { log: string } | { exit
 /** Where a board is readable: live on Pages at its `url`, else on the
  *  operator's prefix. One answer for the link and the copy. */
 const boardLink = (board: BoardSummary): string => board.url ?? `/boards/${board.slug}/`;
+
+/** A link that opens in a new tab and sends no referrer: every board link. */
+function external(href: string, cls: string, label = href): HTMLAnchorElement {
+  const link = h("a", cls, label) as HTMLAnchorElement;
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  return link;
+}
 
 /** The six states of docs/design/05-boards.md: intent (`public`) against fact (`url`). */
 function state(board: BoardSummary): string {
@@ -89,11 +98,7 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
   function resultLine(line: string): HTMLElement {
     const url = /^published (https?:\/\/\S+)$/.exec(line)?.[1];
     if (!url) return h("span", "break-words", line);
-    const link = h("a", "break-all text-indigo-700 hover:underline", url) as HTMLAnchorElement;
-    link.href = url;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    return h("span", "", "published ", link);
+    return h("span", "", "published ", external(url, "break-all text-indigo-700 hover:underline"));
   }
 
   /** Draws one frame; the exit code is the stream's last, returned. */
@@ -156,16 +161,17 @@ export function createBoardsPane(): { el: HTMLElement; show(): void } {
   }
 
   function row(board: BoardSummary): HTMLElement {
-    const link = h("a", "min-w-0 truncate text-[12.5px] font-medium text-neutral-700 hover:text-indigo-700", board.title) as HTMLAnchorElement;
-    link.href = boardLink(board);
-    link.target = "_blank";
-    link.rel = "noreferrer";
+    const link = external(boardLink(board), "min-w-0 truncate text-[12.5px] font-medium text-neutral-700 hover:text-indigo-700", board.title);
     const meta = [board.slug, state(board), `updated ${relTime(Date.parse(board.updatedAt))}`];
     if (board.description) meta.push(board.description);
+    // Live on Pages: said by a badge and the address itself, not only by the state words.
+    const title = board.url ? h("span", "flex min-w-0 items-center gap-2", link, badge("Public", "bg-green-50 text-green-700 ring-green-200")) : link;
+    const address = board.url ? [external(board.url, "min-w-0 truncate text-[11.5px] text-indigo-700 hover:underline")] : [];
     const line = h(
       "div",
       "flex min-w-0 flex-col gap-1",
-      link,
+      title,
+      ...address,
       h("span", "truncate text-[11.5px] text-neutral-400", meta.join(" · ")),
     );
     // One trigger instead of a row of words, so the title keeps the width.

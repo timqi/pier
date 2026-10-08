@@ -46,7 +46,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/tasks/:id/pause`, `/resume` | `setEnabled`; answers the definition. 400 unknown, archived-on-resume, or a task Pier owns |
 | `GET /api/boards` | *(served by `boards/boards.ts`, as is the one below)* `[{slug, title, description, public, url?, publishedAt?, deleted?, updatedAt}]`, freshest `site/` mtime first; `url` only while the board is in the live Pages snapshot; a `<slug>.deleted-<ts>` folder still carrying a `url` is listed with `deleted: true` ([05](05-boards.md)) |
 | `DELETE /api/boards/:slug` | renames the folder `<slug>.deleted-<ts>`; answers `{deleted}`, 404 unknown slug |
-| `POST /api/boards/publish` | *(`boards/publish.ts`)* runs `pier boards publish`'s flow in Pier's process: SSE frames `{log}`, `{out}`, `{err}`, then `{exit}`; 409 while one runs, 422 with no Pages project ([05](05-boards.md)) |
+| `POST /api/boards/publish` | *(`boards/publish.ts`)* runs `pier boards publish`'s flow in Pier's process: SSE frames `{log}`, `{out}`, `{err}`, then `{exit}`; 409 while one runs, 422 with no Pages project, wrangler killed and exit 1 after 10 min ([05](05-boards.md)) |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
@@ -448,7 +448,8 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   and Publish, which runs it in Pier's process and streams its output, result
   lines and outcome into the card (`POST /api/boards/publish`, [05](05-boards.md)) —
   then one row per board — title linking where it is readable (its `url` when
-  live, else `/boards/<slug>/`), slug, its state (`private`, `published`,
+  live, else `/boards/<slug>/`), a board with a `url` badged Public with that
+  address as its own link beneath the title, slug, its state (`private`, `published`,
   `published · changes unpublished`, `publish pending`, `unpublish pending`,
   `deleted · still live`), age — with a ⋯ menu holding Copy link (the ⋯ flashes
   the outcome) and, except on a deleted row, Delete (a rename, confirmed in the

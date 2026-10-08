@@ -23,7 +23,10 @@ what they do not say.
   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in that env, or a shim
   that injects them per call): only for publishing boards, which `pier boards
   publish` does with it; Pier itself never reads a token or calls Cloudflare.
-  The project name goes in Console → Boards.
+  The project name goes in Console → Boards. The service sees the PATH
+  recorded at install: after putting `wrangler` or the vt shim on yours, run
+  `pier service install --force` from that shell, or add
+  `Environment=PATH=<shim dir>:…` via `systemctl --user edit pier`.
 - Pier installed globally. A checkout (`git clone` + `npm ci && npm run build`)
   is the *develop* path; point the unit's `ExecStart` at its `dist/main.js` if
   you run one as the service, and update it with the checkout steps under

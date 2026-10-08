@@ -157,7 +157,10 @@ from settings, answered as an SSE stream of `{log}` (wrangler's output as it
 arrives), `{out}` (a result line), `{err}` (a `boards:` line) and a last
 `{exit}`, pinged every 15 s while wrangler waits on an approval. One publish at
 a time per Pier process — a second is `409 {error: "a publish is already
-running"}` — and no project is `422`. A closed tab does not stop it. The card
+running"}` — and no project is `422`. A closed tab does not stop it; 10
+minutes does: the wrangler call in flight (the direct child, a shim waiting on
+an approval included) is killed, `boards: no answer within 10 min — wrangler
+stopped` is sent, the steps after it fail as theirs would, and the exit is 1. The card
 streams the output, links each published URL, ends on `Published.` or `Publish
 failed`, and redraws the board list. A shell's publish and the button's are not
 serialized against each other; step 6 keeps that race harmless.
@@ -247,7 +250,7 @@ tool or `boards.enabled` flag.
   deployments deleted, the write-back on every state, nothing written on a
   failed deploy, written with exit 1 on a failed delete, wrangler missing,
   the socket's 422; the route's frames, a denied credential, the 409 while
-  one runs, the 422.
+  one runs, the time limit, the 422.
 
 ## Acceptance
 

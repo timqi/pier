@@ -58,10 +58,11 @@ const processIo: BoardsCliIo = {
 class WranglerMissing extends Error {}
 
 /** One wrangler call. `quiet` keeps a `--json` answer off the terminal; the
- *  rest streams through as it happens, so a slow upload is seen uploading. */
-function wrangler(args: string[], cwd: string, io: BoardsCliIo, quiet = false): Promise<{ code: number; stdout: string }> {
+ *  rest streams through as it happens, so a slow upload is seen uploading. An
+ *  aborted call is killed and answers as a failed step. */
+function wrangler(args: string[], cwd: string, io: BoardsCliIo, signal: AbortSignal | undefined, quiet = false): Promise<{ code: number; stdout: string }> {
   return new Promise((done, reject) => {
-    const child = spawn("wrangler", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("wrangler", args, { cwd, stdio: ["ignore", "pipe", "pipe"], signal });
     let stdout = "";
     // Decoded per stream, so a character split across two chunks stays whole.
     child.stdout.setEncoding("utf8");
@@ -71,7 +72,10 @@ function wrangler(args: string[], cwd: string, io: BoardsCliIo, quiet = false): 
       if (!quiet) io.wrangler(chunk, "stdout");
     });
     child.stderr.on("data", (chunk: string) => io.wrangler(chunk, "stderr"));
-    child.on("error", (err: NodeJS.ErrnoException) => reject(err.code === "ENOENT" ? new WranglerMissing() : err));
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.name === "AbortError") done({ code: 1, stdout });
+      else reject(err.code === "ENOENT" ? new WranglerMissing() : err);
+    });
     child.on("close", (code) => done({ code: code ?? 1, stdout }));
   });
 }
@@ -103,17 +107,18 @@ export async function runBoardsCli(argv: string[], post: BoardsPost, io: BoardsC
   return publishBoards(dir, { project, base }, io);
 }
 
-/** The whole publish, every failure one `boards:` line and exit 1. */
-export async function publishBoards(dir: string, target: PagesTarget, io: BoardsCliIo): Promise<number> {
+/** The whole publish, every failure one `boards:` line and exit 1. `signal`
+ *  kills the wrangler call in flight; the steps after it fail as theirs would. */
+export async function publishBoards(dir: string, target: PagesTarget, io: BoardsCliIo, signal?: AbortSignal): Promise<number> {
   try {
-    return await publish(dir, target, io);
+    return await publish(dir, target, io, signal);
   } catch (err) {
     io.stderr(err instanceof WranglerMissing ? "boards: wrangler not found on PATH" : `boards: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   }
 }
 
-async function publish(dir: string, { project, base }: PagesTarget, io: BoardsCliIo): Promise<number> {
+async function publish(dir: string, { project, base }: PagesTarget, io: BoardsCliIo, signal: AbortSignal | undefined): Promise<number> {
   // Taken before the snapshot: an edit landing during the upload is then
   // newer than the publish and shows as unpublished, not silently missed.
   const publishedAt = new Date().toISOString();
@@ -133,7 +138,7 @@ async function publish(dir: string, { project, base }: PagesTarget, io: BoardsCl
     if (manifest.url || now - Date.parse(manifest.withdrawnAt ?? "") < STALE_MS) withdrawn.add(slug);
   }
   const tmp = await mkdtemp(join(tmpdir(), "pier-pages-"));
-  const run = (args: string[], quiet = false) => wrangler(args, tmp, io, quiet);
+  const run = (args: string[], quiet = false) => wrangler(args, tmp, io, signal, quiet);
   try {
     for (const slug of live) await cp(join(dir, slug, "site"), join(tmp, slug), { recursive: true });
     await mkdir(join(tmp, "b", "_assets"), { recursive: true });
@@ -213,10 +218,14 @@ export type PublishFrame = { out: string } | { err: string } | { log: string } |
 /** Under a proxy's idle cutoff while wrangler waits on an approval. */
 const PING_MS = 15_000;
 
+/** Past it, wrangler is killed: an approval nobody answers must not hold the
+ *  one-at-a-time slot, and a real upload of every board fits well inside. */
+const PUBLISH_LIMIT_MS = 10 * 60_000;
+
 /** The Console's Publish button: this same publish in Pier's own process, so
  *  `wrangler` is the one on the service's PATH. One at a time per process; a
  *  closed tab does not stop a deploy halfway. */
-export function registerPublishRoute(app: Hono, target: () => PagesTarget | null, dir: string = defaultBoardsDir()): void {
+export function registerPublishRoute(app: Hono, target: () => PagesTarget | null, dir: string = defaultBoardsDir(), limitMs = PUBLISH_LIMIT_MS): void {
   let running = false;
   app.post("/api/boards/publish", (c) => {
     const pages = target();
@@ -228,18 +237,27 @@ export function registerPublishRoute(app: Hono, target: () => PagesTarget | null
       // Hono drops a write to a closed stream; the publish runs on regardless.
       const send = (frame: PublishFrame): Promise<unknown> => stream.writeSSE({ data: JSON.stringify(frame) });
       const ping = setInterval(() => void stream.write(": ping\n\n"), PING_MS);
+      const io: BoardsCliIo = {
+        stdout: (line) => void send({ out: line }),
+        stderr: (line) => {
+          log.warn(`publish: ${line}`);
+          void send({ err: line });
+        },
+        wrangler: (chunk) => void send({ log: chunk }),
+      };
+      const stop = new AbortController();
+      const limit = setTimeout(() => {
+        io.stderr(`boards: no answer within ${String(Math.round(limitMs / 60_000))} min — wrangler stopped`);
+        stop.abort();
+      }, limitMs);
       try {
-        const code = await publishBoards(dir, pages, {
-          stdout: (line) => void send({ out: line }),
-          stderr: (line) => {
-            log.warn(`publish: ${line}`);
-            void send({ err: line });
-          },
-          wrangler: (chunk) => void send({ log: chunk }),
-        });
-        log.info(`publish to ${pages.project} exited ${String(code)}`);
-        await send({ exit: code });
+        const code = await publishBoards(dir, pages, io, stop.signal);
+        // A step cut short may still have looked like a success to the code after it.
+        const exit = stop.signal.aborted ? 1 : code;
+        log.info(`publish to ${pages.project} exited ${String(exit)}`);
+        await send({ exit });
       } finally {
+        clearTimeout(limit);
         clearInterval(ping);
         running = false;
       }

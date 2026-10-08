@@ -115,7 +115,20 @@ describe("Settings → Boards", () => {
     answers["GET /api/boards"] = () => Response.json([{ ...board, public: true, url: LIVE, publishedAt: board.updatedAt }]);
     const pane = createBoardsPane();
     await mount(pane);
-    expect(href(walk(pane.el as unknown as FakeElement).find((el) => el.localName === "a")!)).toBe(LIVE);
+    const links = walk(pane.el as unknown as FakeElement).filter((el) => el.localName === "a");
+    expect(links.map(href)).toEqual([LIVE, LIVE]);
+    expect(links[1]!.textContent).toBe(LIVE);
+  });
+
+  it("badges a board live on Pages Public, and only that one", async () => {
+    answers["GET /api/boards"] = () => Response.json([
+      { ...board, slug: "live", title: "Live", public: true, url: LIVE, publishedAt: board.updatedAt },
+      { ...board, slug: "pending", title: "Pending", public: true },
+    ]);
+    await mount(createBoardsPane());
+    const badges = walk(root).filter((el) => el.textContent === "Public" && el.localName === "span");
+    expect(badges).toHaveLength(1);
+    expect(text().indexOf("Public")).toBeLessThan(text().indexOf("Pending"));
   });
 
   it("says each of the six states", async () => {
@@ -192,7 +205,8 @@ describe("Settings → Boards", () => {
     await vi.waitFor(() => expect(text()).toContain("Published."));
     expect(publish.disabled).toBe(false);
     expect(walk(root).find((el) => el.localName === "pre")!.textContent).toBe("Uploading… done\n");
-    expect(walk(root).filter((el) => el.localName === "a" && href(el) === LIVE)).toHaveLength(2);
+    // The result line's link, and the redrawn row's title and address.
+    expect(walk(root).filter((el) => el.localName === "a" && href(el) === LIVE)).toHaveLength(3);
     expect(text()).toContain("removed stale");
     expect(text()).toContain("deployment abcd1234, 1 older deleted");
     expect(text()).toContain("digest · published");
