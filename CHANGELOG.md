@@ -4,6 +4,7 @@
 
 ### Upgrade notes
 
+- Boards move out of Pier to Corkboard, a separate project installed as a Pi package (Console → Packages): Pier no longer serves `/boards/*` or `/b/*`, the Console has no Boards pane, `pier boards` is gone along with the `pier-boards` skill, and stored Pages settings are ignored.
 - Public boards move to Cloudflare Pages: `/p/<slug>-<token>/` no longer serves anything — an old link meets the login form — and the `token` field is retired. Install `wrangler` with Cloudflare credentials in the shell agents run in, enter the Pages project name in Console → Boards, repoint every board's stylesheet link (`sed -i 's#/p/_assets/pier.css#/b/_assets/pier.css#g' ~/.pier/boards/*/site/*.html`), then have any session run `pier boards publish`; it creates the project, pushes every `public: true` board and writes each manifest's `url`. Links already sent out must be replaced with the new ones.
 
 ### Changed
