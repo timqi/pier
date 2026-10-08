@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerPublishRoute, runBoardsCli, type BoardsCliIo, type PublishFrame } from "./publish.js";
 
 let dir: string;
@@ -255,18 +255,21 @@ describe("POST /api/boards/publish", () => {
     expect((await frames(await hono.request("/api/boards/publish", { method: "POST" }))).at(-1)).toEqual({ exit: 0 });
   });
 
-  it("stops a wrangler that never answers, ends on exit 1 and takes the next publish", async () => {
-    fakeWrangler({ projects: "exec sleep 30" });
+  it("kills a wrangler that never answers with its children, ends on exit 1 and takes the next publish", async () => {
+    // A shim's shape: the real wrangler is the shim's child, not the shim.
+    fakeWrangler({ projects: `sleep 30 & echo $! > "${join(bin, "child")}"; wait` });
     makeBoard("digest", { public: true });
     const hono = new Hono();
     registerPublishRoute(hono, () => ({ project: PROJECT, base: BASE }), dir, 200);
     const got = await frames(await hono.request("/api/boards/publish", { method: "POST" }));
     expect(got).toEqual([
-      { err: expect.stringMatching(/^boards: no answer within \d+ min — wrangler stopped$/) },
+      { err: expect.stringMatching(/^boards: stopped after \d+ min — wrangler killed$/) },
       { err: "boards: project list failed" },
       { exit: 1 },
     ]);
     expect(manifest("digest")).toEqual({ title: "digest", public: true });
+    const child = Number(readFileSync(join(bin, "child"), "utf8"));
+    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(/ESRCH/));
     fakeWrangler();
     expect((await frames(await hono.request("/api/boards/publish", { method: "POST" }))).at(-1)).toEqual({ exit: 0 });
   });

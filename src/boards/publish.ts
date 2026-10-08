@@ -61,9 +61,24 @@ class WranglerMissing extends Error {}
  *  rest streams through as it happens, so a slow upload is seen uploading. An
  *  aborted call is killed and answers as a failed step. */
 function wrangler(args: string[], cwd: string, io: BoardsCliIo, signal: AbortSignal | undefined, quiet = false): Promise<{ code: number; stdout: string }> {
+  if (signal?.aborted) return Promise.resolve({ code: 1, stdout: "" });
   return new Promise((done, reject) => {
-    const child = spawn("wrangler", args, { cwd, stdio: ["ignore", "pipe", "pipe"], signal });
+    // Its own process group only under a signal: the group is what the abort
+    // kills, so a shim's wrangler child dies with it; a terminal's Ctrl-C
+    // reaches only its foreground group, so the CLI's call stays in it.
+    const child = spawn("wrangler", args, { cwd, stdio: ["ignore", "pipe", "pipe"], detached: signal !== undefined });
     let stdout = "";
+    const kill = (): void => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGTERM");
+      } catch (err) {
+        // ESRCH: the whole group had already exited.
+        if ((err as NodeJS.ErrnoException).code !== "ESRCH") log.warn(`cannot kill wrangler group ${String(child.pid)}`, err);
+      }
+      done({ code: 1, stdout });
+    };
+    signal?.addEventListener("abort", kill, { once: true });
+    child.on("close", () => signal?.removeEventListener("abort", kill));
     // Decoded per stream, so a character split across two chunks stays whole.
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -72,10 +87,7 @@ function wrangler(args: string[], cwd: string, io: BoardsCliIo, signal: AbortSig
       if (!quiet) io.wrangler(chunk, "stdout");
     });
     child.stderr.on("data", (chunk: string) => io.wrangler(chunk, "stderr"));
-    child.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.name === "AbortError") done({ code: 1, stdout });
-      else reject(err.code === "ENOENT" ? new WranglerMissing() : err);
-    });
+    child.on("error", (err: NodeJS.ErrnoException) => reject(err.code === "ENOENT" ? new WranglerMissing() : err));
     child.on("close", (code) => done({ code: code ?? 1, stdout }));
   });
 }
@@ -218,8 +230,8 @@ export type PublishFrame = { out: string } | { err: string } | { log: string } |
 /** Under a proxy's idle cutoff while wrangler waits on an approval. */
 const PING_MS = 15_000;
 
-/** Past it, wrangler is killed: an approval nobody answers must not hold the
- *  one-at-a-time slot, and a real upload of every board fits well inside. */
+/** Past it, wrangler is killed, whatever it was waiting on: an approval nobody
+ *  answers must not hold the one-at-a-time slot. */
 const PUBLISH_LIMIT_MS = 10 * 60_000;
 
 /** The Console's Publish button: this same publish in Pier's own process, so
@@ -247,7 +259,7 @@ export function registerPublishRoute(app: Hono, target: () => PagesTarget | null
       };
       const stop = new AbortController();
       const limit = setTimeout(() => {
-        io.stderr(`boards: no answer within ${String(Math.round(limitMs / 60_000))} min — wrangler stopped`);
+        io.stderr(`boards: stopped after ${String(Math.round(limitMs / 60_000))} min — wrangler killed`);
         stop.abort();
       }, limitMs);
       try {
