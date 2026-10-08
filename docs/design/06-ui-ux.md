@@ -1,7 +1,7 @@
 # Pier UI/UX Design Principles
 
 The workbench's presentation contract for implementation and review. Browser UI
-only; IM messages and Boards need not reproduce it. [Web Workbench](03-web-workbench.md)
+only; IM messages need not reproduce it. [Web Workbench](03-web-workbench.md)
 owns behavior and wire contracts; [AGENTS.md](../../AGENTS.md) the engineering
 boundaries. Explicit user requirements take precedence; a change to a convention
 updates this document.

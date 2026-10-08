@@ -29,15 +29,15 @@ pier serve
 ```
 
 It listens on `127.0.0.1:3141` (`PORT`, `HOST`) and keeps everything under
-`~/.pier` (`PIER_HOME`): one SQLite database, the boards it serves, the
-`master.key` that seals stored credentials, the conversation's memory
+`~/.pier` (`PIER_HOME`): one SQLite database, the `master.key` that seals
+stored credentials, the conversation's memory
 (`~/.pier/home`), and the Pi runtime with its session transcripts
 (`~/.pier/pi`, unless `PI_CODING_AGENT_DIR` says otherwise).
 
 **The first start generates a password and prints it once.** Lost it?
 `sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart. Open
 `http://localhost:3141`, sign in; **Console → Settings** has Models, Agent,
-Channels, Vault, Tasks, Boards, Instance (public URL, accent, notifications,
+Channels, Vault, Tasks, Instance (public URL, accent, notifications,
 reload) and Security (master key, password, passkeys, signed-in devices).
 
 ## How the conversation works

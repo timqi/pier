@@ -72,7 +72,7 @@ is at 3039 of 3.2k.
 The operator asks in chat ("分档用得对吗"); the head runs the verb and
 answers from the JSON — the share per tier, the `named` rows, any lead not
 on `hardest`, and any row whose `names` read like another tier's work. No
-worker, no board, no skill of its own: `skills/pier-tasks/SKILL.md` gains
+worker, no skill of its own: `skills/pier-tasks/SKILL.md` gains
 the verb's line and the one reading rule (a row is a question, not a fault).
 
 ## Telling agents

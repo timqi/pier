@@ -18,15 +18,6 @@ what they do not say.
 - Node 24 or newer (`node:sqlite` is used unflagged).
 - A user-writable global npm prefix: the updater runs as you.
 - `sqlite3` CLI: optional, for the off-machine backup and password steps below.
-- `wrangler` on the PATH of the shell agents run in — and of the service, for
-  Console → Boards → Publish — with Cloudflare credentials (`wrangler login`,
-  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in that env, or a shim
-  that injects them per call): only for publishing boards, which `pier boards
-  publish` does with it; Pier itself never reads a token or calls Cloudflare.
-  The project name goes in Console → Boards. The service sees the PATH
-  recorded at install: after putting `wrangler` or the vt shim on yours, run
-  `pier service install --force` from that shell, or add
-  `Environment=PATH=<shim dir>:…` via `systemctl --user edit pier`.
 - Pier installed globally. A checkout (`git clone` + `npm ci && npm run build`)
   is the *develop* path; point the unit's `ExecStart` at its `dist/main.js` if
   you run one as the service, and update it with the checkout steps under
@@ -74,7 +65,7 @@ journalctl --user -u pier | grep 'client:'              # browser-side errors
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`,
-`lark`, `channels`, `auth`, `boards`, `client`, `db`, `stop`, `secrets`,
+`lark`, `channels`, `auth`, `client`, `db`, `stop`, `secrets`,
 `vault`, `socket`, `settings`, `credentials`, `packages`, `passkeys`, `config-sync`,
 `update`, `tools`, `push`, `web`, `web.providers`, `pier`. Level: a syslog priority prefix under
 `$JOURNAL_STREAM`, a level word in a terminal. `client:` is posted back by
@@ -272,7 +263,6 @@ Loopback bind; reach it over a tunnel, not a wider bind:
   settings, password hash, sealed credentials and tokens. Off-machine: `sqlite3
   ... "VACUUM INTO '…'"`, not `cp` (WAL can miss the latest commits).
 - `~/.pier/master.key` — seals the database's credentials and the vault's `auto` rows.
-- `~/.pier/boards/`.
 - `~/.pier/home` — the conversation's memory: `MEMORY.md`, `memory/` daily notes.
 - `~/.pier/db/backups/` — the automatic pre-update and pre-migration copies.
 - `~/.pier/pi` — Pi's session history (unless `PI_CODING_AGENT_DIR` names

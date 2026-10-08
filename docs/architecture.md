@@ -56,9 +56,6 @@ src/
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
                also -outbound)
-  boards/      boards.ts (scan + manifest + static serving), publish.ts
-               (`pier boards publish`: the public boards as one Cloudflare
-               Pages snapshot), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
@@ -124,7 +121,7 @@ src/
 
 Dependency rules:
 
-- `channels | web | tasks | boards | websearch → core → agent`. Core never imports platform
+- `channels | web | tasks | websearch → core → agent`. Core never imports platform
   SDKs or Pi; runtime dependencies never go sideways.
 - `agent/types.ts` imports no SDK and no `node:*`; any area may import it.
 - `websearch/` imports no SDK: it speaks Messages/Responses itself over the
@@ -147,7 +144,6 @@ Dependency rules:
   `settings.ts` (one function: what a custom tool may be). `tools-task.ts` and
   `config-sync-task.ts` are reachable from `main.ts` alone and are the root
   modules besides it importing `tasks/` (the service type-only, `isTerminal`).
-- `boards/` imports neither core nor Pi.
 
 The IM channel layer's spec is `docs/design/04-im-channels.md`.
 
@@ -261,11 +257,8 @@ mirror them. The seams:
 One line each; the reasoning is in the commit that made it.
 
 - One shared password guards every HTTP surface (`web/auth.ts`); the exemptions
-  are `/b/*` (the signed 8-hour prefix `/boards/*` redirects to, so no board
-  page is ever served on a cookie-authorized URL, plus the stylesheet a board
-  links, `design/05-boards.md`), the two passkey
-  login routes (`web/passkeys.ts`, on the password's throttle), `/login/:token`
-  (the one-time link `pier login` mints over the CLI socket, same throttle) and
+  are the two passkey login routes (`web/passkeys.ts`, on the password's
+  throttle), `/login/:token` (the one-time link `pier login` mints over the CLI socket, same throttle) and
   `/config-sync/:token`, guarded by its token. Single-account on purpose: Pier
   has one workspace; a registered passkey replaces the password rather than
   joining it.
@@ -277,11 +270,8 @@ One line each; the reasoning is in the commit that made it.
   `extensions`/`skills` dirs), Pier writes it, never a second list; Pier
   ships no extension of its own — its tools are CLIs (`pier slack`, `pier
   task`, `pier web`) documented by skills, so no tool schema rides in context.
-- Boards are directories under `$PIER_HOME/boards`, found by scanning; only
-  `site/` is served; static HTML against one shipped stylesheet, no toolchain.
-  A public board is a copy of `site/` on Cloudflare Pages, pushed by `pier
-  boards publish` from a shell or Console → Boards → Publish, with the
-  `wrangler` on that process's PATH; Pier serves no board without the password.
+- Pier serves no static pages: boards are Corkboard, a Pi package added in
+  Console → Packages like any other.
 - **One writer per instance directory**, enforced before the database opens:
   `$PIER_HOME/pier.lock`, a pid file hard-linked into place from a private
   file so it is never seen empty, held for the process's lifetime, taken over

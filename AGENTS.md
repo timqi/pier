@@ -2,7 +2,7 @@
 
 Pier is a minimal agent workspace on the Pi SDK: IM channels (Slack, Lark)
 and a Web UI in front of Pi sessions, with steering/queued messages,
-scheduled tasks, live observability, and static Show pages.
+scheduled tasks and live observability.
 
 ## Principles
 
@@ -14,7 +14,7 @@ scheduled tasks, live observability, and static Show pages.
    (core ↔ Pi). Only `agent/` imports the Pi SDK; only
    `channels/` imports platform SDKs; `core/` is blind to both, so Pi stays
    swappable (SDK → RPC later) and platform quirks stay out of core.
-4. **One event stream per session.** Web UI, logs, Show pages are all
+4. **One event stream per session.** Web UI and logs are both
    consumers of it — never parallel bookkeeping.
 5. **Nothing that happened may look like nothing happening.** Every turn is
    observable on the surface it came from: an empty reply posts its footer and
@@ -22,7 +22,6 @@ scheduled tasks, live observability, and static Show pages.
    every failure reaches the conversation, not only the web timeline. A silent
    `catch` is a bug even when the fallback works.
 6. **No speculative generality.** The third repeat earns an abstraction.
-   Show pages stay static HTML (+ SSE reload at most), no runtime.
 7. **Fast by default.** Optimistic rendering, no blocking fetches on the
    interaction path, no heavy client runtime. If an action needs a round trip,
    render first and reconcile from the event stream.
@@ -46,7 +45,6 @@ scheduled tasks, live observability, and static Show pages.
 - `web/` chat + observability timeline, an event-stream consumer
 - `tasks/` scheduler; cron + prompt + session config; `pier task` over the CLI
   socket is the entire agent-collaboration surface
-- `boards/` static Show pages: a filesystem scan plus a file handler
 - Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
   ops (`service.ts`, `update.ts`, `stop.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`, `vault.ts`); one
@@ -55,7 +53,7 @@ scheduled tasks, live observability, and static Show pages.
   of its Pi session directory — no external `pi` CLI, no second Pier on the
   same `~/.pier`, enforced by a pid claim on `$PIER_HOME` taken before the
   database opens — so in-process knowledge of what changed may be trusted.
-- Dependency direction: `channels/ | web/ | tasks/ | boards/ | websearch/ → core/ → agent/`.
+- Dependency direction: `channels/ | web/ | tasks/ | websearch/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only.
 - `agent/types.ts` imports no SDK and no `node:*`; any area may import it.
@@ -127,10 +125,10 @@ exists to catch.
 | --- | --- | --- |
 | `core/` | 1.8k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
 | `channels/` | 4.8k | two adapters in one shape plus the shared layer that would otherwise be copied between them; the home chat's status message, laid out as the web sidebar in each platform's rich format, on both adapters, is the lines past 4.6k |
-| `web/` | 14k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
+| `web/` | 12.7k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
 | `agent/` | 2.96k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts; a codemode script's calls replayed as steps are the lines past 2.95k |
 | `tasks/` | 3.91k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, and the `--worktree` seam; a `--run` continuation's handoff to a new session, with the context record that decides it, is the lines past 3.75k; a main session's run started in the workspace, not its home, is the lines past 3.9k |
-| root `src/*.ts` | 3.6k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch; the home chat's status refresh, one debounce on the hub the instance layer wires, is the lines past 3.5k; the Pages project's two settings and the `/boards` socket route `pier boards publish` asks are the lines past 3.55k |
+| root `src/*.ts` | 3.55k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch; the home chat's status refresh, one debounce on the hub the instance layer wires, is the lines past 3.5k |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `agent/pi.ts` to 760 — an appended input shown while a turn runs and the retry notice are the lines past 750 |
 | channel adapter file | 460 | transport, render and panel counted separately, each serving the thread and the home chat's main flow; Lark's quote of the message a main-flow reply answers is the lines past 450 |
