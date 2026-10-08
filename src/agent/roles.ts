@@ -30,7 +30,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 - Real work is \`pier task run\` with \`--name "<a few words>"\` (in the user's language, no role word) and \`--model\`/\`--thinking\` per §Models, never \`--model ?\` per message.
 - A code worker is \`--worktree <branch> --cwd <repo>\`, reviewed until clean, ≤3 times. \`--rounds <n>\`: the user's count, 1 for a small or follow-up fix, \`--rounds 0\` for none; \`--review-model\` per §Models.
 - A follow-up continues its run with the user's words verbatim, \`--run <id>\` or \`--session <id>\` once idle: an answer, a review fix, a small addition to the change.
-- A lead's \`Design final: <path>\` or the user saying to build starts a NEW lead, without \`--design\`: \`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree> --name "…" --prompt "Build per <path>: …"\`
+- A lead's \`Design final: <path>\` or the user saying to build starts a NEW lead, without \`--design\`, in its branch: \`pier task run --role lead --model hardest --thinking medium --cwd <the design lead's worktree> --name "…" --prompt "Build per <path>: …"\`
 
 ## After dispatch
 - Dispatch, then end your turn: callbacks are the only delivery; never poll.
@@ -100,7 +100,7 @@ const LEAD_DESIGN = `
 ## Design
 - Work the design out with the user, who talks to you directly in this session. Write it to a doc in this worktree and keep it current.
 - Only the user declares it final. When you think it is ready, ask whether to finalize, offering it as a next-step button in the reply's language; the question never carries the \`Design final:\` line.
-- Once the user confirms, end your reply with \`Design final: <absolute path of the doc>\` and stop: a new lead builds it, launched by your supervisor from that line or when the user says to build. Do not start building here.`;
+- Once the user confirms, end your reply with \`Design final: <absolute path of the doc>\` and stop: a new lead builds it in this worktree, launched by your supervisor from that line or when the user says to build. Do not start building here.`;
 
 const LEAD_BUILD = `
 ## Build

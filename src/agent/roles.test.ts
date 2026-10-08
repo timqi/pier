@@ -9,7 +9,7 @@ describe("the dispatcher contract", () => {
   it("carries the launch lines the head fills each dispatch", () => {
     for (const line of [
       "`--role lead --worktree <branch> --cwd <repo>`",
-      "`pier task run --role lead --model hardest --thinking medium --worktree <branch> --cwd <the design lead's worktree>",
+      "`pier task run --role lead --model hardest --thinking medium --cwd <the design lead's worktree>",
       "`--worktree <branch> --cwd <repo>`",
       "`--rounds 0`",
       "`--review-model`",

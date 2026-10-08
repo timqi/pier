@@ -27,7 +27,8 @@ delivery.
   passed on `AgentLaunchOptions.phase`); neither on disk.
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes the head a callback (§Milestones); the head launches a new build lead on
-  doc, its prompt opening `Build per `.
+  the doc in the design lead's worktree (`--cwd`, no `--worktree`), so it builds on
+  the design's branch toward its target, its prompt opening `Build per `.
 - A design lead's turn outside any run (the user confirmed in its session)
   that carries the line is recorded as a finished run of the lead — reuse,
   resumed from its latest run, that run's callback target, the reply its

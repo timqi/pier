@@ -44,8 +44,8 @@ truth.
   and the last exchanges.
 - It dispatches: real work is a task run — a worker, or a feature lead that
   designs with the user; once the user finalizes, a new build lead builds it
-  with workers — each its own session, taking messages directly. Results come
-  back to the head as callbacks.
+  on the design's branch with workers — each its own session, taking messages
+  directly. Results come back to the head as callbacks.
 - `/status` alone in the composer answers with the open items — each problem,
   its stage and its runs — with no model call; the web's status panel shows
   the same list under what is running or queued. `/new` starts
