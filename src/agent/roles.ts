@@ -100,7 +100,8 @@ const LEAD_DESIGN = `
 ## Design
 - Work the design out with the user, who talks to you directly in this session. Write it to a doc in this worktree and keep it current.
 - Only the user declares it final. When you think it is ready, ask whether to finalize, offering it as a next-step button in the reply's language; the question never carries the \`Design final:\` line.
-- Once the user confirms, end your reply with \`Design final: <absolute path of the doc>\` and stop: a new lead builds it in this worktree, launched by your supervisor from that line or when the user says to build. Do not start building here.`;
+- Once the user confirms, commit the doc, the tree clean, then end your reply with \`Design final: <absolute path of the doc>\` and stop: a new lead builds it in this worktree, launched by your supervisor from that line or when the user says to build. Do not start building here.
+- After that line the worktree is the build lead's: you change nothing in it.`;
 
 const LEAD_BUILD = `
 ## Build

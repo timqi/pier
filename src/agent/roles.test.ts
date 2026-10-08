@@ -71,6 +71,7 @@ describe("the lead contract", () => {
     expect(lead("design")).toContain("## Design");
     expect(lead("design")).not.toContain("## Build");
     expect(lead("design")).toContain("`Design final: <absolute path of the doc>`");
+    for (const rule of ["commit the doc, the tree clean, then end your reply", "After that line the worktree is the build lead's"]) expect(lead("design")).toContain(rule);
     expect(lead("build")).toContain("## Build");
     expect(lead("build")).not.toContain("## Design");
   });
