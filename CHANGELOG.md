@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.15 — 2026-10-09
 
 ### Upgrade notes
 
+- The database migrates to schema 39, one-way; 0.4.14 refuses the upgraded database, so keep the backup Pier takes if you may roll back.
 - Boards move out of Pier to Corkboard, a separate project installed as a Pi package (Console → Packages): Pier no longer serves `/boards/*`, `/p/*` or `/b/*` — an old link meets the login form — the Console has no Boards pane, and the `pier-boards` skill is gone; the stored Pages project settings are deleted on upgrade and a checkout's build no longer leaves `dist/boards/` behind; `~/.pier/boards` is left in place.
+
+### Changed
+
+- Tasks: a session is main only when it has no role and runs in the home; a run or saved definition from the continuous conversation resolves its cwd against `$PIER_HOME/workspace`, created if missing.
+- Roles: a build lead builds in the design lead's worktree, on its branch; the design lead commits its doc before `Design final:` and leaves the worktree to the build lead.
 
 ## 0.4.13 — 2026-10-07
 
