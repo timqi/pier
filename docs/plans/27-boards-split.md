@@ -164,7 +164,7 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 
 ### 8.1 安装
 
-- 仓库本身就是 Pi package：`skills/corkboard/SKILL.md` + `skills/corkboard/bin/cork`（Node ≥ 22，零依赖：`child_process` 跑 git，`fetch` 拉 `_meta.json`）。每个 Pier 实例先 `git clone` 到 `~/.local/share/corkboard/boards`，再在 Console → Packages 加**本地路径**；Pi 不复制本地包，`cork path` 的 pull 同时更新 skill。不用 `git:` 来源：那是 Pi 自己的 clone，不带 deploy key，私有库拉不到。Pier 不改一行代码。
+- 仓库本身就是 Pi package：`skills/corkboard/SKILL.md` + `skills/corkboard/bin/cork`（Node ≥ 22，零依赖：`child_process` 跑 git，`fetch` 拉 `_meta.json`）。每个 Pier 实例先 `git clone` 到 `~/code/dev/boards`，再在 Console → Packages 加**本地路径**；Pi 不复制本地包，`cork path` 的 pull 同时更新 skill。不用 `git:` 来源：那是 Pi 自己的 clone，不带 deploy key，私有库拉不到。Pier 不改一行代码。
 - 实例配置 `~/.config/corkboard/config.json`：`{"repo": "git@github.com:timqi/boards.git", "instance": "pier-g1"}`；`checkout` 默认是 `cork` 所在的仓库根。`cork init` 写配置、设 `core.sshCommand` 与 author；checkout 不存在时才 clone。
 - `compatibility`（skill frontmatter）：`git`、`node`、配置文件存在；一条自检命令 `cork status`。
 
