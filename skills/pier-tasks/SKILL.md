@@ -18,7 +18,7 @@ pier task run --name "auth review" --model balanced --prompt "Review src/auth/*.
 
 The prompt is the whole handoff (goal, constraints, absolute paths, output
 format); the run sees nothing of your conversation. `--cwd` defaults to
-yours; `--timeout` (default 3600 s) starts when the run does.
+yours (from the main session, `~/.pier/workspace`, never your home); `--timeout` (default 3600 s) starts when the run does.
 
 **Callbacks are the only delivery; there is no status query.** The result
 arrives as a system message once your turn ends, so **end your turn after

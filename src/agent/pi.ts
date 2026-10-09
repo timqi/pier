@@ -843,8 +843,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   private async openSnapshot(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     const { cwd, role, phase } = opts;
     // The home is where the continuous conversation's sessions run: only they
-    // dispatch, and they compact at main's cap.
-    const main = realPath(cwd) === realPath(pierPath("home"));
+    // dispatch, and they compact at main's cap. A role is a run's, never main's.
+    const main = !role && realPath(cwd) === realPath(pierPath("home"));
     const cap = main ? MAIN_COMPACTION_CAP : role ? CHILD_COMPACTION_CAP[role] : undefined;
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.

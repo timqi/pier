@@ -653,9 +653,9 @@ describe("titleFromAnswer", () => {
 });
 
 describe("the continuous conversation's seam", () => {
-  const injected = async (cwd: string): Promise<string[]> => {
+  const injected = async (cwd: string, role?: "worker"): Promise<string[]> => {
     const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined, () => ({ skillsOff: [] }));
-    await (await factory.create({ cwd })).dispose();
+    await (await factory.create({ cwd, role })).dispose();
     return loaders.at(-1)!.agentsFilesOverride({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
   };
 
@@ -663,6 +663,7 @@ describe("the continuous conversation's seam", () => {
     const home = join(process.env.PIER_HOME!, "home");
     expect(await injected(home)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
     expect(await injected("/tmp/elsewhere")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
+    expect(await injected(home, "worker")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/worker.md"]);
   });
 
   it("compacts a main session at 100K, a worker at 180K and a lead at 200K, and no other session", async () => {
@@ -680,6 +681,7 @@ describe("the continuous conversation's seam", () => {
     const main = [{ compaction: { reserveTokens: 300_000 } }];
     expect(await reserves(factory.create({ cwd: home }))).toEqual(main);
     expect(await reserves(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual([{ compaction: { reserveTokens: 200_000 } }]);
+    expect(await reserves(factory.create({ cwd: home, role: "worker" }))).toEqual([{ compaction: { reserveTokens: 220_000 } }]);
     expect(await reserves(factory.resume("worker-1"))).toEqual([{ compaction: { reserveTokens: 220_000 } }]);
     // Decided by what the session is, not by who opens it: a run reusing a
     // chain member leaves it at main's cap, and a user's session uncapped.

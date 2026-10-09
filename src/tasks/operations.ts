@@ -3,9 +3,11 @@
 // with the summaries a model reads. Scheduling and delivery stay in the
 // service; this file decides who may ask for what.
 
+import { mkdirSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { isModelTier, LEDGER_WINDOW_MS, MODEL_TIERS, TASK_RUN_STATES, type LedgerRun, type ModelRef, type ModelTier, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import { clipResult } from "./callbacks.js";
 import { type TaskDefinitions, parseLaunch, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -204,6 +206,7 @@ export async function handleTask(
   // The launching session controls a run, and so does the run's own; every
   // member of the continuous conversation counts as the one that launched it.
   const launchers = (): string[] => chain.chainOf(callerSessionId) ?? [callerSessionId];
+  const main = chain.chainOf(callerSessionId) !== undefined;
   const assertOwns = (target: TaskRun): void => {
     if (!launchers().includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {
       throw new Error("session does not own this run");
@@ -253,7 +256,7 @@ export async function handleTask(
   };
   if (input.operation === "save") {
     if (oneRun(input.task)) throw new Error("--worktree and --rounds are one run's; save files a definition that runs again");
-    const draft = await expandDraft(host, definitions, menu, input.task, callerSessionId);
+    const draft = await expandDraft(host, definitions, menu, input.task, callerSessionId, main);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
     return definitions.update(filed(), draft);
   }
@@ -280,7 +283,7 @@ export async function handleTask(
           throw new Error("a goal (--rounds, --worktree) is one run's loop; a --member cannot carry it");
         }
         resolved.push(entry.task_id === undefined
-          ? await resolveDraft(host, definitions, menu, notLead(entry), callerSessionId)
+          ? await resolveDraft(host, definitions, menu, notLead(entry), callerSessionId, main)
           : notLead(definitions.get(requiredString(entry.task_id, "task_id"))));
       }
       const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
@@ -302,7 +305,7 @@ export async function handleTask(
     // Before the draft: a refused callback must not leave a worktree behind.
     const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const task = draft
-      ? await resolveDraft(host, definitions, menu, notLead(draft), callerSessionId)
+      ? await resolveDraft(host, definitions, menu, notLead(draft), callerSessionId, main)
       : notLead(definitions.get(requiredString(input.task_id, "task_id")));
     const run = host.run(task.id, null, "agent", null, {
       invokedBySessionId: callerSessionId,
@@ -441,9 +444,10 @@ const menuLines = (menu: MenuEntry[]): string =>
   || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
- *  directory, or in the worktree `launch.worktree` names, made after every check here;
+ *  directory (the workspace for a main session, whose home is its memory; a relative cwd too), or in the
+ *  worktree `launch.worktree` names, made after every check here;
  *  parseDraft's after it are argv's too (cli.ts), so only a raw socket draft can orphan one. */
-async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu: Menu, raw: unknown, callerSessionId: string): Promise<unknown> {
+async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu: Menu, raw: unknown, callerSessionId: string, main: boolean): Promise<unknown> {
   let draft = record(raw);
   if (!draft) return raw;
   if (typeof draft.prompt === "string") {
@@ -455,7 +459,8 @@ async function expandDraft(host: TaskService, definitions: TaskDefinitions, menu
   const session = record(action?.session);
   const absolute = async (cwd: unknown): Promise<string> => {
     if (typeof cwd === "string" && isAbsolute(cwd)) return resolve(cwd);
-    const base = await definitions.sessionCwd(callerSessionId);
+    if (main) mkdirSync(PIER_WORKSPACE, { recursive: true });
+    const base = main ? PIER_WORKSPACE : await definitions.sessionCwd(callerSessionId);
     if (!base) throw new Error(`cwd ${cwd === undefined ? "omitted" : `"${String(cwd)}" is relative`} and the calling session has no working directory; give an absolute path`);
     return resolve(base, typeof cwd === "string" ? cwd : ".");
   };
@@ -501,6 +506,7 @@ async function resolveDraft(
   menu: Menu,
   raw: unknown,
   callerSessionId: string,
+  main: boolean,
 ): Promise<TaskDefinition> {
   const given = record(raw);
   if (given?.trigger !== undefined && record(given.trigger)?.type !== "manual") {
@@ -511,7 +517,7 @@ async function resolveDraft(
   if (given?.callback !== undefined || given?.callback_session_id !== undefined) {
     throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
-  const draft = record(await expandDraft(host, definitions, menu, raw, callerSessionId));
+  const draft = record(await expandDraft(host, definitions, menu, raw, callerSessionId, main));
   if (!draft) throw new Error("task definition required");
   return definitions.create({ ...draft, trigger: { type: "manual" }, callback: { type: "none" } }, `session:${callerSessionId}`, "subagent");
 }

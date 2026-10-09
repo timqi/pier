@@ -2,10 +2,12 @@
 // read back, how a model name resolves. Service-level behaviour lives in
 // service.test.ts; here the host is a stub over a real in-memory store.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { THINKING_LEVELS } from "../core/types.js";
 import { openDb } from "../db.js";
+import { PIER_WORKSPACE } from "../paths.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { handleTask, type GroupSummary, type RunSummary } from "./operations.js";
@@ -47,7 +49,7 @@ const menu = [
 
 /** A store with these rows and a host that only knows how to read them: the
  *  recover branch touches nothing else on the service. */
-function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] = []) {
+function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] = [], main = false) {
   const db = openDb(":memory:");
   onTestFinished(() => db.close());
   const store = new TaskStore(db);
@@ -99,7 +101,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] 
       return task;
     },
   } as unknown as TaskDefinitions;
-  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1", { chainOf: () => undefined, members: () => [] });
+  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1", { chainOf: () => (main ? ["s1"] : undefined), members: () => [] });
   return Object.assign(ask, { created, changed });
 }
 
@@ -353,6 +355,20 @@ describe("task operations", () => {
       ["slash", { type: "bash", script: "make", cwd: "/elsewhere/tree" }],
       ["Work", { type: "agent", session: { mode: "fresh", cwd: "/elsewhere/tree" }, prompt: "Work", launch: { model: { provider: "test", id: "model" } } }],
     ]);
+  });
+
+  it("starts a main session's run without a cwd, or with a relative one, in the workspace, never in its home", async () => {
+    rmSync(PIER_WORKSPACE, { recursive: true, force: true });
+    const ask = rig([], [], [], true);
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "test/model" } })).toBeTruthy();
+    expect(await ask({ operation: "run", task: { action: { type: "bash", script: "make", cwd: "sub" } } })).toBeTruthy();
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "test/model" }, cwd: "/elsewhere" })).toBeTruthy();
+    expect(ask.created.map((draft) => {
+      const action = draft.action as { cwd?: string; session?: { cwd?: string } };
+      return action.cwd ?? action.session?.cwd;
+    }))
+      .toEqual([PIER_WORKSPACE, join(PIER_WORKSPACE, "sub"), "/elsewhere"]);
+    expect(existsSync(PIER_WORKSPACE)).toBe(true);
   });
 
   it("does not take task_id", async () => {

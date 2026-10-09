@@ -40,7 +40,7 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
 ```
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
-  caller's; `--model` required — §Models), or `--bash` (a one-shot script action in the same `--cwd`, no
+  caller's, a main session's `$PIER_HOME/workspace`, which a relative one resolves against too; `--model` required — §Models), or `--bash` (a one-shot script action in the same `--cwd`, no
   session and no model — `--prompt`, `--model`, `--thinking`, `--role`, `--design` and
   `--session` beside it are refused), or `--task-id` (a saved definition, as
   is), or `--session <id>` with `--prompt` (continue an idle session; `--cwd`
@@ -156,7 +156,9 @@ pier task save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|m
 
 `--task-id` updates, otherwise creates; an archived task or a one-shot's
 hidden definition (`kind: subagent`) is refused. No trigger means `manual`.
-`--bash` is a script action, `--prompt` an agent action; exactly one. `save`
+`--bash` is a script action, `--prompt` an agent action; exactly one. `--cwd`
+defaults and resolves as on `run`, so a main session's definition runs in
+`$PIER_HOME/workspace`, never its home. `save`
 restates the whole definition, callback included:
 
 - no `--callback-session` → `{type: "conversation"}`, also `definitions.create`'s
