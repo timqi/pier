@@ -270,8 +270,6 @@ One line each; the reasoning is in the commit that made it.
   `extensions`/`skills` dirs), Pier writes it, never a second list; Pier
   ships no extension of its own — its tools are CLIs (`pier slack`, `pier
   task`, `pier web`) documented by skills, so no tool schema rides in context.
-- Pier serves no static pages: boards are Corkboard, a git checkout added in
-  Console → Packages as a local-path package like any other.
 - **One writer per instance directory**, enforced before the database opens:
   `$PIER_HOME/pier.lock`, a pid file hard-linked into place from a private
   file so it is never seen empty, held for the process's lifetime, taken over

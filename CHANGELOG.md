@@ -4,7 +4,7 @@
 
 ### Upgrade notes
 
-- Boards move out of Pier to Corkboard, a separate project installed as a Pi package (Console → Packages): Pier no longer serves `/boards/*`, `/p/*` or `/b/*` — an old link meets the login form — the Console has no Boards pane, and the `pier-boards` skill is gone; `~/.pier/boards` is left in place.
+- Boards move out of Pier to Corkboard, a separate project installed as a Pi package (Console → Packages): Pier no longer serves `/boards/*`, `/p/*` or `/b/*` — an old link meets the login form — the Console has no Boards pane, and the `pier-boards` skill is gone; the stored Pages project settings are deleted on upgrade and a checkout's build no longer leaves `dist/boards/` behind; `~/.pier/boards` is left in place.
 
 ## 0.4.13 — 2026-10-07
 

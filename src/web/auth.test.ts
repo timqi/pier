@@ -42,9 +42,6 @@ function app(s: AuthStore): Hono {
   // A route that sets a boundary header itself, as web/fs.ts sets x-frame-options.
   a.get("/own-headers", (c) => c.body("own", 200, { "x-content-type-options": "nosniff" }));
   a.get("/report/", (c) => c.text("private"));
-  // The retired public prefixes: nothing exempt lives under them any more.
-  a.get("/p/report-0123abcd/", (c) => c.text("published"));
-  a.get("/b/report/1a-sig/", (c) => c.text("viewed"));
   registerFsRoutes(a);
   return a;
 }
@@ -159,18 +156,8 @@ describe("requireAuth", () => {
   });
 
   it("refuses a write without redirecting it", async () => {
-    const res = await app(store().store).request("/api/sessions", { method: "POST" });
-    expect(res.status).toBe(401);
-  });
-
-  it("sends an old /boards/, /b/ or /p/ link to the login form like any other page", async () => {
     const a = app(store().store);
-    expect((await a.request("/boards/report/")).headers.get("location")).toBe("/login?next=%2Fboards%2Freport%2F");
-    expect((await a.request("/b/_assets/pier.css")).headers.get("location")).toBe("/login?next=%2Fb%2F_assets%2Fpier.css");
-    expect((await a.request("/b/report/1a-sig/")).headers.get("location")).toBe("/login?next=%2Fb%2Freport%2F1a-sig%2F");
-    expect((await a.request("/b/_assets/pier.css", { method: "POST" })).status).toBe(401);
-    expect((await a.request("/p/report-0123abcd/")).headers.get("location")).toBe("/login?next=%2Fp%2Freport-0123abcd%2F");
-    expect((await a.request("/p/_assets/pier.css")).headers.get("location")).toBe("/login?next=%2Fp%2F_assets%2Fpier.css");
+    expect((await a.request("/api/sessions", { method: "POST" })).status).toBe(401);
     expect((await a.request("/login", { method: "PUT" })).status).toBe(401);
   });
 

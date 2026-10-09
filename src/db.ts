@@ -422,6 +422,8 @@ const MIGRATIONS: readonly string[] = [
   `,
   // 38 — the home chat wears no reactions; its open items' receipts go.
   "DROP TABLE item_receipts;",
+  // 39 — the Pages project rows nothing reads any more.
+  "DELETE FROM settings WHERE key IN ('pagesProject', 'pagesUrl');",
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another
