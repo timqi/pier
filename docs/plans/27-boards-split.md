@@ -29,7 +29,7 @@
 | Placard | `placard` | 告示牌，public/private 都成立；少见，搜索不撞 | 7 字母，敲起来长 |
 | Kiosk | `kiosk` | 街头的报亭/展示柜，"给路人看的页面" | 浏览器 "kiosk mode" 已占这个词 |
 
-Pages 项目名（全局唯一，先到先得）：`corkboard` 和 `corkboard-private`，即 `https://corkboard.pages.dev` 和 `https://corkboard-private.pages.dev`；文中记作 `<pub>` 和 `<priv>`。实现第一步就是 `wrangler pages project create` 占下这两个名字，被占则由用户另起。
+Pages 项目名（全局唯一，先到先得）：`cork-boards` 和 `corkboard-private`（`corkboard` 已被占），即 `https://cork-boards.pages.dev` 和 `https://corkboard-private.pages.dev`；文中记作 `<pub>` 和 `<priv>`。实现第一步就是 `wrangler pages project create` 占下这两个名字，被占则由用户另起。
 
 ## 4. 数据端
 
@@ -62,7 +62,7 @@ A 的代价：仓库会长（11 MB 的日报 `work/` 必须留在仓库外，见
 `corkboard.json`：
 
 ```json
-{ "public":  { "project": "corkboard",         "url": "https://corkboard.pages.dev" },
+{ "public":  { "project": "cork-boards",       "url": "https://cork-boards.pages.dev" },
   "private": { "project": "corkboard-private", "url": "https://corkboard-private.pages.dev" } }
 ```
 
@@ -253,7 +253,7 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 ## 11. 已决定
 
 1. 项目名 Corkboard，CLI `cork`。
-2. Pages 项目 `corkboard` / `corkboard-private`。
+2. Pages 项目 `cork-boards` / `corkboard-private`。
 3. Access 身份：One-time PIN 邮箱。
 4. 旧 `pier-g1.pages.dev`：迁移后删除，不做跳转。
 5. 不开 `public/` 的 PR 门禁。
