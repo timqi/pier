@@ -1,6 +1,6 @@
 # Boards 拆成独立项目：git 仓库为真相，GitHub Actions 直传两个 Pages 项目，private 走 Cloudflare Access
 
-状态：用户已定稿（2026-10-09）。lead 工作树 `boards-split-design`。只写设计，不写实现。
+状态：用户已定稿（2026-10-09），实现中。实现期决定：工具代码（`cork`、skill、workflow）与 board 数据同在一个私有仓库 `timqi/boards`，没有单独的工具仓库；公开项目名 `cork-boards`。lead 工作树 `boards-split-design`。
 
 ## 1. 目标与硬约束
 
@@ -19,7 +19,7 @@
 
 ## 2. 一句话方案
 
-**一个私有 git 仓库是所有 board 的真相；每个实例各有一份 clone；agent 用文件操作改 board，用 `cork publish` 提交推送；GitHub Actions 收到 push 后把 `public/*/site` 和 `private/*/site` 分别直传到两个 Pages 项目；private 项目整体在 Cloudflare Access 后面；撤回 = `git mv` 或 `git rm` + 一次 push；实例上只需要 `git` 和一把 deploy key，Cloudflare 凭据只存在 GitHub Secrets 里。**
+**一个私有 git 仓库是所有 board 的真相，也装着 `cork`、skill 和 workflow；每个实例各有一份 clone；agent 用文件操作改 board，用 `cork publish` 提交推送；GitHub Actions 收到 push 后把 `public/*/site` 和 `private/*/site` 分别直传到两个 Pages 项目；private 项目整体在 Cloudflare Access 后面；撤回 = `git mv` 或 `git rm` + 一次 push；实例上只需要 `git` 和一把 deploy key，Cloudflare 凭据只存在 GitHub Secrets 里。**
 
 ## 3. 项目名
 
@@ -55,8 +55,12 @@ A 的代价：仓库会长（11 MB 的日报 `work/` 必须留在仓库外，见
     README.md, src/, bin/…    # 自带构建的 board 的源码，永不部署
   private/<slug>/             # 同上，上 Access 站
   assets/pier.css             # 共享样式表 → 两个站的 /_assets/pier.css
-  .gitignore                  # */*/work/  node_modules/  .wrangler/
-  .github/workflows/deploy.yml  # 十行：uses: <user>/corkboard/.github/workflows/deploy.yml@v1
+  .gitignore                  # */*/work/  node_modules/  .wrangler/  __pycache__/
+  package.json                # Pi package manifest：pi.skills = ./skills
+  skills/corkboard/           # SKILL.md + bin/cork（含 snapshot.mjs、git.mjs）
+  scripts/assemble.mjs, scripts/import-pier.sh
+  test/
+  .github/workflows/deploy.yml  # on: push main，在仓库内直接跑
 ```
 
 `corkboard.json`：
@@ -101,7 +105,7 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 
 ### 5.2 一次部署做什么
 
-由 Corkboard 工具仓库里的 reusable workflow 完成，数据仓库只写 `uses:` 一行加 secrets：
+由仓库自己的 workflow（`on: push` main + `workflow_dispatch`，`concurrency: deploy` 排队不取消）完成：
 
 1. `git diff --name-only <before> <after>` 判断 `public/`、`private/`、`assets/` 哪些变了，只部署受影响的项目（`assets/` 变则两个都部）。
 2. 为每个项目装配快照：`<slug>/` ← `<vis>/<slug>/site/`（无 `site/index.html` 的目录跳过并报一行）；`_assets/pier.css`；`_headers`（`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Content-Security-Policy: connect-src 'self'; frame-ancestors 'none'`）；`_meta.json`（提交 sha、时间、每个 slug 的 title 和最近修改时间）。
@@ -160,8 +164,8 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 
 ### 8.1 安装
 
-- Corkboard 工具仓库是一个 Pi package：`skills/corkboard/SKILL.md` + `skills/corkboard/bin/cork`（Node ≥ 22，零依赖：`child_process` 跑 git，`fetch` 拉 `_meta.json`）。每个 Pier 实例在 Console → Packages 加这个包（`git:` 来源或本地路径），Pier 不改一行代码。
-- 实例配置 `~/.config/corkboard/config.json`：`{"repo": "git@github.com:<user>/<boards>.git", "instance": "pier-g1", "checkout": "~/.local/share/corkboard/boards"}`；`checkout` 可省，默认如示。`cork init` 写配置并 clone。
+- 仓库本身就是 Pi package：`skills/corkboard/SKILL.md` + `skills/corkboard/bin/cork`（Node ≥ 22，零依赖：`child_process` 跑 git，`fetch` 拉 `_meta.json`）。每个 Pier 实例先 `git clone` 到 `~/.local/share/corkboard/boards`，再在 Console → Packages 加**本地路径**；Pi 不复制本地包，`cork path` 的 pull 同时更新 skill。不用 `git:` 来源：那是 Pi 自己的 clone，不带 deploy key，私有库拉不到。Pier 不改一行代码。
+- 实例配置 `~/.config/corkboard/config.json`：`{"repo": "git@github.com:timqi/boards.git", "instance": "pier-g1"}`；`checkout` 默认是 `cork` 所在的仓库根。`cork init` 写配置、设 `core.sshCommand` 与 author；checkout 不存在时才 clone。
 - `compatibility`（skill frontmatter）：`git`、`node`、配置文件存在；一条自检命令 `cork status`。
 
 ### 8.2 命令
@@ -187,7 +191,7 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 - 发布与可见性：`public: true` 改成 `--public` / `cork set`；`pier boards publish` 改成 `cork publish --wait`；不再有 `url`/`publishedAt` 字段的告诫。回答用户时仍然只给一个裸 URL（public 给 `<pub>/<slug>/`，private 给 `<priv>/<slug>/` 并说"需要登录"）。
 - 样式表链接从 `/b/_assets/pier.css` 改为 `/_assets/pier.css`。
 
-页面写法、布局、`.hero/.card/.table-scroll` 等 helper 的章节、核对清单原样保留；`pier.css` 文件随之搬到数据仓库 `assets/`（流水线部署它）而不是工具仓库，这样一个实例改样式其他实例立刻跟上。
+页面写法、布局、`.hero/.card/.table-scroll` 等 helper 的章节、核对清单原样保留；`pier.css` 文件随之搬到仓库 `assets/`（流水线部署它），一个实例改样式其他实例 pull 后即跟上。
 
 ## 9. Pier 侧删除与迁移
 
@@ -218,9 +222,9 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 
 ### 9.3 数据迁移
 
-一次性脚本（放工具仓库 `scripts/import-pier.sh`，用完即删或留作其他实例用）：
+一次性脚本（`scripts/import-pier.sh`，只读 `~/.pier/boards`，用完即删或留作其他实例用）：
 
-1. `cork init` 建好配置与 clone；`corkboard.json` 写两个项目。
+1. clone 仓库、`cork init` 写配置；`corkboard.json`、`.gitignore`、`assets/pier.css`、workflow 都已在仓库里。
 2. 对 `~/.pier/boards/*/`：跳过 `*.deleted-*`；按 `board.json` 的 `public` 放进 `public/` 或 `private/`；`board.json` 只保留 `title`、`description`，加 `owner: pier-g1`；`site/**/*.html` 里的 `/b/_assets/pier.css` 替换为 `/_assets/pier.css`。
 3. 现有 11 个 board：7 个 public（`daily-news`、`foam-rolling-guide`、`ios-keychain-threat-model`、`nimbus-docs-research`、`qtc-mining`、`session-memory-design`、`vt-intro`），4 个 private（`jd-vacuum`、`sky-token-briefing`、`uniswap-v3-v4`、`workflow-review`）；以迁移当天的 `url` 字段为准。
 4. `cork publish --wait`，核对两站；然后 Pier 升级到删掉 boards 的版本，`~/.pier/boards` 归档（`mv ~/.pier/boards ~/.pier/boards.migrated-<ts>`，确认一周后删）。
@@ -248,7 +252,7 @@ Slug 规则不变：`[a-z0-9][a-z0-9-]{0,63}`。流水线对不合规的目录�
 - 7 天边缘缓存是现有实现的观察结论，不是文档承诺；`_redirects` 的兜底写法与今天一致。
 - 仓库增长：每个 board 的 `site/` 入库，图片要克制；`cork publish` 对单文件 > 25 MiB 直接拒（Pages 限额）。
 - 一个实例离线时只能读旧副本、不能发布；没有本地回退路径（这是设计选择：不再在实例上服务页面）。
-- 工具仓库的 reusable workflow 是所有实例的单点：改坏了所有人都发不了。用 tag（`@v1`）钉版本。
+- workflow 与 `cork` 和数据同库：改坏一次 push 就全部发不了；`git revert` 即回滚。
 
 ## 11. 已决定
 
