@@ -105,10 +105,9 @@ export class AuthStore {
   /** Deleted, not merely refused: a push subscription hangs off the row. */
   sweep(): void {
     const now = Date.now();
-    const swept = this.#sql(
-      "DELETE FROM web_sessions WHERE seen_at <= ? OR created_at <= ? RETURNING id",
-    ).all(now - TTL_MS, now - MAX_AGE_MS) as unknown as { id: string }[];
-    if (swept.length) log.info(`swept ${String(swept.length)} expired session(s)`);
+    const { changes } = this.#sql("DELETE FROM web_sessions WHERE seen_at <= ? OR created_at <= ?")
+      .run(now - TTL_MS, now - MAX_AGE_MS);
+    if (changes) log.info(`swept ${String(changes)} expired session(s)`);
   }
 
   verify(password: string): boolean {
@@ -117,7 +116,7 @@ export class AuthStore {
   }
 
   /** Every session goes too, the caller's included: a password is changed
-   *  because the old one may be known. Listeners hear it after the commit. */
+   *  because the old one may be known. */
   setPassword(password: string): void {
     const salt = randomBytes(16).toString("hex");
     transact(this.#db, () => {
@@ -196,7 +195,6 @@ export class AuthStore {
     this.#links.delete(token);
     return expiresAt !== undefined && expiresAt > Date.now();
   }
-
 }
 
 const hash = (password: string, salt: string): string =>
