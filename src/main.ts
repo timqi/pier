@@ -220,9 +220,10 @@ const refreshStatus = (repost = false): void => {
 hub.subscribeWorkspace((e) => {
   if (STATUS_EVENTS.has(e.type)) refreshStatus();
 });
-/** The head answers in the home chat while its adapter runs (docs/design/11), else on
- *  the web with Web Push; an older member gets no home key, or an adapter's start
- *  would re-key it over the head. Any other session: its conversations row. */
+/** Where a session answers until a user speaks (docs/design/11 §Notifications):
+ *  the head in the home chat while its adapter runs, else on the web with Web
+ *  Push; an older member gets no home key, or an adapter's start would re-key it
+ *  over the head. Any other session: its conversations row. */
 function chatKeyOf(sessionId: string): ConversationKey | undefined {
   // home() reads the vault; locked, no adapter can be live anyway.
   const home = secrets.state === "unlocked" ? channelStore.home() : undefined;
@@ -373,6 +374,7 @@ registerPushRoutes(app, {
   hub,
   unread: (id) => sessionState.unread(id),
   channelOf: (id) => router.conversationOf(id)?.channelId,
+  browserOf: (id) => sessionState.browserOf(id),
   summary: (id) => factory.find(id),
   publicUrl: () => settings.get().publicUrl,
 });
@@ -411,7 +413,11 @@ app.route("/", createServer({
   taskSessions: () => tasks.taskSessions(),
   leads: () => taskStore.leads(),
   openItems: () => tasks.openItems(),
-  channelOf: (id) => chatKeyOf(id)?.channelId,
+  // The live key is the last surface spoken from; a task's alias says nothing.
+  channelOf: (id) => {
+    const live = router.conversationOf(id);
+    return live && live.channelId !== "task" ? live.channelId : chatKeyOf(id)?.channelId;
+  },
   continuous: chain,
 }));
 

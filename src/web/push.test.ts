@@ -69,12 +69,14 @@ function setup(settleMs = 0, title = "pier") {
   const cookie = `pier_session=${auth.open("10.0.0.9", "a browser")}`;
   const unread = vi.fn(() => true);
   const channelOf = vi.fn((_id: string): string | undefined => "web");
+  const browserOf = vi.fn((_id: string): string | undefined => undefined);
   const app = new Hono();
   registerPushRoutes(app, {
     store,
     hub,
     unread,
     channelOf,
+    browserOf,
     summary: async () => ({ title, cwd: "/tmp/pier" }),
     publicUrl: () => "https://pier.example.com",
     settleMs,
@@ -85,7 +87,7 @@ function setup(settleMs = 0, title = "pier") {
     sent.push({ url: String(url), body: init.body as Uint8Array });
     return new Response(status.body, { status: status.code });
   }));
-  return { app, hub, store, auth, db, cookie, unread, channelOf, sent, status };
+  return { app, hub, store, auth, db, cookie, unread, channelOf, browserOf, sent, status };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -311,8 +313,8 @@ describe("the finished-turn trigger", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  const subscribe = async (app: Hono, cookie: string) => {
-    const sub = fakeSubscription();
+  const subscribe = async (app: Hono, cookie: string, endpoint?: string) => {
+    const sub = fakeSubscription(endpoint);
     await app.request("/api/push/subscribe", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
@@ -337,6 +339,35 @@ describe("the finished-turn trigger", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.url).toBe("https://push.example.net/s/1");
     expect(sent[0]?.body.byteLength).toBeGreaterThan(86);
+  });
+
+  it("notifies only the browser that spoke into the session", async () => {
+    const { app, hub, sent, auth, cookie, browserOf } = setup(6_000);
+    const phone = auth.open("10.0.0.2", "a phone");
+    await subscribe(app, cookie);
+    await subscribe(app, `pier_session=${phone}`, "https://push.example.net/s/phone");
+    browserOf.mockReturnValue(phone.split(".")[0]);
+    finishTurn(hub);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sent.map((s) => s.url)).toEqual(["https://push.example.net/s/phone"]);
+  });
+
+  it("notifies nobody when the browser that spoke is not subscribed", async () => {
+    const { app, hub, sent, auth, cookie, browserOf } = setup(6_000);
+    await subscribe(app, cookie);
+    browserOf.mockReturnValue(sessionOf(auth, "10.0.0.3"));
+    finishTurn(hub);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("notifies every device when no browser has spoken", async () => {
+    const { app, hub, sent, auth, cookie } = setup(6_000);
+    await subscribe(app, cookie);
+    await subscribe(app, `pier_session=${auth.open("10.0.0.2", "a phone")}`, "https://push.example.net/s/phone");
+    finishTurn(hub);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sent.map((s) => s.url).sort()).toEqual(["https://push.example.net/s/1", "https://push.example.net/s/phone"]);
   });
 
   it("stays quiet for a turn that was already delivered to a chat", async () => {

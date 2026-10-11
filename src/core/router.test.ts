@@ -502,6 +502,40 @@ describe("opening a session", () => {
     expect(im.sent.map(([, r]) => r.text)).toEqual(["back"]);
   });
 
+  it("answers on the surface the last human message took", async () => {
+    const WEB = { channelId: "web", conversationId: "s1" };
+    router = new Router(hub, () => Promise.resolve(fake), (key) => (key.channelId === "slack" ? "s1" : undefined), () => KEY);
+    router.registerChannel(im.channel);
+    await router.ensure(WEB);
+    expect(router.conversationOf("s1")).toEqual(KEY);
+
+    await router.dispatch({ key: WEB, senderId: "web", text: "from the browser", mode: "auto" });
+    expect(router.conversationOf("s1")).toEqual(WEB);
+    fake.emit({ type: "turn-end", text: "web answer" });
+    fake.emit({ type: "system-input", text: "task finished", origin: ORIGIN });
+    expect(im.sent).toEqual([]);
+    expect(im.notes).toEqual([]);
+    // A callback's open and the adapter's restart leave it where the user spoke.
+    await router.ensure({ channelId: "task", conversationId: "s1" });
+    router.registerChannel(im.channel);
+    expect(router.conversationOf("s1")).toEqual(WEB);
+
+    await router.dispatch({ key: KEY, senderId: "u1", text: "from the phone", mode: "auto" });
+    expect(router.conversationOf("s1")).toEqual(KEY);
+    fake.emit({ type: "turn-end", text: "chat answer" });
+    expect(im.sent.map(([, r]) => r.text)).toEqual(["chat answer"]);
+  });
+
+  it("a chat spoken from takes the session back when its adapter returns", async () => {
+    router = new Router(hub, () => Promise.resolve(fake), (key) => (key.channelId === "slack" ? "s1" : undefined), () => KEY);
+    router.registerChannel(im.channel);
+    await router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" });
+    router.unregisterChannel("slack");
+    expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
+    router.registerChannel(im.channel);
+    expect(router.conversationOf("s1")).toEqual(KEY);
+  });
+
   it("no chat key → alias behaviour unchanged", async () => {
     router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => undefined);
     await router.ensure({ channelId: "web", conversationId: "s1" });

@@ -36,6 +36,9 @@ const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conv
 interface Attached {
   session: AgentSession;
   key: ConversationKey;
+  /** Where a human last spoke (`dispatch`): an alias open or an adapter's
+   *  return does not take the key off it (docs/design/11 §Notifications). */
+  spoke?: ConversationKey;
   /** What eviction ages. */
   activeAt: number;
   /** Bumped with activeAt; the sweep compares it across its await, where a
@@ -114,12 +117,14 @@ export class Router {
     for (const key of this.byKey.keys()) if (key.startsWith(`${channelId}:`)) this.byKey.delete(key);
     for (const attached of this.bySession.values()) {
       if (attached.key.channelId === channelId) attached.key = webKey(attached.session.id);
+      if (attached.spoke?.channelId === channelId) attached.spoke = undefined;
     }
   }
 
   /** The durable chat outranks the alias that happened to open the session
    *  first (a restart, the web speaking first), same rule as `reached`. */
   private toChat(attached: Attached): void {
+    if (attached.spoke?.channelId === "web") return;
     const chat = isAlias(attached.key) ? this.chatKeyOf(attached.session.id) : undefined;
     if (!chat || !this.channels.has(chat.channelId)) return;
     this.hold(chat, attached.session);
@@ -584,18 +589,26 @@ export class Router {
    *  attaches under `task:<id>`, and the workbench's next turn must not still
    *  read as "a task" (web/push.ts). A chat outranks an alias — the workbench
    *  may have opened the session, but its turns are answered in the chat — and
-   *  an alias never overwrites a chat. */
+   *  an alias never overwrites a chat, nor the web a user spoke on. */
   private reached(session: AgentSession, key: ConversationKey): AgentSession {
     const attached = this.bySession.get(session.id);
     if (!attached) return session;
     attached.activeAt = Date.now();
     attached.touched += 1;
-    if (!isAlias(key) || isAlias(attached.key)) attached.key = key;
+    if (!isAlias(key) || (isAlias(attached.key) && attached.spoke?.channelId !== "web")) attached.key = key;
     return session;
   }
 
+  /** Every dispatch is a human's, so its key is where the session answers
+   *  from now on, chat or web alike. */
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
     const session = await this.ensure(msg.key);
+    const attached = this.bySession.get(session.id);
+    if (attached) {
+      this.hold(msg.key, session);
+      attached.key = msg.key;
+      attached.spoke = msg.key;
+    }
     const skilled = skillText(msg.text, session.skills());
     if (skilled instanceof SkillAmbiguous) this.refuse(msg.key, skilled);
     const { action, text } = decide({ ...msg, text: skilled }, session.state);

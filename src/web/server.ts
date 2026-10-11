@@ -20,6 +20,7 @@ import { registerExplorerRoutes } from "./explorer.js";
 import { registerPackageRoutes } from "./packages.js";
 import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
+import { sessionIdOf } from "./auth.js";
 import type {
   AgentFactory,
   BackgroundRun,
@@ -243,8 +244,12 @@ export function createServer(
     (channelOf?.(id) ?? "web") === "web" && !(taskSessions?.().has(id) ?? false);
   // Outside the continuous conversation only a turn the operator sent into is
   // theirs to read: a lead's dispatch or callback turn reports through main.
+  // The browser is recorded so Web Push reaches the one that spoke (web/push.ts).
   const operatorSent = new Set<string>();
-  const sentByOperator = (id: string): void => void operatorSent.add(id);
+  const sentByOperator = (id: string, c: Context): void => {
+    operatorSent.add(id);
+    state.spokeFrom(id, sessionIdOf(c));
+  };
   const runningNow = new Set<string>();
   // Whether every turn of the run stayed silent; turn-end precedes the idle state.
   // A head's silent turn (a dispatch, a stage moved) is traced by the stage, not a mark.
@@ -476,7 +481,7 @@ export function createServer(
     }
     const mode: InboundMessage["mode"] =
       body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
-    sentByOperator(id);
+    sentByOperator(id, c);
     try {
       const { sessionId } = await router.dispatch({
         key: { channelId: "web", conversationId: id },
@@ -513,7 +518,9 @@ export function createServer(
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
     try {
-      return c.json(reached(await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode })), 202);
+      const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode });
+      state.spokeFrom(head.sessionId, sessionIdOf(c));
+      return c.json(reached(head), 202);
     } catch (err) {
       if (err instanceof ChatCommandRefused || err instanceof SkillAmbiguous) return c.json({ error: err.message }, 409);
       throw err;
@@ -538,7 +545,7 @@ export function createServer(
     await session.rewindToUserTurn(index);
     // The rewind took the speaker headers out of the context too.
     router.forgetSender(id);
-    sentByOperator(id);
+    sentByOperator(id, c);
     await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
@@ -557,7 +564,7 @@ export function createServer(
     if (mode !== "steer" && mode !== "restart") {
       return c.json({ error: "mode must be steer or restart" }, 400);
     }
-    sentByOperator(id);
+    sentByOperator(id, c);
     return queueResponse(async () => ({ submitted: await router.deliverQueue(id, mode) }), 202);
   });
 

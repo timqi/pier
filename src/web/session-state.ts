@@ -1,5 +1,6 @@
 // What the workbench decided about a session, and nothing a transcript already
-// knows: a finished turn nobody looked at (`unread`).
+// knows: a finished turn nobody looked at (`unread`), and the browser that
+// last spoke into it (`browserOf`, memory only: a restart forgets it).
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
@@ -10,6 +11,7 @@ export interface SessionFlags {
 
 export class SessionStateStore {
   readonly #db: DatabaseSync;
+  readonly #spoke = new Map<string, string>();
 
   constructor(db: DatabaseSync = pierDb()) {
     this.#db = db;
@@ -34,5 +36,14 @@ export class SessionStateStore {
       "SELECT session_id AS id FROM session_state WHERE unread = 1",
     ).all() as unknown as { id: string }[];
     return new Map(rows.map((r) => [r.id, { unread: true }]));
+  }
+
+  /** `browser` is the web auth session id (`sessionIdOf`, web/auth.ts). */
+  spokeFrom(sessionId: string, browser: string): void {
+    this.#spoke.set(sessionId, browser);
+  }
+
+  browserOf(sessionId: string): string | undefined {
+    return this.#spoke.get(sessionId);
   }
 }

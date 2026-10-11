@@ -129,6 +129,9 @@ interface PushDeps {
   unread(sessionId: string): boolean;
   /** A turn Pier already delivered to a chat is not notified about again. */
   channelOf(sessionId: string): string | undefined;
+  /** The web session that last spoke into it (`sessionIdOf`, web/auth.ts):
+   *  only that browser is notified. Undefined: nobody has, so every device. */
+  browserOf(sessionId: string): string | undefined;
   summary(sessionId: string): Promise<{ title?: string; cwd: string } | undefined>;
   /** For the VAPID `sub` claim only. */
   publicUrl(): string;
@@ -160,7 +163,7 @@ function parseTarget(body: unknown): PushTarget | null {
 }
 
 export function registerPushRoutes(app: Hono, deps: PushDeps): void {
-  const { store, hub, unread, channelOf, summary, publicUrl, settleMs = SETTLE_MS } = deps;
+  const { store, hub, unread, channelOf, browserOf, summary, publicUrl, settleMs = SETTLE_MS } = deps;
 
   /** Must be a mailto: or https: URL or Apple rejects the token outright. */
   const subject = (): string => {
@@ -170,9 +173,13 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
 
   /** A failure is logged with what the service said: a notification that never
    *  arrives is otherwise indistinguishable from one nobody tapped. */
-  async function deliver(payload: PushPayload): Promise<{ sent: number; failed: number }> {
-    const targets = store.list();
-    if (!targets.length) return { sent: 0, failed: 0 };
+  async function deliver(payload: PushPayload, browser?: string): Promise<{ sent: number; failed: number }> {
+    const targets = store.list().filter((row) => browser === undefined || row.sessionId === browser);
+    if (!targets.length) {
+      // A browser that spoke with notifications off is told nothing, by choice.
+      if (browser !== undefined) log.debug(`no push for ${payload.tag}: the browser that spoke is not subscribed`);
+      return { sent: 0, failed: 0 };
+    }
     const keys = store.identity();
     const body = JSON.stringify(payload);
     let sent = 0;
@@ -247,7 +254,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
           body: preview(reply.text) || "Turn finished.",
           url: `/app/#/session/${encodeURIComponent(e.sessionId)}`,
           tag: e.sessionId,
-        });
+        }, browserOf(e.sessionId));
       })().catch((err: unknown) => log.error(`delivering a push for ${e.sessionId} failed`, err));
     }, settleMs);
     // A pending notification must never hold a shutting-down process open.

@@ -320,10 +320,16 @@ through what the head launches (`pier task`), never by a group's message.
   `MainChain.send` is notified as an error.
 - `core/router.test.ts`: `chatKeyOf` answering for an alias attach delivers the
   turn-end to the channel.
+- `core/router.test.ts`: a web message keys the head to the web — no turn-end
+  or note reaches the chat, a `task:` open and the adapter's re-register
+  leave it there — and the chat's next message takes it back; a chat spoken
+  from takes the head back when its adapter returns.
 - `core/reply.test.ts`: `originLabel` for `session-seed` and `chat-command`;
   `channels/lines.test.ts`: a `chat-command` note is quoted whole.
 - `channels/config.test.ts`: one home across platforms.
-- `web/push.test.ts`: no push while the head answers a chat.
+- `web/push.test.ts`: no push while the head answers a chat; only the browser
+  that spoke is notified, nobody when it has no subscription, every device
+  when no browser has spoken.
 - `channels/runtime.test.ts`: `designLead` binds the thread, attaches the
   session and posts the result there, then edits the root on `final` and
   `failed`; nothing without a live home or when the session already has a
