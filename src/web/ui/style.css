@@ -351,6 +351,8 @@ main > section, #turns { grid-row: 1 / -1; }
 .open-item:has(.session-open:hover), .open-item:focus-within, .open-item:has([aria-current]) { background: var(--color-neutral-100); }
 .open-item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .open-item-dot { margin-top: 6px; }
+/* A running dot holds still: an endless pulse repaints the page for as long as the work runs. */
+.running-dot { outline: 1px solid var(--color-neutral-500); outline-offset: 2px; }
 .open-item-stage, .open-item-meta { margin-top: 3px; white-space: pre-wrap; }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
@@ -841,7 +843,6 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #turns > [data-enter], dialog[open]:not(#image-dialog) {
     animation: surface-fade 120ms ease-out;
   }
-  .open-item-dot.animate-pulse { animation: none; outline: 1px solid var(--color-neutral-500); outline-offset: 2px; }
   .chip { transition: none; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
   #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }

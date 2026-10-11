@@ -2,7 +2,7 @@
 // steps) and the background runs, rendered as chips in the reply bubble's chip
 // row (chat.ts), each chip its own fold over its detail.
 
-import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
+import { Check, Clock, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
@@ -188,7 +188,7 @@ export function setChipOpen(el: HTMLElement, open: boolean): void {
 
 /** Run state colours are shared by detached runs and callback summaries. */
 export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: IconNode }> = {
-  queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: LoaderCircle },
+  queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: Clock },
   running: { edge: "border-l-neutral-400", label: "text-neutral-600", glyph: LoaderCircle },
   succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: Check },
   failed: { edge: "border-l-red-500", label: "text-red-600", glyph: X },
@@ -197,9 +197,10 @@ export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: 
   skipped: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
 };
 
-/** The state's glyph: a spinner while it is still moving. */
+/** The state's glyph, static even while running: a run lasts minutes, and an
+ *  endless spin repaints the page for all of them. */
 export const stateGlyph = (state: BackgroundRun["state"]): SVGElement =>
-  icon(STATE_STYLE[state].glyph, `h-3 w-3 ${state === "queued" || state === "running" ? "spinner" : ""} ${STATE_STYLE[state].label}`);
+  icon(STATE_STYLE[state].glyph, `h-3 w-3 flex-none ${STATE_STYLE[state].label}`);
 
 const runChips = new Map<string, HTMLElement>();
 

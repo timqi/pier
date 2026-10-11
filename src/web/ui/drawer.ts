@@ -99,7 +99,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
   );
 }
 
-const WORKING: [string, string] = ["bg-green-500 animate-pulse", "working…"];
+const WORKING: [string, string] = ["bg-green-500 running-dot", "working…"];
 
 function markDot([cls, title]: [string, string]): HTMLElement[] {
   const dot = h("span", `h-2 w-2 flex-none rounded-full ${cls}`);

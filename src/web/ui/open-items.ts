@@ -41,7 +41,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     dot.style.background = item.key.startsWith("item:") ? topicColour(item.problem) : "var(--color-neutral-400)";
-    dot.classList.toggle("animate-pulse", item.status === "running");
+    dot.classList.toggle("running-dot", item.status === "running");
     dot.title = item.status;
     main.setAttribute("aria-label", `${item.title} · ${item.status}`);
     const to = openItemDestination(item);

@@ -117,10 +117,10 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(doc.querySelectorAll(".row-status")).toHaveLength(0);
   const dot = (key: string) => item(key).querySelector(".open-item-dot")!;
   expect(dot("item:auth").style.background).toBe(topicColour("auth"));
-  expect(dot("item:auth").classList.contains("animate-pulse")).toBe(true);
-  expect(dot("item:原始完整问题").classList.contains("animate-pulse")).toBe(false);
+  expect(dot("item:auth").classList.contains("running-dot")).toBe(true);
+  expect(dot("item:原始完整问题").classList.contains("running-dot")).toBe(false);
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
-  expect(dot("run:q").classList.contains("animate-pulse")).toBe(false);
+  expect(dot("run:q").classList.contains("running-dot")).toBe(false);
   expect(item("session:free").querySelector(".open-item-stage")!.textContent).toBe("Needs you · turn finished — not viewed yet");
   expect(doc.querySelectorAll(".open-item").every((li) => li.querySelectorAll("button").length === 1)).toBe(true);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题");

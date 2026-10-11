@@ -272,6 +272,11 @@ it("names a run card by its session once there is one, and by the run id until t
   expect(select).toHaveBeenLastCalledWith("s7abcdef1234");
 });
 
+it("draws a queued or running run's glyph static, so a long run animates nothing", async () => {
+  const { stateGlyph } = await import("./turn-activity.js");
+  for (const state of ["queued", "running"] as const) expect(stateGlyph(state).classList.contains("spinner")).toBe(false);
+});
+
 it("replays a refused prompt as the user's row and the reason", () => {
   chat.renderSnapshot([
     { role: "user", text: "hello" },

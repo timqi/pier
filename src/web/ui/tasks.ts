@@ -21,7 +21,7 @@ const RUN_TINT: Record<TaskRun["state"], string> = {
 const runBadge = (run: TaskRun): HTMLElement =>
   run.state === "succeeded" && run.matched === false
     ? badge("no match", RUN_TINT.skipped)
-    : badge(run.state, RUN_TINT[run.state], run.state === "running" ? "animate-pulse bg-sky-500" : undefined);
+    : badge(run.state, RUN_TINT[run.state], run.state === "running" ? "running-dot bg-sky-500" : undefined);
 
 const triggerText = (task: TaskDefinition): string => {
   if (task.trigger.type === "manual") return "manual";
