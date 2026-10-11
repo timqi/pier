@@ -23,7 +23,9 @@ actually ran. Anthropic by default, OpenAI when that is the only auth; the
 backend is this flag's to choose and never follows the model you run on —
 `--backend openai` sends a thin answer to the other index.
 
-- `--lang preserve` when the query's language is the point (a local company,
+- `--lang` is a translation policy, not a language code: the query's own
+  language is detected, and `--lang en` is ignored with a `Note:`.
+  `--lang preserve` when the query's language is the point (a local company,
   a Chinese source): the backend is audited and retried in that language;
   a `Warning:` line means it still translated. `auto` (default) allows
   English supplements; `expand` asks for them.
@@ -39,6 +41,11 @@ keeps names, dates, numbers and caveats; `full` is the document itself
 Every fetch writes the whole document to disk and ends with
 `Full document artifact: <path> (<n> chars)` — read that file for what the
 digest left out, never fetch twice. Kept 30 days.
+
+A developer.apple.com/documentation page is read through its `.md` copy,
+the page itself when there is none. A page that renders only with JavaScript
+is a `web:` refusal, not an answer: find the content elsewhere (a `.md` or raw
+copy, an API, `pier web search`).
 
 ## Rules
 

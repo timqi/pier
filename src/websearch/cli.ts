@@ -3,6 +3,7 @@
 // text comes back verbatim.
 
 import { parseArgs } from "node:util";
+import { LANGUAGE_MODES, type LanguageMode } from "./language.js";
 
 export interface WebCliIo {
   stdout(line: string): void;
@@ -25,7 +26,7 @@ type Values = Partial<Record<Flag, string | boolean>>;
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   search: {
     usage: "search <query> [--lang auto|preserve|expand] [--allow <domain,…> | --block <domain,…>] [--backend anthropic|openai]",
-    help: "a briefing with sources from the provider's hosted search; --lang preserve never translates the query",
+    help: "a briefing with sources from the provider's hosted search; --lang is a translation policy, not a language code (the query's own language is detected): preserve never translates the query",
   },
   fetch: {
     usage: "fetch <url> [--prompt <question>] [--mode concise|thorough|full]",
@@ -43,6 +44,13 @@ const processIo: WebCliIo = {
   stdout: (line) => process.stdout.write(`${line}\n`),
   stderr: (line) => process.stderr.write(`${line}\n`),
 };
+
+/** `--lang en` is the natural misreading; the query's script already names the
+ *  language, so a code means nothing beyond the default. */
+const LANGUAGE_CODE = /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i;
+/** `pre` is a mode cut short, not a language: it gets the usage, not a quiet auto. */
+const isLanguageCode = (value: string): boolean =>
+  LANGUAGE_CODE.test(value) && !LANGUAGE_MODES.some((mode) => mode.startsWith(value.toLowerCase()));
 
 const list = (raw: string | boolean | undefined): string[] | undefined =>
   raw === undefined ? undefined : String(raw).split(",").map((d) => d.trim()).filter(Boolean);
@@ -71,8 +79,14 @@ export async function runWebCli(argv: string[], post: WebPost, io: WebCliIo = pr
     const stray = (Object.keys(v) as Flag[]).find((flag) => !allowed.has(flag));
     if (stray) return usage(`--${stray} is not an option of ${name}`);
     if (positionals.length !== 1) return usage(`${name} takes exactly one ${name === "search" ? "query" : "url"}`);
+    let lang = v.lang as string | undefined;
+    if (lang !== undefined && !LANGUAGE_MODES.includes(lang as LanguageMode)) {
+      if (!isLanguageCode(lang)) return usage(`--lang takes auto, preserve or expand, not "${lang}"`);
+      io.stderr(`Note: --lang takes auto|preserve|expand, not a language code — "${lang}" ignored, searching with auto in the query's own language; --lang preserve keeps it untranslated.`);
+      lang = undefined;
+    }
     params = name === "search"
-      ? { op: "search", query: positionals[0], language_mode: v.lang, allowed_domains: list(v.allow), blocked_domains: list(v.block), backend: v.backend }
+      ? { op: "search", query: positionals[0], language_mode: lang, allowed_domains: list(v.allow), blocked_domains: list(v.block), backend: v.backend }
       : { op: "fetch", url: positionals[0], prompt: v.prompt, mode: v.mode };
   } catch (err) {
     return usage(err instanceof Error ? err.message : String(err));

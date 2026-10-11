@@ -38,6 +38,7 @@ interface FetchedDocument {
   url?: string;
   retrievedAt?: string;
   text?: string;
+  mediaType?: string;
 }
 
 export interface SearchQuery {
@@ -148,6 +149,7 @@ export function fetchedDocument(content: unknown[]): FetchedDocument {
         source?.type === "text" && typeof source.data === "string"
           ? source.data
           : undefined,
+      mediaType: typeof source?.media_type === "string" ? source.media_type : undefined,
     };
   }
   return {};

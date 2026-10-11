@@ -2,7 +2,7 @@ import { isObject } from "./json.js";
 
 /** One POST of JSON to a provider endpoint: timeout, transient-status retry, parsed body. */
 
-const TIMEOUT_MS = Number(process.env.PIER_WEB_TIMEOUT_MS) || 60_000;
+export const TIMEOUT_MS = Number(process.env.PIER_WEB_TIMEOUT_MS) || 60_000;
 const MAX_RETRIES = 2;
 const RETRY_STATUS = new Set([408, 409, 429, 500, 502, 503, 504]);
 

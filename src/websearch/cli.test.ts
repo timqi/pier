@@ -45,6 +45,19 @@ describe("pier web", () => {
     expect(await run("fetch", "-h")).toBe(0);
   });
 
+  it("reads a language code for --lang as auto, says so, and refuses anything else with the usage", async () => {
+    const { run, posted, err } = rig();
+    expect(await run("search", "swift concurrency", "--lang", "en")).toBe(0);
+    expect(await run("search", "苹果 财报", "--lang", "zh-CN")).toBe(0);
+    expect(posted.map((p) => p.language_mode)).toEqual([undefined, undefined]);
+    expect(err[0]).toMatch(/^Note: --lang takes auto\|preserve\|expand, not a language code — "en" ignored/);
+    expect(await run("search", "swift concurrency", "--lang", "english")).toBe(2);
+    for (const typo of ["pre", "exp", "aut", "Pres"]) expect(await run("search", "swift concurrency", "--lang", typo)).toBe(2);
+    expect(posted).toHaveLength(2);
+    expect(err.at(-1)).toMatch(/^web: --lang takes auto, preserve or expand, not "Pres"/);
+    expect(err[2]).toMatch(/^web: --lang takes auto, preserve or expand, not "english"\npier web search <query> \[--lang auto\|preserve\|expand\]/);
+  });
+
   it("prints a refusal as one web: line, exit 1", async () => {
     const { run, err } = rig({ status: 422, body: { error: "No web backend available — anthropic: …" } });
     expect(await run("search", "pier")).toBe(1);

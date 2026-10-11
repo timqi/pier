@@ -468,6 +468,105 @@ describe("the fetch tool end to end", () => {
   });
 });
 
+describe("a page that renders only with JavaScript", () => {
+  const SHELL = "This page requires JavaScript.\nPlease turn on JavaScript in your browser and refresh the page to view its content.";
+  const fetched = (url: string, data: string, media_type = "text/plain") => ok({
+    model: "claude-haiku-4-5-20251001",
+    stop_reason: "end_turn",
+    usage: { input_tokens: 10, output_tokens: 5 },
+    content: [
+      { type: "server_tool_use", id: "f1", name: "web_fetch", input: { url } },
+      {
+        type: "web_fetch_tool_result",
+        tool_use_id: "f1",
+        content: { type: "web_fetch_result", url, content: { type: "document", source: { type: "text", media_type, data } } },
+      },
+      { type: "text", text: `Digest of ${url}` },
+    ],
+  });
+  const unreachable = (url: string) => ok({
+    model: "claude-haiku-4-5-20251001",
+    stop_reason: "end_turn",
+    usage: { input_tokens: 10, output_tokens: 5 },
+    content: [
+      { type: "server_tool_use", id: "f1", name: "web_fetch", input: { url } },
+      { type: "web_fetch_tool_result", tool_use_id: "f1", content: { type: "web_fetch_tool_error", error_code: "url_not_accessible" } },
+      { type: "text", text: "I could not fetch that page." },
+    ],
+  });
+  const asked = (body: string): string => /\n(https:\S+)/.exec(String(JSON.parse(body).messages[0].content))?.[1] ?? "";
+  const page = "https://developer.apple.com/documentation/localauthentication/lacontext";
+
+  it("reads an Apple documentation page through its .md copy", async () => {
+    const { webFetch } = await import("./run.js");
+    const urls: string[] = [];
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      urls.push(asked(init.body));
+      return fetched(urls.at(-1)!, "# LAContext\nA mechanism for evaluating authentication policies.");
+    }) as never;
+    const result = await webFetch({ op: "fetch", url: `${page}/` }, ctx([haiku], haiku), () => {});
+    expect(urls).toEqual([`${page}.md`]);
+    expect(result.text).toContain(`Digest of ${page}.md`);
+  });
+
+  it("falls back to the page itself when the .md copy is not there", async () => {
+    const { webFetch } = await import("./run.js");
+    const urls: string[] = [];
+    const notes: string[] = [];
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      urls.push(asked(init.body));
+      return urls.length === 1 ? unreachable(urls[0]!) : fetched(urls.at(-1)!, "Invalidates the context.");
+    }) as never;
+    const symbol = `${page}/1514192-invalidate`;
+    const result = await webFetch({ op: "fetch", url: symbol }, ctx([haiku], haiku), (text) => notes.push(text));
+    expect(urls).toEqual([`${symbol}.md`, symbol]);
+    expect(result.text).toContain(`Digest of ${symbol}`);
+    expect(notes).toContain(`no text at ${symbol}.md — fetching ${symbol}`);
+  });
+
+  it("gives the .md copy its own deadline, so a hung copy leaves the fallback its time", async () => {
+    const { webFetch } = await import("./run.js");
+    const urls: string[] = [];
+    const notes: string[] = [];
+    globalThis.fetch = (async (_url: string, init: { body: string; signal: AbortSignal }) => {
+      urls.push(asked(init.body));
+      if (urls.length > 1) return fetched(urls.at(-1)!, "The class reference.");
+      return new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
+    }) as never;
+    const result = await webFetch({ op: "fetch", url: page }, ctx([haiku], haiku), (text) => notes.push(text));
+    // One attempt at the copy, cut by its own deadline rather than retried.
+    expect(urls).toEqual([`${page}.md`, page]);
+    expect(result.text).toContain(`Digest of ${page}`);
+    expect(notes.some((n) => n.startsWith(`${page}.md failed:`))).toBe(true);
+  });
+
+  it("judges only an HTML page a shell, never a text file that quotes the notice", async () => {
+    const { webFetch } = await import("./run.js");
+    const urls: string[] = [];
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      urls.push(asked(init.body));
+      return fetched(urls.at(-1)!, SHELL);
+    }) as never;
+    // Apple's copy is a text file: kept, no fallback to the page.
+    await expect(webFetch({ op: "fetch", url: page }, ctx([haiku], haiku), () => {})).resolves.toBeTruthy();
+    expect(urls).toEqual([`${page}.md`]);
+    await expect(webFetch({ op: "fetch", url: "https://raw.example.com/notes.md" }, ctx([haiku], haiku), () => {})).resolves.toBeTruthy();
+    globalThis.fetch = (async (_url: string, init: { body: string }) => fetched(asked(init.body), SHELL, "text/markdown")) as never;
+    await expect(webFetch({ op: "fetch", url: "https://docs.example.com/guide" }, ctx([haiku], haiku), () => {})).resolves.toBeTruthy();
+  });
+
+  it("refuses a JavaScript shell instead of answering with it", async () => {
+    const { webFetch } = await import("./run.js");
+    globalThis.fetch = (async (_url: string, init: { body: string }) => fetched(asked(init.body), SHELL)) as never;
+    await expect(webFetch({ op: "fetch", url: "https://app.example.com/docs" }, ctx([haiku], haiku), () => {}))
+      .rejects.toThrow('https://app.example.com/docs renders only with JavaScript: the fetch got its "requires JavaScript" notice');
+    // A page that only mentions JavaScript is content.
+    globalThis.fetch = (async (_url: string, init: { body: string }) =>
+      fetched(asked(init.body), `${"An article. ".repeat(200)}Some sites require JavaScript.`)) as never;
+    await expect(webFetch({ op: "fetch", url: "https://blog.example.com/js" }, ctx([haiku], haiku), () => {})).resolves.toBeTruthy();
+  });
+});
+
 describe("a call that partly failed", () => {
   const searchBody = (blocks: unknown[]) => ({
     model: "claude-haiku-4-5-20251001",

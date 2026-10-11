@@ -3,6 +3,7 @@
 // quietly translates a Chinese query answers a question nobody asked.
 
 export type LanguageMode = "auto" | "preserve" | "expand";
+export const LANGUAGE_MODES: readonly LanguageMode[] = ["auto", "preserve", "expand"];
 
 export function searchPrompt(query: string, mode: LanguageMode): string {
   const policy =
