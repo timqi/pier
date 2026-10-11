@@ -51,8 +51,9 @@ surface owns its routes and is mounted beside it.
 | `GET /app/manifest.webmanifest`, `/app/icon.svg` | the shipped files, rendered per instance and `no-cache`: `name`/`short_name` (≤12) are `PIER_TITLE` (`Pier` when unset), `theme_color` and the icon's plate the accent's 600 step (`ACCENTS` in `settings.ts`). Safari and the iOS Home Screen read only the PNG links, so the shell points `icon-32` and `apple-touch-icon` at the preset's pre-rendered `icon-32-<accent>.png` / `icon-touch-192-<accent>.png`; the Dock and launchers read the manifest's PNGs, so its `icons` are rewritten to `icon-192-<accent>.png` / `icon-512-<accent>.png` / `icon-maskable-512-<accent>.png` the same way (all rendered from `icon.svg` by `just icons` — `scripts/render-icons.ts`, `@resvg/resvg-js` fetched by npx, not a dependency). An installed app keeps the icon it was installed with |
 | `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/login` and `/api/*`. Hash routes are `/app/#/…`; `/api/*` and `/login` stay where they are, and the cookie's `Path` stays `/` |
 
-- **Unread**: `streaming → idle` marks the session unread when no durable
-  conversation row exists (`conversations.keyOf`) and no task run made the
+- **Unread**: `streaming → idle` marks the session unread when the session
+  answers the web — its live key (`Router.conversationOf`), else its durable
+  conversation row (`conversations.keyOf`), is no chat's ([11 §Notifications](11-im-conversation.md#notifications)) — and no task run made the
   session for itself, and only for a turn of the head or
   one the operator sent into (a message, an edit, a queue delivery); a lead's
   dispatch or callback turn finishing reports through the head and marks nothing.
@@ -118,6 +119,12 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   it closes is notified. Sessions answering an IM conversation
   (`router.conversationOf(id)`) are not, nor is a run all of whose non-empty
   turns stayed silent; the body is the last spoken turn's `splitReply(text).text`, markers off.
+- Only the browser that spoke is notified: a message, an edit or a queue
+  delivery records the sender's web session on the Pi session
+  (`SessionStateStore.spokeFrom`, memory only), and the push goes to that
+  session's subscription alone — none when it has no subscription, which is
+  the browser's notification switch off. Nobody has spoken from the web since
+  the start (a callback's answer on a head with no home chat): every device.
 - `webpush.ts` is the wire format — RFC 8291 `aes128gcm` and RFC 8292 VAPID on
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the

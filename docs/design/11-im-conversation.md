@@ -259,14 +259,25 @@ through what the head launches (`pier task`), never by a group's message.
 
 ## Notifications
 
-- The home chat is the head's notification. While the head is
-  attached under the home key, `channelOf(head)` is the platform, so Web Push
-  sends nothing for it and the web sets no unread mark on it (the existing
-  rule: a turn delivered to a chat is not notified about again). The web
-  timeline shows every turn regardless.
-- A message typed on the web is not mirrored into the DM; the head's answer
-  is, whichever surface asked. The web is the record, the DM the phone.
+- A session answers on the surface its last user message took, and nowhere
+  else. A message from the home chat keys the head to it (`Router.dispatch`
+  sets the key, `attached.spoke`): every later turn, note and failure — a
+  callback's answer included — is delivered there, `channelOf(head)` is the
+  platform, so Web Push sends nothing and the web sets no unread mark (a turn
+  delivered to a chat is not notified about again). A message typed on the
+  web keys the head to the web until the chat speaks again: nothing is posted
+  in the DM meanwhile, and Web Push goes to the browser that typed it
+  ([03 §Notifications](03-web-workbench.md#notifications-srcwebpushts--srcwebwebpushts)).
+  A `task:` open never takes the key off a surface a user spoke on; an
+  adapter's restart does not take the head back from the web (`toChat`).
+  The web timeline shows every turn regardless; the DM is never backfilled
+  with what it was not told.
+- Until a user speaks after a start, the durable rule holds: the home chat
+  while its adapter is live, else the web. The last surface is in memory
+  only — a restart returns the head to the home chat.
 - No home chat, or its adapter down: Web Push.
+- A run's abnormal-end notice (`abnormalEnd`, below) goes to the home chat
+  through the restart ledger whichever surface the head answers on.
 - A run a session launched that ends abnormally is told in the home chat when
   nothing else there would say so (`owesNotice`, `tasks/service.ts`): an
   interruption always; a failure, or a cancel no one asked for the user (asked
