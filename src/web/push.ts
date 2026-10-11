@@ -177,7 +177,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     const targets = store.list().filter((row) => browser === undefined || row.sessionId === browser);
     if (!targets.length) {
       // A browser that spoke with notifications off is told nothing, by choice.
-      if (browser !== undefined) log.debug(`no push for ${payload.tag}: the browser that spoke is not subscribed`);
+      log.debug(`no push for ${payload.tag}: ${browser === undefined ? "no browser is subscribed" : "the browser that spoke is not subscribed"}`);
       return { sent: 0, failed: 0 };
     }
     const keys = store.identity();

@@ -12,7 +12,7 @@ import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js"
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
 import { fakeSession, type FakeSession, type FakeSessionOptions } from "./session.testkit.js";
-import type { AgentFactory, AgentLaunchOptions, Channel, LedgerRun, NoteOrigin } from "./types.js";
+import type { AgentFactory, AgentLaunchOptions, Channel, ConversationKey, LedgerRun, NoteOrigin } from "./types.js";
 
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -20,6 +20,7 @@ const day = (d: Date): string =>
 function rig({
   runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
   head = undefined as string | undefined,
+  chat = undefined as ConversationKey | undefined,
 } = {}) {
   // Settings' default model and reasoning, as the operator last saved them; a function may throw.
   const defaults: { value: AgentDefaults | (() => AgentDefaults) } = { value: { defaultModel: null, defaultThinkingLevel: null } };
@@ -54,7 +55,9 @@ function rig({
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
   const hub = new EventHub();
-  const router = new Router(hub, (key) => factory.resume(key.conversationId));
+  // The home chat answers for the head only, as main.ts wires it.
+  const router = new Router(hub, (key) => factory.resume(key.conversationId), undefined,
+    (id) => (chat && chain.members()[0]?.sessionId === id ? chat : undefined));
   // The open items' text is tasks/open-items.ts's; the chain only places it.
   const status = { text: "Nothing open.", seed: undefined as string | undefined, sessions: {} as Record<string, string>, asked: [] as number[] };
   const chain = new MainChain(db, {
@@ -467,6 +470,26 @@ describe("a send under a chat's key", () => {
     expect(r.router.conversationOf("m1")).toEqual({ channelId: "web", conversationId: "m1" });
     expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "session-seed", reason: "idle" })]);
     expect(r.sessions.get("m2")!.prompts[0]).toContain("back");
+  });
+
+  it("keys the head, a rotation's next head and a /new to the web a user typed on, the chat's next word taking it back", async () => {
+    const r = rig({ chat: KEY });
+    const im = lark();
+    r.router.registerChannel(im.channel);
+    await send(r, "hello");
+    expect(im.notes).toHaveLength(1);
+
+    r.clock.now += 2 * IDLE_MS;
+    expect(await r.say("from the browser")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(r.router.conversationOf("m2")).toEqual({ channelId: "web", conversationId: "m2" });
+    expect((await r.say("/new")).sessionId).toBe("m3");
+    expect(r.router.conversationOf("m3")).toEqual({ channelId: "web", conversationId: "m3" });
+    // Neither seed reached the chat: the user is on the web.
+    expect(im.notes).toHaveLength(1);
+
+    await send(r, "/status");
+    expect(r.router.conversationOf("m3")).toEqual(KEY);
+    expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "chat-command", command: "status" })]);
   });
 
   it("answers `/status` in the chat while the head is still replying", async () => {

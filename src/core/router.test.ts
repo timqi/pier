@@ -526,6 +526,18 @@ describe("opening a session", () => {
     expect(im.sent.map(([, r]) => r.text)).toEqual(["chat answer"]);
   });
 
+  it("keeps answering the web a user spoke on after an eviction's reopen", async () => {
+    const WEB = { channelId: "web", conversationId: "s1" };
+    router = new Router(hub, () => Promise.resolve(fake), (key) => (key.channelId === "slack" ? "s1" : undefined), () => KEY);
+    router.registerChannel(im.channel);
+    await router.dispatch({ key: WEB, senderId: "web", text: "from the browser", mode: "auto" });
+    expect(await router.evictIdle(0)).toBe(1);
+    await router.ensure({ channelId: "task", conversationId: "s1" });
+    expect(router.conversationOf("s1")).toEqual(WEB);
+    fake.emit({ type: "turn-end", text: "callback answer" });
+    expect(im.sent).toEqual([]);
+  });
+
   it("a chat spoken from takes the session back when its adapter returns", async () => {
     router = new Router(hub, () => Promise.resolve(fake), (key) => (key.channelId === "slack" ? "s1" : undefined), () => KEY);
     router.registerChannel(im.channel);

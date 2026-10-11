@@ -180,7 +180,7 @@ export class MainChain {
     const done = this.queue.then(async () => {
       this.chat = key;
       const found = await this.current();
-      if (key) this.deps.router.attach(key, found.session);
+      this.deps.router.heard(key ?? webKey(found.session.id), found.session);
       const { session, rotated } = (await then(found.session, found.rotated)) ?? found;
       return { sessionId: session.id, ...(rotated ? { rotated } : {}) };
     });
@@ -234,7 +234,8 @@ export class MainChain {
       if (reason === "lost" && previous) this.db.prepare("DELETE FROM main_chain WHERE session_id = ?").run(previous.sessionId);
     });
     this.deps.router.attach(webKey(session.id), session);
-    if (this.chat) this.deps.router.attach(this.chat, session);
+    // The surface the send came from, before the seed: a web send posts no card in the chat.
+    this.deps.router.heard(this.chat ?? webKey(session.id), session);
     await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
     log.info(`main session ${session.id} started (${reason})`);
     return session;

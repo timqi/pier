@@ -260,16 +260,19 @@ through what the head launches (`pier task`), never by a group's message.
 ## Notifications
 
 - A session answers on the surface its last user message took, and nowhere
-  else. A message from the home chat keys the head to it (`Router.dispatch`
-  sets the key, `attached.spoke`): every later turn, note and failure — a
+  else. A message or chat command from the home chat keys the head to it
+  (`Router.heard`): every later turn, note and failure — a
   callback's answer included — is delivered there, `channelOf(head)` is the
   platform, so Web Push sends nothing and the web sets no unread mark (a turn
   delivered to a chat is not notified about again). A message typed on the
   web keys the head to the web until the chat speaks again: nothing is posted
   in the DM meanwhile, and Web Push goes to the browser that typed it
   ([03 §Notifications](03-web-workbench.md#notifications-srcwebpushts--srcwebwebpushts)).
-  A `task:` open never takes the key off a surface a user spoke on; an
-  adapter's restart does not take the head back from the web (`toChat`).
+  A `task:` open never takes the key off a surface a user spoke on, nor does
+  an idle eviction's reopen; an adapter's restart does not take the head back
+  from the web (`toChat`). A rotation's next head is keyed to the surface the
+  send came from before its seed is appended, so a web send posts no seed card
+  in the DM.
   The web timeline shows every turn regardless; the DM is never backfilled
   with what it was not told.
 - Until a user speaks after a start, the durable rule holds: the home chat
@@ -323,7 +326,10 @@ through what the head launches (`pier task`), never by a group's message.
 - `core/router.test.ts`: a web message keys the head to the web — no turn-end
   or note reaches the chat, a `task:` open and the adapter's re-register
   leave it there — and the chat's next message takes it back; a chat spoken
-  from takes the head back when its adapter returns.
+  from takes the head back when its adapter returns; an eviction's reopen
+  keeps the web.
+- `core/chain.test.ts`: a web send's rotation and a web `/new` key the next
+  head to the web with no seed card in the chat; a chat `/status` takes it back.
 - `core/reply.test.ts`: `originLabel` for `session-seed` and `chat-command`;
   `channels/lines.test.ts`: a `chat-command` note is quoted whole.
 - `channels/config.test.ts`: one home across platforms.

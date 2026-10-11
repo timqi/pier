@@ -36,9 +36,6 @@ const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conv
 interface Attached {
   session: AgentSession;
   key: ConversationKey;
-  /** Where a human last spoke (`dispatch`): an alias open or an adapter's
-   *  return does not take the key off it (docs/design/11 §Notifications). */
-  spoke?: ConversationKey;
   /** What eviction ages. */
   activeAt: number;
   /** Bumped with activeAt; the sweep compares it across its await, where a
@@ -79,6 +76,9 @@ function skillText(text: string, skills: { name: string }[]): string | SkillAmbi
 export class Router {
   private readonly byKey = new Map<string, AgentSession>();
   private readonly bySession = new Map<string, Attached>();
+  /** Where a user last spoke, per session (`heard`): outlives an eviction, so
+   *  the reopen answers there too; memory only (docs/design/11 §Notifications). */
+  private readonly spoke = new Map<string, ConversationKey>();
   /** Resolves in flight: two surfaces asking at once must share one session
    *  object, not open a second Pi runtime on the same transcript. */
   private readonly opening = new Map<string, Promise<AgentSession>>();
@@ -117,14 +117,19 @@ export class Router {
     for (const key of this.byKey.keys()) if (key.startsWith(`${channelId}:`)) this.byKey.delete(key);
     for (const attached of this.bySession.values()) {
       if (attached.key.channelId === channelId) attached.key = webKey(attached.session.id);
-      if (attached.spoke?.channelId === channelId) attached.spoke = undefined;
     }
+    for (const [id, key] of this.spoke) if (key.channelId === channelId) this.spoke.delete(id);
   }
 
   /** The durable chat outranks the alias that happened to open the session
-   *  first (a restart, the web speaking first), same rule as `reached`. */
+   *  first (a restart, the web speaking first), same rule as `reached` — but
+   *  not the web a user last spoke on, which an alias open answers on. */
   private toChat(attached: Attached): void {
-    if (attached.spoke?.channelId === "web") return;
+    const spoke = this.spoke.get(attached.session.id);
+    if (spoke?.channelId === "web") {
+      if (isAlias(attached.key)) attached.key = spoke;
+      return;
+    }
     const chat = isAlias(attached.key) ? this.chatKeyOf(attached.session.id) : undefined;
     if (!chat || !this.channels.has(chat.channelId)) return;
     this.hold(chat, attached.session);
@@ -595,20 +600,22 @@ export class Router {
     if (!attached) return session;
     attached.activeAt = Date.now();
     attached.touched += 1;
-    if (!isAlias(key) || (isAlias(attached.key) && attached.spoke?.channelId !== "web")) attached.key = key;
+    if (!isAlias(key) || (isAlias(attached.key) && this.spoke.get(session.id)?.channelId !== "web")) attached.key = key;
     return session;
   }
 
-  /** Every dispatch is a human's, so its key is where the session answers
-   *  from now on, chat or web alike. */
+  /** A user spoke on `key` (a dispatch, a chat command): the session answers
+   *  there from now on, chat or web alike, until a user speaks elsewhere. */
+  heard(key: ConversationKey, session: AgentSession): void {
+    this.attach(key, session);
+    const attached = this.bySession.get(session.id);
+    if (attached) attached.key = key;
+    this.spoke.set(session.id, key);
+  }
+
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
     const session = await this.ensure(msg.key);
-    const attached = this.bySession.get(session.id);
-    if (attached) {
-      this.hold(msg.key, session);
-      attached.key = msg.key;
-      attached.spoke = msg.key;
-    }
+    this.heard(msg.key, session);
     const skilled = skillText(msg.text, session.skills());
     if (skilled instanceof SkillAmbiguous) this.refuse(msg.key, skilled);
     const { action, text } = decide({ ...msg, text: skilled }, session.state);
