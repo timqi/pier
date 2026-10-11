@@ -17,6 +17,8 @@ import { replaySystemPrompt } from "./system-prompt.js";
 const sent: string[] = [];
 /** The `messages` of every request, as JSON. */
 const wire: string[] = [];
+/** The `tools` of every request. */
+const declared: { name: string; description: string }[][] = [];
 let factory: PiAgentFactory;
 
 beforeAll(async () => {
@@ -27,8 +29,9 @@ beforeAll(async () => {
   }
   vi.stubEnv("ANTHROPIC_API_KEY", "sk-test");
   vi.stubGlobal("fetch", async (_url: unknown, init?: { body?: string }) => {
-    const body = JSON.parse(init?.body ?? "{}") as { system?: { text: string }[]; messages?: unknown[] };
+    const body = JSON.parse(init?.body ?? "{}") as { system?: { text: string }[]; messages?: unknown[]; tools?: { name: string; description: string }[] };
     wire.push(JSON.stringify(body.messages ?? []));
+    declared.push(body.tools ?? []);
     sent.push((body.system ?? []).map((part) => part.text).join("\n\n"));
     return Response.json({ type: "error", error: { type: "invalid_request_error", message: "stubbed" } }, { status: 400 });
   });
@@ -90,6 +93,8 @@ describe("a session's system prompt", () => {
     await session.prompt("hello").catch(() => {});
     const blocks = (await codemode.readSystemPrompt(session.id))?.blocks;
     expect(sent.at(-1)).toContain("# Tool calls\n- A step with two or more");
+    // The threshold rides with the tool too, after Pi's own description.
+    expect(declared.at(-1)?.find((t) => t.name === "codemode")?.description).toMatch(/^Run JavaScript that calls other tools\.[^]*\n\nA script earns its round trip only[^]*never wrapped \(not `return \(await tools\.bash\(\{ command \}\)\)\.output`\)\.$/);
     expect(blocks?.[0]).toMatchObject({ label: "Pier baseline" });
     expect(blocks?.[0]?.text).toMatch(/# Tool calls[^]*strictly serial steps[^]*\n\n# Working style[^]*without running it\.$/);
     expect(blocks?.[1]).toEqual({ label: "SYSTEM.md", text: "user system" });

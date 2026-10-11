@@ -79,6 +79,9 @@ A run that changes a repository's files commits them before ending its turn, unl
 ## Result
 Your final reply is the run result your supervisor reads verbatim:${RUN_RESULT}`;
 
+/** Pi's codemode description carries it too (agent/pi.ts), as the call is chosen. */
+export const CODEMODE_THRESHOLD = "A script earns its round trip only by combining two or more calls or by cutting a large result down in code; a single call whose output is used as-is is made directly, never wrapped (not `return (await tools.bash({ command })).output`).";
+
 /** Pi's codemode guideline sits in the rules section the override drops, so
  *  a worker with the tool hears it in Pier's baseline (agent/pi.ts), ahead of
  *  Working style, or never calls it. A worker's and a lead's tool results
@@ -86,7 +89,7 @@ Your final reply is the run result your supervisor reads verbatim:${RUN_RESULT}`
 export const toolCalls = (codemode: boolean): string => `# Tool calls
 ${codemode ? `- A step with two or more tool calls that do not depend on each other is one codemode script (Promise.allSettled); calls that do depend chain in the same script, and large output is filtered there.
 - Before each call, ask what else you already know you will need; exploration, independent reads, greps and inspections of the same file go in one script.
-- Call a tool directly only for a single call, an action awaiting a person's confirmation, or strictly serial steps (one browser tab, a rate limit); a fresh shell per command is not one.
+- ${CODEMODE_THRESHOLD} Direct too: an action awaiting a person's confirmation, or strictly serial steps (one browser tab, a rate limit); a fresh shell per command is not one.
 ` : ""}- Every tool result stays in your context: \`rg -n\` locates, then read only that line range; filter or cap command output in its pipe; a large output goes to a file, read back in parts.
 
 `;

@@ -51,7 +51,7 @@ import type {
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
-import { DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
+import { CODEMODE_THRESHOLD, DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
 import {
   lastAssistant,
   textOf,
@@ -188,6 +188,20 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
       event.input.timeout = BASH_DEFAULT_TIMEOUT_SECONDS;
     }
   });
+};
+
+/** Pi's codemode with the threshold appended to the description each request
+ *  carries, which `prepareLoadout` rebuilds from the loadout every time. */
+const codemodeWithThreshold = (pi: ExtensionAPI) => {
+  const registerTool = ((tool) => {
+    const prepareLoadout: typeof tool.prepareLoadout = (loadout) => {
+      const changes = tool.prepareLoadout?.(loadout);
+      const codemode = `${changes?.descriptions?.codemode ?? tool.description}\n\n${CODEMODE_THRESHOLD}`;
+      return { ...changes, descriptions: { ...changes?.descriptions, codemode } };
+    };
+    pi.registerTool({ ...tool, prepareLoadout });
+  }) as ExtensionAPI["registerTool"];
+  createCodemodeExtension({ models: false })(Object.assign(Object.create(pi) as ExtensionAPI, { registerTool }));
 };
 
 /** A chat command's answer is the user's to read, not the model's: shown and
@@ -816,7 +830,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
         // Registered inactive; `defaultTools` in openSnapshot switches it on.
-        ...(codemode ? [{ name: "codemode", factory: createCodemodeExtension({ models: false }) }] : []),
+        ...(codemode ? [{ name: "codemode", factory: codemodeWithThreshold }] : []),
       ],
       agentsFilesOverride: (current) => {
         const content = this.instructions(role);
