@@ -10,6 +10,13 @@ import { Secrets } from "../secrets.js";
 import { AuthStore } from "./auth.js";
 import { vapidAuthorization } from "./webpush.js";
 
+const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock("../log.js", () => ({ logger: () => log }));
+
+/** The info lines that say why a run sent nothing. */
+const skips = (): string[] =>
+  log.info.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("no push"));
+
 /** A signed-in browser's session id — what a subscription has to name. */
 const sessionOf = (auth: AuthStore, ip = "10.0.0.1"): string =>
   auth.open(ip, "a browser").split(".")[0] ?? "";
@@ -90,7 +97,10 @@ function setup(settleMs = 0, title = "pier") {
   return { app, hub, store, auth, db, cookie, unread, channelOf, browserOf, sent, status };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
 
 describe("PushStore", () => {
   it("mints one VAPID identity and keeps it", () => {
@@ -184,6 +194,9 @@ describe("push routes", () => {
       body: JSON.stringify({ endpoint: sub.endpoint }),
     });
     expect(store.list()).toHaveLength(0);
+    // Named by label: the endpoint is a capability to the device.
+    expect(log.info).toHaveBeenCalledWith("unsubscribed a browser");
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain(sub.endpoint);
   });
 
   it("lists every subscribed device, marks the caller's own, never the keys", async () => {
@@ -359,6 +372,7 @@ describe("the finished-turn trigger", () => {
     finishTurn(hub);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(sent).toHaveLength(0);
+    expect(skips()).toEqual(["no push for s1: the browser that spoke is not subscribed"]);
   });
 
   it("notifies every device when no browser has spoken", async () => {
@@ -370,6 +384,25 @@ describe("the finished-turn trigger", () => {
     expect(sent.map((s) => s.url).sort()).toEqual(["https://push.example.net/s/1", "https://push.example.net/s/phone"]);
   });
 
+  it("logs no skip at all while no device is subscribed", async () => {
+    // No phone is waiting, so there is no silence to explain.
+    const { hub, sent, auth, unread, channelOf, browserOf } = setup(6_000);
+    const settle = async (text?: string) => {
+      finishTurn(hub, text);
+      await vi.advanceTimersByTimeAsync(6_000);
+    };
+    await settle(); // every device, of which there are none
+    browserOf.mockReturnValue(sessionOf(auth, "10.0.0.3"));
+    await settle();
+    await settle("<silent>dispatched</silent>");
+    unread.mockReturnValue(false);
+    await settle();
+    channelOf.mockReturnValue("slack");
+    await settle();
+    expect(sent).toHaveLength(0);
+    expect(skips()).toEqual([]);
+  });
+
   it("stays quiet for a turn that was already delivered to a chat", async () => {
     // Slack and Lark carry the answer themselves; a push would be
     // the same reply a second time, on the same phone.
@@ -379,6 +412,7 @@ describe("the finished-turn trigger", () => {
     finishTurn(hub);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(sent).toHaveLength(0);
+    expect(skips()).toEqual(["no push for s1: answering slack, not the workbench"]);
   });
 
   it("stays quiet when a client reported the turn as seen", async () => {
@@ -388,6 +422,7 @@ describe("the finished-turn trigger", () => {
     finishTurn(hub);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(sent).toHaveLength(0);
+    expect(skips()).toEqual(["no push for s1: a client reported the turn as seen"]);
   });
 
   it("ignores a session that was already idle when it was first seen", async () => {
@@ -459,6 +494,7 @@ describe("the finished-turn trigger", () => {
     finishTurn(hub, "<silent>dispatched</silent>\n<open>fix the parser</open>");
     await vi.advanceTimersByTimeAsync(6_000);
     expect(sent).toHaveLength(0);
+    expect(skips()).toEqual(["no push for s1: the turn stayed silent (dispatched)"]);
   });
 
   it("previews the spoken text, never Pier's markers", async () => {

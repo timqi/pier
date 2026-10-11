@@ -108,9 +108,11 @@ export class PushStore {
       .run(MAX_SUBSCRIPTIONS);
   }
 
-  remove(endpoint: string): boolean {
-    return this.#db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?")
-      .run(endpoint).changes > 0;
+  /** The removed row's label, for a log line that never carries the endpoint. */
+  remove(endpoint: string): string | undefined {
+    const row = this.#db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? RETURNING label")
+      .get(endpoint) as { label: string } | undefined;
+    return row?.label;
   }
 }
 
@@ -171,13 +173,19 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     return url.startsWith("https://") ? url : "mailto:pier@localhost";
   };
 
+  /** One info line per run, and none while no device is subscribed: there is
+   *  then no phone whose silence needs explaining. */
+  const skipped = (sessionId: string, why: string): void => {
+    if (store.list().length) log.info(`no push for ${sessionId}: ${why}`);
+  };
+
   /** A failure is logged with what the service said: a notification that never
    *  arrives is otherwise indistinguishable from one nobody tapped. */
   async function deliver(payload: PushPayload, browser?: string): Promise<{ sent: number; failed: number }> {
     const targets = store.list().filter((row) => browser === undefined || row.sessionId === browser);
     if (!targets.length) {
       // A browser that spoke with notifications off is told nothing, by choice.
-      log.debug(`no push for ${payload.tag}: ${browser === undefined ? "no browser is subscribed" : "the browser that spoke is not subscribed"}`);
+      skipped(payload.tag, "the browser that spoke is not subscribed");
       return { sent: 0, failed: 0 };
     }
     const keys = store.identity();
@@ -232,19 +240,19 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     const reply = splitReply(text);
     // An IM turn was already delivered to its chat. Read now, not in the
     // timer: this is the state that produced the turn. Every outcome is logged:
-    // "why did my phone stay quiet" is the only question this is asked (§5).
+    // "why did my phone stay quiet" is the question asked (§5).
     const channel = channelOf(e.sessionId);
     if (channel !== "web") {
-      log.debug(`no push for ${e.sessionId}: answering ${channel ?? "nothing"}, not the workbench`);
+      skipped(e.sessionId, `answering ${channel ?? "nothing"}, not the workbench`);
       return;
     }
     if (text.trim() && isSilentReply(reply)) {
-      log.debug(`no push for ${e.sessionId}: the turn stayed silent (${reply.silence ?? "no reason"})`);
+      skipped(e.sessionId, `the turn stayed silent (${reply.silence ?? "no reason"})`);
       return;
     }
     const timer = setTimeout(() => {
       if (!unread(e.sessionId)) {
-        log.debug(`no push for ${e.sessionId}: a client reported the turn as seen`);
+        skipped(e.sessionId, "a client reported the turn as seen");
         return; // somebody has it on screen
       }
       // One async step before the send, so a failure in either half is reported.
@@ -301,7 +309,9 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
   app.post("/api/push/unsubscribe", async (c) => {
     const { endpoint } = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
     if (typeof endpoint !== "string") return c.json({ error: "endpoint required" }, 400);
-    return c.json({ removed: store.remove(endpoint) });
+    const label = store.remove(endpoint);
+    if (label !== undefined) log.info(`unsubscribed ${label}`);
+    return c.json({ removed: label !== undefined });
   });
 
   // On a phone, a permission granted to the wrong context looks like a granted one.
