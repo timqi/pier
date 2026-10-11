@@ -111,7 +111,7 @@ const taskStore = new TaskStore(db);
 const factory = new PiAgentFactory(
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
-  (role) => surfacePrompt({ publicUrl: settings.get().publicUrl }, role),
+  (role) => surfacePrompt({ publicUrl: settings.get().publicUrl, skillsDir }, role),
   // Documents Pier's own tools, so it loads only inside a Pier session.
   [skillsDir],
   new CredentialStore(db, secrets),

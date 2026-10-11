@@ -169,8 +169,9 @@ ${role === "worker" ? "" : QUOTE_CHAT}`;
 
 /** Deployment facts an agent cannot discover: a guessed host links nowhere
  *  (a Host header is whatever a proxy passed on); GPT models carry
- *  `apply_patch` from post-training and go hunting for it in the shell. */
-export function surfacePrompt(instance: { publicUrl: string }, role?: AgentRole): string {
+ *  `apply_patch` from post-training and go hunting for it in the shell, and
+ *  read `skills/pier-*` beside the user's own skills instead of where Pier ships them. */
+export function surfacePrompt(instance: { publicUrl: string; skillsDir: string }, role?: AgentRole): string {
   const reach = instance.publicUrl
     ? `Address: ${instance.publicUrl} — this instance's web workbench.`
     : "No public address is configured (the user sets one in Console → Settings), " +
@@ -179,6 +180,10 @@ export function surfacePrompt(instance: { publicUrl: string }, role?: AgentRole)
 ## This Pier instance
 
 ${reach}
+
+Skills: Pier's own (\`pier-*\`, the \`skills/pier-…\` its CLIs cite) are in
+\`${instance.skillsDir}\`; read a skill at the \`<location>\` its list entry gives,
+never a path guessed from another skill's.
 
 Editing: files change through the \`edit\` tool (exact text replacement) or
 \`write\`. There is no \`apply_patch\` here — not as a tool, not as a command —

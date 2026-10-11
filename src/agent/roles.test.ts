@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DISPATCHER, lead, MODEL_TABLE, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
 
 // What code or the CLI parses back out of these prompts, not their sentences.
-const instance = { publicUrl: "" };
+const instance = { publicUrl: "", skillsDir: "/opt/pier/skills" };
 const tokens = (text: string): number => Math.ceil(text.length / 4);
 
 describe("the dispatcher contract", () => {
@@ -107,9 +107,15 @@ describe("the worker contract", () => {
 
 describe("the surface prompt", () => {
   it("names the instance's address", () => {
-    const prompt = surfacePrompt({ publicUrl: "https://test-pier.example.com" });
+    const prompt = surfacePrompt({ ...instance, publicUrl: "https://test-pier.example.com" });
     for (const fact of ["https://test-pier.example.com", "apply_patch"]) {
       expect(prompt).toContain(fact);
+    }
+  });
+
+  it("names where Pier's own skills are, so none is read from a guessed directory", () => {
+    for (const role of [undefined, "worker"] as const) {
+      expect(surfacePrompt(instance, role)).toContain("`/opt/pier/skills`");
     }
   });
 
@@ -139,7 +145,7 @@ describe("prompt sizes", () => {
     ["DISPATCHER", DISPATCHER, 1_365],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
-    ["surfacePrompt()", surfacePrompt({ publicUrl: "https://pier.example.com" }), 700],
+    ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);
   });
