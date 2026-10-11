@@ -77,7 +77,7 @@ export class Router {
   private readonly byKey = new Map<string, AgentSession>();
   private readonly bySession = new Map<string, Attached>();
   /** Where a user last spoke, per session (`heard`): outlives an eviction, so
-   *  the reopen answers there too; memory only (docs/design/11 §Notifications). */
+   *  the reopen answers there too; memory only, never pruned (docs/design/11 §Notifications). */
   private readonly spoke = new Map<string, ConversationKey>();
   /** Resolves in flight: two surfaces asking at once must share one session
    *  object, not open a second Pi runtime on the same transcript. */

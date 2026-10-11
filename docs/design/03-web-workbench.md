@@ -52,8 +52,9 @@ surface owns its routes and is mounted beside it.
 | `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/login` and `/api/*`. Hash routes are `/app/#/…`; `/api/*` and `/login` stay where they are, and the cookie's `Path` stays `/` |
 
 - **Unread**: `streaming → idle` marks the session unread when the session
-  answers the web — its live key (`Router.conversationOf`), else its durable
-  conversation row (`conversations.keyOf`), is no chat's ([11 §Notifications](11-im-conversation.md#notifications)) — and no task run made the
+  answers the web — its live key (`Router.conversationOf`), else the durable
+  rule (`chatKeyOf`: the home chat while its adapter is live, else the
+  conversations row), is no chat's ([11 §Notifications](11-im-conversation.md#notifications)) — and no task run made the
   session for itself, and only for a turn of the head or
   one the operator sent into (a message, an edit, a queue delivery); a lead's
   dispatch or callback turn finishing reports through the head and marks nothing.
@@ -123,8 +124,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   delivery records the sender's web session on the Pi session
   (`SessionStateStore.spokeFrom`, memory only), and the push goes to that
   session's subscription alone — none when it has no subscription, which is
-  the browser's notification switch off. Nobody has spoken from the web since
-  the start (a callback's answer on a head with no home chat): every device.
+  the browser's notification switch off. A web-keyed session nobody has
+  spoken into from the web since the start (the chat's adapter down after a
+  chat message): every device.
 - `webpush.ts` is the wire format — RFC 8291 `aes128gcm` and RFC 8292 VAPID on
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the
