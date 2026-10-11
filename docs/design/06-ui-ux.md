@@ -94,7 +94,7 @@ updates this document.
   group and launched run, in arrival order — the text under it, next-step
   buttons at the bottom (an earlier turn's muted, on an open topic's newest
   reply only). A chip is the `.run-label` material in its state colour (a failed
-  callback red, an interrupted one amber, running neutral with a static glyph)
+  callback red, an interrupted one amber, running sky with a still dot)
   and the run's name in the bubble's type; the count of chips
   is the count of things that happened, and no chip summarises the others.
   An error or silent body carries the same row on its own material.
@@ -121,8 +121,8 @@ updates this document.
   for a sheet of Reply, Copy, Edit, Select text.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
   not yet landed), clear success/failure/interruption for results; running is
-  neutral. Only the current turn's steps chip spins, for the seconds it runs;
-  a background run's glyph and a running dot hold still. Accents small.
+  a sky label and a still `.running-dot`, the current turn's steps chip
+  included. Accents small.
 - Time separators at the first user message, after a ten-minute gap, across
   dates; absolute plus relative. Essential context never depends on hover.
 - The head's divider between two sessions is a time
@@ -155,8 +155,9 @@ updates this document.
   state.
 - Animate deliberate changes, not streaming updates, refreshes or restored
   messages. Preserve the reader's position unless following the bottom.
-- Nothing animates for as long as background work runs: running dots are a
-  static outline plus their accessible status, never a pulse.
+- Nothing animates for as long as work runs or loads: no spinner, pulse or
+  infinite animation anywhere; running is a static `.running-dot` (fill plus
+  outline) beside its status text, loading a still skeleton.
 - Reduced motion: short fades, less movement. Reduced transparency / increased
   contrast: solid surfaces. Unsupported features fall back to instant changes
   keeping content, semantics and keyboard access.

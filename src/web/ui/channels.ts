@@ -1,7 +1,7 @@
 // Settings → Channels: one tab per IM platform, a pure consumer of
 // /api/channels/:platform.
 
-import { Check, LoaderCircle, TriangleAlert } from "lucide";
+import { Check, TriangleAlert } from "lucide";
 import { icon } from "./icons.js";
 import type { ModelRef } from "../../core/types.js";
 import type { ChannelConfig, ChannelPlatform, ChannelView, ChatConfig, ChatKind, LaunchDefaults } from "../../channels/types.js";
@@ -88,7 +88,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (state === "clean") return;
     statusBox.className = `ml-auto flex items-center gap-1.5 text-[11.5px] ${STATUS_TONE[state]}`;
     if (state === "saving") {
-      statusBox.append(icon(LoaderCircle, "spinner"), h("span", "", "Saving…"));
+      statusBox.append(h("span", "", "Saving…"));
     } else if (state === "saved") {
       statusBox.append(icon(Check), h("span", "", "Saved"));
       // Fade the receipt: a permanent "Saved" says nothing about the next edit.

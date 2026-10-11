@@ -272,9 +272,22 @@ it("names a run card by its session once there is one, and by the run id until t
   expect(select).toHaveBeenLastCalledWith("s7abcdef1234");
 });
 
-it("draws a queued or running run's glyph static, so a long run animates nothing", async () => {
-  const { stateGlyph } = await import("./turn-activity.js");
-  for (const state of ["queued", "running"] as const) expect(stateGlyph(state).classList.contains("spinner")).toBe(false);
+it("draws a running run and the current turn's steps chip as a still dot, so running work animates nothing", async () => {
+  const activity = await import("./turn-activity.js");
+  expect(activity.stateGlyph("running").classList.contains("running-dot")).toBe(true);
+  chat.appendTurn("user", "go", false, 1);
+  activity.activityToolStart(2, "t1", "bash", { command: "ls" });
+  const steps = doc.querySelector("[data-kind='activity']")!;
+  expect(steps.dataset.status).toBe("running");
+  expect(steps.querySelector(".running-dot")).not.toBeNull();
+});
+
+it("ships no endless animation anywhere under web/ui: no spin, pulse, ping, bounce or infinite keyframes", () => {
+  const sources = import.meta.glob<string>(["./**/*.{ts,css,html,js}", "!./**/*.test.ts"], { query: "?raw", import: "default", eager: true });
+  expect(Object.keys(sources)).toEqual(expect.arrayContaining(["./style.css", "./public/sw.js"]));
+  for (const [file, text] of Object.entries(sources)) {
+    expect(text, file).not.toMatch(/animate-(spin|pulse|ping|bounce)\b|\binfinite\b|\.spinner\b/);
+  }
 });
 
 it("replays a refused prompt as the user's row and the reason", () => {

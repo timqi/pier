@@ -514,7 +514,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const content = origin.kind === "chat-command" && origin.statusSnapshot
     ? openItemsCard(origin.statusSnapshot, deps)
     : origin.kind === "task-callback" ? h("div", "mt-1.5") : runBody(body);
-  const glyphEl = (): SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
+  const glyphEl = (): HTMLElement | SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
   const labelCls = state ? STATE_STYLE[state].label : cls;
   const name = origin.kind === "session-seed" ? origin.reason
     : origin.kind === "chat-command" ? undefined

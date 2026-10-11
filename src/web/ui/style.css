@@ -927,12 +927,9 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .chev-open .chev {
     transform: rotate(90deg);
   }
-  .spinner {
-    @apply h-3 w-3 flex-none animate-spin;
-  }
-  /* Placeholder bar for content on its way in — a transcript being fetched. */
+  /* Placeholder bar for content on its way in — a transcript being fetched; still, like every waiting state. */
   .skeleton {
-    @apply animate-pulse rounded bg-neutral-200;
+    @apply rounded bg-neutral-200;
   }
   /* Chat attachment thumbnails — the same tile whether the user attached the
      image or the agent produced it. A small fixed square; object-contain, not

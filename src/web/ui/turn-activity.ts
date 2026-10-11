@@ -2,7 +2,7 @@
 // steps) and the background runs, rendered as chips in the reply bubble's chip
 // row (chat.ts), each chip its own fold over its detail.
 
-import { Check, Clock, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
+import { Check, Clock, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
@@ -40,7 +40,7 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
 const shortId = (id: string): string => id.slice(0, 8);
 
 interface RunHead {
-  glyph?: SVGElement;
+  glyph?: Element;
   /** The kind of card or the run's state, whichever the card is about;
    *  absent under a chip that already says it. */
   label?: string;
@@ -187,9 +187,9 @@ export function setChipOpen(el: HTMLElement, open: boolean): void {
 // --- background runs (detached task calls made from this session) ------------------
 
 /** Run state colours are shared by detached runs and callback summaries. */
-export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: IconNode }> = {
+export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: IconNode | null }> = {
   queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: Clock },
-  running: { edge: "border-l-neutral-400", label: "text-neutral-600", glyph: LoaderCircle },
+  running: { edge: "border-l-sky-500", label: "text-sky-700", glyph: null },
   succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: Check },
   failed: { edge: "border-l-red-500", label: "text-red-600", glyph: X },
   cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
@@ -197,10 +197,14 @@ export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: 
   skipped: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
 };
 
-/** The state's glyph, static even while running: a run lasts minutes, and an
- *  endless spin repaints the page for all of them. */
-export const stateGlyph = (state: BackgroundRun["state"]): SVGElement =>
-  icon(STATE_STYLE[state].glyph, `h-3 w-3 flex-none ${STATE_STYLE[state].label}`);
+/** Running is a still dot, never a spinner: a run lasts minutes, and an endless
+ *  animation repaints the page for all of them. */
+export const runningDot = (): HTMLElement => h("span", "running-dot mx-0.5 h-2 w-2 flex-none rounded-full bg-sky-500");
+
+export const stateGlyph = (state: BackgroundRun["state"]): HTMLElement | SVGElement => {
+  const glyph = STATE_STYLE[state].glyph;
+  return glyph ? icon(glyph, `h-3 w-3 flex-none ${STATE_STYLE[state].label}`) : runningDot();
+};
 
 const runChips = new Map<string, HTMLElement>();
 
@@ -362,9 +366,9 @@ export function resetActivity(): void {
   runChips.clear();
 }
 
-/** The steps chip's colour names the outcome; running is neutral, the spinner carries the motion. */
+/** The steps chip's colour names the outcome; running is sky with a still dot, like a background run. */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
-  running: "text-neutral-600",
+  running: "text-sky-700",
   done: "text-neutral-500",
   failed: "text-red-600",
   interrupted: "text-amber-700",
@@ -376,7 +380,7 @@ const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, IconNode>
 };
 
 function statusIconEl(status: ActivityStatus): HTMLElement | SVGElement {
-  if (status === "running") return icon(LoaderCircle, "spinner");
+  if (status === "running") return runningDot();
   // Done is the common case and has nothing to say — the step count is the
   // whole message, so only the states that want attention carry a glyph.
   if (status === "done") return h("span", "hidden");
