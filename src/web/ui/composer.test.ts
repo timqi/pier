@@ -113,41 +113,19 @@ it("measures the dock's parts as border-box", () => {
   expect(dock).toEqual(dock.map(() => ({ box: "border-box" })));
 });
 
-it("gives a draft past one line the row's width, and takes it back when the draft is one line again", () => {
-  const row = node("#input").parentNode!;
-  type("one line");
-  expect("multiline" in row.dataset).toBe(false);
-  type("two\nlines");
-  expect("multiline" in row.dataset).toBe(true);
-  type("one again");
-  expect("multiline" in row.dataset).toBe(false);
-});
-
-// Wrapped prose takes fewer lines across the full row than beside the actions:
-// the box is the wide measure, or blank lines hang under the draft.
-it("sizes a wrapped draft at the row's full width, not the width that decided its mode", () => {
-  const row = node("#input").parentNode!;
-  const input = node("#input");
-  Object.defineProperty(input, "scrollHeight", { get: () => ("multiline" in row.dataset ? 104 : 156) });
-  Object.defineProperty(input, "clientHeight", { value: 30 });
-  type("prose long enough to wrap beside the actions and across the row");
-  expect("multiline" in row.dataset).toBe(true);
-  expect(input.style.height).toBe("104px");
-});
-
-// The mode is read at the row's width: a window resized under a draft reads it again.
-it("re-reads the draft's mode when the row's width changes, not its height", () => {
+// The height is read at the row's width: a window resized under a draft reads it again.
+it("re-reads the draft's height when the row's width changes, not its height", () => {
   const row = node("#input").parentNode!;
   const input = node("#input");
   type("a draft that fits one line here");
   const watch = state.observed.find((o) => o.target === row)!;
+  const before = input.style.height;
   Object.defineProperty(input, "scrollHeight", { value: 60 });
-  Object.defineProperty(input, "clientHeight", { value: 30 });
   watch.fire();
-  expect("multiline" in row.dataset).toBe(false);
+  expect(input.style.height).toBe(before);
   Object.defineProperty(row, "clientWidth", { value: 240 });
   watch.fire();
-  expect("multiline" in row.dataset).toBe(true);
+  expect(input.style.height).toBe("60px");
 });
 
 // localStorage is readable by any script on this origin; a tab-scoped store is not.

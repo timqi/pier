@@ -735,10 +735,6 @@ main {
   height: var(--composer-control-size);
   border-radius: 50%;
 }
-/* A draft past one line (composer.ts autosize): the text takes the row, the actions a row under it. */
-#composer [data-multiline] { flex-wrap: wrap; }
-#composer [data-multiline] > #input { order: -1; flex-basis: 100%; }
-#composer [data-multiline] > #attach { margin-right: auto; }
 .glass { box-shadow: var(--glass-shadow); }
 /* Opacity/transform entrances avoid layout animation; history replay skips them. */
 @keyframes surface-in {
