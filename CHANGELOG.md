@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.16 — 2026-10-11
+
+### Changed
+
+- Notifications: a session replies on the surface of its latest user message, including after eviction or rotation.
+- Web: finished turns explain why a push was not sent; running indicators and the composer stay stable during interaction.
+
 ## 0.4.15 — 2026-10-09
 
 ### Upgrade notes
