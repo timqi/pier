@@ -6,7 +6,7 @@ import { EventHub } from "./hub.js";
 import { SenderPrefix, withoutLanguage, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
 import { cut, splitReply } from "./reply.js";
-import { isChatCommand } from "./types.js";
+import { COMMAND_SHAPE, isChatCommand, skillsNamed } from "./types.js";
 import type {
   AgentSession,
   Channel,
@@ -63,12 +63,10 @@ export class SkillAmbiguous extends Refused {}
  *  the text unchanged when it names none (docs/design/11-im-conversation.md). */
 function skillText(text: string, skills: { name: string }[]): string | SkillAmbiguous {
   // Two characters at least: `/s <text>` is the settings draft's spelling (channels/commands.ts).
-  const [, kept, spelled, rest] = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i.exec(text.trim()) ?? [];
+  const [, kept, spelled, rest] = COMMAND_SHAPE.exec(text.trim()) ?? [];
   const word = spelled?.toLowerCase();
   if (!word || (!kept && isChatCommand(word))) return text;
-  const names = skills.map((s) => s.name);
-  const found = names.includes(word) ? [word] : names.filter((name) =>
-    name.split("-").some((_, i, parts) => parts.slice(i).join("-").startsWith(word)));
+  const found = skillsNamed(word, skills.map((s) => s.name));
   if (found.length > 1) return new SkillAmbiguous(`/${word} matches ${found.join(", ")} — say more`);
   return found[0] ? `/skill:${found[0]}${rest ? ` ${rest}` : ""}` : text;
 }

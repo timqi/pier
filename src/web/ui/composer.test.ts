@@ -5,6 +5,7 @@ import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.te
 const state = vi.hoisted(() => ({
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
   observed: [] as { target: unknown; options?: ResizeObserverOptions; fire: () => void }[],
+  reads: null as { onload: (() => void) | null; onerror: (() => void) | null; error: Error | null }[] | null,
 }));
 vi.mock("./chat.js", () => ({
   appendTurn: state.appendTurn, excerptText: (t: string, _role: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
@@ -46,11 +47,18 @@ beforeEach(async () => {
     constructor(private readonly cb: () => void) {}
     observe(target: unknown, options?: ResizeObserverOptions) { state.observed.push({ target, options, fire: this.cb }); }
   });
-  // A pasted screenshot: the reader hands back a data URL, synchronously here.
+  // A pasted screenshot: the reader hands back a data URL, synchronously
+  // unless a test holds it in `reads`.
+  state.reads = null;
   vi.stubGlobal("FileReader", class {
     onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    error: Error | null = null;
     result = "data:image/png;base64,AAAA";
-    readAsDataURL() { this.onload?.(); }
+    readAsDataURL() {
+      if (state.reads) state.reads.push(this);
+      else this.onload?.();
+    }
   });
   vi.stubGlobal("fetch", state.fetch);
   // Drafts live in sessionStorage: another page shares this origin but never
@@ -388,16 +396,17 @@ describe("pending attachments", () => {
   const paste = (name: string): void => {
     node("#input").onpaste!({
       clipboardData: {
-        items: [{ kind: "file", getAsFile: () => ({ name, size: 4, type: "image/png" }) }],
+        items: [{ kind: "file", getAsFile: () => new File(["png"], name, { type: "image/png" }) }],
         getData: () => "",
       },
     });
   };
   const staged = (): number => node("#image-strip").childElementCount;
 
-  it("uploads a file as it is attached, so Enter does not wait on it", () => {
+  it("uploads a file as it is attached, so Enter does not wait on it", async () => {
     state.fetch.mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }));
     paste("shot.png");
+    await settled();
     expect(state.fetch.mock.calls.map(([url]) => url)).toEqual(["/api/inbox"]);
   });
 
@@ -412,6 +421,53 @@ describe("pending attachments", () => {
     expect(staged()).toBe(1);
     select("a");
     expect(staged()).toBe(2);
+  });
+
+  // A screenshot pasted and sent at once used to go out as text alone, the
+  // image landing in the strip after the send — or in another session's.
+  it("stages a file before its read lands, and the send waits for it", async () => {
+    state.reads = [];
+    paste("shot.png");
+    expect(staged()).toBe(1);
+    type("look");
+    const sent = composer.send("auto");
+    expect(staged()).toBe(0);
+    state.fetch
+      .mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }))
+      .mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    state.reads[0]!.onload!();
+    await sent;
+    expect(state.fetch.mock.calls.map(([url]) => url)).toEqual(["/api/inbox", "/api/sessions/a/messages"]);
+    expect(JSON.parse(state.fetch.mock.calls[1]?.[1]?.body as string).text).toBe("look\n[shot.png](file:///inbox/shot.png)");
+  });
+
+  it("releases a vanished session's previews, never the open one's", () => {
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    state.fetch.mockResolvedValue(Response.json({ path: "/inbox/x.png" }));
+    paste("shot.png");
+    select("b");
+    paste("b.png");
+    composer.dropStaged(["a", "b"]);
+    expect(revoke).toHaveBeenCalledOnce();
+    expect(staged()).toBe(1);
+    select("a");
+    expect(staged()).toBe(0);
+  });
+
+  it("names a failed upload's cause and gives the message and file back", async () => {
+    state.reads = [];
+    paste("shot.png");
+    type("look");
+    state.reads[0]!.error = new Error("permission denied");
+    state.reads[0]!.onerror!();
+    await composer.send("auto");
+    expect(state.appendTurn).toHaveBeenCalledWith("error", "attachment upload failed — shot.png: permission denied");
+    expect(node("#input").value).toBe("look");
+    expect(staged()).toBe(1);
+    state.fetch.mockResolvedValueOnce(Response.json({ error: "invalid file" }, { status: 400 }));
+    state.reads[1]!.onload!();
+    await composer.send("auto");
+    expect(state.appendTurn).toHaveBeenLastCalledWith("error", "attachment upload failed — shot.png: invalid file");
   });
 });
 
@@ -430,6 +486,38 @@ describe("the reply quote", () => {
     expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text)
       .toBe("[re assistant 2024-06-01 12:00]\n> Merged.\n>\n> ---\n> [Deploy] | [Show diff]\n\nship it");
     expect(strip().classList.contains("hidden")).toBe(true);
+  });
+
+  it("goes with a message that opens with a path, and with its files", async () => {
+    composer.setQuote(source);
+    node("#input").onpaste!({
+      clipboardData: { items: [{ kind: "file", getAsFile: () => new File(["png"], "shot.png", { type: "image/png" }) }], getData: () => "" },
+    });
+    state.fetch
+      .mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }))
+      .mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    type("/Users/me/run.log");
+    await composer.send("auto");
+    expect(JSON.parse(state.fetch.mock.calls[1]?.[1]?.body as string).text)
+      .toBe("[re assistant 2024-06-01 12:00]\n> Merged.\n>\n> ---\n> [Deploy] | [Show diff]\n\n/Users/me/run.log\n[shot.png](file:///inbox/shot.png)");
+    expect(strip().classList.contains("hidden")).toBe(true);
+  });
+
+  it("goes with a one-segment path and is held for a skill ask, by the skill's name", async () => {
+    composer.setSkills([{ name: "pier-deploy", description: "" }]);
+    for (const text of ["/tmp", "/home some words"]) {
+      composer.setQuote(source);
+      state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+      type(text);
+      await composer.send("auto");
+      expect(JSON.parse(state.fetch.mock.calls.at(-1)?.[1]?.body as string).text).toMatch(/^\[re assistant/);
+    }
+    composer.setQuote(source);
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    type("/deploy now");
+    await composer.send("auto");
+    expect(JSON.parse(state.fetch.mock.calls.at(-1)?.[1]?.body as string).text).toBe("/deploy now");
+    expect(strip().textContent).toBe("Merged.");
   });
 
   it("stays staged past a command, and Esc on an empty draft drops it", async () => {

@@ -32,6 +32,7 @@ import {
 import {
   clearOptimistic,
   dropParked,
+  dropStaged,
   focusInput,
   initComposer,
   markOptimisticUser,
@@ -279,6 +280,7 @@ turnsPane.addEventListener("scroll", () => {
 function commitSessions(rows: SessionInfo[]): void {
   // A title read off an IM prompt still carries its speaker header: every
   // surface downstream reads `title`, so it is made readable once, here.
+  dropStaged(sessions.filter((s) => !rows.some((r) => r.id === s.id)).map((s) => s.id));
   sessions = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
   // By birth only: ordering by `modified` makes rows jump under the pointer.
   sessions.sort((a, b) => b.createdAt - a.createdAt);

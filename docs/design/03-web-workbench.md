@@ -312,7 +312,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   240 raw characters, under the speaker header and above the words — text,
   so it survives reload, edit and rotation with no field, and reaches the
   model as its own convention (`agent/roles.ts`). A next-step button never
-  takes it. A user bubble renders the quote as a block above its words — role
+  takes it, nor a chat command or an ask naming one of the session's skills
+  (`isCommandText`, `core/types.ts`); `/tmp` or `/Users/…` is a reply. A user bubble renders the quote as a block above its words — role
   and minute, the excerpt clamped to two lines (a reply's markdown shown as
   plain text, `dom.ts` `plainText`; the stored excerpt unchanged), a neutral grey bar — and a click reveals the source
   (`quoteSource`: same role and minute, then the row whose text opens with
@@ -377,8 +378,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Attachments**: paste, drag-drop, `+` → pending strip; each file goes to
   `POST /api/inbox` as it is attached, and on send its `[name](file:///…)`
   marker joins the text, so sent, optimistic and echoed text are identical and
-  Enter does not wait on the upload. A file removed before sending stays in
-  the inbox. The strip is per session, in memory only. User bubbles strip
+  Enter does not wait on the upload. A file is staged before it is read, so
+  an Enter that beats the read or upload waits for it; a failure names the
+  file and cause and gives the message and files back. A file removed before sending stays in
+  the inbox. The strip is per session, in memory only; a session gone from the
+  list releases its previews. User bubbles strip
   markers and render them via `web/ui/attachments.ts`; images open in the
   lightbox.
 - **Speaker caption**: a user bubble whose text opens with the speaker header

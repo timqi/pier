@@ -34,7 +34,7 @@ vi.mock("./chat.js", () => ({
   resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
-  clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
+  clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),

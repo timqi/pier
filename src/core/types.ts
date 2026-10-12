@@ -239,6 +239,23 @@ export type ChatCommand = keyof typeof CHAT_COMMANDS;
 
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
+/** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`), a word of two
+ *  characters at least. Groups: `skill:`, word, rest. */
+export const COMMAND_SHAPE = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i;
+
+/** The skills `word` names: exactly, else as a prefix of the name or of the name after any `-`. */
+export const skillsNamed = (word: string, names: string[]): string[] =>
+  names.includes(word) ? [word] : names.filter((name) =>
+    name.split("-").some((_, i, parts) => parts.slice(i).join("-").startsWith(word)));
+
+/** Whether the router reads `text` as a chat command or a skill ask; a path
+ *  like `/tmp` or `/Users/…` names neither. */
+export function isCommandText(text: string, skills: string[]): boolean {
+  const [, kept, spelled] = COMMAND_SHAPE.exec(text.trim()) ?? [];
+  const word = spelled?.toLowerCase();
+  return !!word && ((!kept && isChatCommand(word)) || skillsNamed(word, skills).length > 0);
+}
+
 /** Why a session joined the continuous conversation's chain: the first one,
  *  the previous one idle past the rotation boundary, the previous one gone,
  *  the previous one's context past the size ceiling, or `/new`. */

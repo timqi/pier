@@ -12,16 +12,15 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { CHAT_COMMANDS, type ChatCommand, type SessionState } from "../../core/types.js";
+import { CHAT_COMMANDS, type ChatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
-/** A file picked but not yet sent. The upload starts on attach, so Enter
- *  usually finds its marker already there and the send paints at once. */
+/** A file picked but not yet sent. The read and upload start on attach, so
+ *  Enter usually finds its marker already there and the send paints at once. */
 interface PendingFile {
-  data: string; // base64
-  mimeType: string;
-  name?: string; // absent for a pasted screenshot — the server derives one
-  marker: Promise<string | null>; // null: the upload failed
+  file: File;
+  preview?: string; // an image's object URL, for its tile
+  marker: Promise<string | { error: string }>;
 }
 
 /** Everything the composer needs from the orchestrator (main.ts). */
@@ -224,13 +223,14 @@ function renderFileStrip(): void {
     ...pendingFiles.map((f, i) => {
       // The chat tile, so a pending image looks like the sent one and clicking
       // it opens the same lightbox (paging across the strip, not the transcript).
-      const body = f.mimeType.startsWith("image/")
-        ? imageThumb(`data:${f.mimeType};base64,${f.data}`)
-        : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.name ?? "file");
+      const body = f.preview
+        ? imageThumb(f.preview)
+        : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.file.name || "file");
       const remove = h("button", "absolute -right-1.5 -top-1.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", icon(X, "h-3 w-3"));
       remove.setAttribute("type", "button");
-      remove.setAttribute("aria-label", `Remove ${f.name ?? "attachment"}`);
+      remove.setAttribute("aria-label", `Remove ${f.file.name || "attachment"}`);
       remove.onclick = () => {
+        if (f.preview) URL.revokeObjectURL(f.preview);
         pendingFiles.splice(i, 1);
         renderFileStrip();
       };
@@ -274,32 +274,42 @@ function addFile(file: File): void {
     appendTurn("error", `${file.name || "file"} is too large (32MB max)`);
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    const url = reader.result as string;
-    pendingFiles.push(withUpload({
-      data: url.slice(url.indexOf(",") + 1),
-      mimeType: file.type || "application/octet-stream",
-      name: file.name || undefined,
-    }));
-    renderFileStrip();
-  };
-  reader.readAsDataURL(file);
+  // Staged now, read in the marker: an Enter before the read lands must wait
+  // for it, not send without the file.
+  const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+  pendingFiles.push(withUpload(file, preview));
+  renderFileStrip();
+}
+
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).replace(/^[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error ?? new Error("unreadable"));
+    reader.readAsDataURL(file);
+  });
 }
 
 /** Marker line built with the shared grammar (core/inbound-file.ts), so the
  *  optimistic render is exactly what every other surface will see. */
-function withUpload({ data, mimeType, name }: Omit<PendingFile, "marker">): PendingFile {
-  const f = { data, mimeType, name };
-  const marker = sendJson("/api/inbox", f)
-    .then(async (res) => (res.ok ? fileMarker(((await res.json()) as { path: string }).path) : null))
-    .catch(() => null); // a failed send reports it (§5) and re-arms the upload
-  return { ...f, marker };
+function withUpload(file: File, preview?: string): PendingFile {
+  const name = file.name || "file";
+  // A failure is reported by the send that awaits it (§5), which re-arms the upload.
+  // No name (some pasted screenshots): the server derives one.
+  const marker = readBase64(file)
+    .then((data) => sendJson("/api/inbox", { data, mimeType: file.type || "application/octet-stream", name: file.name || undefined }))
+    .then(async (res) => res.ok
+      ? fileMarker(((await res.json()) as { path: string }).path)
+      : { error: `${name}: ${await failure(res, "upload failed")}` })
+    .catch((err: unknown) => ({ error: `${name}: ${err instanceof Error ? err.message : String(err)}` }));
+  return { file, preview, marker };
 }
 
-async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
+/** Every file's marker, or the sentence naming the ones that failed. */
+async function uploadFiles(files: PendingFile[]): Promise<string[] | { error: string }> {
   const markers = await Promise.all(files.map((f) => f.marker));
-  return markers.every((m): m is string => m !== null) ? markers : null;
+  const failed = markers.flatMap((m) => (typeof m === "string" ? [] : [m.error]));
+  return failed.length ? { error: failed.join("; ") } : markers.filter((m): m is string => typeof m === "string");
 }
 
 // --- chat commands and skills ---------------------------------------------------------
@@ -433,6 +443,14 @@ function adoptStoredDrafts(): void {
  *  renderFileStrip, which every mutation of `pendingFiles` goes through. */
 const pendingBySession = new Map<string, PendingFile[]>();
 
+/** Sessions gone from the list release their staged previews; the open one keeps its strip. */
+export function dropStaged(gone: string[]): void {
+  for (const id of gone.filter((g) => g !== deps.sessionId())) {
+    for (const f of pendingBySession.get(id) ?? []) if (f.preview) URL.revokeObjectURL(f.preview);
+    pendingBySession.delete(id);
+  }
+}
+
 export function saveDraft(id = deps.sessionId(), text = input.value): void {
   if (!id) return;
   if (text) sessionStorage.setItem(draftKey(id), text);
@@ -490,7 +508,7 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
     renderFileStrip();
   }
   // A command or skill ask is not a reply: the quote stays staged for the next message.
-  const staged = label === undefined && !/^[/%]/.test(typed) ? pendingQuote : null;
+  const staged = label === undefined && !isCommandText(typed, skills.map((s) => s.name)) ? pendingQuote : null;
   if (staged) setQuote(null);
   quote ??= staged ?? undefined;
   try {
@@ -499,18 +517,19 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
     let markers: string[] = [];
     if (files.length) {
       const uploaded = await uploadFiles(files);
-      if (uploaded === null) {
-        appendTurn("error", "attachment upload failed");
+      if (!Array.isArray(uploaded)) {
+        appendTurn("error", `attachment upload failed — ${uploaded.error}`);
         // Give the message back — merged with anything typed meanwhile.
         input.value = [typed, input.value.trim()].filter(Boolean).join("\n");
         autosize();
         saveDraft();
-        pendingFiles = files.map(withUpload); // fresh uploads: the failed ones are spent
+        pendingFiles = files.map((f) => withUpload(f.file, f.preview)); // fresh uploads: the failed ones are spent
         renderFileStrip();
         setQuote(staged);
         return;
       }
       markers = uploaded;
+      for (const f of files) if (f.preview) URL.revokeObjectURL(f.preview);
     }
     const body = [typed, ...markers].filter(Boolean).join("\n");
     const text = quote ? withQuote(quote, body) : body;
