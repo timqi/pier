@@ -158,7 +158,11 @@ final move.
   `task-group-changed` and `session-state` on a 1.5 s timer into an
   `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text
   and snapshot) and hands it to `ChannelRuntime.openItems`, which calls
-  `Channel.status` on the home platform's live adapter; nothing otherwise.
+  `Channel.status` on the home platform's live adapter while the head answers
+  in the home chat (`Router.answersOn`, §Notifications; a `task:` key or none is
+  the durable rule); nothing otherwise — no post, edit or delete, a design
+  final's re-post included. A card left behind meanwhile is reconciled by the
+  first refresh after the chat speaks again.
 - The status message is `▤ open items` in the platform's emphasis over the
   view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
@@ -266,7 +270,8 @@ through what the head launches (`pier task`), never by a group's message.
   platform, so Web Push sends nothing and the web sets no unread mark (a turn
   delivered to a chat is not notified about again). A message typed on the
   web keys the head to the web until the chat speaks again: nothing is posted
-  in the DM meanwhile, and Web Push goes to the browser that typed it
+  in the DM meanwhile, nor is the status message (§Status) posted, edited or
+  deleted, and Web Push goes to the browser that typed it
   ([03 §Notifications](03-web-workbench.md#notifications-srcwebpushts--srcwebwebpushts)).
   A `task:` open never takes the key off a surface a user spoke on, nor does
   an idle eviction's reopen; an adapter's restart does not take the head back
@@ -354,7 +359,7 @@ through what the head launches (`pier task`), never by a group's message.
   `channels/slack.test.ts` and `lark.test.ts` no reaction call in the home, a
   silent turn's footer, notes, `status()` and its repost;
   `channels/runtime.test.ts` `openItems` to the live home adapter only, with
-  the repost flag, and `designLead` answering whether it edited the root.
+  the repost flag, and only while the head answers in the home chat, and `designLead` answering whether it edited the root.
 
 ## Acceptance
 

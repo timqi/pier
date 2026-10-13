@@ -66,6 +66,8 @@ const bound = new Map<string, string>();
 /** The keys the fake router was asked to resolve, with the session the store bound them to. */
 const attached: [ConversationKey, string | undefined][] = [];
 let home: { platform: "slack"; chatId: string } | undefined;
+/** Where the fake router says the head answers; undefined, the durable rule. */
+let headOn: ConversationKey | undefined;
 
 function runtime(config: Record<string, unknown>, log: (m: string) => void = () => {}): ChannelRuntime {
   const store = {
@@ -87,12 +89,14 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       attached.push([key, bound.get(key.conversationId)]);
       return Promise.resolve({ id: bound.get(key.conversationId) ?? key.conversationId });
     },
+    answersOn: (id: string) => (id === "head" ? headOn : undefined),
   } as unknown as Router;
   const chain = {
     send: (msg: InboundMessage, key?: ConversationKey) => {
       headSent.push([msg.text, key]);
       return headFails ? Promise.reject(headFails) : Promise.resolve({ sessionId: "head" });
     },
+    members: () => [{ sessionId: "head", startedAt: 0, reason: "first" }],
   } as unknown as MainChain;
   const control = {
     isHome: (key: ConversationKey) => key.conversationId.startsWith("D1"),
@@ -298,5 +302,29 @@ describe("ChannelRuntime", () => {
     await rt.stop();
     await rt.openItems(view);
     expect(events.filter((e) => e.startsWith("status"))).toHaveLength(2);
+  });
+
+  // docs/design/11-im-conversation.md §Notifications: the card follows the head's surface.
+  it("open items reach the home chat only while the head answers there", async () => {
+    events.length = 0; openFails = undefined; startGate = Promise.resolve();
+    const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
+    const view = { text: "storage — running", snapshot: { version: 1 as const, items: [] }, items: [{ problem: "storage", status: "running" }] };
+    home = { platform: "slack", chatId: "D1" };
+    await rt.reload();
+    const shown = (): string[] => events.filter((e) => e.startsWith("status"));
+    headOn = { channelId: "web", conversationId: "head" };
+    await rt.openItems(view);
+    await rt.openItems({ ...view, text: "Nothing open." }, true);
+    expect(shown()).toEqual([]);
+    headOn = { channelId: "slack", conversationId: "D9" };
+    await rt.openItems(view);
+    expect(shown()).toEqual([]);
+    headOn = { channelId: "task", conversationId: "head" };
+    await rt.openItems(view);
+    headOn = { channelId: "slack", conversationId: "D1" };
+    await rt.openItems(view, true);
+    expect(shown()).toEqual(["status D1: storage — running", "status D1: storage — running (repost)"]);
+    headOn = undefined;
+    await rt.stop();
   });
 });

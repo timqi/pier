@@ -256,6 +256,13 @@ export class Router {
     return this.bySession.get(sessionId)?.key;
   }
 
+  /** Where the session's next turn would be delivered: its live key, else the
+   *  surface a user last spoke on, which an evicted session reopens on; undefined
+   *  leaves it to the durable rule (`toChat`). */
+  answersOn(sessionId: string): ConversationKey | undefined {
+    return this.conversationOf(sessionId) ?? this.spoke.get(sessionId);
+  }
+
   /** Every alias: a key left behind hands out a session that is no longer live. */
   private forgetKeys(session: AgentSession): void {
     for (const [key, held] of this.byKey) if (held === session) this.byKey.delete(key);

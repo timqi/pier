@@ -166,11 +166,16 @@ export class ChannelRuntime {
   }
 
   /** The home chat's status message (docs/design/11 §Status), while its adapter
-   *  is live; nothing otherwise. A failure is logged, never thrown. */
+   *  is live and the head answers there; nothing otherwise — a card left behind
+   *  is reconciled once the chat speaks again. A failure is logged, never thrown. */
   async openItems(view: OpenItemsView, repost = false): Promise<void> {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
     if (!home || !channel) return;
+    const head = this.chain.members()[0]?.sessionId;
+    const on = head === undefined ? undefined : this.router.answersOn(head);
+    // A `task:` key says nothing of the surface (main.ts `channelOf`); the durable rule is the home chat.
+    if (on && on.channelId !== "task" && (on.channelId !== home.platform || on.conversationId !== home.chatId)) return;
     await channel.status(home.chatId, view, repost).catch((err: unknown) =>
       this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
   }
