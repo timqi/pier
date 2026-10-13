@@ -343,9 +343,9 @@ main > section, #turns { grid-row: 1 / -1; }
 #queue-panel { grid-row: 2; }
 #composer { grid-row: 3; }
 :is(#bar, #queue-panel, #composer) { position: relative; z-index: 1; }
-/* The status panel's list, docked as a second column where the window has
-   room for it beside the reading column (drawer.ts `WIDE`); gone with no rows
-   and under a Console view, whose open hides the bar. */
+/* The status panel's list, docked in the right gutter where the window has
+   room for it beside the centred reading column (drawer.ts `WIDE`); gone with
+   no rows and under a Console view, whose open hides the bar. */
 #status-side { display: none; }
 .open-item { margin-block: 8px; padding: 4px 6px; border-radius: 10px; overflow-wrap: anywhere; }
 .open-item:has(.session-open:hover), .open-item:focus-within, .open-item:has([aria-current]) { background: var(--color-neutral-100); }
@@ -359,16 +359,20 @@ main > section, #turns { grid-row: 1 / -1; }
 @media (pointer: coarse) {
   .open-item .session-open { min-height: 44px; min-width: 44px; }
 }
-@media (width >= 80rem) {
-  main { grid-template-columns: minmax(0, 1fr) auto; }
-  #bar { grid-column: 1 / -1; }
+/* The rail overlays the gutter, so its arrival never re-centres the column;
+   the 1rem inset clears #turns' scrollbar. 85.5rem is --read-w plus two
+   gutters of the rail's 14rem floor, inset and a 1rem gap — 76 of the root's
+   18px rem, written in the 16px rem a media query reads. */
+@media (width >= 85.5rem) {
   main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
     display: flex;
-    grid-column: 2;
     grid-row: 1 / -1;
     align-self: start;
-    width: 17.5rem;
-    margin: calc(var(--head-h) + 0.75rem) 8px 0 0;
+    justify-self: end;
+    position: relative;
+    z-index: 1;
+    width: min(17.5rem, calc((100% - var(--read-w)) / 2 - 2rem));
+    margin: calc(var(--head-h) + 0.75rem) 1rem 0 0;
     max-height: min(60dvh, calc(100dvh - var(--head-h) - var(--dock-h, 4rem) - 2rem));
   }
   main:has(#status-side:not([data-empty])) #status-chip { display: none; }

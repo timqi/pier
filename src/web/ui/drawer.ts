@@ -55,7 +55,7 @@ const sideHead = $("#status-side-head");
 const sideList = $("#status-side-list");
 
 /** Where the list docks instead of floating; style.css `#status-side` holds the same width. */
-const WIDE = "(width >= 80rem)";
+const WIDE = "(width >= 85.5rem)";
 let wide: MediaQueryList;
 
 // --- marks -------------------------------------------------------------------------------
