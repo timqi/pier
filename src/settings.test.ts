@@ -98,19 +98,6 @@ describe("SettingsStore", () => {
     db.close();
   });
 
-  it("gives workers codemode until the operator's row switches it off", () => {
-    const db = openDb(":memory:");
-    const store = new SettingsStore(db);
-    expect(store.workerCodemode()).toBe(true);
-    db.prepare("INSERT INTO settings(key, value) VALUES ('workerCodemode', '0')").run();
-    expect(store.workerCodemode()).toBe(false);
-    expect(store.get()).not.toHaveProperty("workerCodemode");
-    db.prepare("UPDATE settings SET value = 'off' WHERE key = 'workerCodemode'").run();
-    expect(store.workerCodemode()).toBe(true);
-    expect(log.warn).toHaveBeenCalledWith('settings.workerCodemode is not "0" or "1" — ignoring it');
-    db.close();
-  });
-
   it("round-trips the model menu and ignores a corrupt row rather than crashing", () => {
     const db = openDb(":memory:");
     const store = new SettingsStore(db);

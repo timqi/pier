@@ -21,12 +21,9 @@ export interface StatsRow {
   runs: number;
   cancelled: number;
   names: string[];
-  /** The rows' recorded tool calls, a codemode script's calls each counted. */
+  /** The rows' recorded tool calls. */
   toolCalls: number;
-  codemodeRuns: number;
-  /** The newest five of them. */
-  codemodeRunIds: string[];
-  /** Runs with no recorded count (`TaskRun.toolCalls`), outside the two above. */
+  /** Runs with no recorded count (`TaskRun.toolCalls`), outside the one above. */
   uncounted: number;
 }
 
@@ -161,13 +158,13 @@ export class TaskStore {
   /** `pier task stats`'s rows, one statement over opened agent runs a session
    *  or the user fired that settled at or after `since`; skipped runs never ran.
    *  `role` is `createdRole`'s rule, the head's own runs (no role) left out.
-   *  MATERIALIZED: unshared, each group's two subqueries re-parse every row's JSON. */
+   *  MATERIALIZED: unshared, each group's subquery re-parses every row's JSON. */
   agentRunStats(since: number): StatsRow[] {
     const rows = this.sql(`
       WITH r AS MATERIALIZED (
         SELECT *, json_array(tier, role, provider, model, thinking) AS k FROM (SELECT id, state,
           json ->> '$.finishedAt' AS at, json ->> '$.context.definition.name' AS name,
-          json ->> '$.toolCalls' AS calls, json ->> '$.codemode' AS codemode,
+          json ->> '$.toolCalls' AS calls,
           coalesce(json ->> '$.context.definition.action.launch.tier', 'named') AS tier,
           iif(json ->> '$.context.definition.action.launch.role' = 'lead', 'lead', iif(json ->> '$.invokedBySessionId' IS NULL, NULL, 'worker')) AS role,
           json ->> '$.context.model.provider' AS provider, json ->> '$.context.model.id' AS model, json ->> '$.context.thinking' AS thinking
@@ -178,13 +175,12 @@ export class TaskStore {
       )
       SELECT tier, role, provider, model, thinking,
         sum(state IN ('succeeded', 'failed')) AS runs, sum(state IN ('cancelled', 'interrupted')) AS cancelled,
-        coalesce(sum(calls), 0) AS toolCalls, sum(codemode IS 1) AS codemodeRuns, sum(calls IS NULL) AS uncounted,
-        (SELECT json_group_array(name ORDER BY at DESC) FROM (SELECT name, max(at) AS at FROM r n WHERE n.k = g.k GROUP BY name ORDER BY at DESC LIMIT 5)) AS names,
-        (SELECT json_group_array(id ORDER BY at DESC) FROM (SELECT id, at FROM r c WHERE c.k = g.k AND c.codemode IS 1 ORDER BY at DESC LIMIT 5)) AS codemodeRunIds
+        coalesce(sum(calls), 0) AS toolCalls, sum(calls IS NULL) AS uncounted,
+        (SELECT json_group_array(name ORDER BY at DESC) FROM (SELECT name, max(at) AS at FROM r n WHERE n.k = g.k GROUP BY name ORDER BY at DESC LIMIT 5)) AS names
       FROM r g WHERE role IS NOT NULL GROUP BY k
-    `).all(since) as unknown as (Omit<StatsRow, "id" | "thinking" | "names" | "codemodeRunIds"> & { model: string; thinking: string | null; names: string; codemodeRunIds: string })[];
-    return rows.map(({ model, thinking, names, codemodeRunIds, ...row }) => ({
-      ...row, id: model, ...(thinking ? { thinking } : {}), names: JSON.parse(names) as string[], codemodeRunIds: JSON.parse(codemodeRunIds) as string[],
+    `).all(since) as unknown as (Omit<StatsRow, "id" | "thinking" | "names"> & { model: string; thinking: string | null; names: string })[];
+    return rows.map(({ model, thinking, names, ...row }) => ({
+      ...row, id: model, ...(thinking ? { thinking } : {}), names: JSON.parse(names) as string[],
     }));
   }
 

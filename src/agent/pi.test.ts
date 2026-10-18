@@ -16,12 +16,12 @@ type Runtime = { providers: Set<string>; registerProvider(name: string): void; s
 const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
-const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string; getDefaultTools(): string[] | undefined } }[] = [];
+const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string } }[] = [];
 /** Whether the mocked Pi still has the privates the prompt loadout shim uses. */
 let shim = true;
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
-type LoaderOptions = { systemPromptOverride: (user?: string) => string; skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files; extensionFactories: { name: string }[] };
+type LoaderOptions = { systemPromptOverride: (user?: string) => string; skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
 /** What each open handed Pi's resource loader. */
 const loaders: LoaderOptions[] = [];
 
@@ -49,7 +49,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
     constructor(options: unknown) { loaders.push(options as LoaderOptions); }
     async reload(): Promise<void> {}
   },
-  createAgentSession: async ({ cwd, modelRuntime, settingsManager }: { cwd: string; modelRuntime: Runtime; settingsManager: { getFollowUpMode(): string; getDefaultTools(): string[] | undefined } }) => {
+  createAgentSession: async ({ cwd, modelRuntime, settingsManager }: { cwd: string; modelRuntime: Runtime; settingsManager: { getFollowUpMode(): string } }) => {
     // Pi extensions register providers onto the runtime handed to this session.
     modelRuntime.registerProvider(cwd);
     const session = {
@@ -290,25 +290,16 @@ describe("the pier package's skills off-list", () => {
   });
 });
 
-describe("worker codemode", () => {
-  it("loads and switches on Pi's codemode for a worker only, and not once the setting is off", async () => {
-    let on = true;
-    const factory = new PiAgentFactory(undefined, [], undefined, undefined, undefined, () => ({ skillsOff: [], workerCodemode: on }));
-    const codemode = async (role?: AgentRole) => {
+describe("tool calls", () => {
+  it("gives a worker and a lead the reading rule, and no one else", async () => {
+    const factory = new PiAgentFactory();
+    const narrow = async (role?: AgentRole) => {
       await (await factory.create({ cwd: "/tmp/cm", ...(role ? { role } : {}) })).dispose();
-      const loader = loaders.at(-1)!;
-      const loaded = loader.extensionFactories.some((e) => e.name === "codemode");
-      // Pi's own guideline for the tool is in the section the override drops.
-      const guided = loader.systemPromptOverride().includes("# Tool calls\n- A step with two or more");
-      // The reading rule holds for every worker and lead, codemode or not.
-      const narrow = loader.systemPromptOverride().includes("- Every tool result stays in your context");
-      return [loaded, opened.at(-1)!.settings.getDefaultTools()?.includes("codemode") ?? false, guided, narrow];
+      return loaders.at(-1)!.systemPromptOverride().includes("# Tool calls\n- Every tool result stays in your context");
     };
-    expect(await codemode("worker")).toEqual([true, true, true, true]);
-    expect(await codemode("lead")).toEqual([false, false, false, true]);
-    expect(await codemode()).toEqual([false, false, false, false]);
-    on = false;
-    expect(await codemode("worker")).toEqual([false, false, false, true]);
+    expect(await narrow("worker")).toBe(true);
+    expect(await narrow("lead")).toBe(true);
+    expect(await narrow()).toBe(false);
   });
 });
 

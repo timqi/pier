@@ -117,7 +117,7 @@ const factory = new PiAgentFactory(
   new CredentialStore(db, secrets),
   piConfig,
   () => settings.get().modelMenu,
-  () => ({ ...settings.get(), workerCodemode: settings.workerCodemode() }),
+  () => settings.get(),
   () => settings.get().titleModel,
   // Transcripts carry the speaker header core wrote for the model, and replies
   // the chat markup core strips before anyone sees them.

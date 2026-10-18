@@ -28,7 +28,7 @@ const notes = (dir: string): string[] => readdirSync(dir, { withFileTypes: true 
 const tree = { head: "abc1234", branch: "feat", base: "main", baseSha: "def5678", clean: true };
 const prompts: Record<string, string> = {
   DISPATCHER, WORKER, RUN_RESULT, MILESTONE,
-  toolCalls: toolCalls(true),
+  toolCalls,
   "lead(design)": lead("design"),
   "lead(build)": lead("build"),
   reviewPrompt: reviewPrompt("/repo", tree, 0, 3, ""),

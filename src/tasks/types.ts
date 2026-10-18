@@ -146,11 +146,9 @@ export interface TaskRun extends CallbackFields {
   result: TaskResult | null;
   error: string | null;
   skipReason: string | null;
-  /** An agent run's tool calls, each a codemode script made among them;
-   *  absent means not counted (older runs, a run resumed after a restart). */
+  /** An agent run's tool calls; absent means not counted (older runs, a run
+   *  resumed after a restart). */
   toolCalls?: number;
-  /** The run called `codemode`; absent exactly when `toolCalls` is. */
-  codemode?: boolean;
   /** An agent run's compactions, counted off its session's events; absent means not counted. */
   compactions?: number;
   /** The largest context the run's turns reached and where its session compacts, in tokens. */

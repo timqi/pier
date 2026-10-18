@@ -2240,16 +2240,16 @@ describe("continuing a run in a new session", () => {
 });
 
 describe("pier task stats", () => {
-  it("records on the run the calls its own turn made, a codemode script's included, a cancel too", async () => {
+  it("records on the run the calls its own turn made, a cancel too", async () => {
     const { cwd, service, factory } = setup();
     const child = fakeSession("counted", { hold: true });
     vi.mocked(factory.create).mockResolvedValueOnce(child);
     const task = await service.create({ name: "counted", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" } });
     const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner", sourceSessionId: "s1", background: true });
     await vi.waitFor(() => expect(child.systemInputs).toHaveLength(1));
-    for (const [toolCallId, toolName] of [["c", "codemode"], ["c/1", "read"], ["c/2", "bash"], ["d", "read"]]) child.emit({ type: "tool-start", toolCallId: toolCallId!, toolName: toolName!, args: {} });
+    for (const [toolCallId, toolName] of [["c", "bash"], ["d", "read"]]) child.emit({ type: "tool-start", toolCallId: toolCallId!, toolName: toolName!, args: {} });
     service.cancel(run.id);
-    expect(await service.waitForRun(run.id)).toMatchObject({ state: "cancelled", toolCalls: 4, codemode: true });
+    expect(await service.waitForRun(run.id)).toMatchObject({ state: "cancelled", toolCalls: 2 });
   });
 
   it("groups dispatched agent runs in the window by tier, role and model, cancelled apart", async () => {
@@ -2264,11 +2264,11 @@ describe("pier task stats", () => {
       store.saveRun(storedRun(`r${String(++n)}`, task, now, { invokedBySessionId: "head", context: { definition: task, model: model ?? undefined, thinking }, finishedAt: now - n * 1000, ...over }));
     };
     // review-0's resume counts its own calls; a run without a count is uncounted, not zero.
-    for (let i = 0; i < 7; i++) seed(`review-${String(i)}`, { tier: "hardest" }, i < 2 ? { toolCalls: 2 + i * 2, codemode: i === 1 } : {}, opus, "high");
-    seed("review-0", { tier: "hardest" }, { state: "failed", toolCalls: 3, codemode: false }, opus, "high");
-    seed("stopped", { tier: "hardest" }, { state: "cancelled", toolCalls: 1, codemode: true }, opus, "high");
+    for (let i = 0; i < 7; i++) seed(`review-${String(i)}`, { tier: "hardest" }, i < 2 ? { toolCalls: 2 + i * 2 } : {}, opus, "high");
+    seed("review-0", { tier: "hardest" }, { state: "failed", toolCalls: 3 }, opus, "high");
+    seed("stopped", { tier: "hardest" }, { state: "cancelled", toolCalls: 1 }, opus, "high");
     seed("restarted", { tier: "hardest" }, { state: "interrupted" }, opus, "high");
-    seed("plan", { tier: "hardest", role: "lead" }, { invokedBySessionId: null, triggerSource: "manual", toolCalls: 0, codemode: false });
+    seed("plan", { tier: "hardest", role: "lead" }, { invokedBySessionId: null, triggerSource: "manual", toolCalls: 0 });
     seed("named-a", {});
     seed("named-b", {}, {}, { provider: "openai", id: "gpt" });
     seed("cheap", { tier: "cheap" });
@@ -2280,11 +2280,11 @@ describe("pier task stats", () => {
     seed("live", { tier: "cheap" }, { state: "running", finishedAt: null });
     seed("unopened", { tier: "cheap" }, {}, null);
 
-    const none = { toolCalls: 0, codemodeRuns: 0, codemodeRunIds: [], uncounted: 1 };
+    const none = { toolCalls: 0, uncounted: 1 };
     expect(service.stats(30)).toEqual({ days: 30, rows: [
       { tier: "hardest", role: "lead", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["plan"], ...none, uncounted: 0 },
       { tier: "hardest", role: "worker", provider: "anthropic", id: "opus", thinking: "high", runs: 8, cancelled: 2,
-        names: ["review-0", "review-1", "review-2", "review-3", "review-4"], toolCalls: 10, codemodeRuns: 2, codemodeRunIds: ["r2", "r9"], uncounted: 6 },
+        names: ["review-0", "review-1", "review-2", "review-3", "review-4"], toolCalls: 10, uncounted: 6 },
       { tier: "cheap", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["cheap"], ...none },
       { tier: "named", role: "worker", provider: "anthropic", id: "opus", runs: 1, cancelled: 0, names: ["named-a"], ...none },
       { tier: "named", role: "worker", provider: "openai", id: "gpt", runs: 1, cancelled: 0, names: ["named-b"], ...none },
@@ -2312,7 +2312,7 @@ describe("resume after a restart", () => {
       store.saveRun(storedRun("cut", task, 1000, {
         state: "running", startedAt: 1000, finishedAt: null, result: null,
         targetSessionId: "child", sessionMode: "fresh", invokedBySessionId: "parent", sourceSessionId: "parent",
-        callbackSessionId: "parent", background: true, toolCalls: 2, codemode: false,
+        callbackSessionId: "parent", background: true, toolCalls: 2,
         context: { definition: task, ...(prompted ? { sessionId: "child", renderedPrompt: "the prompt" } : {}) },
       }));
       return new TaskService(store, factory, router, hub, BARE);
@@ -2335,7 +2335,6 @@ describe("resume after a restart", () => {
     });
     // The calls before the stop were never saved: uncounted, not a partial count.
     expect(store.getRun("cut")).not.toHaveProperty("toolCalls");
-    expect(store.getRun("cut")).not.toHaveProperty("codemode");
     expect(child.systemInputs).toEqual([{
       text: restartInput(at, 7_000, ["DO NOT DEPLOY"]),
       origin: { kind: "restart", at, downMs: 7_000, taskId: task.id, runId: "cut", sourceSessionId: "parent", source: expect.objectContaining({ taskName: "worker" }) },
@@ -2361,7 +2360,7 @@ describe("resume after a restart", () => {
     const { cut } = await rig({ child, parent: fakeSession("parent") });
     const service = cut(false);
     service.resumeAfterRestart(RESTART);
-    expect(await service.waitForRun("cut")).toMatchObject({ state: "succeeded", toolCalls: 0, codemode: false });
+    expect(await service.waitForRun("cut")).toMatchObject({ state: "succeeded", toolCalls: 0 });
     expect(child.systemInputs).toHaveLength(1);
     expect(child.systemInputs[0]).toMatchObject({ origin: { kind: "task-delegation", runId: "cut" }, mode: "prompt" });
     // Its session is the worker the row made, so the head is the worker's short one.

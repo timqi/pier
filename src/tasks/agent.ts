@@ -104,12 +104,9 @@ export class AgentTaskRunner {
         // How it ended, too: a provider outage ends with an empty reply, which
         // would otherwise report as a turn that chose to say nothing (§5).
         let failure: string | undefined;
-        // Pi announces each call a codemode script makes as its own tool-start.
         // A resume after a restart lost the calls before the stop: not counted.
-        if (resumed) {
-          delete run.toolCalls;
-          delete run.codemode;
-        } else Object.assign(run, { toolCalls: 0, codemode: false, compactions: 0 });
+        if (resumed) delete run.toolCalls;
+        else Object.assign(run, { toolCalls: 0, compactions: 0 });
         // Within a turn the context only grows, so its peak is a turn's end or a compaction's start.
         const usage = session.contextUsage;
         if (usage) run.compactAt = usage.compactAt;
@@ -118,10 +115,7 @@ export class AgentTaskRunner {
         };
         peak(usage?.tokens);
         const unsubscribe = session.subscribe((event) => {
-          if (event.type === "tool-start" && run.toolCalls !== undefined) {
-            run.toolCalls++;
-            if (event.toolName === "codemode") run.codemode = true;
-          }
+          if (event.type === "tool-start" && run.toolCalls !== undefined) run.toolCalls++;
           if (event.type === "context-compacted") {
             run.compactions = (run.compactions ?? 0) + 1;
             peak(event.before);

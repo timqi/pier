@@ -6,7 +6,6 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import {
   createAgentSession,
-  createCodemodeExtension,
   CredentialSynchronizationError,
   DefaultResourceLoader,
   ModelRegistry,
@@ -51,7 +50,7 @@ import type {
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
-import { CODEMODE_THRESHOLD, DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
+import { DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
 import {
   lastAssistant,
   textOf,
@@ -165,12 +164,12 @@ ${VERBATIM_RULES}
 /** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows
  *  it. A worker's replies are read by an agent (roles.ts), so its
  *  Communication holds only the rules that are not about a human's screen. */
-const pierBaseline = (role: AgentRole | undefined, codemode = false): string => `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
+const pierBaseline = (role: AgentRole | undefined): string => `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
 
 # Communication
 ${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
 
-${role === "worker" || role === "lead" ? toolCalls(codemode) : ""}# Working style
+${role === "worker" || role === "lead" ? toolCalls : ""}# Working style
 - Before touching files: list and search first. Never guess a path or a line number.
 - Read before you edit. Match the surrounding code's style, naming, and comment density.
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.
@@ -178,8 +177,8 @@ ${role === "worker" || role === "lead" ? toolCalls(codemode) : ""}# Working styl
 - Destructive or irreversible actions on things you didn't create — deleting user files, force push, migrations, deploys, service restarts: ask first; unattended, don't do them and report what you would have done. The one exception: a step your prompt names on an \`Approved: <step>\` line was asked and answered — take that step, and only that one.
 - Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.`;
 
-export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole, codemode = false): string =>
-  userPrompt ? `${pierBaseline(role, codemode)}\n\n${userPrompt}` : pierBaseline(role, codemode);
+export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole): string =>
+  userPrompt ? `${pierBaseline(role)}\n\n${userPrompt}` : pierBaseline(role);
 
 /** Patching the call keeps the built-in's shell settings. */
 const bashTimeoutDefault = (pi: ExtensionAPI) => {
@@ -188,20 +187,6 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
       event.input.timeout = BASH_DEFAULT_TIMEOUT_SECONDS;
     }
   });
-};
-
-/** Pi's codemode with the threshold appended to the description each request
- *  carries, which `prepareLoadout` rebuilds from the loadout every time. */
-const codemodeWithThreshold = (pi: ExtensionAPI) => {
-  const registerTool = ((tool) => {
-    const prepareLoadout: typeof tool.prepareLoadout = (loadout) => {
-      const changes = tool.prepareLoadout?.(loadout);
-      const codemode = `${changes?.descriptions?.codemode ?? tool.description}\n\n${CODEMODE_THRESHOLD}`;
-      return { ...changes, descriptions: { ...changes?.descriptions, codemode } };
-    };
-    pi.registerTool({ ...tool, prepareLoadout });
-  }) as ExtensionAPI["registerTool"];
-  createCodemodeExtension({ models: false })(Object.assign(Object.create(pi) as ExtensionAPI, { registerTool }));
 };
 
 /** A chat command's answer is the user's to read, not the model's: shown and
@@ -582,9 +567,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly credentials?: CredentialStore,
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
-    /** The built-in `pier` package's one switch list: Pier's own skills switched off;
-     *  and whether a worker gets Pi's `codemode` tool. */
-    private readonly pier: () => { skillsOff: string[]; workerCodemode?: boolean } = () => ({ skillsOff: [] }),
+    /** The built-in `pier` package's one switch list: Pier's own skills switched off. */
+    private readonly pier: () => { skillsOff: string[] } = () => ({ skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -810,14 +794,14 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
   }
 
-  private async resourceLoader(cwd: string, { role, phase }: Pick<AgentLaunchOptions, "role" | "phase">, dispatcher: boolean, codemode: boolean): Promise<DefaultResourceLoader> {
+  private async resourceLoader(cwd: string, { role, phase }: Pick<AgentLaunchOptions, "role" | "phase">, dispatcher: boolean): Promise<DefaultResourceLoader> {
     // A worker never delegates (tasks/operations.ts refuses it), so it is not taught how.
     const skillsOff = role === "worker" ? [...this.pier().skillsOff, "pier-tasks"] : this.pier().skillsOff;
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(),
       // The user's SYSTEM.md is appended after Pier's baseline, so it still wins.
-      systemPromptOverride: (user) => pierSystemPrompt(user, role, codemode),
+      systemPromptOverride: (user) => pierSystemPrompt(user, role),
       additionalSkillPaths: this.skillPaths,
       // Only Pier's own skills answer to the off-list; a user's skill of the
       // same name is Pi's to switch (settings.json).
@@ -829,8 +813,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       extensionFactories: [
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
-        // Registered inactive; `defaultTools` in openSnapshot switches it on.
-        ...(codemode ? [{ name: "codemode", factory: codemodeWithThreshold }] : []),
       ],
       agentsFilesOverride: (current) => {
         const content = this.instructions(role);
@@ -876,16 +858,13 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     // N turns. An in-memory override on this session's own manager; Pi reads
     // it at creation, and `setFollowUpMode` would write settings.json.
     const settingsManager = SettingsManager.create(cwd, defaultAgentDir());
-    // Only a worker: its result is read by an agent, so a script's batched
-    // calls change nothing a person sees.
-    const codemode = role === "worker" && this.pier().workerCodemode === true;
-    settingsManager.applyOverrides({ followUpMode: "all", ...(codemode ? { defaultTools: ["+codemode"] } : {}) });
+    settingsManager.applyOverrides({ followUpMode: "all" });
     const { session: live } = await createAgentSession({
       cwd,
       sessionManager,
       settingsManager,
       modelRuntime: runtime,
-      resourceLoader: await this.resourceLoader(cwd, { role, phase }, main, codemode),
+      resourceLoader: await this.resourceLoader(cwd, { role, phase }, main),
     });
     try {
       assertPromptLoadout(live);
@@ -949,8 +928,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const info = await this.locate(sessionId);
     if (!info) return undefined;
     const { messages } = SessionManager.open(info.path).buildSessionContext();
-    // Longest first: the plain worker baseline is a prefix of the codemode one.
-    return replaySystemPrompt(messages as PiSystemMessage[], [pierBaseline("worker", true), pierBaseline("worker"), pierBaseline(undefined)]);
+    return replaySystemPrompt(messages as PiSystemMessage[], [pierBaseline("worker"), pierBaseline(undefined)]);
   }
 
   async find(sessionId: string): Promise<SessionSummary | undefined> {
