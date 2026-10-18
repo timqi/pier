@@ -38,9 +38,6 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
       isStreaming: false,
       messages: [],
       agent: { followUpMode: "one-at-a-time" },
-      // The privates the prompt loadout shim asserts at open.
-      _baseSystemPromptOptions: {},
-      _preparePromptAndToolLoadout() {},
       dispose() {},
     },
   }),

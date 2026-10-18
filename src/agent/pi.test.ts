@@ -17,8 +17,6 @@ const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
 const opened: { agent: { followUpMode: string }; overrides: unknown[]; settings: { getFollowUpMode(): string } }[] = [];
-/** Whether the mocked Pi still has the privates the prompt loadout shim uses. */
-let shim = true;
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
 type LoaderOptions = { systemPromptOverride: (user?: string) => string; skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
@@ -59,7 +57,6 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
       // Pi reads the queue modes off the settings manager it was handed.
       agent: { followUpMode: settingsManager.getFollowUpMode() },
       settings: settingsManager,
-      ...(shim ? { _baseSystemPromptOptions: {}, _preparePromptAndToolLoadout() {} } : {}),
       model: { provider: "p", id: "m", contextWindow: 400_000 },
       overrides: [] as unknown[],
       settingsManager: {
@@ -83,17 +80,12 @@ function fakePi() {
   /** What each prompt was queued as, kept apart from `calls` so the ordering
    *  assertions elsewhere stay about ordering. */
   const promptOptions: unknown[] = [];
-  /** The transcript, as far as the system prompt is concerned: what Pi
-   *  would build for the next request, diffed against what is recorded. */
-  const transcript: PiMessage[] = [];
-  const state = { messages: [] as PiMessage[] };
   /** What `sendCustomMessage` was handed, as Pi would later emit it. */
   const custom: unknown[] = [];
   return {
     calls,
     custom,
     promptOptions,
-    transcript,
     emit: (event: PiEvent) => {
       for (const fn of listeners) fn(event);
     },
@@ -116,21 +108,6 @@ function fakePi() {
         getSessionName() {
           return this.name;
         },
-        appendMessage(message: PiMessage) {
-          transcript.push(message);
-        },
-      },
-      agent: { state },
-      refreshContext() {
-        state.messages = transcript.slice();
-      },
-      getActiveToolNames: () => ["bash"],
-      _baseSystemPromptOptions: { cwd: "/tmp/wt", customPrompt: "be brief" },
-      _preparePromptAndToolLoadout(options: { cwd: string; customPrompt: string; selectedTools: string[] }): PiMessage | undefined {
-        calls.push("loadout");
-        const sections = { preamble: options.customPrompt, cwd: options.cwd, tools: options.selectedTools.join(",") };
-        const has = state.messages.some((m) => m.role === "system");
-        return has ? undefined : { role: "system", content: "", sections, timestamp: 1 } as PiMessage;
       },
       prompt: (_text: string, options?: unknown) => {
         calls.push("prompt");
@@ -232,17 +209,6 @@ describe("session model runtimes", () => {
     expect(opened.at(-1)?.agent.followUpMode).toBe("all");
     await session.dispose();
   });
-
-  it("refuses to open on a Pi without the prompt loadout privates", async () => {
-    shim = false;
-    try {
-      // Failing at open names the cause; failing at the first system input
-      // would run that turn with no system prompt.
-      await expect(new PiAgentFactory().create({ cwd: "/tmp/shim" })).rejects.toThrow("prompt loadout shim no longer applies (pi#5581)");
-    } finally {
-      shim = true;
-    }
-  });
 });
 
 describe("the pier package's skills off-list", () => {
@@ -327,40 +293,7 @@ describe("a disposed session", () => {
       { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null },
       "followUp",
     );
-    expect(fake.calls).toEqual(["prompt", "loadout", "sendCustomMessage"]);
-  });
-});
-
-describe("a session whose first turn is a system input", () => {
-  const origin = { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null } as const;
-
-  it("runs it with the system prompt, recorded ahead of the input", async () => {
-    const { fake, session: s } = session();
-    // Pi builds the prompt in `prompt()` and between turns only; a custom
-    // message that opens the turn would reach the model with none — no
-    // cwd, no context files, no skills.
-    await s.systemInput("do the task", origin, "prompt");
-    expect(fake.calls).toEqual(["loadout", "sendCustomMessage"]);
-    const first = fake.transcript[0] as PiMessage & { sections?: Record<string, string> };
-    expect(first.role).toBe("system");
-    expect(first.sections).toEqual({ preamble: "be brief", cwd: "/tmp/wt", tools: "bash" });
-    expect(fake.pi.agent.state.messages).toEqual(fake.transcript);
-  });
-
-  it("records nothing when the model already has the prompt", async () => {
-    const { fake, session: s } = session();
-    await s.systemInput("do the task", origin, "prompt");
-    await s.systemInput("and this", origin, "prompt");
-    expect(fake.transcript.filter((m) => m.role === "system")).toHaveLength(1);
-  });
-
-  it("leaves a queued input to the turn that drains it", async () => {
-    const { fake, session: s } = session();
-    fake.pi.isStreaming = true;
-    await s.systemInput("guidance", origin, "followUp");
-    // Between turns Pi refreshes the prompt itself; loading it here would
-    // put a system message between a tool call and its result.
-    expect(fake.calls).toEqual(["sendCustomMessage"]);
+    expect(fake.calls).toEqual(["prompt", "sendCustomMessage"]);
   });
 });
 

@@ -13,9 +13,7 @@ import {
   SessionManager,
   sessionEntryToContextMessages,
   SettingsManager,
-  VERSION,
   type AgentSession as PiAgentSession,
-  type BuildSystemPromptOptions,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type {
@@ -217,24 +215,6 @@ const CHILD_COMPACTION_CAP = { worker: 180_000, lead: 200_000 } as const;
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
 type CacheRetentionBox = { value: "short" | "long" };
-
-/** Pi builds the system prompt only on `prompt()` and between turns;
- *  `sendCustomMessage({ triggerTurn })` skips it (pi#5581), so a session whose
- *  first turn is a system input would run it with no prompt at all. The
- *  privates that `prompt()` uses (Pi 0.87); gone once Pi prepares a
- *  custom-triggered turn itself. */
-type PromptLoadout = {
-  _baseSystemPromptOptions: BuildSystemPromptOptions;
-  _preparePromptAndToolLoadout(options: BuildSystemPromptOptions): Parameters<SessionManager["appendMessage"]>[0] | undefined;
-};
-
-/** At open, not at the first system input: a Pi that dropped the privates
- *  would otherwise run turns with no system prompt (principle 5). */
-function assertPromptLoadout(pi: unknown): void {
-  const live = pi as Partial<PromptLoadout>;
-  if (typeof live._preparePromptAndToolLoadout === "function" && typeof live._baseSystemPromptOptions === "object" && live._baseSystemPromptOptions) return;
-  throw new Error(`pi ${VERSION}: prompt loadout shim no longer applies (pi#5581)`);
-}
 
 export class PiSession implements AgentSession {
   constructor(
@@ -448,8 +428,7 @@ export class PiSession implements AgentSession {
     // A running turn means the call below queues.
     const queued = this.pi.isStreaming && mode !== "append";
     if (queued) this.queuedInputs.push(origin);
-    else if (mode !== "append") this.loadSystemPrompt();
-    else if (this.pi.isStreaming) {
+    else if (mode === "append" && this.pi.isStreaming) {
       // Pi records it only after the running turn; a /status answer that waits
       // for the reply it asks about is no answer. Its later message_start is skipped.
       this.shownEarly.add(origin);
@@ -467,16 +446,6 @@ export class PiSession implements AgentSession {
       if (at >= 0) this.queuedInputs.splice(at, 1);
       throw error;
     }
-  }
-
-  /** What `prompt()` does before a turn: the prompt sections the model does
-   *  not have yet, recorded ahead of the turn's own messages. */
-  private loadSystemPrompt(): void {
-    const pi = this.pi as unknown as PromptLoadout;
-    const update = pi._preparePromptAndToolLoadout({ ...pi._baseSystemPromptOptions, selectedTools: this.pi.getActiveToolNames() });
-    if (!update) return;
-    this.pi.sessionManager.appendMessage(update);
-    this.pi.refreshContext();
   }
 
   abort(): Promise<void> {
@@ -866,12 +835,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       modelRuntime: runtime,
       resourceLoader: await this.resourceLoader(cwd, { role, phase }, main),
     });
-    try {
-      assertPromptLoadout(live);
-    } catch (error) {
-      live.dispose();
-      throw error;
-    }
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
     }, retention, () => {
