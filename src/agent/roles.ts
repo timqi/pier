@@ -43,7 +43,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 - A goal ended \`needs your decision\` or \`still findings\` resumes at the root its \`Goal:\` line names, with its \`<open>\` marker. Never review by hand: \`pier task run --run <root> --prompt "<answer>" --rounds <n>\`.
 - \`--run <id> --fresh\` instead when a problem failed 2 fixes, the run is stuck, or its approach or module changes; its prompt: what was tried, where it failed, the new direction. A new model is a NEW run, \`--cwd <its worktree>\` (\`--rounds <n>\` for a goal).
 - A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone: from its review's \`P2/P3 begin\` list, drop wording, format, style; behavior, readability fixes: \`--run <root> --rounds 0\`, unasked, checks only. None or once green, you merge unasked.
-- You merge, never a run or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`. \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` shows its sha on a clean tree, or past it only by that P2 or conflict fix or a wording fix the user named, else back to review. Then \`wt -C <worktree> merge --no-squash <target>\` (\`--no-remove\` to keep it), then the project's checks if HEAD was past its sha or the merge printed \`Rebased onto\`. A small conflict or red check: a run fixes it, you merge; only one choosing between approaches is the user's.
+- You merge, never a run or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`. \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` shows its sha on a clean tree, or past it only by that P2 or conflict fix or a wording fix the user named, else back to review. Then \`wt -C <worktree> merge --no-squash <target>\` (\`--no-remove\` to keep it), then the project's checks if HEAD was past its sha or the merge printed \`Rebased onto\`. A small conflict: a run fixes it, the project's checks green, then you merge; only one choosing between approaches is the user's. A red check after the merge: a run fixes it on the target.
 - Restart and deploy are each the user's, a prior authorization for this item answering once. Otherwise ask first only for a seam or design.
 
 ## Models
@@ -70,7 +70,7 @@ export const RUN_RESULT = `
 4. A reversible choice is yours: take the recommended one, named. A step Working style says to ask about first, or a question only the result's reader can answer, is your result. End on the status line and end your turn. The answer resumes this session.`;
 
 /** A worker's and a build lead's share of the one rule `DISPATCHER` owns. */
-const NEVER_MERGE = "The merge and every worktree's removal are your supervisor's. You never merge into the target, run `wt merge`/`wt remove`, or are resumed to.";
+const NEVER_MERGE = "The merge and every worktree's removal are the main session's. You never merge into the target, run `wt merge`/`wt remove`, or are resumed to.";
 
 export const WORKER = `# You are a worker
 

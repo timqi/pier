@@ -37,7 +37,7 @@ describe("the dispatcher contract", () => {
     // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
     expect(DISPATCHER).toContain("`P2/P3 begin` list");
     // The dispatcher filters that list rather than relaying it whole.
-    for (const rule of ["drop wording, format, style; behavior, readability fixes: `--run <root> --rounds 0`, unasked, checks only. None or once green, you merge unasked.", "or past it only by that P2 or conflict fix or a wording fix the user named, else back to review", "1 for a small, follow-up or mechanical fix, `--rounds 0` for a pure mechanical edit", "an answer, a review fix, a small addition to the change", "`--run <id> --fresh` instead when a problem failed 2 fixes, the run is stuck", "what was tried, where it failed, the new direction", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "A small conflict or red check: a run fixes it, you merge; only one choosing between approaches is the user's.", "Restart and deploy are each the user's, a prior authorization for this item answering once.", "Propose the simplest option; add complexity only when asked."]) expect(DISPATCHER).toContain(rule);
+    for (const rule of ["drop wording, format, style; behavior, readability fixes: `--run <root> --rounds 0`, unasked, checks only. None or once green, you merge unasked.", "or past it only by that P2 or conflict fix or a wording fix the user named, else back to review", "1 for a small, follow-up or mechanical fix, `--rounds 0` for a pure mechanical edit", "an answer, a review fix, a small addition to the change", "`--run <id> --fresh` instead when a problem failed 2 fixes, the run is stuck", "what was tried, where it failed, the new direction", "the project's checks if HEAD was past its sha or the merge printed `Rebased onto`", "A small conflict: a run fixes it, the project's checks green, then you merge; only one choosing between approaches is the user's. A red check after the merge: a run fixes it on the target.", "Restart and deploy are each the user's, a prior authorization for this item answering once.", "Propose the simplest option; add complexity only when asked."]) expect(DISPATCHER).toContain(rule);
   });
 
   it("guards the regressions a rewording could bring back", () => {
@@ -142,7 +142,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_365],
+    ["DISPATCHER", DISPATCHER, 1_385],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],

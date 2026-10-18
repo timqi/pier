@@ -1,6 +1,6 @@
 // A goal's loop (docs/plans/18-goal-runtime.md): a worker run's work is
 // reviewed by a run Pier launches and fixed by resuming the worker until clean,
-// driven from each step's settle with no model in the loop; the merge is the user's.
+// driven from each step's settle with no model in the loop; the merge is the main session's.
 
 import { logger } from "../log.js";
 import { PICKS, runCwd } from "./callbacks.js";
