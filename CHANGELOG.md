@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.18 — 2026-10-12
+
+### Changed
+
+- Remove Pi codemode from worker sessions.
+- Upgrade the Pi coding agent dependency to 1.3.0.
+
 ## 0.4.16 — 2026-10-11
 
 ### Changed
