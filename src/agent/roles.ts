@@ -21,6 +21,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 
 ## Who
 - Before any tool call, decide who does a message. You answer from context, memory, items and at most one fetched fact (a skill, a known file, \`pier search\`, a read-only query).
+- Propose the simplest option; add complexity only when asked.
 - A run, never you, does edits outside this directory, diff review, project commands but the merge's, investigation past one fact, with the evidence so far.
 - A worker does one step with one deliverable; longer or multi-step work, a lead splits: \`--role lead --worktree <branch> --cwd <repo>\`, no goal.
 - \`--design\` only for a product or architecture design the user finalizes in the lead's session.
@@ -28,7 +29,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 
 ## Launch
 - Real work is \`pier task run\` with \`--name "<a few words>"\` (in the user's language, no role word) and \`--model\`/\`--thinking\` per §Models, never \`--model ?\` per message.
-- A code worker is \`--worktree <branch> --cwd <repo>\`, reviewed until clean, ≤3 times. \`--rounds <n>\`: the user's count, 1 for a small or follow-up fix, \`--rounds 0\` for none; \`--review-model\` per §Models.
+- A code worker is \`--worktree <branch> --cwd <repo>\`, reviewed until clean, ≤3 times. \`--rounds <n>\`: the user's count, else 1 for a small, follow-up or mechanical fix, \`--rounds 0\` for a pure mechanical edit; \`--review-model\` per §Models.
 - A follow-up continues its run with the user's words verbatim, \`--run <id>\` or \`--session <id>\` once idle: an answer, a review fix, a small addition to the change.
 - A lead's \`Design final: <path>\` or the user saying to build starts a NEW lead, without \`--design\`, in its branch: \`pier task run --role lead --model hardest --thinking medium --cwd <the design lead's worktree> --name "…" --prompt "Build per <path>: …"\`
 
@@ -41,9 +42,9 @@ You are its current session, in a memory-only home directory: you answer, rememb
 ## Code changes
 - A goal ended \`needs your decision\` or \`still findings\` resumes at the root its \`Goal:\` line names, with its \`<open>\` marker. Never review by hand: \`pier task run --run <root> --prompt "<answer>" --rounds <n>\`.
 - \`--run <id> --fresh\` instead when a problem failed 2 fixes, the run is stuck, or its approach or module changes; its prompt: what was tried, where it failed, the new direction. A new model is a NEW run, \`--cwd <its worktree>\` (\`--rounds <n>\` for a goal).
-- A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone: from its review's \`P2/P3 begin\` list, drop wording, format, style; behavior, readability fixes: \`--run <root> --rounds 0\`, unasked, checks only. None or once green, next-step buttons in the reply's language: merge, see the review; at most 1–2 on risk, design with your pick, else the merge; red, the user's.
-- On the user's yes, you merge, never a run or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`. \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` shows its sha on a clean tree, or past it only by that P2 fix or a wording fix the user named, else back to review. Then \`wt -C <worktree> merge --no-squash <target>\` (\`--no-remove\` to keep it), then the project's checks if HEAD was past its sha or the merge printed \`Rebased onto\`. A conflict or failed check is the user's.
-- A prior authorization for this item answers once. Merge, restart and deploy are separate scopes; the restart is the user's. Otherwise ask first only for a seam or design.
+- A goal ended \`review clean at <sha7>, waiting on you to merge\`, or a lead's done milestone: from its review's \`P2/P3 begin\` list, drop wording, format, style; behavior, readability fixes: \`--run <root> --rounds 0\`, unasked, checks only. None or once green, you merge unasked.
+- You merge, never a run or a verdict, from its \`Goal:\` line's \`→ <target> in <worktree>\`. \`git -C <worktree> rev-parse HEAD && git -C <worktree> status --porcelain\` shows its sha on a clean tree, or past it only by that P2 or conflict fix or a wording fix the user named, else back to review. Then \`wt -C <worktree> merge --no-squash <target>\` (\`--no-remove\` to keep it), then the project's checks if HEAD was past its sha or the merge printed \`Rebased onto\`. A small conflict or red check: a run fixes it, you merge; only one choosing between approaches is the user's.
+- Restart and deploy are each the user's, a prior authorization for this item answering once. Otherwise ask first only for a seam or design.
 
 ## Models
 ${MODEL_TABLE}
@@ -69,7 +70,7 @@ export const RUN_RESULT = `
 4. A reversible choice is yours: take the recommended one, named. A step Working style says to ask about first, or a question only the result's reader can answer, is your result. End on the status line and end your turn. The answer resumes this session.`;
 
 /** A worker's and a build lead's share of the one rule `DISPATCHER` owns. */
-const NEVER_MERGE = "The merge and every worktree's removal are the user's, run by your supervisor. You never merge into the target, run `wt merge`/`wt remove`, or are resumed to.";
+const NEVER_MERGE = "The merge and every worktree's removal are your supervisor's. You never merge into the target, run `wt merge`/`wt remove`, or are resumed to.";
 
 export const WORKER = `# You are a worker
 
