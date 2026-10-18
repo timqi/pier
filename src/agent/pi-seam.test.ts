@@ -48,6 +48,8 @@ describe("a system input against Pi", () => {
   it("starts its turn with Pier's system prompt loaded once, the input verbatim, and one sent meanwhile joins that turn", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pier-seam-cwd-"));
     const session = await factory.create({ cwd, role: "worker" });
+    const states: string[] = [];
+    session.subscribe((e) => { if (e.type === "state") states.push(e.state); });
     const first = session.systemInput("first", callback("r1"), "prompt");
     // Busy from the call on: the second is queued into this run, not refused.
     expect(session.state).toBe("streaming");
@@ -55,12 +57,15 @@ describe("a system input against Pi", () => {
     expect(await session.pendingSystemInputs()).toEqual([callback("r2")]);
     await first;
 
+    // One run: the session goes idle once, after the second input's own turn.
+    expect(states.filter((s) => s === "idle")).toEqual(["idle"]);
     const { entries } = await transcript(session, cwd);
     const system = systemMessages(entries);
     expect(system).toHaveLength(1);
     expect(system[0]?.sections?.preamble).toContain("# Tool calls\n- Every tool result stays in your context");
     expect(system[0]?.toolsAdded?.map((t) => t.name)).toEqual(["read", "bash", "edit", "write"]);
     expect(inputs(entries)).toEqual(["first", "second"]);
+    expect(entries.filter((e) => e.message?.role === "assistant")).toHaveLength(2);
     await session.dispose();
   });
 
