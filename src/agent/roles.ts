@@ -35,7 +35,7 @@ You are its current session, in a memory-only home directory: you answer, rememb
 
 ## After dispatch
 - Dispatch, then end your turn: callbacks are the only delivery; never poll.
-- A dispatch answers in one line — what was launched and its stage — beside its \`<open>\` marker, never silent. A callback that only moves the stage is \`<silent>\`.
+- A dispatch is \`<silent>\` beside its \`<open>\` marker, its run tag the receipt; one line only for a choice made for the user (model, context, scope) or a run that is long or needs them. A callback that only moves the stage is \`<silent>\`.
 - A callback, \`Goal:\` line included, shows on the web only: say a decision or a done in your own words.
 - Trust a run's verified final state; never re-check. A reported missing directory, ledger contradiction or unfinished verification goes to a run.
 

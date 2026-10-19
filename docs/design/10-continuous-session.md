@@ -148,8 +148,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   adds or replaces the item keyed by `problem`, `<done>problem</done>` removes it;
   both are stripped beside `<silent>` and never read inside a fence
   (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
-- A dispatch's receipt is the head's one-line reply naming what launched and
-  its stage, beside the `<open>` marker.
+- A dispatch is a silent reply beside its `<open>` marker, the chat's run tag
+  its receipt; it speaks one line only for a choice made for the user or
+  a run that is long or needs them.
 - A reply about an item names it: `<open>`/`<done>` does, any other reply ends
   with `<topic>problem</topic>`, the same key — one written like an `<open>`
   line still keys on the problem, its stage and run tokens dropped; stripped like

@@ -30,7 +30,7 @@ describe("the dispatcher contract", () => {
     }
     // tasks/open-items.ts reads an item as waiting on the user by this stage word.
     expect(DISPATCHER).toContain("`waiting on you: <question>`");
-    expect(DISPATCHER).toContain("A dispatch answers in one line — what was launched and its stage — beside its `<open>` marker, never silent. A callback that only moves the stage is `<silent>`.");
+    expect(DISPATCHER).toContain("A dispatch is `<silent>` beside its `<open>` marker, its run tag the receipt; one line only for a choice made for the user (model, context, scope) or a run that is long or needs them. A callback that only moves the stage is `<silent>`.");
     for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
       expect(DISPATCHER).toContain(line);
     }
@@ -142,7 +142,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_385],
+    ["DISPATCHER", DISPATCHER, 1_405],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
