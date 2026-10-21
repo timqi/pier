@@ -130,12 +130,20 @@ button("plus").onclick = openAdd;
 input.onkeydown = (e) => {
   if (e.key === "Escape") form.hidden = true;
 };
+// A URL the shell warned does not look like Pier is added when submitted again unchanged.
+let warned = "";
 form.onsubmit = (e) => {
   e.preventDefault();
-  invoke("add", { input: input.value }).then(() => {
-    form.hidden = true;
-    input.value = "";
-  }, fail);
+  const value = input.value;
+  input.readOnly = true;
+  invoke<string | null>("add", { input: value, force: value === warned })
+    .then((warning) => {
+      warned = warning ? value : "";
+      if (warning) return fail(warning);
+      form.hidden = true;
+      input.value = "";
+    }, fail)
+    .finally(() => (input.readOnly = false));
 };
 
 toast.onclick = () => (toast.hidden = true);

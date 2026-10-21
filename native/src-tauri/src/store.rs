@@ -41,6 +41,12 @@ impl Instance {
     pub fn app_url(&self) -> Result<Url, String> {
         app_url(&self.url)
     }
+
+    /// Whether its tab loads `url`: its own origin (scheme, host and port) or a frame with
+    /// no origin to leave to; every other page, another Pier's included, is the browser's.
+    pub fn keeps(&self, url: &Url) -> bool {
+        matches!(url.scheme(), "about" | "data") || url.origin().ascii_serialization() == self.url
+    }
 }
 
 /// The name an instance has before its page reports a title.

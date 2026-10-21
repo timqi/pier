@@ -10,14 +10,16 @@ use std::{
     io,
     path::PathBuf,
     process::Command,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{mpsc, Mutex, MutexGuard, PoisonError},
+    time::{Duration, Instant},
 };
 
 use serde_json::{json, Value};
 use store::Instance;
 use tauri::{
+    ipc::CapabilityBuilder,
     menu::{Menu, MenuEvent, MenuItem, Submenu},
-    webview::NewWindowResponse,
+    webview::{NewWindowResponse, PageLoadEvent},
     window::WindowBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewBuilder, WebviewUrl, Window,
     WindowEvent,
@@ -213,7 +215,6 @@ fn resize_edges(widget: &gtk::Widget) {
     });
 }
 
-/// A link the page opens in a new window goes to the system browser.
 fn open_external(url: &Url) -> io::Result<()> {
     if !matches!(url.scheme(), "http" | "https" | "mailto") {
         return Err(io::Error::other("not a web link"));
@@ -224,16 +225,51 @@ fn open_external(url: &Url) -> io::Result<()> {
     Ok(())
 }
 
-/// Adds an instance's webview, hidden, over a persistent data store of its own.
+/// A page the instance does not keep (`Instance::keeps`) goes to the system browser.
+fn to_browser(app: &AppHandle, url: &Url) {
+    if let Err(e) = open_external(url) {
+        report(app, format!("opening {url}: {e}"));
+    }
+}
+
+/// Adds an instance's webview, hidden, over a persistent data store of its own. Its
+/// commands are granted to its own origin only, so a foreign page in it has no IPC.
 fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res {
     let window = app.get_window(WINDOW).ok_or("the window is gone")?;
-    let opener = app.clone();
+    let capability = ["allow-set-badge", "allow-notify", "allow-page-title"].into_iter().fold(
+        CapabilityBuilder::new(format!("instance-{}", instance.id))
+            .webview(&instance.id)
+            .remote(instance.url.clone())
+            .local(false),
+        CapabilityBuilder::permission,
+    );
+    app.add_capability(capability).map_err(text)?;
+    let (handle, own) = (app.clone(), instance.clone());
+    let keep = move |url: &Url| {
+        own.keeps(url) || {
+            to_browser(&handle, url);
+            false
+        }
+    };
+    let (opener, id) = (app.clone(), instance.id.clone());
     let builder = WebviewBuilder::new(&instance.id, WebviewUrl::External(first))
         .data_directory(shell.data_dir(&instance.id))
         .disable_drag_drop_handler()
+        .on_navigation(keep.clone())
+        // A link the page opens in a new window: its own page takes the tab, as a click would.
         .on_new_window(move |url, _| {
-            if let Err(e) = open_external(&url) {
-                report(&opener, format!("opening {url}: {e}"));
+            if !keep(&url) {
+                return NewWindowResponse::Deny;
+            }
+            let (handle, id) = (opener.clone(), id.clone());
+            let navigated = opener.run_on_main_thread(move || {
+                let webview = handle.get_webview(&id).ok_or_else(|| format!("{id} has no webview"));
+                if let Err(e) = webview.and_then(|w| w.navigate(url).map_err(text)) {
+                    report(&handle, format!("opening a link: {e}"));
+                }
+            });
+            if let Err(e) = navigated {
+                report(&opener, format!("opening a link: {e}"));
             }
             NewWindowResponse::Deny
         });
@@ -283,16 +319,72 @@ fn list(app: AppHandle, shell: State<'_, Shell>) -> Res {
     live.startup_error.take().map_or(Ok(()), Err)
 }
 
+enum Probed {
+    Title(String),
+    Loaded,
+    Left(Url),
+}
+
+/// Why `origin` does not look like Pier, if it does not: every Pier serves `/login`, signed
+/// out, as a page titled "Pier". Loaded in a hidden throwaway webview with no cookie jar
+/// and no IPC, so the shell still opens no connection of its own.
+async fn probe(app: &AppHandle, instance: &Instance) -> Res<Option<String>> {
+    const WAIT: Duration = Duration::from_secs(10);
+    let window = app.get_window(WINDOW).ok_or("the window is gone")?;
+    let login = Url::parse(&instance.url).and_then(|u| u.join("/login")).map_err(text)?;
+    let (tx, rx) = mpsc::channel();
+    let (titled, loaded, own) = (tx.clone(), tx.clone(), instance.clone());
+    let builder = WebviewBuilder::new(format!("probe-{}", instance.id), WebviewUrl::External(login))
+        .incognito(true)
+        .on_navigation(move |url| {
+            own.keeps(url) || {
+                drop(tx.send(Probed::Left(url.clone())));
+                false
+            }
+        })
+        .on_document_title_changed(move |_, title| drop(titled.send(Probed::Title(title))))
+        .on_page_load(move |_, load| {
+            if load.event() == PageLoadEvent::Finished {
+                drop(loaded.send(Probed::Loaded));
+            }
+        });
+    let webview = window.add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0));
+    let webview = webview.map_err(text)?;
+    webview.hide().map_err(text)?;
+    let waited = tauri::async_runtime::spawn_blocking(move || {
+        let (deadline, mut title) = (Instant::now() + WAIT, String::new());
+        loop {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Probed::Title(t)) if t == "Pier" => return None,
+                Ok(Probed::Title(t)) => title = t,
+                Ok(Probed::Loaded) if title.is_empty() => return Some("its /login did not load".to_owned()),
+                Ok(Probed::Loaded) => return Some(format!("its /login is titled \"{title}\"")),
+                Ok(Probed::Left(url)) => return Some(format!("it redirects to {url}")),
+                Err(_) => return Some(format!("no answer within {}s", WAIT.as_secs())),
+            }
+        }
+    });
+    let verdict = waited.await.map_err(text);
+    webview.close().map_err(text)?;
+    verdict
+}
+
+/// The warning when the input does not look like Pier, unless `force`: added only then.
 /// Async: building a webview from a sync command, which runs on the main thread, can deadlock.
 #[tauri::command]
-async fn add(app: AppHandle, shell: State<'_, Shell>, input: String) -> Res {
+async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool) -> Res<Option<String>> {
     let (instance, first) = Instance::parse(&input)?;
+    if !force {
+        if let Some(why) = probe(&app, &instance).await? {
+            return Ok(Some(format!("Does not look like Pier ({why}): Enter again to add it anyway")));
+        }
+    }
     edit(&app, &shell, |all| {
         all.push(instance.clone());
         Ok(())
     })?;
     mount(&app, &shell, &instance, first)?;
-    show_instance(&app, &shell, &instance.id)
+    show_instance(&app, &shell, &instance.id).map(|()| None)
 }
 
 #[tauri::command]

@@ -20,6 +20,7 @@ li.confirm .remove { opacity: 1; color: #d93025; }
 #plus:hover, #menu:hover, .remove:hover { background: color-mix(in srgb, CanvasText 10%, transparent); }
 form { align-self: center; flex: 0 0 280px; }
 input { box-sizing: border-box; width: 100%; font: inherit; padding: 4px 6px; }
+input:read-only { cursor: progress; opacity: 0.6; }
 .grow { flex: 1; align-self: stretch; }
 #controls { display: flex; align-self: stretch; }
 #controls button { width: 46px; display: grid; place-items: center; }

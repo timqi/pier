@@ -27,6 +27,19 @@ for a few weeks, and is deleted whole if it is not.
   reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
   page title. An error shows as a red toast over the bar for 8s; a click
   dismisses it.
+- **Origin guard**: before adding, a hidden throwaway webview (no cookie
+  jar, no IPC) loads `<origin>/login`, which every Pier serves signed out
+  titled `Pier`; a different title, a failed load, a redirect off the origin
+  or 10s without an answer shows a warning, and submitting the same input
+  again adds it anyway. http and https are both accepted.
+- **Navigation**: an instance's tab loads only its own origin (scheme, host
+  and port; `about:`/`data:` frames aside), a `target=_blank` link to it
+  included; every other URL, another Pier's included, opens in the system
+  browser, a cross-origin redirect and a foreign iframe too.
+- **IPC**: the instance's three commands are a capability added at mount
+  for its webview label and its origin alone (`remote` = the origin); the
+  tab bar's are local-only (`capabilities/tabs.json`). A foreign page has no
+  IPC even if it were loaded.
 - **Title bar**: the tab bar is the title bar. macOS keeps its traffic
   lights over the bar's left end (overlay title bar, hidden title); elsewhere
   the window has no system frame and no menu bar, and the bar draws
@@ -86,7 +99,7 @@ everything else is the web UI's own keyboard.
 
 - `native/` beside `src/`: `src-tauri/` (Rust) and the tab bar page (TS,
   built by `native/vite.config.ts`); `just native-dev`, `just native`.
-- Budget line: `native/` ≤ 730 non-blank lines (Rust + TS); the server-side
+- Budget line: `native/` ≤ 830 non-blank lines (Rust + TS); the server-side
   change is the `notification` workspace event alone (~20 lines in `push.ts`
   and `server.ts`), the UI change `shell.ts` and two call sites.
 - New toolchain: Rust + cargo lockfile, reviewed on upgrade like

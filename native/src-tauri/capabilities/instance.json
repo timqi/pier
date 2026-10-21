@@ -1,8 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "instance",
-  "description": "An instance's web UI, at the URL the user entered: the bridge's three calls and nothing else: no event listen, so no page hears the tab bar's or another instance's.",
-  "webviews": ["i-*"],
-  "remote": { "urls": ["http://*:*", "https://*:*"] },
-  "permissions": ["allow-set-badge", "allow-notify", "allow-page-title"]
-}
