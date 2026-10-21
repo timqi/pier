@@ -78,7 +78,7 @@ updates this document.
 
 - User messages: bounded mist-blue surface, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
-- Transcript type: `text-sm` (0.875rem of the 18px root, ~16px) at line-height 1.5, a step under the draft's 1rem.
+- Transcript type: `text-sm` rounded to a whole pixel (16px at the 18px root) at line-height 1.5, a step under the draft's 1rem; markdown sizes are em that land on whole pixels (headings 1.25em/1.125em, inline code 0.875em).
 - Assistant replies: solid reading surface, comfortable width; on a phone the
   full column. A fenced code block keeps its lines and scrolls sideways in its own box; a table scrolls sideways in its own box, columns as wide as
   their text up to a bounded cell, an edge shade on the side with more; a
