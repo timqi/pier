@@ -381,7 +381,7 @@ export function appendTurn(
   }
   if (kind === "user" || kind === "assistant") row.append(rowGestures(row, rowTools(kind, row, node), node));
   if (stamp !== undefined) {
-    const time = h("div", "my-4 text-center text-[11px] text-neutral-400");
+    const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
     time.dataset.kind = "time";
     time.dataset.at = String(stamp);
     paintTime(time);
@@ -951,7 +951,7 @@ export function appendPager(onClick: () => void): HTMLButtonElement {
   const more = button("Earlier session");
   more.id = "chain-pager";
   more.onclick = onClick;
-  const row = h("div", "my-4 flex justify-center", more);
+  const row = h("div", "my-3 flex justify-center", more);
   row.dataset.kind = "pager";
   turnsPane.append(row);
   return more;

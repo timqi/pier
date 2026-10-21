@@ -42,8 +42,8 @@ updates this document.
 
 ## Layout
 
-- **One column**: the conversation is one ~960px column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred in the pane under the full-width bar; a reply's bubble starts at its left edge and may fill it, a user's ends at its right edge (88% at most). A pointer keeps a 4.5rem gutter beside it for the row toolbar and time; a phone's inset is 0.75rem.
-- **Stream rhythm**: two steps, `--turn-gap` (1rem) between turns, separator lines (date, `· N background updates`, session divider, load more) and from the bar and composer; `--tight-gap` (0.375rem) within a bubble (chip row, topic tag, quote, files) and between a reply and its continuation.
+- **One column**: the conversation is a 44rem reading column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred in the pane under the full-width bar; a bubble is 88% of it at most, a reply on a phone the full column; a phone's inset is 0.75rem.
+- **Stream rhythm**: two steps, `--turn-gap` (0.75rem) between turns, separator lines (date, `· N background updates`, session divider, load more) and from the bar and composer; `--tight-gap` (0.375rem) within a bubble (chip row, topic tag, quote, files) and between a reply and its continuation.
 - **Bar**: one glass strip at every width; child sessions show ‹, title and phase. Right of the title the status panel's most urgent row leads — topic dot, title, status mark and phrase, truncated, a `1/N` counter cycling it — and opens the panel; below md the status glyph and the row count; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
 - **Status rows**: the panel and `/status` share a topic dot, a two-line title, a second line of a status mark (amber waiting, sky in progress, red failed, neutral queued, green pending release) and the stage's short phrase, and useful time/goal/worker metadata; no row reserves a badge column. A row is one control, a 44px target on coarse pointers, its full problem a tooltip when the title is shorter; refresh preserves focus by item identity.
 - **Status panel**: one flat waiting-first list uses the existing popover at ≥640px and sheet below it, dropped from the bar's lead item. Hover, focus and selection use restrained neutral surfaces; `/status` keeps its solid reading card and counted groups.
@@ -78,6 +78,7 @@ updates this document.
 
 - User messages: bounded mist-blue surface, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
+- Transcript type: `text-sm` rounded to a whole pixel (16px at the 18px root) at line-height 1.5, a step under the draft's 1rem; markdown sizes are em that land on whole pixels (headings 1.25em/1.125em, inline code 0.875em).
 - Assistant replies: solid reading surface, comfortable width; on a phone the
   full column. A fenced code block keeps its lines and scrolls sideways in its own box; a table scrolls sideways in its own box, columns as wide as
   their text up to a bounded cell, an edge shade on the side with more; a

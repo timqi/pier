@@ -347,9 +347,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `agent/events.ts` validates it on replay, logging malformed snapshots and showing original text with a fallback notice.
   Old text cards retain `origin.sessions` links: full run IDs match exactly, and a shortened prefix links only when unique, with an ambiguity notice otherwise;
   an empty chain's pane says the first message starts it.
-- **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
-  (streaming only), **Stop** = abort (streaming only). Enter sends, never during
-  IME composition (`isComposing`/229).
+- **Composer**: **Send** submits while idle; while a turn runs, sending queues
+  with `mode:"auto"` (amber clock). **Stop** or Esc aborts the running turn.
+  Enter sends, never during IME composition (`isComposing`/229).
 - **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (each line from `CHAT_COMMANDS`; the
@@ -372,9 +372,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `bg-indigo-50` selection), word in mono, line truncated, `role=listbox`/
   `option` with `aria-selected`, 44px on touch; past eight rows the list
   scrolls inside itself.
-- **Queue panel**: `queue-state` snapshots with mode chips; **Send now**
-  (steer), **Abort & send** (abort, fresh prompt), **Recall all** (append to the
-  composer draft). Queued messages join with newlines.
+- **Queue panel**: `queue-state` snapshots with mode chips; **Steer** inserts
+  pending input into the running turn, **Abort & send** aborts the turn and
+  resends as a fresh prompt, and **Return to draft** withdraws queued messages
+  to the composer. Queued messages join with newlines.
 - **Attachments**: paste, drag-drop, `+` → pending strip; each file goes to
   `POST /api/inbox` as it is attached, and on send its `[name](file:///…)`
   marker joins the text, so sent, optimistic and echoed text are identical and
@@ -590,9 +591,10 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
 ## Acceptance
 
 - Two browser tabs on one session see identical timelines (fan-out works).
-- While a long turn streams: plain send queues (queue panel updates via
-  `queue-state`), the queue's Send now action steers pending input into the
-  running turn.
+- While a long turn streams: plain send queues (`mode:"auto"`, amber clock;
+  queue panel updates via `queue-state`); the queue panel can steer pending
+  input into the turn, abort and resend it as a fresh prompt, or return it to
+  the composer draft.
 - In an isolated test server, restart and reconnect without duplicated events.
 
 ## Shared UI vocabulary
