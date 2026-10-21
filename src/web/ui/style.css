@@ -520,7 +520,9 @@ main {
   --turn-gap: 0.75rem;
   --tight-gap: 0.375rem;
   /* `text-sm` snapped to a whole pixel: 0.875rem of the 18px root is 15.75px,
-     which a 1x screen renders soft. The `.md` sizes below are em of this 16. */
+     which a 1x screen renders soft. The `.md` sizes below are em of this 16.
+     The plain 16px is for engines without round() (Chromium <125). */
+  font-size: 16px;
   font-size: round(0.875rem, 1px);
   overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
   /* The fade is complete across the heading's 8px inset (margin above): a row
