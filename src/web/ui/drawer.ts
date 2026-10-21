@@ -1,13 +1,13 @@
-// The status panel: what needs you and what is running, counted on the bar's
-// status chip and listed in the panel it opens, or docked beside the chat on a
-// wide window — the open items and the live sessions no item holds, one row each.
+// The status panel: what needs you and what is running, led in the bar by its
+// most urgent row and listed in the panel that row opens — the open items and
+// the live sessions no item holds, one row each.
 
 import { $, agoLabel, h } from "./dom.js";
-import { closeMenu, listStep, openPanel, walkRows } from "./menu.js";
+import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { openItemPresentation } from "../../core/open-items.js";
-import { openItemRow } from "./open-items.js";
+import { openItemRow, paintDot, stageLine } from "./open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
@@ -49,14 +49,12 @@ interface DrawerDeps {
 
 let deps: DrawerDeps;
 
-const chip = $("#status-chip");
-const side = $("#status-side");
-const sideHead = $("#status-side-head");
-const sideList = $("#status-side-list");
-
-/** Where the list docks instead of floating; style.css `#status-side` holds the same width. */
-const WIDE = "(width >= 68.625rem)";
-let wide: MediaQueryList;
+const lead = $("#status-item");
+const leadDot = $("#status-item-dot");
+const leadTitle = $("#status-item-title");
+const leadStage = $("#status-item-stage");
+const leadCount = $("#status-item-count");
+const next = $("#status-next");
 
 // --- marks -------------------------------------------------------------------------------
 
@@ -167,7 +165,7 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
 const rowNodes = new Map<string, HTMLElement>();
 
 /** Items keep their own identity even when they hold the same session; only independent sessions deduplicate. */
-function listed(now: number): { rows: HTMLElement[]; waiting: number; runningCount: number; sessions: SessionInfo[] } {
+function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentation[]; sessions: SessionInfo[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain());
@@ -183,7 +181,8 @@ function listed(now: number): { rows: HTMLElement[]; waiting: number; runningCou
   const waiting = all.filter(waits);
   const keys = new Set(all.map((p) => p.key));
   for (const [key, node] of rowNodes) if (!keys.has(key)) { node.remove(); rowNodes.delete(key); }
-  const rows = [...waiting, ...all.filter((r) => !waits(r))].map((p) => {
+  const ordered = [...waiting, ...all.filter((r) => !waits(r))];
+  const rows = ordered.map((p) => {
     const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target); },
@@ -191,14 +190,19 @@ function listed(now: number): { rows: HTMLElement[]; waiting: number; runningCou
     rowNodes.set(p.key, node);
     return node;
   });
-  return { rows, waiting: waiting.length, runningCount: all.filter((r) => r.status === "running").length, sessions };
+  return { rows, ordered, sessions };
 }
 
-// --- the chip and the panel -------------------------------------------------------------
+// --- the lead and the panel -------------------------------------------------------------
 
 /** The panel's list while it is open; a render fills it in place. */
 let list: HTMLElement | null = null;
 let rows: HTMLElement[] = [];
+let ordered: OpenItemPresentation[] = [];
+/** The row the bar leads with: the most urgent until the counter cycles it on,
+ *  and again once a different row becomes the most urgent. */
+let shownKey: string | null = null;
+let topKey: string | null = null;
 
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
@@ -211,26 +215,43 @@ export function renderDrawer(): void {
   const key = renderKey();
   if (key === drawn) return;
   drawn = key;
-  const { waiting, runningCount, sessions, ...got } = listed(Date.now());
+  const { sessions, ...got } = listed(Date.now());
   rows = got.rows;
+  ordered = got.ordered;
   // The app icon counts a turn to look at — an unread one —
   // plus the conversation's own unread reply, which the bar stands for instead of a row.
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
-  // The rows open the panel; the counts are only its copy, and a row neither counts is still an entrance.
-  const counts = [...(runningCount ? [`${runningCount} running`] : []), ...(waiting ? [`${waiting} needs you`] : [])];
-  const shown = rows.length > 0;
-  chip.textContent = counts.join(" · ") || (shown ? `${rows.length} open` : "");
-  sideHead.textContent = chip.textContent;
-  side.toggleAttribute("data-empty", !shown);
-  chip.classList.toggle("hidden", !shown);
-  chip.classList.toggle("block", shown);
-  chip.classList.toggle("text-amber-700", waiting > 0);
-  chip.classList.toggle("text-neutral-600", waiting === 0);
-  if (wide.matches) fill(sideList);
-  else if (list?.isConnected && !list.closest("[inert]")) {
-    if (!shown) closeMenu();
+  paintLead();
+  if (list?.isConnected && !list.closest("[inert]")) {
+    if (!rows.length) closeMenu();
     else fill(list);
   }
+}
+
+/** Dot, title and gray second line of the shown row; below md the dot and the row count only (index.html). */
+function paintLead(): void {
+  if (ordered[0]?.key !== topKey) shownKey = topKey = ordered[0]?.key ?? null;
+  const at = Math.max(0, ordered.findIndex((p) => p.key === shownKey));
+  const p = ordered[at];
+  shownKey = p?.key ?? null;
+  lead.classList.toggle("hidden", !p);
+  lead.classList.toggle("flex", !!p);
+  next.classList.toggle("hidden", ordered.length < 2);
+  if (!p) return;
+  const stage = stageLine(p);
+  paintDot(leadDot, p);
+  leadTitle.textContent = p.title;
+  leadStage.textContent = stage;
+  leadCount.textContent = String(ordered.length);
+  lead.title = [p.title, stage].filter(Boolean).join(" — ");
+  lead.setAttribute("aria-label", `Status: ${ordered.length} open — ${lead.title}`);
+  next.textContent = `${at + 1}/${ordered.length}`;
+}
+
+function cycleLead(): void {
+  const at = ordered.findIndex((p) => p.key === shownKey);
+  shownKey = ordered[(at + 1) % ordered.length]?.key ?? null;
+  paintLead();
 }
 
 /** Refill keeping the focused control focused: Escape has to find its way back. */
@@ -242,46 +263,20 @@ function fill(into: HTMLElement): void {
   into.scrollTop = top;
 }
 
-/** Nothing to show is the chip's absence, not an empty panel; docked, opening
- *  is focusing its first row. */
+/** Nothing to show is the lead's absence, not an empty panel. */
 export function openDrawer(): void {
-  if (wide.matches) return sideList.querySelector<HTMLElement>(".session-open")?.focus();
-  if (chip.getAttribute("aria-expanded") === "true") return closeMenu();
+  if (lead.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!rows.length) return;
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fill(list);
-  openPanel(chip, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", list)).setAttribute("aria-label", "Status");
+  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", list)).setAttribute("aria-label", "Status");
 }
 
 export function initDrawer(d: DrawerDeps): void {
   deps = d;
-  chip.onclick = openDrawer;
-  wide = window.matchMedia(WIDE);
-  // CSS hiding and the menu's resize handler can blur a control before the media event arrives.
-  document.addEventListener("focusout", (ev) => {
-    if (ev.relatedTarget) return;
-    const control = ev.target as HTMLElement;
-    const docking = wide.matches && list?.contains(control);
-    if (!docking && (wide.matches || !sideList.contains(control))) return;
-    queueMicrotask(() => {
-      if (document.activeElement !== document.body) return;
-      if (docking) { fill(sideList); control.focus(); }
-      else chip.focus();
-    });
-  });
-  // One list, moved: docking takes the rows out of any panel still open.
-  wide.addEventListener("change", () => {
-    const focused = sideList.contains(document.activeElement);
-    if (wide.matches) {
-      closeMenu();
-      fill(sideList);
-    } else if (focused) chip.focus();
-  });
-  sideList.onkeydown = (ev) => {
-    const to = listStep(ev);
-    if (to !== undefined && walkRows(sideList, to)) ev.preventDefault();
-  };
+  lead.onclick = openDrawer;
+  next.onclick = cycleLead;
   // Stands down under a modal: it is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
 }

@@ -343,10 +343,6 @@ main > section, #turns { grid-row: 1 / -1; }
 #queue-panel { grid-row: 2; }
 #composer { grid-row: 3; }
 :is(#bar, #queue-panel, #composer) { position: relative; z-index: 1; }
-/* The status panel's list, docked beside the reading column where the window
-   has room for both (drawer.ts `WIDE`); gone with
-   no rows and under a Console view, whose open hides the bar. */
-#status-side { display: none; }
 .open-item { margin-block: 8px; padding: 4px 6px; border-radius: 10px; overflow-wrap: anywhere; }
 .open-item:has(.session-open:hover), .open-item:focus-within, .open-item:has([aria-current]) { background: var(--color-neutral-100); }
 .open-item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -357,41 +353,7 @@ main > section, #turns { grid-row: 1 / -1; }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
-  .open-item .session-open { min-height: 44px; min-width: 44px; }
-}
-/* Wide, the column, a 1rem gap and the rail's slot centre as one block, the
-   slot reserved with or without rows so the rail's arrival never moves the
-   column. 68.625rem is the slot's 14rem floor plus --read-w, the gap and 1rem
-   each side that clears #turns' scrollbar — 61 of the root's 18px rem, written
-   in the 16px rem a media query reads. The vars hold `100%` unresolved: each
-   use reads it against main's width, which is why #composer pads rather than
-   its div's margins. `main` outranks the base rules below. */
-@media (width >= 68.625rem) {
-  main {
-    --rail-w: clamp(14rem, 100% - var(--read-w) - 3rem, 17.5rem);
-    --block-l: calc((100% - var(--read-w) - 1rem - var(--rail-w)) / 2);
-    --block-r: calc(var(--block-l) + 1rem + var(--rail-w));
-  }
-  main #turns { padding-inline: var(--block-l) var(--block-r); }
-  main #queue-panel { margin-inline: var(--block-l) var(--block-r); }
-  main #composer { padding-inline: var(--block-l) var(--block-r); }
-  /* The assistant bubble's material: a reading surface like the replies, not glass. */
-  main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
-    display: flex;
-    grid-row: 1 / -1;
-    align-self: start;
-    justify-self: start;
-    position: relative;
-    z-index: 1;
-    width: var(--rail-w);
-    margin: calc(var(--head-h) + 0.75rem + 0.875rem) 0 0 calc(var(--block-l) + var(--read-w) + 1rem);
-    max-height: min(60dvh, calc(100dvh - var(--head-h) - var(--dock-h, 4rem) - 2rem));
-    padding: 0.75rem 1rem;
-    border-radius: 1.375rem;
-    background: var(--color-white);
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
-  }
-  main:has(#status-side:not([data-empty])) #status-chip { display: none; }
+  :is(.open-item .session-open, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
 }
 /* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the

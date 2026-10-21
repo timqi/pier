@@ -192,8 +192,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   in, from the same reason: a design lead not reported final → its session; a
   stage's `waiting on you` or a goal's `decision`/`cap`/`done` → absent, the chat.
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
-  `core/reply.ts`): `/status`'s first group, the status panel's, its chip's
-  `needs you`; a finished worker's outcome is read from its lead's run, not its own.
+  `core/reply.ts`): `/status`'s first group, the status panel's first rows; a finished worker's outcome is read from its lead's run, not its own.
 - An item is keyed by `problem` in the user's words; `stage` holds concrete phase, question and valid authorization, omitting ledger-derived run state, time and review rounds; only work in flight or waiting on the user's decision now belongs here, with backlog in MEMORY.md.
 - A goal root's goal is read from the ledger (`TaskStore.goalOf`,
   by the run's session), never from the stage; a run queued in that session
@@ -203,14 +202,14 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
   | status | second line |
   | --- | --- |
-  | waiting, answered in the chat (the stage says `waiting on you`) | `Needs you · <question>`, the prefix dropped |
-  | waiting on an ended goal, stage without `waiting on you` | `Needs you · merge?` (clean review), `Needs you · decision: <reason>`, `Needs you · review cap reached · findings remain`; the goal wording leaves the metadata |
-  | waiting, answered in the design session (`waitsIn`) | `Needs you in the design session`, then ` · <stage>` when there is one |
+  | waiting, answered in the chat (the stage says `waiting on you`) | `Needs you · <wait> · <question>`, the prefix dropped |
+  | waiting on an ended goal, stage without `waiting on you` | `Needs you · <wait> · merge?` (clean review), `… · decision: <reason>`, `… · review cap reached · findings remain`; the goal wording leaves the metadata |
+  | waiting, answered in the design session (`waitsIn`) | `Needs you in the design session · <wait>`, then ` · <stage>` when there is one |
   | running / queued | the stage; queued as `Queued · <stage>` |
   | pending release / stopped | `Pending release · <stage>` / `Stopped · <stage>` |
 
   Grouped cards and IM's `Waiting on you` group omit `Needs you`, keeping `in the design session`.
-- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview while its goal is live; multiple runs read `N runs · <newest run's time>`.
+- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview while its goal is live; a waiting item whose newest run ended reads none, its `<wait>` (`2h`, the age since that run ended) on the second line instead; multiple runs read `N runs · <newest run's time>`.
 - Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker metadata names only running, failed and interrupted workers.
 - `openItemsStatus` returns compact `text`, a `seed` and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
 - The seed is one line per item, the full problem kept as the `<done>` key: `- <problem> — <stage> (run <id> · session <id>, run …) · <status>`; an empty stage drops ` — <stage>`, a run with no session drops `· session`.
@@ -221,7 +220,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   carrying `sessions`, run id → session id, and optional `statusSnapshot` with fixed display text and targets; replay validates the snapshot, ignoring keys it does not read, and logs a malformed one, retaining original text and a visible fallback notice. Old commands keep their text and uniquely resolvable run links; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card, and the web's status panel, opened by the bar's
-  status chip — the same statuses as rows, `waiting on you` first in one list (`GET /api/continuous/open`),
+  lead item — the same statuses as rows, `waiting on you` first in one list (`GET /api/continuous/open`),
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 
 ## Chat commands

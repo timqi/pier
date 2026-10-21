@@ -34,7 +34,7 @@ truth.
 ## Pier
 
 - Pier is one conversation, on the web and in the home chat (below): the
-  status chip opens the status panel — what is running over the open items;
+  bar's lead item opens the status panel — what is running over the open items;
   the ⋯ menu holds the rest. Its current session, the head, runs in `$PIER_HOME/home`,
   which holds memory only: `MEMORY.md` and daily notes in `memory/`.
 - Recall: `rg` over `memory/`; `pier search --in main <words>` over what the

@@ -242,8 +242,9 @@ describe("the open items", () => {
     const status = openItemsStatus(open, now);
     // An ended goal's ask is the waiting item's second line, not repeated below it.
     expect(status.snapshot.items.map((i) => [i.stage, i.metadata])).toEqual([
-      ["worker building", ["review 3/3"]], ["decision", ["succeeded 1m ago"]],
-      ["review cap reached · findings remain", ["succeeded 1m ago"]], ["merge?", ["succeeded 1m ago"]],
+      // A waiting item reads how long it has waited, never "succeeded … ago".
+      ["worker building", ["review 3/3"]], ["1m · decision", []],
+      ["1m · review cap reached · findings remain", []], ["1m · merge?", []],
       ["worker building", ["succeeded 1m ago", "failed: no verdict"]], ["worker building", ["succeeded 1m ago"]],
       ["worker building", ["succeeded 1m ago", "merged"]],
     ]);
@@ -300,9 +301,9 @@ describe("the open items", () => {
     ]);
     expect(openItemsStatus(open, now).text).toBe([
       "Waiting on you · 3", "",
-      "stage wait", "60K or 80K?", "succeeded just now", "",
-      "goal wait", "decision", "succeeded just now", "",
-      "Rail redesign", "in the design session · lead proposed two layouts", "succeeded just now",
+      "stage wait", "<1m · 60K or 80K?", "",
+      "goal wait", "<1m · decision", "",
+      "Rail redesign", "in the design session · <1m · lead proposed two layouts",
     ].join("\n"));
   });
 

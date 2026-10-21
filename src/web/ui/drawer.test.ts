@@ -1,11 +1,11 @@
-// The status panel's projection, counts and retained row controls; layout and navigation run in the browser fixture.
+// The status panel's projection, the bar's lead item and retained row controls; layout and navigation run in the browser fixture.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NOT_IN_LEDGER, type ChainMember } from "../../core/types.js";
 import { fake, installPage, type FakeDocument } from "./dom.testkit.js";
 
 const menu = vi.hoisted(() => ({
   panel: null as HTMLElement | null,
-  closeMenu: vi.fn(() => { menu.panel?.remove(); document.querySelector("#status-chip")?.setAttribute("aria-expanded", "false"); }),
+  closeMenu: vi.fn(() => { menu.panel?.remove(); document.querySelector("#status-item")?.removeAttribute("aria-expanded"); }),
   openPanel: vi.fn((anchor: HTMLElement, content: HTMLElement) => {
     anchor.setAttribute("aria-expanded", "true");
     const panel = document.createElement("div");
@@ -14,10 +14,8 @@ const menu = vi.hoisted(() => ({
     menu.panel = panel;
     return panel;
   }),
-  walkRows: vi.fn(() => true),
 }));
 vi.mock("./menu.js", async (actual) => ({ ...(await actual<typeof import("./menu.js")>()), ...menu }));
-const wide = { matches: false, change: () => {}, addEventListener(_: "change", fn: () => void) { this.change = fn; } };
 const badge = vi.hoisted(() => vi.fn());
 vi.mock("./notifications.js", () => ({ setUnreadBadge: badge }));
 const chords = vi.hoisted(() => new Map<string, [() => void, (() => boolean) | undefined]>());
@@ -40,15 +38,16 @@ let open: import("../../tasks/types.js").OpenItems | null = null;
 const openItem = vi.fn();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
-  doc = installPage(); wide.matches = false;
-  vi.stubGlobal("window", { matchMedia: () => wide });
+  doc = installPage();
   drawer = await import("./drawer.js");
   sessions = []; chain = []; current = null; open = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
     openContinuous: vi.fn(), open: () => open, openItem });
 });
 afterEach(() => vi.restoreAllMocks());
-const chip = () => doc.querySelector("#status-chip")!;
+const lead = () => doc.querySelector("#status-item")!;
+const next = () => doc.querySelector("#status-next")!;
+const shown = (sel: string) => doc.querySelector(sel)!.textContent;
 const panelRows = () => doc.querySelectorAll(".session-open");
 const labels = () => panelRows().map((b) => b.querySelector(".open-item-title")!.textContent);
 const item = (key: string) => doc.querySelector(`[data-row-key='${key}']`)!;
@@ -65,35 +64,53 @@ it("keeps independent session marks and phase tags", () => {
   expect(fake(drawer.phaseTag(row("x", { phase: "build" }))[0]).title).toBe("lead — building per the design");
 });
 
-it("counts running and needs-you, omits zero halves, and keeps a chip for other open states", () => {
+it("leads with the most urgent row, cycles with the counter, and is absent with no rows", () => {
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(chip().classList.contains("hidden")).toBe(true);
+  expect(lead().classList.contains("hidden")).toBe(true);
+  expect(next().classList.contains("hidden")).toBe(true);
   expect(menu.openPanel).not.toHaveBeenCalled();
   expect(badge).toHaveBeenLastCalledWith(0);
   sessions = [row("run", { state: "streaming" }), row("q", { runLive: true }), row("idle")];
-  drawer.renderDrawer(); expect(chip().textContent).toBe("1 running");
-  sessions = [row("done", { unread: true }), row("design", { phase: "design", unread: true })];
-  drawer.renderDrawer(); expect(chip().textContent).toBe("2 needs you");
+  drawer.renderDrawer();
+  expect(lead().classList.contains("hidden")).toBe(false);
+  expect(shown("#status-item-title")).toBe("run");
+  expect(shown("#status-item-count")).toBe("2");
+  expect(next().textContent).toBe("1/2");
+  sessions = [row("run", { state: "streaming" }), row("done", { unread: true }), row("design", { phase: "design", unread: true })];
+  drawer.renderDrawer();
   expect(badge).toHaveBeenLastCalledWith(2);
-  sessions.push(row("run", { state: "streaming" }));
-  drawer.renderDrawer(); expect(chip().textContent).toBe("1 running · 2 needs you");
+  expect(shown("#status-item-title")).toBe("done");
+  expect(shown("#status-item-stage")).toBe("Needs you · turn finished — not viewed yet");
+  expect(lead().title).toBe("done — Needs you · turn finished — not viewed yet");
+  expect(next().textContent).toBe("1/3");
+  next().onclick?.(); next().onclick?.();
+  expect([shown("#status-item-title"), next().textContent]).toEqual(["run", "3/3"]);
+  // A refresh keeps the cycled row; the counter wraps.
+  drawer.renderDrawer(); expect(next().textContent).toBe("3/3");
+  next().onclick?.(); expect([shown("#status-item-title"), next().textContent]).toEqual(["done", "1/3"]);
+  next().onclick?.();
+  // A new most urgent row takes the lead back.
+  sessions.unshift(row("new", { unread: true }));
+  drawer.renderDrawer(); expect([shown("#status-item-title"), next().textContent]).toEqual(["new", "1/4"]);
   sessions = [];
-  for (const status of ["pending release", "stopped"] as const) {
-    open = { items: [{ problem: "a", stage: "", runs: [], status }], unlisted: [] };
-    drawer.renderDrawer(); expect(chip().textContent).toBe("1 open");
-  }
-  open = { items: [], unlisted: [run("q", { state: "queued" })] };
-  drawer.renderDrawer(); expect(chip().textContent).toBe("1 open");
-  drawer.openDrawer(); expect(panelRows()).toHaveLength(1);
+  open = { items: [{ problem: "a", stage: "", runs: [], status: "stopped" }], unlisted: [] };
+  drawer.renderDrawer();
+  expect(shown("#status-item-stage")).toBe("Stopped");
+  expect(next().classList.contains("hidden")).toBe(true);
+  lead().onclick?.(); expect(panelRows()).toHaveLength(1);
+  expect(menu.openPanel).toHaveBeenLastCalledWith(lead(), expect.anything());
+  lead().onclick?.(); expect(menu.closeMenu).toHaveBeenCalledOnce();
+  drawer.openDrawer();
   open = { items: [], unlisted: [] }; drawer.renderDrawer();
-  expect(chip().classList.contains("hidden")).toBe(true);
-  expect(menu.closeMenu).toHaveBeenCalledOnce();
+  expect(lead().classList.contains("hidden")).toBe(true);
+  expect(menu.closeMenu).toHaveBeenCalledTimes(2);
 });
 
 it("leaves the chain off the list and counts the head's unread on the app badge", () => {
   chain = [member("h1"), member("h0")];
   sessions = [row("h1", { unread: true }), row("h0", { state: "streaming" }), row("c", { unread: true })];
-  drawer.renderDrawer(); expect(chip().textContent).toBe("1 needs you");
+  drawer.renderDrawer(); expect(shown("#status-item-title")).toBe("c");
+  expect(shown("#status-item-count")).toBe("1");
   expect(badge).toHaveBeenLastCalledWith(2);
   expect(drawer.inProgress(sessions, chain).map((s) => s.id)).toEqual(["c"]);
 });
@@ -110,8 +127,10 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(labels()).toEqual(["稳定标题", "free", "merged", "gone", "auth review", "Queued one", "queued"]);
-  expect(chip().textContent).toBe("1 running · 2 needs you");
-  expect(item("item:原始完整问题").querySelector(".open-item-stage")!.textContent).toBe("Needs you · 是否合并？授权只限本分支。");
+  expect([shown("#status-item-title"), next().textContent]).toEqual(["稳定标题", "1/7"]);
+  // How long it has waited, not how long ago its run succeeded.
+  expect(item("item:原始完整问题").querySelector(".open-item-stage")!.textContent).toBe("Needs you · 10m · 是否合并？授权只限本分支。");
+  expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
   expect(doc.querySelectorAll(".row-status")).toHaveLength(0);
@@ -132,12 +151,11 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
 });
 
 it("keeps controls and focus on problem identity across title and state refreshes", () => {
-  wide.matches = true;
   open = { items: [
     { problem: "first", title: "short", stage: "", status: "running", runs: [run("r")] },
     { problem: "second", title: "short", stage: "", status: "running", runs: [run("r")] },
   ], unlisted: [] };
-  drawer.renderDrawer();
+  drawer.renderDrawer(); drawer.openDrawer();
   const second = item("item:second");
   const control = second.querySelector(".session-open")!;
   control.focus();
@@ -151,15 +169,14 @@ it("keeps controls and focus on problem identity across title and state refreshe
   expect(second.querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
-it.each([false, true])("retains same-titled designs on refresh, focus and navigation (docked: %s)", (docked) => {
-  wide.matches = docked;
+it("retains same-titled designs on refresh, focus and navigation", () => {
   const name = "Same design name";
   open = { items: ["held", "first", "second"].map((id) => ({
     problem: id, title: name, stage: "", status: "waiting on you", designSessionId: id,
     runs: [run(`root-${id}`, { name, state: "succeeded", targetSessionId: id })],
   })), unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(chip().textContent).toBe("3 needs you");
+  expect(next().textContent).toBe("1/3");
   expect(labels()).toEqual([name, name, name]);
   const first = item("item:first");
   const control = first.querySelector(".session-open")!;
@@ -180,13 +197,14 @@ it.each([false, true])("retains same-titled designs on refresh, focus and naviga
 });
 
 it("says where a design's wait is answered, the place read as part of the label", () => {
+  vi.spyOn(Date, "now").mockReturnValue(2 * 3_600_000);
   open = { items: [
     { problem: "rail", stage: "two layouts", status: "waiting on you", designSessionId: "d", waitsIn: "d", runs: [run("r", { state: "succeeded", finishedAt: 0, targetSessionId: "d" })] },
     { problem: "bare", stage: "", status: "waiting on you", designSessionId: "e", waitsIn: "e", runs: [run("q", { state: "succeeded", finishedAt: 0, targetSessionId: "e" })] },
   ], unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(item("item:rail").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · two layouts");
-  expect(item("item:bare").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session");
+  expect(item("item:rail").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · 2h · two layouts");
+  expect(item("item:bare").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · 2h");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -197,7 +215,7 @@ it("forwards design and waiting entrances without inferring a current session fr
   button.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }));
   expect(button.getAttribute("aria-current")).toBe("page");
-  expect(chip().textContent).toBe("1 running");
+  expect(shown("#status-item-title")).toBe("first");
 });
 
 it("marks a row current where its click lands: the newest run's session, never a run of an item answered in the chat", () => {
@@ -211,27 +229,16 @@ it("marks a row current where its click lands: the newest run's session, never a
   expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
-it("moves the same rows between popover and dock, returning focus to the chip on narrowing", () => {
+it("opens the panel from the lead and ⌘⇧P, closing on a second press", () => {
   current = "b";
   sessions = [row("a", { state: "streaming" }), row("b", { unread: true })];
-  drawer.renderDrawer(); chip().onclick?.();
+  drawer.renderDrawer(); lead().onclick?.();
   expect(labels()).toEqual(["b", "a"]);
   expect(panelRows().map((b) => b.getAttribute("aria-current"))).toEqual(["page", null]);
   chords.get("shift+p")![0](); expect(menu.closeMenu).toHaveBeenCalledOnce();
   expect(chords.get("shift+p")![1]).toBeTypeOf("function");
-  wide.matches = true; wide.change();
-  const side = doc.querySelector("#status-side")!;
-  expect(side.querySelectorAll(".session-open")).toHaveLength(2);
-  expect(doc.querySelector("#status-side-head")!.textContent).toBe("1 running · 1 needs you");
-  drawer.openDrawer(); expect(doc.activeElement).toBe(panelRows()[0]);
-  const preventDefault = vi.fn();
-  doc.querySelector("#status-side-list")!.onkeydown?.({ key: "ArrowDown", preventDefault } as never);
-  expect(preventDefault).toHaveBeenCalled();
-  expect(menu.walkRows).toHaveBeenLastCalledWith(doc.querySelector("#status-side-list"), 1);
-  wide.matches = false; wide.change(); expect(doc.activeElement).toBe(chip());
-  drawer.openDrawer();
-  expect(side.querySelectorAll(".session-open")).toHaveLength(0);
-  expect(menu.openPanel).toHaveBeenCalledTimes(2);
+  chords.get("shift+p")![0](); expect(menu.openPanel).toHaveBeenCalledTimes(2);
   panelRows()[1]!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "a", targetSessionId: "a" }] }));
 });
+

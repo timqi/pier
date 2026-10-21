@@ -195,7 +195,7 @@ it("shows ‹ with the head's dot on a child, and the child's phase tag", () => 
   expect(fake(document.querySelector("#chat-phase")).textContent).toBe("");
 });
 
-// Subagents are the status chip's count (drawer.ts): the meta row is model,
+// Subagents are the status panel's rows (drawer.ts): the meta row is model,
 // reasoning and context only, and a phone shows it just for a context near full.
 it("keeps the meta row to model, reasoning and context, urgent only under context pressure", () => {
   current = session(2);

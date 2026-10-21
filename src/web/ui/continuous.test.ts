@@ -103,5 +103,5 @@ it("adds no row when nothing is open, and does not open with nothing to list", (
   state.items = { items: [], unlisted: [] };
   open();
   expect(doc.querySelectorAll(".session-open")).toHaveLength(0);
-  expect(doc.querySelector("#status-chip")!.classList.contains("hidden")).toBe(true);
+  expect(doc.querySelector("#status-item")!.classList.contains("hidden")).toBe(true);
 });

@@ -1,4 +1,4 @@
-// The open-item row used by status panels and fixed command cards.
+// The open-item row used by the status panel, its lead in the bar and fixed command cards.
 
 import { openItemDestination, openItemGroups } from "../../core/open-items.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
@@ -9,6 +9,20 @@ interface Actions {
   openItem: (target: OpenItemTarget) => void;
   currentId?: string | null;
   grouped?: boolean;
+}
+
+/** The second line: status label, then stage. */
+export function stageLine(item: OpenItemPresentation, grouped = false): string {
+  const label = grouped && item.status === "waiting on you" ? "" : item.statusLabel;
+  // "Needs you in the design session · …": the place reads as part of the label.
+  return [label, item.stage].filter(Boolean).join(item.waitsIn ? " " : " · ");
+}
+
+/** The topic dot, the same on a row and on the bar's lead item. */
+export function paintDot(dot: HTMLElement, item: OpenItemPresentation): void {
+  dot.style.background = item.key.startsWith("item:") ? topicColour(item.problem) : "var(--color-neutral-400)";
+  dot.classList.toggle("running-dot", item.status === "running");
+  dot.title = item.status;
 }
 
 const updates = new WeakMap<HTMLElement, (p: OpenItemPresentation, actions: Actions) => void>();
@@ -32,17 +46,13 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     // The title is short; the head's full wording stays one hover away.
     if (item.title !== item.problem) main.title = item.problem;
     else main.removeAttribute("title");
-    const label = a.grouped && item.status === "waiting on you" ? "" : item.statusLabel;
-    // "Needs you in the design session · …": the place reads as part of the label.
-    stage.textContent = [label, item.stage].filter(Boolean).join(item.waitsIn ? " " : " · ");
+    stage.textContent = stageLine(item, a.grouped);
     stage.classList.toggle("text-amber-700", item.status === "waiting on you");
     stage.classList.toggle("text-neutral-500", item.status !== "waiting on you");
     stage.classList.toggle("hidden", !stage.textContent);
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
-    dot.style.background = item.key.startsWith("item:") ? topicColour(item.problem) : "var(--color-neutral-400)";
-    dot.classList.toggle("running-dot", item.status === "running");
-    dot.title = item.status;
+    paintDot(dot, item);
     main.setAttribute("aria-label", `${item.title} · ${item.status}`);
     const to = openItemDestination(item);
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");

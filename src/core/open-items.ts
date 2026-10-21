@@ -56,15 +56,19 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
   const waiting = waitsOnYou(i.status);
   const question = waiting ? i.stage.replace(/^waiting on you:\s*/i, "") : i.stage;
   const asked = waiting && !i.waitsIn && !/\bwaiting on you\b/i.test(i.stage) ? i.runs.map((r) => (r.goal ? goalAsk(r.goal) : "")).find(Boolean) ?? "" : "";
-  const stage = asked || (waiting && i.waitsIn ? ["in the design session", question].filter(Boolean).join(" · ") : question);
   // Reversed first: of runs queued together, the later named is the newer.
   const runs = [...i.runs].reverse().sort((a, b) => b.queuedAt - a.queuedAt);
+  // A waiting item has waited since its newest run ended; that run's "succeeded … ago" would contradict the ask.
+  const newest = runs[0];
+  const waited = waiting && newest && newest.state !== NOT_IN_LEDGER && newest.finishedAt !== null
+    ? relTime(newest.finishedAt, now).replace(/^now$/, "<1m") : "";
+  const stage = [waiting && i.waitsIn ? "in the design session" : "", waited, asked || question].filter(Boolean).join(" · ");
   // An ended root's time is no news while its goal's review runs elsewhere.
   const reviewing = (r: Run): boolean => r.goal?.outcome === null && r.state !== "running" && r.state !== "queued";
-  const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) ? [] : [time(runs[0]!, now)])] : [];
+  const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) || waited ? [] : [time(runs[0]!, now)])] : [];
   for (const r of i.runs) {
     const goal = r.goal ? goalText(r.goal) : "";
-    if (i.runs.length === 1 && !reviewing(r)) metadata.push(time(r, now));
+    if (i.runs.length === 1 && !reviewing(r) && !waited) metadata.push(time(r, now));
     const moved = !!asked && !!r.goal && goalAsk(r.goal) === asked;
     if (goal && goal !== "waiting on you" && !moved && !metadata.includes(goal)) metadata.push(goal);
     if (r.workers) {

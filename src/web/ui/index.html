@@ -59,16 +59,27 @@
         class="icon-btn text-[13px]"></button>
     </section>
     <!-- The one bar, at every width: the way back, the title (Session info),
-         the phase tag, then the status chip (the status panel, drawer.ts),
-         the meta chips and ⋯ (session-header.ts). Flat children, so below md the
-         urgent meta row can wrap to a line of its own (style.css). -->
+         the phase tag, then the lead open item and its counter (the status
+         panel, drawer.ts), the meta chips and ⋯ (session-header.ts). Flat
+         children, so below md the urgent meta row can wrap to a line of its own
+         (style.css). -->
     <header id="bar" class="flex flex-none items-center gap-1.5 px-1.5 md:px-3">
       <button type="button" id="bar-back" aria-label="Back to the conversation" title="Back to the conversation"
         class="icon-btn hidden h-11 w-11 gap-0.5 text-neutral-500"></button>
       <button type="button" id="chat-title" class="min-w-0 truncate text-left font-medium"></button>
-      <span id="chat-phase" class="mr-auto flex flex-none items-center"></span>
-      <button type="button" id="status-chip" title="Status"
-        class="hidden max-w-[45vw] flex-none cursor-pointer truncate rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] font-medium text-neutral-600 hover:bg-neutral-200"></button>
+      <span id="chat-phase" class="flex flex-none items-center"></span>
+      <!-- Always laid out, empty with no rows: its auto margin keeps the meta and ⋯ right. -->
+      <div id="status-lead" class="mr-auto flex min-w-0 items-center gap-0.5 text-[13px]">
+        <button type="button" id="status-item" aria-haspopup="dialog"
+          class="hidden min-w-0 max-w-[36rem] cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 hover:bg-neutral-100">
+          <span id="status-item-dot" class="h-2 w-2 flex-none rounded-full"></span>
+          <span id="status-item-title" class="min-w-0 truncate text-neutral-800 max-md:hidden"></span>
+          <span id="status-item-stage" class="min-w-0 shrink-[3] truncate text-[12px] text-neutral-500 max-md:hidden"></span>
+          <span id="status-item-count" class="text-[12px] tabular-nums text-neutral-600 md:hidden"></span>
+        </button>
+        <button type="button" id="status-next" aria-label="Next open item"
+          class="hidden flex-none cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] tabular-nums text-neutral-500 hover:bg-neutral-100 max-md:hidden"></button>
+      </div>
       <!-- Inline session meta: model · reasoning · current context size. -->
       <div id="session-meta" class="hidden flex-none items-center gap-1 text-[11px]"></div>
       <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
@@ -132,12 +143,6 @@
         </div>
       </div>
     </form>
-    <!-- The status panel's list docked beside the chat from 68.625rem (style.css,
-         drawer.ts); absent while it has no rows. -->
-    <aside id="status-side" aria-label="Status" data-empty class="min-h-0 flex-col font-sans text-sm">
-      <h2 id="status-side-head" class="flex-none px-1.5 pb-1 text-[12px] font-normal text-neutral-500"></h2>
-      <ul id="status-side-list" data-list class="min-h-0 overflow-y-auto overscroll-contain"></ul>
-    </aside>
   </main>
 
   <!-- Full-size view of a thumbnail; a click on the image zooms about the
