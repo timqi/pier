@@ -28,9 +28,10 @@ native-dev:
     cd native/src-tauri && cargo run
 
 # A local bundle under native/src-tauri/target/release/bundle; needs `cargo install tauri-cli --version '^2' --locked`.
+# macOS builds only the .app; Linux keeps Tauri's default bundle target.
 native:
     npx vite build -c native/vite.config.ts
-    cd native/src-tauri && cargo tauri build
+    cd native/src-tauri && if [ "$(uname -s)" = Darwin ]; then cargo tauri build --bundles app; else cargo tauri build; fi
 
 # Non-blank, non-comment lines per area, tests excluded — the Budgets table in AGENTS.md.
 size:
