@@ -255,8 +255,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   progress, tool rows; tool rows reveal args/output, thinking rows
   tail-capped text; an opened log scrolls independently and follows its
   tail; simple replies leave no empty log; interrupted work stays visible. A
-  replayed log whose detail is still on the server (`data-lazy`) fetches it
-  on its first open, once. A compaction (Pi's automatic one) leaves one
+  replayed settled log is drawn on its first open, and one whose detail is
+  still on the server (`data-lazy`) fetches it then, once. A compaction (Pi's automatic one) leaves one
   system line, `context-compacted`, the only trace it leaves anywhere (§5).
 - **Task communication**: runs launched by `pier task run` are run chips of
   the bubble that launched them, updated from `task-status` events; a

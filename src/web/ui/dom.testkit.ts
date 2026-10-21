@@ -71,17 +71,18 @@ class FakeStyle {
 }
 
 /** Compound selectors in a comma list: tag, `#id`, `.class`, `[attr]`, `[attr=v]`,
- *  `:disabled`. Combinators throw rather than match wrongly. */
+ *  `:disabled`, `:not([attr])`. Combinators throw rather than match wrongly. */
 function matcher(selector: string): (el: FakeElement) => boolean {
   const alternatives = (selector.match(/(?:[^,"']|"[^"]*"|'[^']*')+/g) ?? []).map((raw) => {
     const part = raw.trim();
-    const m = /^(\*|[a-z][\w-]*)?((?:#[\w-]+|\.[\w-]+|\[[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\]"']*))?\]|:disabled)*)$/i.exec(part);
+    const m = /^(\*|[a-z][\w-]*)?((?:#[\w-]+|\.[\w-]+|\[[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\]"']*))?\]|:disabled|:not\(\[[\w-]+\]\))*)$/i.exec(part);
     if (!m) throw new Error(`fake DOM: unsupported selector ${JSON.stringify(selector)}`);
     const tests: ((el: FakeElement) => boolean)[] = [];
     const tag = m[1]?.toLowerCase();
     if (tag && tag !== "*") tests.push((el) => el.localName === tag);
-    for (const [token] of m[2]!.matchAll(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:\w+/g)) {
-      if (token[0] === "#") tests.push((el) => el.id === token.slice(1));
+    for (const [token] of m[2]!.matchAll(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:not\(\[[\w-]+\]\)|:\w+/g)) {
+      if (token.startsWith(":not(")) tests.push((el) => !el.hasAttribute(token.slice(6, -2)));
+      else if (token[0] === "#") tests.push((el) => el.id === token.slice(1));
       else if (token[0] === ".") tests.push((el) => el.classList.contains(token.slice(1)));
       else if (token === ":disabled") tests.push((el) => FORM_CONTROLS.has(el.localName) && el.disabled);
       else {

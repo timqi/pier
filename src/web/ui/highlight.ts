@@ -22,7 +22,8 @@ function highlighter(): Promise<HLJSApi | undefined> {
  *  DOMPurify: hljs escapes its output. */
 export async function highlightCode(root: HTMLElement): Promise<void> {
   const hl = await highlighter();
-  if (!hl) return;
+  // Callers attach the root synchronously; one detached by the await was trimmed or replaced.
+  if (!hl || !root.isConnected) return;
   for (const el of root.querySelectorAll<HTMLElement>("pre code[class]")) {
     const lang = /(?:language|lang)-(\S+)/.exec(el.className)?.[1]?.toLowerCase();
     if (!lang || !hl.getLanguage(lang)) continue;

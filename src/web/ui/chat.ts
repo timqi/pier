@@ -104,7 +104,7 @@ function openBubble(closed = false): HTMLElement {
   const bubble = h("div", `group relative ${ROW_STYLE.assistant.row}`);
   bubble.dataset.kind = "assistant";
   if (!closed) bubble.dataset.pending = "";
-  if (readonlyRows) bubble.dataset.readonly = "";
+  markReadonly(bubble);
   if (!bulk) bubble.dataset.enter = "";
   turnsPane.insertBefore(bubble, closed ? pendingBubble() : null);
   return bubble;
@@ -285,11 +285,21 @@ let trimNotice: HTMLElement | null = null;
 
 /** An earlier session of the continuous conversation, rendered read-only above the head. */
 let readonlyRows = false;
+/** A `data-readonly` row is in the pane: only resetChat takes those out. */
+let readonlyShown = false;
+/** The snapshot's head was never drawn, so the notice's count is a floor. */
+let trimmedAtLeast = false;
+
+function markReadonly(row: HTMLElement): void {
+  if (!readonlyRows) return;
+  row.dataset.readonly = "";
+  readonlyShown = true;
+}
 
 /** Called after every append: the pane grows only from the bottom. Never while
  *  earlier sessions are paged in above: they are exactly what was asked for. */
 function trimRows(): void {
-  if (turnsPane.querySelector("[data-readonly]")) return;
+  if (readonlyShown) return;
   let trimmed = false;
   // A seed card on top lost the divider that opens it (folds.ts foldSeed) and goes too.
   while (turnsPane.childElementCount > MAX_ROWS || (turnsPane.firstElementChild as HTMLElement | null)?.dataset.seed !== undefined) {
@@ -306,7 +316,7 @@ function trimRows(): void {
     trimNotice = h("div", "px-5 py-1.5 text-center text-[11.5px] italic text-neutral-400");
     trimNotice.dataset.kind = "trim"; // every row in the pane names its kind
   }
-  trimNotice.textContent = `${trimmedRows} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
+  trimNotice.textContent = `${trimmedRows}${trimmedAtLeast ? "+" : ""} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
   if (turnsPane.firstElementChild !== trimNotice) turnsPane.prepend(trimNotice);
 }
 
@@ -346,7 +356,7 @@ export function appendTurn(
   row.className = `group relative ${s.row}`;
   row.dataset.kind = kind;
   delete row.dataset.pending;
-  if (readonlyRows) row.dataset.readonly = "";
+  markReadonly(row);
   if (grouped) row.dataset.grouped = "";
   if (!bulk && !pending) row.dataset.enter = ""; // History replay must not animate every old message.
   const files = kind === "user" ? splitInboundFiles(text) : null;
@@ -499,10 +509,15 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
   return [meta, text.slice(at + 2)];
 }
 
+function noteCallbackCwd(cwd: string | undefined): void {
+  if (cwd) callbackCwds = [cwd, ...callbackCwds.filter((c) => c !== cwd)];
+}
+
 /** Callbacks and delegations are a cause chip of the turn that answers them,
  *  opening to the exchange: the exchange is the reading, the chip its receipt.
  *  A seed folds into its session's divider. A chat command's answer is what
  *  the user asked to see, so it is a standalone open card and never a turn's. */
+
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
@@ -541,7 +556,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   if (origin.kind === "task-callback") {
     // The child wrote these paths, so they resolve against its cwd, not this session's.
     renderMarkdown(content, body, origin.sourceSessionId ?? deps.sessionId(), origin.cwd ? [origin.cwd] : []);
-    if (origin.cwd) callbackCwds = [origin.cwd, ...callbackCwds.filter((cwd) => cwd !== origin.cwd)];
+    noteCallbackCwd(origin.cwd);
   }
   card.append(head, content);
   if (origin.kind === "chat-command") {
@@ -913,6 +928,8 @@ export function resetChat(): void {
   turnsPane.replaceChildren();
   trimmedUserTurns = 0;
   trimmedRows = 0;
+  trimmedAtLeast = false;
+  readonlyShown = false;
   callbackCwds = [];
   trimNotice = null;
   lastStampAt = null;
@@ -957,6 +974,32 @@ export function appendPager(onClick: () => void): HTMLButtonElement {
   return more;
 }
 
+/** Rows turn `i` is sure to open: a user row and the reply bubble right after
+ *  it, a command card. A floor — chips, cards and stamps open more. */
+function sureRows(turns: ChatTurn[], i: number): number {
+  const t = turns[i]!;
+  if (t.role === "system") return t.origin?.kind === "chat-command" && t.text ? 1 : 0;
+  if (t.role !== "user" || !t.text) return 0;
+  const next = turns[i + 1];
+  return next?.role === "assistant" && (next.text || next.steps?.length || next.cut || next.error) ? 2 : 1;
+}
+
+/** Where a replay starts drawing — a user turn with 2 × MAX_ROWS sure rows from
+ *  it on: the rows the trim keeps and the window each of them looks back on, so
+ *  the pane ends as a whole replay's would — and the sure rows above it. */
+function tailStart(turns: ChatTurn[]): { start: number; skipped: number } {
+  let rows = 0;
+  for (let i = turns.length - 1; i > 0; i--) {
+    rows += sureRows(turns, i);
+    // A user row closes the turn before it: nothing drawn below leans on that one.
+    if (rows < 2 * MAX_ROWS || turns[i]!.role !== "user") continue;
+    let skipped = 0;
+    for (let j = 0; j < i; j++) skipped += sureRows(turns, j);
+    return { start: i, skipped };
+  }
+  return { start: 0, skipped: 0 };
+}
+
 /** Replay a session snapshot into the pane (main.ts fetches, this renders).
  *  `readonly`: an earlier session of the continuous conversation — no edits,
  *  no next-step buttons. */
@@ -975,11 +1018,11 @@ export function renderSnapshot(
   // A run Pier launched, not a turn: its chip finds its kin's (turn-activity.ts).
   const queuedBy = (completedAt: number): string[] =>
     [...unplacedRuns].filter(([, run]) => !run.byPier && run.queuedAt <= completedAt).map(([runId]) => runId);
-  const placeRuns = (runIds: string[]): void => {
+  const placeRuns = (runIds: string[], skip = false): void => {
     for (const runId of runIds) {
       const run = unplacedRuns.get(runId);
       if (!run) continue;
-      renderBackgroundRun(run);
+      if (!skip) renderBackgroundRun(run);
       unplacedRuns.delete(runId);
     }
   };
@@ -989,24 +1032,40 @@ export function renderSnapshot(
   const lastAssistant = readonly ? -1 : turns.reduce((acc, t, i) => (t.role === "assistant" && t.text && !t.error && !t.cut ? i : acc), -1);
   bulk = true;
   readonlyRows = readonly;
+  // The trim never runs above paged-in sessions, so there every row is drawn.
+  const { start, skipped } = readonly || readonlyShown ? { start: 0, skipped: 0 } : tailStart(turns);
+  if (start) {
+    trimmedRows = skipped;
+    trimmedAtLeast = true;
+  }
   try {
     for (const [i, t] of turns.entries()) {
+      // Above `start` only what outlives a trimmed row: placed runs, cwds, the clock, the edit index.
+      const skip = i < start;
       // The last assistant entry of a running snapshot is still provisional.
       const live = state === "streaming" && i === turns.length - 1 && t.role === "assistant";
       const steps = t.steps ?? [];
       // A cut turn with no steps still gets its chip: the cut is the only thing it has to show.
       if (steps.length || t.cut) {
-        replayActivity(steps, t.meta?.durationMs, live, i, t.error ? "failed" : t.cut ? "restarted" : undefined);
+        if (!skip) replayActivity(steps, t.meta?.durationMs, live, i, t.error ? "failed" : t.cut ? "restarted" : undefined);
         // Launched during the turn: chips of the bubble the answer fills.
-        if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
+        if (t.meta) placeRuns(queuedBy(t.meta.completedAt), skip);
         // Cut short before it spoke: the steps chip is the bubble's whole content.
-        if (!live && !t.text && !t.error) endTurn();
+        if (!skip && !live && !t.text && !t.error) endTurn();
       }
       if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
-        if (t.origin.kind === "restart") { if (t.origin.runId) placeRuns([t.origin.runId]); }
-        else if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
-        appendSystemInput(t.text, t.origin);
+        if (t.origin.kind === "restart") { if (t.origin.runId) placeRuns([t.origin.runId], skip); }
+        else if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]), skip);
+        if (!skip) appendSystemInput(t.text, t.origin);
+        else if (t.origin.kind === "task-callback") noteCallbackCwd(t.origin.cwd);
+        continue;
+      }
+      if (skip) {
+        if (t.role === "user" && t.text) {
+          trimmedUserTurns++;
+          if (t.at !== undefined) lastStampAt = t.at;
+        }
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.

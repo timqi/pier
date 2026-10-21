@@ -142,6 +142,27 @@ it("trims a seed's card with the divider that opens it", () => {
   expect(doc.querySelector("#turns")!.querySelector("[data-seed]")).toBeNull();
 });
 
+it("replays only the tail a long snapshot keeps, and an edit still names its turn", async () => {
+  const fetch = vi.fn(async (_url: string) => Response.json({ error: "nope" }, { status: 409 }));
+  vi.stubGlobal("fetch", fetch);
+  const turns = Array.from({ length: 1200 }, (_, i) => [
+    { role: "user" as const, text: `u${i}` },
+    { role: "assistant" as const, text: `a${i}`, meta: { completedAt: i, durationMs: 1, tokens: 1 } },
+  ]).flat();
+  chat.renderSnapshot(turns, "idle", []);
+  const pane = doc.querySelector("#turns")!;
+  expect(pane.childElementCount).toBe(501);
+  // The skipped head is counted by the rows it was sure to open: here every one.
+  expect(pane.children[0]!.textContent).toMatch(/^1900\+ earlier rows not shown/);
+  const user = pane.children[1]!;
+  expect(user.textContent).toContain("u950");
+  expect(pane.children.at(-1)!.textContent).toContain("a1199");
+  fake(user.querySelector(".message-tools")!.querySelector("button")).onclick!();
+  fake(user.querySelectorAll("button").find((b) => b.textContent === "Send edit")).onclick!();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+  expect(fetch.mock.calls[0]![0]).toBe("/api/sessions/h1/turns/950/edit");
+});
+
 it("shows a callback without the language stamp the model reads", () => {
   chat.appendSystemInput('[lang=zh]\nTask "fix it" finished with state: succeeded\nrun r1\n\nAll green.', {
     kind: "task-callback", taskId: "t1", runId: "run45678xyz", sourceSessionId: "s-run", state: "succeeded",
@@ -1409,6 +1430,38 @@ describe("the turn's bubble", () => {
     const buttons = bubble().querySelectorAll("button").filter((b) => b.textContent === "Ship it");
     buttons[0]!.onclick?.();
     expect(send).toHaveBeenCalledWith("auto", "Ship it", { role: "assistant", at: 2, text: "Done.\n\n---\n[Ship it] | [Wait]" });
+  });
+
+  it("draws a replayed log on its first open, as the live stream left it", () => {
+    const log = () => details()[0]!;
+    const rows = () => log().children.map((r) => [r.dataset.kind, r.dataset.state, r.textContent]);
+    chat.appendTurn("user", "go", false, 1);
+    activity.activityThinking(1, "weighing it\n");
+    activity.activityThinking(1, "the plan");
+    activity.activityToolStart(1, "c1", "bash", { cmd: "ls" });
+    activity.activityToolEnd("c1", true, "boom");
+    activity.activityProgress(1, "Looking");
+    activity.activityToolStart(1, "c2", "read", { path: "a" });
+    chat.completeTurn("Done.", { completedAt: 5, durationMs: 1000, tokens: 1 });
+    const live = [rows(), stepsChip().dataset.status];
+    chat.resetChat();
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: "Done.", meta: { completedAt: 5, durationMs: 1000, tokens: 1 }, steps: [
+        { kind: "thinking", text: "weighing it\n" },
+        { kind: "thinking", text: "the plan" },
+        { kind: "tool", id: "c1", toolName: "bash", args: { cmd: "ls" }, done: true, isError: true, output: "boom" },
+        { kind: "progress", text: "Looking" },
+        { kind: "tool", id: "c2", toolName: "read", args: { path: "a" }, done: false },
+      ] },
+    ], "idle", []);
+    expect(stepsChip().textContent).toMatch(/^interrupted · 4 steps/);
+    expect(log().children).toEqual([]);
+    stepsChip().onclick?.();
+    expect([rows(), stepsChip().dataset.status]).toEqual(live);
+    stepsChip().onclick?.();
+    stepsChip().onclick?.();
+    expect(log().children).toHaveLength(4);
   });
 
   it("opens each chip on its own click only; a replayed log fetches its detail on the first", async () => {

@@ -276,6 +276,7 @@ interface Activity {
   toolRows: Map<string, ToolRow>;
   thinking: Thinking | null;
   steps: number;
+  tools: number;
   failedSteps: number;
   startTs: number;
   sawError: boolean; // turn-level error event — fails the whole group
@@ -300,13 +301,13 @@ let think: Thinking | null = null;
 let thinkTimer: ReturnType<typeof setTimeout> | null = null;
 let thinkDirty = false;
 
-function drawThinking(): void {
-  if (!think) return;
-  think.text = think.text.slice(-4000);
-  think.pre.textContent = think.text;
+function drawThinking(row = think): void {
+  if (!row) return;
+  row.text = row.text.slice(-4000);
+  row.pre.textContent = row.text;
   // Markdown emphasis and heading marks on the label line read as noise.
-  const line = (think.text.split("\n").filter(Boolean).pop() ?? "").replace(/^[\s*_#]+|[\s*_]+$/g, "") || "thinking…";
-  const label = think.summary.lastElementChild as HTMLElement;
+  const line = (row.text.split("\n").filter(Boolean).pop() ?? "").replace(/^[\s*_#]+|[\s*_]+$/g, "") || "thinking…";
+  const label = row.summary.lastElementChild as HTMLElement;
   label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
 }
 
@@ -403,7 +404,7 @@ function ensureActivity(ts: number): Activity {
   tailFollow(el, rowsEl);
   turns.chip(el, rowsEl);
   turns.scroll();
-  activity = { chip: el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
+  activity = { chip: el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, tools: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
 }
 
@@ -414,15 +415,19 @@ export function activityProgress(ts: number, text: string): void {
   flushThinking();
   a.thinking = null;
   a.steps += 1;
+  a.rowsEl.append(progressRow(text));
+  activityHeadline(a, "running", "writing…");
+  tailSteps(a);
+  turns.scroll();
+}
+
+function progressRow(text: string): HTMLElement {
   const node = h("div", "whitespace-pre-wrap break-words text-[12.5px] text-neutral-600", text);
   // 2px edge + pl-5 lands the text on the tool rows' column (px-1 + h-3 chevron + gap-1.5);
   // the hairline is the one mark that says the model is speaking.
   const row = h("div", "border-l-2 border-neutral-200 py-0.5 pl-5", node);
   row.dataset.kind = "progress";
-  a.rowsEl.append(row);
-  activityHeadline(a, "running", "writing…");
-  tailSteps(a);
-  turns.scroll();
+  return row;
 }
 
 /** Opening lands on the newest step and a running group follows the tail;
@@ -465,22 +470,21 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
 export function finishActivity(status: ActivityStatus): void {
   if (!activity) return;
   flushThinking(); // the last tokens of the turn are part of the turn
-  // Any still-running tool rows were cut short.
+  // Any still-running tool rows were cut short; a log not drawn yet marks its own (drawSteps).
   for (const row of activity.toolRows.values()) {
     if (row.el.dataset.state === "running") toolState(row, "interrupted");
   }
   // One failed step doesn't fail the group — its red row says enough. All-red
   // is reserved for every tool step failing, or a turn-level error (sawError),
   // which wins over a tool it cut short so live and replay agree.
-  const toolSteps = rowsOf(activity.chip).length;
-  const allFailed = toolSteps > 0 && activity.failedSteps === toolSteps;
+  const allFailed = activity.tools > 0 && activity.failedSteps === activity.tools;
   activityHeadline(
     activity,
     activity.sawError || (allFailed && status === "done") ? "failed"
       : status === "done" && activity.toolRows.size ? "interrupted" : status,
   );
   // A log with nothing in it (a turn cut before its first step) is no disclosure.
-  if (!activity.rowsEl.childElementCount) {
+  if (!activity.steps) {
     chipDetails.delete(activity.chip);
     activity.chip.removeAttribute("aria-expanded");
     activity.chip.onclick = null;
@@ -504,8 +508,19 @@ function argsPreview(argsText: string): string {
 export function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
   const a = ensureActivity(ts);
   a.steps += 1;
+  a.tools += 1;
   flushThinking(); // the preceding thinking row stops receiving text here
   a.thinking = null;
+  const row = toolRow(a.chip, id, name, args);
+  toolState(row, "running");
+  a.toolRows.set(id, row);
+  a.rowsEl.append(row.el);
+  tailSteps(a);
+  activityHeadline(a, "running", name);
+  turns.scroll();
+}
+
+function toolRow(group: HTMLElement, id: string, name: string, args: unknown): ToolRow {
   const argsText = JSON.stringify(args, null, 2) ?? "";
   const statusEl = h("span", "ml-auto flex flex-none");
   // min-w-0, or a flex item's min-content floor keeps an unbreakable argument
@@ -521,14 +536,8 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   el.append(h("div", "mt-1.5 flex flex-col gap-1 pl-4", argsPre, outputPre));
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
-  rowsOf(a.chip).push({ tool: name, call: id, preview, argsPre, outputPre });
-  const row = { el, statusEl, outputPre };
-  toolState(row, "running");
-  a.toolRows.set(id, row);
-  a.rowsEl.append(el);
-  tailSteps(a);
-  activityHeadline(a, "running", name);
-  turns.scroll();
+  rowsOf(group).push({ tool: name, call: id, preview, argsPre, outputPre });
+  return { el, statusEl, outputPre };
 }
 
 /** The row's state is on its element, the glyph its only rendering: the same
@@ -548,35 +557,42 @@ export function activityToolEnd(id: string, isError: boolean, output: string): v
   const row = a.toolRows.get(id);
   a.toolRows.delete(id);
   if (row) {
-    toolState(row, isError ? "failed" : "succeeded");
-    if (output) {
-      row.outputPre.textContent =
-        output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
-      row.outputPre.classList.remove("hidden");
-    }
+    endTool(row, isError, output);
     if (isError) a.failedSteps += 1;
   }
   activityHeadline(a, "running");
+}
+
+function endTool(row: ToolRow, isError: boolean, output: string): void {
+  toolState(row, isError ? "failed" : "succeeded");
+  if (!output) return;
+  row.outputPre.textContent = output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
+  row.outputPre.classList.remove("hidden");
 }
 
 export function activityThinking(ts: number, text: string): void {
   const a = ensureActivity(ts);
   if (!a.thinking) {
     flushThinking(); // whatever the previous row was still owed
-    const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
-      h("span", "min-w-0 truncate", "thinking…"),
-    ]);
-    const pre = h("div", "mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
-    el.append(pre);
+    const { el, row } = thinkingRow();
     a.rowsEl.append(el);
     a.steps += 1;
-    a.thinking = { pre, summary, text: "" };
+    a.thinking = row;
     think = a.thinking;
     tailSteps(a);
     activityHeadline(a, "running", "thinking…");
   }
   a.thinking.text += text;
   paintThinking();
+}
+
+function thinkingRow(): { el: HTMLElement; row: Thinking } {
+  const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
+    h("span", "min-w-0 truncate", "thinking…"),
+  ]);
+  const pre = h("div", "mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
+  el.append(pre);
+  return { el, row: { pre, summary, text: "" } };
 }
 
 /** Through the same functions the live stream drives, so a reload shows the
@@ -597,39 +613,73 @@ export function replayActivity(
   const start = Date.now() - durationMs; // headline duration is now - startTs
   // Detail still on the server: fetched on the first open.
   const lazy = turnIndex !== undefined && steps.some((s) => s.kind === "tool" && s.args === undefined);
-  const group = ensureActivity(start).chip;
+  const a = ensureActivity(start);
+  const group = a.chip;
   if (lazy) group.dataset.lazy = "";
-  for (const s of steps) {
-    if (s.kind === "progress") {
-      activityProgress(start, s.text ?? "");
-      continue;
-    }
-    if (s.kind === "thinking") {
-      activityThinking(start, s.text ?? "");
-      continue;
-    }
-    // Real tool call ids when the snapshot has them: a live tool-end for a
-    // replayed row then closes that row instead of missing it.
-    const id = s.id ?? `replay-${++replaySeq}`;
-    activityToolStart(start, id, s.toolName ?? "", s.args);
-    // `done` and not "has output": the snapshot carries no output, so reading
-    // absence as "cut short" marked every replayed step interrupted.
-    if (s.done) activityToolEnd(id, s.isError ?? false, s.output ?? "");
-  }
-  if (lazy) onFirstOpen(group, turnIndex);
   // The turn still running keeps its group open, so the live stream counts on
   // into it instead of opening a second bubble beneath the replayed one.
-  if (live) return;
+  if (live) {
+    for (const s of steps) {
+      if (s.kind === "progress") activityProgress(start, s.text ?? "");
+      else if (s.kind === "thinking") activityThinking(start, s.text ?? "");
+      else {
+        // Real tool call ids when the snapshot has them: a live tool-end for a
+        // replayed row then closes that row instead of missing it.
+        const id = s.id ?? `replay-${++replaySeq}`;
+        activityToolStart(start, id, s.toolName ?? "", s.args);
+        // `done` and not "has output": the snapshot carries no output, so reading
+        // absence as "cut short" marked every replayed step interrupted.
+        if (s.done) activityToolEnd(id, s.isError ?? false, s.output ?? "");
+      }
+    }
+    if (lazy) onFirstOpen(group, () => void fillDetail(group, turnIndex!));
+    return;
+  }
+  // A settled group's log is drawn on its first open: most are never opened.
+  const tools = steps.filter((s) => s.kind === "tool");
+  // Thinking runs on into the row before it until a tool or progress row (activityThinking).
+  a.steps = steps.filter((s, i) => s.kind !== "thinking" || steps[i - 1]?.kind !== "thinking").length;
+  a.tools = tools.length;
+  a.failedSteps = tools.filter((s) => s.done && s.isError).length;
+  if (steps.length) onFirstOpen(group, () => {
+    drawSteps(group, a.rowsEl, steps);
+    if (lazy) void fillDetail(group, turnIndex!);
+  });
   if (end === "failed") noteTurnError();
-  finishActivity(end === "restarted" ? "restarted" : steps.some((s) => s.kind === "tool" && !s.done) ? "interrupted" : "done");
+  finishActivity(end === "restarted" ? "restarted" : tools.some((s) => !s.done) ? "interrupted" : "done");
+}
+
+/** The rows the live functions would have appended, in their final state. */
+function drawSteps(group: HTMLElement, rowsEl: HTMLElement, steps: ActivityStep[]): void {
+  let thinking: Thinking | null = null;
+  for (const s of steps) {
+    if (s.kind === "thinking") {
+      if (!thinking) {
+        const made = thinkingRow();
+        rowsEl.append(made.el);
+        thinking = made.row;
+      }
+      thinking.text += s.text ?? "";
+      drawThinking(thinking);
+      continue;
+    }
+    thinking = null;
+    if (s.kind === "progress") rowsEl.append(progressRow(s.text ?? ""));
+    else {
+      const row = toolRow(group, s.id ?? `replay-${++replaySeq}`, s.toolName ?? "", s.args);
+      if (s.done) endTool(row, s.isError ?? false, s.output ?? "");
+      else toolState(row, "interrupted");
+      rowsEl.append(row.el);
+    }
+  }
 }
 
 /** Args and output are ~90% of a transcript and live behind this very chip,
  *  so they travel per opened group, one request for the whole group. */
-function onFirstOpen(group: HTMLElement, turnIndex: number): void {
+function onFirstOpen(group: HTMLElement, open: () => void): void {
   lazyLoaders.set(group, () => {
     lazyLoaders.delete(group);
-    void fillDetail(group, turnIndex);
+    open();
   });
 }
 
