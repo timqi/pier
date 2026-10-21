@@ -280,6 +280,9 @@ fn set_badge(app: AppHandle, shell: State<'_, Shell>, webview: Webview, count: u
 
 #[tauri::command]
 fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String) -> Res {
+    if !url.starts_with("/app/") {
+        return surfaced(&app, Err(format!("not a workbench path: {url}")));
+    }
     let shown = app
         .notification()
         .builder()
@@ -333,7 +336,13 @@ fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
         .ok_or_else(|| "the window is gone".to_owned())
         .and_then(|w| w.unminimize().and_then(|()| w.show()).and_then(|()| w.set_focus()).map_err(text))
         .and_then(|()| show_instance(app, &app.state::<Shell>(), id))
-        .and_then(|()| app.emit_to(id, "open-url", Value::from(url)).map_err(text));
+        // Set from here, not sent as an event: an instance page holds no event
+        // permission, so no page can hear another's.
+        .and_then(|()| app.get_webview(id).ok_or_else(|| format!("{id} has no webview")))
+        .and_then(|w| {
+            let hash = url.split_once('#').map_or("", |(_, hash)| hash);
+            w.eval(format!("location.hash = {}", Value::from(hash))).map_err(text)
+        });
     if let Err(e) = opened {
         report(app, format!("opening a notification: {e}"));
     }

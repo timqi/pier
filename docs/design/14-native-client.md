@@ -41,7 +41,8 @@ one ~30-line module; in a browser every call is a no-op.
   ignores the event (push already covers it); in the shell the bridge hands
   it to the native notification. Body is the same `preview(reply.text)` the
   push sends — the topic is in it. Click: the shell focuses the window and
-  that instance, and the UI navigates to `url`.
+  that instance and sets the page's hash from `url` itself; an instance page
+  holds no event permission, so no page can hear the rail's or another's.
 - **Visibility**: a hidden instance's webview must read
   `document.hidden === true`, or the UI acks every turn as seen
   (`main.ts:315`) and nothing is ever unread. The shell hides, not merely

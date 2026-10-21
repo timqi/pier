@@ -47,7 +47,7 @@ import {
 } from "./composer.js";
 import { initPush } from "./notifications.js";
 import { initReport } from "./report.js";
-import { notify, onOpenUrl } from "./shell.js";
+import { notify } from "./shell.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
@@ -697,13 +697,6 @@ document.addEventListener("gesturestart", (ev) => ev.preventDefault());
 // turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
-
-// A native notification's click, as sw.js answers a push's: the same
-// `/app/#/…` target, its hash handed to the router.
-onOpenUrl((url) => {
-  if (url.startsWith("/app/")) location.hash = new URL(url, location.origin).hash;
-  else console.warn(`shell: refused to open ${url}`);
-});
 
 connectWorkspace();
 void refreshSessions().then(applyRoute);
