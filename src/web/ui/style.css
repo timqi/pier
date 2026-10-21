@@ -375,7 +375,6 @@ main > section, #turns { grid-row: 1 / -1; }
   main #turns { padding-inline: var(--block-l) var(--block-r); }
   main #queue-panel { margin-inline: var(--block-l) var(--block-r); }
   main #composer { padding-inline: var(--block-l) var(--block-r); }
-  main #composer > div { margin-inline: 0; }
   /* The assistant bubble's material: a reading surface like the replies, not glass. */
   main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
     display: flex;
