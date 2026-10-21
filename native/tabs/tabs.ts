@@ -1,6 +1,8 @@
-// The rail: a row per Pier instance. Every action is a shell command, every state a `state` event from it.
+// The tab bar, which is also the title bar: a tab per Pier instance. Every action is a shell
+// command, every state a `state` event from it.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface Row {
   id: string;
@@ -16,10 +18,14 @@ const list = document.querySelector<HTMLUListElement>("#instances")!;
 const form = document.querySelector<HTMLFormElement>("#add")!;
 const input = document.querySelector<HTMLInputElement>("#add input")!;
 const toast = document.querySelector<HTMLElement>("#toast")!;
+const button = (id: string): HTMLButtonElement => document.querySelector<HTMLButtonElement>(`#${id}`)!;
+
+// macOS keeps its own traffic lights at the bar's left end; elsewhere the bar draws the buttons.
+if (navigator.userAgent.includes("Mac")) document.documentElement.dataset.os = "mac";
 
 let hideToast = 0;
 function fail(error: unknown): void {
-  toast.textContent = String(error);
+  toast.textContent = toast.title = String(error);
   toast.hidden = false;
   clearTimeout(hideToast);
   hideToast = window.setTimeout(() => (toast.hidden = true), 8000);
@@ -38,7 +44,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "
   return node;
 }
 
-function rename(row: Row, name: HTMLElement): void {
+function rename(row: Pick<Row, "id" | "name">, name: HTMLElement): void {
   editing = true;
   name.contentEditable = "plaintext-only";
   name.focus();
@@ -72,6 +78,10 @@ function render(rows: Row[]): void {
     ...rows.map((row, index) => {
       const li = el("li", row.active ? "active" : "");
       li.title = row.url;
+      li.dataset.id = row.id;
+      li.dataset.name = row.name;
+      li.role = "tab";
+      li.ariaSelected = String(row.active);
       li.draggable = true;
       const dot = el("span", "dot");
       if (row.accent) dot.style.background = row.accent;
@@ -79,10 +89,10 @@ function render(rows: Row[]): void {
       const remove = el("button", "remove", "×");
       remove.title = "Remove";
       li.append(dot, name, el("span", "unread", row.unread ? String(row.unread) : ""), remove);
-      li.onclick = () => {
-        if (!editing) void call("select", { id: row.id });
+      li.onclick = (e) => {
+        // Selecting focuses the instance's page, which would end the rename a double click's second click starts.
+        if (!editing && e.detail === 1) void call("select", { id: row.id });
       };
-      name.ondblclick = () => rename(row, name);
       remove.onclick = (e) => {
         e.stopPropagation();
         if (li.classList.contains("confirm")) return void call("remove", { id: row.id });
@@ -105,11 +115,18 @@ function render(rows: Row[]): void {
   );
 }
 
+// On the list, which outlives a render: the first click's `select` re-renders every tab.
+list.ondblclick = (e) => {
+  const name = (e.target as Element).closest<HTMLElement>(".name");
+  const { id, name: was } = name?.closest("li")?.dataset ?? {};
+  if (name && id && was !== undefined) rename({ id, name: was }, name);
+};
+
 function openAdd(): void {
   form.hidden = false;
   input.focus();
 }
-document.querySelector<HTMLButtonElement>("#plus")!.onclick = openAdd;
+button("plus").onclick = openAdd;
 input.onkeydown = (e) => {
   if (e.key === "Escape") form.hidden = true;
 };
@@ -119,6 +136,31 @@ form.onsubmit = (e) => {
     form.hidden = true;
     input.value = "";
   }, fail);
+};
+
+toast.onclick = () => (toast.hidden = true);
+const win = getCurrentWindow();
+button("minimize").onclick = () => win.minimize().catch(fail);
+button("maximize").onclick = () => win.toggleMaximize().catch(fail);
+button("close").onclick = () => win.close().catch(fail);
+
+// The bar's empty space moves the window. The drag starts on the first move, not the press:
+// GTK's move grab would swallow a double click's second press.
+let pressed = false;
+document.body.onmousedown = (e) => {
+  if (e.button !== 0 || (e.target as Element).closest("li, button, form, #toast")) return;
+  if (e.detail === 2) void win.toggleMaximize().catch(fail);
+  pressed = e.detail === 1;
+};
+document.body.onmousemove = (e) => {
+  if (!pressed || e.buttons !== 1) return;
+  pressed = false;
+  void win.startDragging().catch(fail);
+};
+document.body.onmouseup = () => (pressed = false);
+button("menu").onclick = (e) => {
+  const at = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  void call("popup", { x: at.left, y: at.bottom });
 };
 
 await listen<Row[]>("state", (e) => render(e.payload));

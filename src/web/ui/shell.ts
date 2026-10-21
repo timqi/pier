@@ -37,5 +37,5 @@ function accentHex(): string | undefined {
 }
 
 // The server writes `$PIER_TITLE` into the page title and the accent onto
-// `<html>`; the shell names and colours the instance's rail row from them.
+// `<html>`; the shell names and colours the instance's tab from them.
 if (tauri) invoke("page_title", { title: document.title, accent: accentHex() });

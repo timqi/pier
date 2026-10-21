@@ -1,4 +1,4 @@
-//! Pier's native client: one window, a rail of Pier instances, one webview per instance.
+//! Pier's native client: one frameless window, a tab per Pier instance over one webview each.
 
 mod store;
 
@@ -25,8 +25,9 @@ use tauri::{
 use tauri_plugin_notification::{ActionPerformed, NotificationExt};
 
 const WINDOW: &str = "main";
-const RAIL: &str = "rail";
-const RAIL_WIDTH: f64 = 200.0;
+const TABS: &str = "tabs";
+const TABS_HEIGHT: f64 = 38.0;
+const INSTANCES: &str = "instances";
 
 type Res<T = ()> = Result<T, String>;
 
@@ -42,7 +43,7 @@ struct Live {
     unread: HashMap<String, u32>,
     accent: HashMap<String, String>,
     active: Option<String>,
-    /// What went wrong before the rail could show it; `list` hands it over.
+    /// What went wrong before the tab bar could show it; `list` hands it over.
     startup_error: Option<String>,
     badge_logged: bool,
 }
@@ -69,15 +70,15 @@ fn position(all: &[Instance], id: &str) -> Res<usize> {
     all.iter().position(|i| i.id == id).ok_or_else(|| format!("no instance {id}"))
 }
 
-/// Logs `message` and shows it on the rail: a failure is never only a log line.
+/// Logs `message` and shows it on the tab bar: a failure is never only a log line.
 fn report(app: &AppHandle, message: impl Display) {
     eprintln!("pier-client: {message}");
-    if let Err(e) = app.emit_to(RAIL, "error", message.to_string()) {
-        eprintln!("pier-client: the rail missed that: {e}");
+    if let Err(e) = app.emit_to(TABS, "error", message.to_string()) {
+        eprintln!("pier-client: the tab bar missed that: {e}");
     }
 }
 
-/// An instance's command failing shows on the rail too, not only in its page's console.
+/// An instance's command failing shows on the tab bar too, not only in its page's console.
 fn surfaced(app: &AppHandle, result: Res) -> Res {
     if let Err(e) = &result {
         report(app, e);
@@ -85,7 +86,7 @@ fn surfaced(app: &AppHandle, result: Res) -> Res {
     result
 }
 
-/// Pushes the rows to the rail and their unread sum to the Dock / taskbar badge.
+/// Pushes the tabs to the tab bar and their unread sum to the Dock / taskbar badge.
 fn publish(app: &AppHandle, live: &mut Live) {
     let rows: Vec<Value> = live
         .instances
@@ -96,8 +97,8 @@ fn publish(app: &AppHandle, live: &mut Live) {
                     "active": live.active.as_ref() == Some(&i.id) })
         })
         .collect();
-    if let Err(e) = app.emit_to(RAIL, "state", &rows) {
-        eprintln!("pier-client: the rail missed a state: {e}");
+    if let Err(e) = app.emit_to(TABS, "state", &rows) {
+        eprintln!("pier-client: the tab bar missed a state: {e}");
     }
     // Saturating: each count is a page's to choose, and an overflow panics a debug build.
     let total = live.unread.values().fold(0u32, |sum, &n| sum.saturating_add(n));
@@ -123,50 +124,93 @@ fn edit(app: &AppHandle, shell: &Shell, change: impl FnOnce(&mut Vec<Instance>) 
     Ok(())
 }
 
-/// The rail docked left at a fixed width, every instance filling the rest; on Linux these
-/// calls are no-ops and GTK lays out the row `dock` builds.
+/// The tab bar across the top at a fixed height, every instance filling the rest; on Linux
+/// these calls are no-ops and GTK lays out the window's box, where `dock` fixes the bar.
 fn layout(window: &Window) -> tauri::Result<()> {
     let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
     for webview in window.webviews() {
-        let (x, width) =
-            if webview.label() == RAIL { (0.0, RAIL_WIDTH) } else { (RAIL_WIDTH, (size.width - RAIL_WIDTH).max(0.0)) };
-        webview.set_position(LogicalPosition::new(x, 0.0))?;
-        webview.set_size(LogicalSize::new(width, size.height))?;
+        let (y, height) =
+            if webview.label() == TABS { (0.0, TABS_HEIGHT) } else { (TABS_HEIGHT, size.height - TABS_HEIGHT) };
+        webview.set_position(LogicalPosition::new(0.0, y))?;
+        webview.set_size(LogicalSize::new(size.width, height))?;
     }
     Ok(())
 }
 
-/// GTK packs each child webview into the window's vertical box, where position and size are
-/// no-ops: each moves into Pier's horizontal row under the menu bar, the rail at its fixed width.
+/// GTK packs each child webview into the window's vertical box, expanding, in creation order:
+/// the tab bar, created first, is held at its height and every instance below shares the rest.
 #[cfg(target_os = "linux")]
 fn dock(webview: &Webview) -> tauri::Result<()> {
     use gtk::prelude::*;
-    const ROW: &str = "pier-row";
-    let (app, label, rail) = (webview.app_handle().clone(), webview.label().to_owned(), webview.label() == RAIL);
+    let (app, tabs) = (webview.app_handle().clone(), webview.label() == TABS);
     webview.with_webview(move |platform| {
         let widget = platform.inner().upcast::<gtk::Widget>();
+        resize_edges(&widget);
+        if !tabs {
+            return;
+        }
         let Some(vbox) = widget.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) else {
-            return report(&app, format!("layout: {label} is not in the window's box"));
+            return report(&app, "layout: the tab bar is not in the window's box");
         };
-        let row = match vbox.children().into_iter().find(|c| c.widget_name() == ROW) {
-            Some(found) => match found.downcast::<gtk::Box>() {
-                Ok(row) => row,
-                Err(_) => return report(&app, format!("layout: {ROW} is not a box; {label} left where GTK put it")),
-            },
-            None => {
-                let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                row.set_widget_name(ROW);
-                vbox.pack_start(&row, true, true, 0);
-                row.show();
-                row
+        vbox.set_child_packing(&widget, false, true, 0, gtk::PackType::Start);
+        widget.set_size_request(-1, TABS_HEIGHT as i32);
+        // GTK fires only a drawable item's accelerator: each item of the hidden menu bar says it can.
+        let mut items: Vec<gtk::Widget> = vbox.children().into_iter().filter(|c| c.is::<gtk::MenuBar>()).collect();
+        while let Some(item) = items.pop() {
+            item.connect_can_activate_accel(|_, _| true);
+            if let Some(shell) = item.downcast_ref::<gtk::Container>() {
+                items.extend(shell.children());
             }
-        };
-        vbox.remove(&widget);
-        row.pack_start(&widget, !rail, true, 0);
-        if rail {
-            widget.set_size_request(RAIL_WIDTH as i32, -1);
+            if let Some(menu) = item.downcast_ref::<gtk::MenuItem>().and_then(|i| i.submenu()) {
+                items.push(menu);
+            }
         }
     })
+}
+
+/// Tauri arms an undecorated window's resize edges on its content webview only, and tao on
+/// the window, which the webviews cover: each child webview takes the edges it lies on.
+#[cfg(target_os = "linux")]
+fn resize_edges(widget: &gtk::Widget) {
+    use gtk::{gdk, gdk::WindowEdge::*, glib::Propagation, prelude::*};
+    fn edge(widget: &gtk::Widget, (x, y): (f64, f64)) -> Option<(gdk::Window, gdk::WindowEdge, &'static str)> {
+        let full = gdk::WindowState::MAXIMIZED | gdk::WindowState::FULLSCREEN;
+        let frame = widget.toplevel()?.window().filter(|f| !f.state().intersects(full))?;
+        let ((left, top), inset) = (frame.position(), f64::from(5 * frame.scale_factor()));
+        let (x, y) = (x - f64::from(left), y - f64::from(top));
+        let (w, h) = (f64::from(frame.width()), f64::from(frame.height()));
+        let (edge, cursor) = match (y < inset, y >= h - inset, x < inset, x >= w - inset) {
+            (true, _, true, _) => (NorthWest, "nw-resize"),
+            (true, _, _, true) => (NorthEast, "ne-resize"),
+            (true, ..) => (North, "n-resize"),
+            (_, true, true, _) => (SouthWest, "sw-resize"),
+            (_, true, _, true) => (SouthEast, "se-resize"),
+            (_, true, ..) => (South, "s-resize"),
+            (_, _, true, _) => (West, "w-resize"),
+            (_, _, _, true) => (East, "e-resize"),
+            _ => return None,
+        };
+        Some((frame, edge, cursor))
+    }
+    widget.add_events(gdk::EventMask::POINTER_MOTION_MASK | gdk::EventMask::BUTTON_PRESS_MASK);
+    // WebKit sets the cursor only when its own changes, so leaving an edge resets ours here.
+    let armed = std::cell::Cell::new(false);
+    widget.connect_motion_notify_event(move |widget, event| {
+        let Some(own) = widget.window() else { return Propagation::Proceed };
+        let cursor = edge(widget, event.root()).and_then(|(_, _, name)| gdk::Cursor::from_name(&own.display(), name));
+        if armed.replace(cursor.is_some()) || cursor.is_some() {
+            own.set_cursor(cursor.as_ref());
+        }
+        cursor.map_or(Propagation::Proceed, |_| Propagation::Stop)
+    });
+    widget.connect_button_press_event(|widget, event| match edge(widget, event.root()) {
+        Some((frame, edge, _)) if event.button() == 1 => {
+            let (x, y) = event.root();
+            frame.begin_resize_drag(edge, 1, x as i32, y as i32, event.time());
+            Propagation::Stop
+        }
+        _ => Propagation::Proceed,
+    });
 }
 
 /// A link the page opens in a new window goes to the system browser.
@@ -195,7 +239,7 @@ fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res
         });
     #[cfg(target_os = "macos")]
     let builder = builder.data_store_identifier(store::store_key(&instance.id));
-    let at = LogicalPosition::new(RAIL_WIDTH, 0.0);
+    let at = LogicalPosition::new(0.0, TABS_HEIGHT);
     let webview = window.add_child(builder, at, LogicalSize::new(1.0, 1.0)).map_err(text)?;
     #[cfg(target_os = "linux")]
     dock(&webview).map_err(text)?;
@@ -231,7 +275,7 @@ fn show_at(app: &AppHandle, shell: &Shell, pick: impl FnOnce(Option<usize>, usiz
     id.map_or(Ok(()), |id| show_instance(app, shell, &id))
 }
 
-/// The rail is ready: it gets the rows, and anything that failed before it could listen.
+/// The tab bar is ready: it gets the tabs, and anything that failed before it could listen.
 #[tauri::command]
 fn list(app: AppHandle, shell: State<'_, Shell>) -> Res {
     let mut live = shell.lock();
@@ -396,12 +440,22 @@ fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
     }
 }
 
-/// Accelerators on the app menu, so they fire while an instance's page has focus.
+/// The tab bar's menu button: the Instances menu, dropped at `x`, `y` in the bar.
+#[tauri::command]
+fn popup(app: AppHandle, window: Window, x: f64, y: f64) -> Res {
+    let menu = app.menu().and_then(|m| m.get(INSTANCES)).and_then(|i| i.as_submenu().cloned());
+    let menu = menu.ok_or("no Instances menu")?;
+    window.popup_menu_at(&menu, LogicalPosition::new(x, y)).map_err(text)
+}
+
+/// Accelerators on the app menu, so they fire while an instance's page has focus. Only macOS
+/// shows a menu bar; elsewhere it is hidden and the tab bar's menu button pops up Instances.
 fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let menu = Menu::default(app)?;
+    let menu = if cfg!(target_os = "macos") { Menu::default(app)? } else { Menu::new(app)? };
     let item = |id: String, label: String, keys: String| MenuItem::with_id(app, id, label, true, Some(keys));
-    let instances = Submenu::with_items(
+    let instances = Submenu::with_id_and_items(
         app,
+        INSTANCES,
         "Instances",
         true,
         &[
@@ -421,10 +475,10 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
     let shell = app.state::<Shell>();
     let done = match event.id().as_ref() {
         "add" => app
-            .get_webview(RAIL)
-            .ok_or_else(|| "the rail is gone".to_owned())
-            .and_then(|rail| rail.set_focus().map_err(text))
-            .and_then(|()| app.emit_to(RAIL, "add", ()).map_err(text)),
+            .get_webview(TABS)
+            .ok_or_else(|| "the tab bar is gone".to_owned())
+            .and_then(|tabs| tabs.set_focus().map_err(text))
+            .and_then(|()| app.emit_to(TABS, "add", ()).map_err(text)),
         "prev" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + len - 1) % len)),
         "next" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + 1) % len)),
         id => match id.strip_prefix("nth-").and_then(|n| n.parse::<usize>().ok()) {
@@ -450,12 +504,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     app.notification().on_action(move |performed| on_tap(&handle, performed))?;
 
-    let window =
-        WindowBuilder::new(app, WINDOW).title("Pier").inner_size(1200.0, 800.0).min_inner_size(640.0, 400.0).build()?;
-    let rail = WebviewBuilder::new(RAIL, WebviewUrl::App("index.html".into())).disable_drag_drop_handler();
-    let _rail = window.add_child(rail, LogicalPosition::new(0.0, 0.0), LogicalSize::new(RAIL_WIDTH, 800.0))?;
+    let window = WindowBuilder::new(app, WINDOW).title("Pier").inner_size(1200.0, 800.0).min_inner_size(640.0, 400.0);
+    // The tab bar is the title bar: macOS keeps its traffic lights over the bar's left end,
+    // elsewhere the bar draws the window's buttons.
+    #[cfg(target_os = "macos")]
+    let window = window.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true).build()?;
+    #[cfg(not(target_os = "macos"))]
+    let window = window.decorations(false).build()?;
+    #[cfg(not(target_os = "macos"))]
+    window.hide_menu()?;
+    let tabs = WebviewBuilder::new(TABS, WebviewUrl::App("index.html".into())).disable_drag_drop_handler();
+    let _tabs = window.add_child(tabs, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1200.0, TABS_HEIGHT))?;
     #[cfg(target_os = "linux")]
-    dock(&_rail)?;
+    dock(&_tabs)?;
     let (resized, handle) = (window.clone(), app.handle().clone());
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
@@ -490,7 +551,7 @@ fn main() {
         .menu(menu)
         .on_menu_event(on_menu)
         .invoke_handler(tauri::generate_handler![
-            list, add, remove, rename, reorder, select, set_badge, notify, page_title
+            list, add, remove, rename, reorder, select, popup, set_badge, notify, page_title
         ])
         .setup(setup)
         .run(tauri::generate_context!());

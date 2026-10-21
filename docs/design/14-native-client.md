@@ -11,18 +11,35 @@ for a few weeks, and is deleted whole if it is not.
 
 - **Tauri 2** (`native/`): a Rust shell over the system webview (WebKit on
   both platforms), one webview per instance, each loading `<url>/app/`. No
-  bundled browser engine; the Rust side is instance bookkeeping, the rail,
-  the badge and the notification call, nothing about chat.
+  bundled browser engine; the Rust side is instance bookkeeping, the tab
+  bar, the badge and the notification call, nothing about chat.
 - **Instance** = `{name, url}` in the shell's own store
   (`~/.config/pier-client/instances.json`). Auth is the instance's own: each
   webview keeps a persistent cookie jar of its own, and the operator signs in
   with the password, a passkey or a `pier login` link as in a browser. The
   shell holds no credential and opens no HTTP connection of its own.
-- **Rail**: a left column of instances (icon in the instance's accent, name,
-  unread count); click switches the visible webview, the others stay mounted
-  so SSE streams and composer drafts survive a switch. Add = paste a URL or a
-  `pier login` link (sets url and signs in at once); remove, rename, reorder.
-  `name` defaults to the instance's `PIER_TITLE`, read from the page title.
+- **Tab bar**: one row across the top, a tab per instance (dot in the
+  instance's accent, name, red unread count), then `+`; the instance's page
+  fills the window below. Click switches the visible webview, the others stay
+  mounted so SSE streams and composer drafts survive a switch. Add = paste a
+  URL or a `pier login` link into the field `+` opens (sets url and signs in
+  at once); `×` then `Remove` removes, double-click on the name renames, drag
+  reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
+  page title. An error shows as a red toast over the bar for 8s; a click
+  dismisses it.
+- **Title bar**: the tab bar is the title bar. macOS keeps its traffic
+  lights over the bar's left end (overlay title bar, hidden title); elsewhere
+  the window has no system frame and no menu bar, and the bar draws
+  minimize, maximize and close at its right end. `⋯` at the right end pops
+  up the Instances menu. The bar's empty space drags the window, a double
+  click maximizes or restores; on Linux each webview's outer 5px resizes the
+  window, unless it is maximized or fullscreen. On Windows only the shadow's
+  frame outside the left, right and bottom edges resizes; the top edge lies
+  under the bar and does not.
+- **Layout**: the bar is a fixed-height webview; the shell positions the
+  webviews on resize, except on Linux, where GTK packs them in the window's
+  vertical box, the bar first at its height, the shown instance taking the
+  rest.
 
 ## Bridge (`src/web/ui/shell.ts`)
 
@@ -31,7 +48,7 @@ one ~30-line module; in a browser every call is a no-op.
 
 - **Badge**: where `notifications.ts` calls `navigator.setAppBadge(count)`,
   the bridge sends `count` to the shell instead; the shell shows it on the
-  rail row and sums every instance onto the Dock / taskbar badge.
+  instance's tab and sums every instance onto the Dock / taskbar badge.
 - **Notifications**: Web Push cannot reach a webview, so the push pipeline
   (`push.ts`: settle window, silent-reply and seen checks, "the browser that
   spoke" targeting) gains a second delivery: besides the push, `deliver`
@@ -42,7 +59,7 @@ one ~30-line module; in a browser every call is a no-op.
   it to the native notification. Body is the same `preview(reply.text)` the
   push sends — the topic is in it. Click: the shell focuses the window and
   that instance and sets the page's hash from `url` itself; an instance page
-  holds no event permission, so no page can hear the rail's or another's.
+  holds no event permission, so no page can hear the tab bar's or another's.
 - **Visibility**: a hidden instance's webview must read
   `document.hidden === true`, or the UI acks every turn as seen
   (`main.ts:315`) and nothing is ever unread. The shell hides, not merely
@@ -52,8 +69,10 @@ one ~30-line module; in a browser every call is a no-op.
 ## Keyboard
 
 `Cmd+1…9` (Ctrl on Linux) switch to the Nth instance, `Cmd+Shift+[` / `]`
-previous / next, `Cmd+N` add an instance. The rail is the only native
-surface with focus; everything else is the web UI's own keyboard.
+previous / next, `Cmd+N` add an instance. They are the Instances menu's
+accelerators: in the menu bar on macOS, in the hidden menu bar elsewhere,
+which still fires them. The tab bar is the only native surface with focus;
+everything else is the web UI's own keyboard.
 
 ## Out of scope (v1)
 
@@ -65,9 +84,9 @@ surface with focus; everything else is the web UI's own keyboard.
 
 ## Repository
 
-- `native/` beside `src/`: `src-tauri/` (Rust) and the rail page (TS, built
-  by `native/vite.config.ts`); `just native-dev`, `just native`.
-- Budget line: `native/` ≤ 620 non-blank lines (Rust + TS); the server-side
+- `native/` beside `src/`: `src-tauri/` (Rust) and the tab bar page (TS,
+  built by `native/vite.config.ts`); `just native-dev`, `just native`.
+- Budget line: `native/` ≤ 730 non-blank lines (Rust + TS); the server-side
   change is the `notification` workspace event alone (~20 lines in `push.ts`
   and `server.ts`), the UI change `shell.ts` and two call sites.
 - New toolchain: Rust + cargo lockfile, reviewed on upgrade like

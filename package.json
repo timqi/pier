@@ -29,7 +29,7 @@
     "build:assets": "mkdir -p dist/web && rm -rf dist/web/public && cp -r src/web/public dist/web/public",
     "prepack": "npm run build",
     "build:web": "vite build",
-    "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p native/rail/tsconfig.json",
+    "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p native/tabs/tsconfig.json",
     "lint": "oxlint src --format=default --deny-warnings",
     "test": "vitest run --passWithNoTests"
   },

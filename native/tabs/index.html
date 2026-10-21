@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pier</title>
+    <link rel="stylesheet" href="./tabs.css" />
+    <script type="module" src="./tabs.ts"></script>
+  </head>
+  <body>
+    <ul id="instances" role="tablist"></ul>
+    <form id="add" hidden>
+      <input name="url" placeholder="URL or pier login link" autocomplete="off" spellcheck="false" required />
+    </form>
+    <button id="plus" type="button" title="Add an instance (Ctrl/⌘ N)">+</button>
+    <span class="grow"></span>
+    <button id="menu" type="button" title="Instances">⋯</button>
+    <span id="controls">
+      <button id="minimize" type="button" title="Minimize"><svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg></button>
+      <button id="maximize" type="button" title="Maximize"><svg viewBox="0 0 10 10"><path d="M.5 .5h9v9h-9z" /></svg></button>
+      <button id="close" type="button" title="Close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" /></svg></button>
+    </span>
+    <p id="toast" role="alert" hidden></p>
+  </body>
+</html>
