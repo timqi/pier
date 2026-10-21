@@ -18,12 +18,14 @@ for a few weeks, and is deleted whole if it is not.
   in `pier-client-dev/`, as its cookie stores are not the bundle's). Auth is
   the instance's own: each webview keeps a persistent cookie jar of its own, and the operator signs in
   with the password, a passkey or a `pier login` link as in a browser. The
-  shell holds no credential and opens no HTTP connection of its own.
+  shell holds no credential and opens no HTTP connection of its own; a local
+  instance's port check is a bare TCP connect, and its sign-in link comes
+  from the `pier login` CLI straight into its webview.
 - **Open on demand**: a tab is an open instance, in the list's order; only
   an open instance has a webview, so a closed one costs nothing. `+` pops up
   the list, the open ones checked: picking one opens its tab (or shows it),
-  then Add Instance…, then Remove and Delete Data ▸ per instance. A tab's `×`
-  closes it and destroys its webview; the instance stays listed and keeps its
+  then Add Instance…, Add Local Instance… ([below](#local-instance)), then
+  Remove and Delete Data ▸ per instance. A tab's `×` closes it and destroys its webview; the instance stays listed and keeps its
   data store, so reopening finds it signed in. Which tabs are open is the
   list's `closed` flag, so a restart reopens the same tabs, the first shown.
 - **A closed instance is unreachable**: no SSE stream, so no native
@@ -75,6 +77,54 @@ for a few weeks, and is deleted whole if it is not.
   vertical box, the bar first at its height, the shown instance taking the
   rest.
 
+## Local instance
+
+A Pier on this machine, started and stopped with the shell; for a desktop,
+not a server, so no launchd or systemd unit: quitting the app stops it.
+
+- **Command**: `+` → Add Local Instance… opens the add field holding the
+  command that starts Pier, prefilled with `<pier's absolute path> serve`
+  from an interactive login shell (`$SHELL -lic 'command -v pier'`; a GUI
+  app's PATH lacks fnm's and Homebrew's, and zsh reads `~/.zshrc` only when
+  interactive), empty when it finds none; a shell that does not answer in
+  20s is killed and its error shown, the field opening empty. The user may edit
+  it — a dev build, `PORT=3200 pier serve`. It runs in that login shell too,
+  so a bare `pier` works.
+- **Instance** = `{name, url, closed, command}`; its url is
+  `http://127.0.0.1:<port>`, the port the command's own `PORT=` word
+  assigns, else 3141; a `PORT` the profile exports is not seen.
+- **Start**: on add, on the app's start when its tab is open, and on opening
+  its tab, a TCP connect to the port decides. Answered: a Pier already runs
+  there, connected to as is and marked `external` in `+`'s menu; quitting
+  leaves it running. Not answered: the shell spawns the command in its own
+  process group, output appended to `~/.pier/logs/serve-<port>.log`, and
+  loads the tab once the port answers (60s; a command that exits first shows
+  its status and the log's path). Either way the port is then probed as any
+  added instance, so a listener that is not Pier warns; a warned add stops the
+  Pier it spawned, and a forced one spawns its own for the instance it adds.
+  One start runs per instance at a time: an open during it waits for it. A spawned Pier that
+  has exited is started again on the next open, and picking a tab whose start
+  failed retries it.
+- **Close**: closing or removing a local tab leaves its Pier running until
+  the app quits.
+- **Sign-in**: when the local tab lands on `/login`, the shell runs the
+  command with `serve` swapped for `login` (`pier login`'s one-time link,
+  the same `PIER_HOME`) and loads the link, at most once per 30s per tab: the
+  terminal on Pier's own machine is already its door (`src/web/auth.ts`), so
+  no password and no auth change; a sign-out signs straight back in. A
+  command not ending in `serve` gets no link; the login page asks as in a
+  browser. `pier login` too is killed after 20s with its error shown.
+- **Restart**: the first open tab is shown, as for any instance; a local one
+  is shown once its Pier answers unless a tab was picked meanwhile, and
+  another local tab never takes over.
+- **Quit** (Cmd+Q, the window's close): when a spawned Pier's open tab has a
+  session mid-turn or with a run in flight (`/api/sessions`, read by its own
+  page; one that cannot tell counts none), the first quit shows the count on
+  the tab bar and a second within 8s quits; so does a second after the count
+  itself failed. Then each spawned process group gets SIGTERM, and SIGKILL after
+  10s, all in parallel. A Dock Quit cannot be held, so it skips the warning, not the stop. A
+  closed tab's Pier is not asked.
+
 ## Bridge (`src/web/ui/shell.ts`)
 
 The web UI detects the shell (`window.__TAURI__`) and talks to it through
@@ -117,7 +167,7 @@ everything else is the web UI's own keyboard.
 - iOS, Windows.
 - Release, signing, updater: `just native` builds a local bundle; nothing is
   published until the experiment is judged.
-- Starting, stopping or installing instances; the shell talks HTTP only.
+- Installing instances, or starting one anywhere but on this machine with the app.
 - Any native page replicating a web view.
 
 ## Repository

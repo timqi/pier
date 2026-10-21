@@ -1,5 +1,6 @@
 //! Pier's native client: one frameless window, a tab per open Pier instance over one webview each.
 
+mod local;
 mod store;
 
 use std::{
@@ -10,8 +11,8 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     io,
     path::PathBuf,
-    process::Command,
-    sync::{mpsc, Mutex, MutexGuard, PoisonError},
+    process::{Child, Command},
+    sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -22,8 +23,8 @@ use tauri::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
     webview::{NewWindowResponse, PageLoadEvent},
     window::WindowBuilder,
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewBuilder, WebviewUrl, Window,
-    WindowEvent,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, State, Url, Webview, WebviewBuilder,
+    WebviewUrl, Window, WindowEvent,
 };
 use tauri_plugin_notification::{ActionPerformed, NotificationExt};
 
@@ -54,6 +55,12 @@ struct Live {
     /// What went wrong before the tab bar could show it; `list` hands it over.
     startup_error: Option<String>,
     badge_logged: bool,
+    /// The local Piers the shell started, by instance; one already running is not here.
+    children: HashMap<String, Child>,
+    /// Held by an instance's start, so an open meanwhile waits for it rather than starting another.
+    starting: HashMap<String, Arc<tauri::async_runtime::Mutex<()>>>,
+    /// When a quit was held for a busy local Pier: the next one within 8s goes ahead.
+    quit_warned: Option<Instant>,
 }
 
 impl Shell {
@@ -265,10 +272,16 @@ fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res
         }
     };
     let (opener, id) = (app.clone(), instance.id.clone());
+    let (signer, local, tried, kept) = (app.clone(), instance.clone(), Mutex::new(None), keep.clone());
     let builder = WebviewBuilder::new(&instance.id, WebviewUrl::External(first))
         .data_directory(shell.data_dir(&instance.id))
         .disable_drag_drop_handler()
-        .on_navigation(keep.clone())
+        .on_navigation(move |url| {
+            if url.path() == "/login" && local.keeps(url) {
+                sign_in(&signer, &local, &tried);
+            }
+            kept(url)
+        })
         // A link the page opens in a new window: its own page takes the tab, as a click would.
         .on_new_window(move |url, _| {
             if !keep(&url) {
@@ -294,6 +307,77 @@ fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res
     dock(&webview).map_err(text)?;
     webview.hide().map_err(text)?;
     layout(&window).map_err(text)
+}
+
+/// A local tab sent to `/login` loads a `pier login` link instead, not within 30s of the last
+/// time, so a link that does not sign in cannot loop.
+fn sign_in(app: &AppHandle, instance: &Instance, tried: &Mutex<Option<Instant>>) {
+    let last = tried.lock().unwrap_or_else(PoisonError::into_inner).replace(Instant::now());
+    let again = last.is_none_or(|at| at.elapsed() >= Duration::from_secs(30));
+    let Some(command) = instance.command.clone().filter(|_| again) else { return };
+    let (handle, id, origin) = (app.clone(), instance.id.clone(), instance.url.clone());
+    detach(app, async move {
+        let link = tauri::async_runtime::spawn_blocking(move || local::login(&command)).await.map_err(text)?;
+        let Some(link) = link.transpose()? else { return Ok(()) };
+        let url = Url::parse(&origin).and_then(|u| u.join(&link)).map_err(text)?;
+        let webview = handle.get_webview(&id).ok_or_else(|| format!("{id} has no webview"))?;
+        webview.navigate(url).map_err(text)
+    });
+}
+
+/// A local instance's Pier: one already answering on its port is used as is, else the shell starts its own.
+async fn serve(app: &AppHandle, instance: &Instance) -> Res {
+    let shell = app.state::<Shell>();
+    let gate = shell.lock().starting.entry(instance.id.clone()).or_default().clone();
+    let _starting = gate.lock().await;
+    // One that exited since is started again, its entry replaced.
+    let running = shell.lock().children.get_mut(&instance.id).is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+    let Some(command) = instance.command.clone().filter(|_| !running) else { return Ok(()) };
+    let port = local::port(&command)?;
+    let log = app.path().home_dir().map_err(text)?.join(".pier/logs").join(format!("serve-{port}.log"));
+    let start = move || (!local::listening(port)).then(|| local::start(&command, port, &log)).transpose();
+    let child = tauri::async_runtime::spawn_blocking(start).await.map_err(text)??;
+    shell.lock().children.extend(child.map(|child| (instance.id.clone(), child)));
+    Ok(())
+}
+
+/// Sessions mid-turn or with a run in flight, read by the page itself: the shell holds no credential.
+const BUSY: &str = r#"(() => { try { const x = new XMLHttpRequest(); x.open("GET", "/api/sessions", false); x.send();
+  return JSON.parse(x.responseText).filter((s) => s.state === "streaming" || s.activeRuns > 0).length } catch { return -1 } })()"#;
+
+/// What the open tabs of `ids` count busy; a page that cannot tell (signed out, no answer in 3s) counts none.
+async fn busy(app: &AppHandle, ids: &[String]) -> Res<u32> {
+    let (tx, rx) = mpsc::channel();
+    let mut asked = 0;
+    for webview in ids.iter().filter_map(|id| app.get_webview(id)) {
+        let tx = tx.clone();
+        webview.eval_with_callback(BUSY, move |n| drop(tx.send(n))).map_err(text)?;
+        asked += 1;
+    }
+    let answer = move |_| rx.recv_timeout(Duration::from_secs(3)).ok().and_then(|n| n.parse::<u32>().ok());
+    let count = move || (0..asked).map(answer).map(Option::unwrap_or_default).sum();
+    tauri::async_runtime::spawn_blocking(count).await.map_err(text)
+}
+
+/// The app's quit: a busy local Pier the shell started holds the first one, a second within 8s goes ahead.
+async fn quit(app: AppHandle) -> Res {
+    let shell = app.state::<Shell>();
+    // Set before asking, so a quit whose question fails goes ahead the next time too.
+    let last = shell.lock().quit_warned.replace(Instant::now());
+    let warned = last.is_some_and(|at| at.elapsed() < Duration::from_secs(8));
+    let ids: Vec<String> = shell.lock().children.keys().cloned().collect();
+    let busy = if warned { 0 } else { busy(&app, &ids).await.map_err(|e| format!("{e}: quit again"))? };
+    if busy > 0 {
+        return Err(format!("{busy} sessions on the local Pier are mid-turn or running a task: quit again to stop it"));
+    }
+    // `RunEvent::Exit` stops the Piers the shell started.
+    app.exit(0);
+    Ok(())
+}
+
+fn stop_all(app: &AppHandle) {
+    let children: Vec<Child> = app.state::<Shell>().lock().children.drain().map(|(_, child)| child).collect();
+    std::thread::scope(|scope| children.into_iter().for_each(|child| drop(scope.spawn(|| local::stop(child)))));
 }
 
 /// Reloads an instance's page from the shell, not its script, so a hung page reloads too; a
@@ -404,15 +488,20 @@ async fn probe(app: &AppHandle, instance: &Instance) -> Res<Option<String>> {
     verdict
 }
 
-/// The warning when the input does not look like Pier, unless `force`: added only then.
+/// The warning when the input does not look like Pier, unless `force`: added only then. A
+/// `local` input is the command that starts Pier here, run first unless its port answers, and then
+/// probed as any other, so a listener that is not Pier is not taken for one.
 /// Async: building a webview from a sync command, which runs on the main thread, can deadlock.
 #[tauri::command]
-async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool) -> Res<Option<String>> {
-    let (instance, first) = Instance::parse(&input)?;
-    if !force {
-        if let Some(why) = probe(&app, &instance).await? {
-            return Ok(Some(format!("Does not look like Pier ({why}): Enter again to add it anyway")));
-        }
+async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool, local: bool) -> Res<Option<String>> {
+    let (instance, first) = if local { Instance::local(&input)? } else { Instance::parse(&input)? };
+    serve(&app, &instance).await?;
+    let why = if force { None } else { probe(&app, &instance).await? };
+    if let Some(why) = why {
+        // Not added: a Pier started for it stops, and a forced add starts its own under the added instance.
+        let unadded = shell.lock().children.remove(&instance.id);
+        tauri::async_runtime::spawn_blocking(move || unadded.map(local::stop)).await.map_err(text)?;
+        return Ok(Some(format!("Does not look like Pier ({why}): Enter again to add it anyway")));
     }
     edit(&app, &shell, |all| {
         all.push(instance.clone());
@@ -423,7 +512,7 @@ async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool
 }
 
 /// Opens a listed instance's tab, or shows its open one; `hash`, if any, is the page it shows.
-fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> Res {
+async fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> Res {
     if let Some(webview) = app.get_webview(id) {
         show_instance(app, shell, id)?;
         // Set from here, not sent as an event: an instance page holds no event
@@ -432,6 +521,7 @@ fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> Res {
             .map_or(Ok(()), |hash| webview.eval(format!("location.hash = {}", Value::from(hash))).map_err(text));
     }
     let instance = shell.lock().instances.iter().find(|i| i.id == id).cloned().ok_or(format!("no instance {id}"))?;
+    serve(app, &instance).await?;
     let mut first = instance.app_url()?;
     first.set_fragment(hash);
     mount(app, shell, &instance, first)?;
@@ -536,9 +626,10 @@ fn reorder(app: AppHandle, shell: State<'_, Shell>, id: String, onto: String) ->
     })
 }
 
+/// Through `open`, so a local tab whose Pier is not up yet, or failed to start, starts it again.
 #[tauri::command]
-fn select(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
-    show_instance(&app, &shell, &id)
+async fn select(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
+    open(&app, &shell, &id, None).await
 }
 
 #[tauri::command]
@@ -621,11 +712,12 @@ fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
     };
     let (app, id, hash) = (app.clone(), id.to_owned(), url.split_once('#').map_or("", |(_, h)| h).to_owned());
     detach(&app.clone(), async move {
-        app.get_window(WINDOW)
-            .ok_or_else(|| "the window is gone".to_owned())
-            .and_then(|w| w.unminimize().and_then(|()| w.show()).and_then(|()| w.set_focus()).map_err(text))
-            .and_then(|()| open(&app, &app.state::<Shell>(), &id, Some(&hash)))
-            .map_err(|e| format!("opening a notification: {e}"))
+        let opened = async {
+            let w = app.get_window(WINDOW).ok_or("the window is gone")?;
+            w.unminimize().and_then(|()| w.show()).and_then(|()| w.set_focus()).map_err(text)?;
+            open(&app, &app.state::<Shell>(), &id, Some(&hash)).await
+        };
+        opened.await.map_err(|e| format!("opening a notification: {e}"))
     });
 }
 
@@ -640,19 +732,26 @@ fn detach(app: &AppHandle, work: impl Future<Output = Res> + Send + 'static) {
     });
 }
 
-/// `+`'s menu: every listed instance, the open ones checked, to open; then Add, and Remove.
-fn saved(app: &AppHandle, all: &[Instance]) -> tauri::Result<Menu<tauri::Wry>> {
-    let item = |id: String, label: &str| MenuItem::with_id(app, id, label, true, None::<&str>);
+/// `+`'s menu: every listed instance, the open ones checked, to open; then Add, and Remove. A
+/// local one is marked `external` while its open tab runs on a Pier the shell did not start.
+fn saved(app: &AppHandle, live: &Live) -> tauri::Result<Menu<tauri::Wry>> {
+    let (all, item) =
+        (&live.instances, |id: String, label: &str| MenuItem::with_id(app, id, label, true, None::<&str>));
     let menu = Menu::new(app)?;
     let remove = Submenu::new(app, "Remove and Delete Data", !all.is_empty())?;
     for i in all {
-        menu.append(&CheckMenuItem::with_id(app, format!("open:{}", i.id), &i.name, true, !i.closed, None::<&str>)?)?;
+        let owned = live.children.contains_key(&i.id) || app.get_webview(&i.id).is_none();
+        let mark = i.command.as_ref().map_or("", |_| if owned { " \u{b7} local" } else { " \u{b7} external" });
+        let label = format!("{}{mark}", i.name);
+        menu.append(&CheckMenuItem::with_id(app, format!("open:{}", i.id), label, true, !i.closed, None::<&str>)?)?;
         remove.append(&item(format!("remove:{}", i.id), &i.name)?)?;
     }
     if !all.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
-    menu.append_items(&[&item("add".into(), "Add Instance…")?, &remove])?;
+    menu.append(&item("add".into(), "Add Instance…")?)?;
+    menu.append(&item("add-local".into(), "Add Local Instance…")?)?;
+    menu.append(&remove)?;
     Ok(menu)
 }
 
@@ -663,7 +762,7 @@ fn popup(app: AppHandle, shell: State<'_, Shell>, window: Window, menu: String, 
     let at = LogicalPosition::new(x, y);
     if menu == "+" {
         // Built before the popup, which holds the thread: the list's lock is not held across it.
-        let saved = saved(&app, &shell.lock().instances).map_err(text)?;
+        let saved = saved(&app, &shell.lock()).map_err(text)?;
         return window.popup_menu_at(&saved, at).map_err(text);
     }
     if menu != "⋯" {
@@ -679,6 +778,12 @@ fn popup(app: AppHandle, shell: State<'_, Shell>, window: Window, menu: String, 
 fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = if cfg!(target_os = "macos") { Menu::default(app)? } else { Menu::new(app)? };
     let item = |id: String, label: String, keys: String| MenuItem::with_id(app, id, label, true, Some(keys));
+    // NSApp's own Quit, the app menu's last item, cannot be held for `quit`'s warning.
+    #[cfg(target_os = "macos")]
+    if let Some(app_menu) = menu.items()?.first().and_then(|m| m.as_submenu().cloned()) {
+        app_menu.remove_at(app_menu.items()?.len().saturating_sub(1))?;
+        app_menu.append(&item("quit".into(), "Quit Pier".into(), "Cmd+Q".into())?)?;
+    }
     let instances = Submenu::with_id_and_items(
         app,
         INSTANCES,
@@ -734,6 +839,20 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             .ok_or_else(|| "the tab bar is gone".to_owned())
             .and_then(|tabs| tabs.set_focus().map_err(text))
             .and_then(|()| app.emit_to(TABS, "add", ()).map_err(text)),
+        "add-local" => {
+            let handle = app.clone();
+            detach(app, async move {
+                let suggested = tauri::async_runtime::spawn_blocking(local::suggested).await.map_err(text)?;
+                let command = suggested.inspect_err(|e| report(&handle, e)).unwrap_or_default();
+                handle.get_webview(TABS).ok_or("the tab bar is gone")?.set_focus().map_err(text)?;
+                handle.emit_to(TABS, "add-local", command).map_err(text)
+            });
+            Ok(())
+        }
+        "quit" => {
+            detach(app, quit(app.clone()));
+            Ok(())
+        }
         "prev" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + len - 1) % len)),
         "next" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + 1) % len)),
         "close-tab" => app.emit_to(TABS, "close-tab", ()).map_err(text),
@@ -746,7 +865,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
                 let (handle, item) = (app.clone(), id.to_owned());
                 detach(app, async move {
                     match item.split_once(':') {
-                        Some(("open", id)) => open(&handle, &handle.state::<Shell>(), id, None),
+                        Some(("open", id)) => open(&handle, &handle.state::<Shell>(), id, None).await,
                         Some((_, id)) => remove(&handle, id).await,
                         None => Ok(()),
                     }
@@ -796,15 +915,33 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 report(&handle, format!("layout: {e}"));
             }
         }
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            detach(&handle, quit(handle.clone()));
+        }
     });
 
     let shell = app.state::<Shell>();
-    for instance in instances.iter().filter(|i| !i.closed) {
+    let first = instances.iter().find(|i| !i.closed);
+    // A local tab waits for its Pier off the main thread, and is shown only when it is the first and
+    // nothing was picked meanwhile.
+    for instance in instances.iter().filter(|i| !i.closed && i.command.is_some()).cloned() {
+        let (handle, shown) = (app.handle().clone(), first.is_some_and(|f| f.id == instance.id));
+        detach(app.handle(), async move {
+            let shell = handle.state::<Shell>();
+            let mounted =
+                serve(&handle, &instance).await.and_then(|()| mount(&handle, &shell, &instance, instance.app_url()?));
+            mounted.map_err(|e| format!("{}: {e}", instance.name))?;
+            let shown = shown && shell.lock().active.is_none();
+            shown.then_some(&instance.id).map_or(Ok(()), |id| show_instance(&handle, &shell, id))
+        });
+    }
+    for instance in instances.iter().filter(|i| !i.closed && i.command.is_none()) {
         if let Err(e) = instance.app_url().and_then(|url| mount(app.handle(), &shell, instance, url)) {
             errors.push(format!("{}: {e}", instance.name));
         }
     }
-    if let Some(first) = instances.iter().find(|i| !i.closed) {
+    if let Some(first) = first.filter(|i| i.command.is_none()) {
         if let Err(e) = show_instance(app.handle(), &shell, &first.id) {
             errors.push(e);
         }
@@ -826,11 +963,17 @@ fn main() {
             list, add, close, rename, reorder, select, popup, set_badge, notify, page_title
         ])
         .setup(setup)
-        .run(tauri::generate_context!());
-    if let Err(e) = app {
-        eprintln!("pier-client: {e}");
-        std::process::exit(1);
-    }
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|e| {
+            eprintln!("pier-client: {e}");
+            std::process::exit(1)
+        });
+    // A Dock Quit ends the loop without asking: the local Pier stops all the same.
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            stop_all(app);
+        }
+    });
 }
 
 #[cfg(test)]

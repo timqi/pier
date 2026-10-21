@@ -117,7 +117,12 @@ list.ondblclick = (e) => {
   if (name && id && was !== undefined) rename({ id, name: was }, name);
 };
 
-function openAdd(): void {
+// The field adds a URL, or for a local instance holds the command that starts it.
+let local = false;
+function openAdd(command?: string): void {
+  if (local || command !== undefined) input.value = command ?? "";
+  local = command !== undefined;
+  input.placeholder = local ? "Command that starts Pier, e.g. pier serve" : "URL or pier login link";
   form.hidden = false;
   input.focus();
 }
@@ -130,7 +135,7 @@ form.onsubmit = (e) => {
   e.preventDefault();
   const value = input.value;
   input.readOnly = true;
-  invoke<string | null>("add", { input: value, force: value === warned })
+  invoke<string | null>("add", { input: value, force: value === warned, local })
     .then((warning) => {
       warned = warning ? value : "";
       if (warning) return fail(warning);
@@ -169,7 +174,8 @@ button("menu").onclick = popup("⋯");
 
 await listen<Row[]>("state", (e) => render(e.payload));
 await listen<string>("error", (e) => fail(e.payload));
-await listen("add", openAdd);
+await listen("add", () => openAdd());
+await listen<string>("add-local", (e) => openAdd(e.payload));
 // As Safari, the last tab's Cmd+W closes the window instead, which keeps the tab for the next launch.
 await listen("close-tab", () => {
   const active = rows.find((row) => row.active)?.id;

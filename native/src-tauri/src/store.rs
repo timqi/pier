@@ -24,6 +24,9 @@ pub struct Instance {
     /// Its tab is closed: listed, its data kept, no webview.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
+    /// A Pier on this machine: the command that starts it, in the login shell (`local.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 impl Instance {
@@ -37,8 +40,15 @@ impl Instance {
         }
         let url = link.origin().ascii_serialization();
         let first = if link.path().starts_with("/login/") { link } else { app_url(&url)? };
-        let instance = Self { id: new_id(), name: host(&url), url, named: false, closed: false };
+        let instance = Self { id: new_id(), name: host(&url), url, named: false, closed: false, command: None };
         Ok((instance, first))
+    }
+
+    /// A Pier this machine runs with `command`, on the loopback port it assigns.
+    pub fn local(command: &str) -> Result<(Self, Url), String> {
+        let (mut instance, first) = Self::parse(&format!("http://127.0.0.1:{}", crate::local::port(command)?))?;
+        instance.command = Some(command.trim().to_owned()).filter(|c| !c.is_empty());
+        instance.command.is_some().then_some((instance, first)).ok_or_else(|| "no command to start Pier".to_owned())
     }
 
     pub fn app_url(&self) -> Result<Url, String> {
