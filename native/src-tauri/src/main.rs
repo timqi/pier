@@ -123,7 +123,8 @@ fn edit(app: &AppHandle, shell: &Shell, change: impl FnOnce(&mut Vec<Instance>) 
     Ok(())
 }
 
-/// The rail docked left at a fixed width, every instance filling the rest.
+/// The rail docked left at a fixed width, every instance filling the rest; on Linux these
+/// calls are no-ops and GTK lays out the row `dock` builds.
 fn layout(window: &Window) -> tauri::Result<()> {
     let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
     for webview in window.webviews() {
@@ -133,6 +134,39 @@ fn layout(window: &Window) -> tauri::Result<()> {
         webview.set_size(LogicalSize::new(width, size.height))?;
     }
     Ok(())
+}
+
+/// GTK packs each child webview into the window's vertical box, where position and size are
+/// no-ops: each moves into Pier's horizontal row under the menu bar, the rail at its fixed width.
+#[cfg(target_os = "linux")]
+fn dock(webview: &Webview) -> tauri::Result<()> {
+    use gtk::prelude::*;
+    const ROW: &str = "pier-row";
+    let (app, label, rail) = (webview.app_handle().clone(), webview.label().to_owned(), webview.label() == RAIL);
+    webview.with_webview(move |platform| {
+        let widget = platform.inner().upcast::<gtk::Widget>();
+        let Some(vbox) = widget.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) else {
+            return report(&app, format!("layout: {label} is not in the window's box"));
+        };
+        let row = match vbox.children().into_iter().find(|c| c.widget_name() == ROW) {
+            Some(found) => match found.downcast::<gtk::Box>() {
+                Ok(row) => row,
+                Err(_) => return report(&app, format!("layout: {ROW} is not a box; {label} left where GTK put it")),
+            },
+            None => {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                row.set_widget_name(ROW);
+                vbox.pack_start(&row, true, true, 0);
+                row.show();
+                row
+            }
+        };
+        vbox.remove(&widget);
+        row.pack_start(&widget, !rail, true, 0);
+        if rail {
+            widget.set_size_request(RAIL_WIDTH as i32, -1);
+        }
+    })
 }
 
 /// A link the page opens in a new window goes to the system browser.
@@ -163,6 +197,8 @@ fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res
     let builder = builder.data_store_identifier(store::store_key(&instance.id));
     let at = LogicalPosition::new(RAIL_WIDTH, 0.0);
     let webview = window.add_child(builder, at, LogicalSize::new(1.0, 1.0)).map_err(text)?;
+    #[cfg(target_os = "linux")]
+    dock(&webview).map_err(text)?;
     webview.hide().map_err(text)?;
     layout(&window).map_err(text)
 }
@@ -417,7 +453,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let window =
         WindowBuilder::new(app, WINDOW).title("Pier").inner_size(1200.0, 800.0).min_inner_size(640.0, 400.0).build()?;
     let rail = WebviewBuilder::new(RAIL, WebviewUrl::App("index.html".into())).disable_drag_drop_handler();
-    window.add_child(rail, LogicalPosition::new(0.0, 0.0), LogicalSize::new(RAIL_WIDTH, 800.0))?;
+    let _rail = window.add_child(rail, LogicalPosition::new(0.0, 0.0), LogicalSize::new(RAIL_WIDTH, 800.0))?;
+    #[cfg(target_os = "linux")]
+    dock(&_rail)?;
     let (resized, handle) = (window.clone(), app.handle().clone());
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
