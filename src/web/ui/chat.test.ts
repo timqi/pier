@@ -302,11 +302,11 @@ it("replays a refused prompt as the user's row and the reason", () => {
   ]);
 });
 
-it("keeps the prior answer's buttons when the turn after it failed", () => {
+it.each([["failed", { error: "overloaded" }], ["was cut by a restart", { cut: "restart" as const }]])("keeps the prior answer's buttons when the turn after it %s", (_, after) => {
   chat.renderSnapshot([
     { role: "assistant", text: "Done.\n\n---\n[Ship it] | [Wait]" },
     { role: "user", text: "Ship it" },
-    { role: "assistant", text: "", error: "overloaded" },
+    { role: "assistant", text: "Half.\n\n---\n[Half]", ...after },
   ], "idle", []);
   const buttons = doc.querySelector("#turns")!.querySelectorAll("button").map((b) => b.textContent).filter(Boolean);
   expect(buttons).toEqual(["Ship it", "Wait"]);

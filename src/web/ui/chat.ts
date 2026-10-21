@@ -985,8 +985,8 @@ export function renderSnapshot(
   };
   // The final assistant turn keeps its next-step buttons across reloads and
   // on every client — an idle session is still waiting on exactly that choice.
-  // A failed turn offers nothing, so it must not take the row from that answer.
-  const lastAssistant = readonly ? -1 : turns.reduce((acc, t, i) => (t.role === "assistant" && t.text && !t.error ? i : acc), -1);
+  // A failed or cut turn offers nothing, so it must not take the row from that answer.
+  const lastAssistant = readonly ? -1 : turns.reduce((acc, t, i) => (t.role === "assistant" && t.text && !t.error && !t.cut ? i : acc), -1);
   bulk = true;
   readonlyRows = readonly;
   try {
