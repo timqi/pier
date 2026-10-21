@@ -7,7 +7,7 @@ import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { openItemPresentation } from "../../core/open-items.js";
-import { openItemRow, paintDot, stageLine } from "./open-items.js";
+import { openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
@@ -52,6 +52,7 @@ let deps: DrawerDeps;
 const lead = $("#status-item");
 const leadDot = $("#status-item-dot");
 const leadTitle = $("#status-item-title");
+const leadState = $("#status-item-state");
 const leadStage = $("#status-item-stage");
 const leadCount = $("#status-item-count");
 const next = $("#status-next");
@@ -228,7 +229,7 @@ export function renderDrawer(): void {
   }
 }
 
-/** Dot, title and gray second line of the shown row; below md the dot and the row count only (index.html). */
+/** Dot, title, status mark and phrase of the shown row; below md the status glyph and the row count only (index.html). */
 function paintLead(): void {
   if (ordered[0]?.key !== topKey) shownKey = topKey = ordered[0]?.key ?? null;
   const at = Math.max(0, ordered.findIndex((p) => p.key === shownKey));
@@ -238,12 +239,12 @@ function paintLead(): void {
   lead.classList.toggle("flex", !!p);
   next.classList.toggle("hidden", ordered.length < 2);
   if (!p) return;
-  const stage = stageLine(p);
   paintDot(leadDot, p);
+  paintStatus(leadState, p);
   leadTitle.textContent = p.title;
-  leadStage.textContent = stage;
+  leadStage.textContent = stagePhrase(p);
   leadCount.textContent = String(ordered.length);
-  lead.title = [p.title, stage].filter(Boolean).join(" — ");
+  lead.title = `${p.title} — ${stageLine(p)}`;
   lead.setAttribute("aria-label", `Status: ${ordered.length} open — ${lead.title}`);
   next.textContent = `${at + 1}/${ordered.length}`;
 }

@@ -61,7 +61,7 @@ interface RunHead {
 /** Quiet card body; the coloured edge and labelled chip carry type/status. */
 export const runCard = (tone: string): HTMLElement => h("div", `system-card relative rounded-xl px-3 py-2.5 ${tone}`);
 export const runBody = (text: string): HTMLElement =>
-  h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
+  h("div", "mt-1.5 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
 /** `/status`'s text names a run as `run <id8>…` (core/reply.ts `openRunText`);
  *  each one whose session `sessions` carries opens it — in the chat card and the Status panel. */
@@ -518,7 +518,7 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   ]);
   const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100", argsText);
   const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100");
-  el.append(h("div", "mt-1 flex flex-col gap-1 pl-4", argsPre, outputPre));
+  el.append(h("div", "mt-1.5 flex flex-col gap-1 pl-4", argsPre, outputPre));
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
   rowsOf(a.chip).push({ tool: name, call: id, preview, argsPre, outputPre });
@@ -566,7 +566,7 @@ export function activityThinking(ts: number, text: string): void {
     const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
       h("span", "min-w-0 truncate", "thinking…"),
     ]);
-    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
+    const pre = h("div", "mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
     el.append(pre);
     a.rowsEl.append(el);
     a.steps += 1;

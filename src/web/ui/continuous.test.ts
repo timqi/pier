@@ -88,7 +88,7 @@ it("lists each open item once, what waits on you first, with who runs it and whe
   const ids = doc.querySelectorAll("[data-row-key]").map((el) => el.dataset.rowKey);
   expect(ids).toEqual(["item:model menu", "item:open items 视图", "item:auth review", "run:q1"]);
   const byId = (id: string) => doc.querySelectorAll("[data-row-key]").find((el) => el.dataset.rowKey === id)!;
-  expect(byId("item:open items 视图").querySelector(".open-item-stage")!.textContent).toBe("lead designing");
+  expect(byId("item:open items 视图").querySelector(".open-item-phrase")!.textContent).toBe("lead designing");
   expect(byId("item:open items 视图").querySelector(".open-item-meta")!.textContent).toContain("workers: 1 running");
   expect(byId("item:model menu").textContent).toContain("not in the ledger");
   byId("item:auth review").querySelector("button")!.onclick?.();

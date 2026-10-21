@@ -120,11 +120,11 @@ function chipSlots(bubble: HTMLElement): [row: HTMLElement, details: HTMLElement
   const kids = [...bubble.children] as HTMLElement[];
   const row = kids.find((el) => el.classList.contains("chip-row"));
   if (row) return [row, row.nextElementSibling as HTMLElement];
-  const made = h("div", "chip-row mb-1 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-tight");
+  const made = h("div", "chip-row mb-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-tight");
   const details = h("div", "chip-details");
   const tag = kids.find((el) => el.classList.contains("topic-tag"));
   if (tag) {
-    tag.classList.remove("mb-1"); // the row's gap is the tag's now
+    tag.classList.remove("mb-1.5"); // the row's gap is the tag's now
     made.append(tag);
   }
   bubble.prepend(made, details);
@@ -303,7 +303,7 @@ function trimRows(): void {
   if (trimmed) foldSilence(turnsPane); // the fold line may have gone off the top without its rows
   if (!trimmedRows) return;
   if (!trimNotice) {
-    trimNotice = h("div", "px-5 py-2 text-center text-[11.5px] italic text-neutral-400");
+    trimNotice = h("div", "px-5 py-1.5 text-center text-[11.5px] italic text-neutral-400");
     trimNotice.dataset.kind = "trim"; // every row in the pane names its kind
   }
   trimNotice.textContent = `${trimmedRows} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
@@ -381,7 +381,7 @@ export function appendTurn(
   }
   if (kind === "user" || kind === "assistant") row.append(rowGestures(row, rowTools(kind, row, node), node));
   if (stamp !== undefined) {
-    const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
+    const time = h("div", "my-4 text-center text-[11px] text-neutral-400");
     time.dataset.kind = "time";
     time.dataset.at = String(stamp);
     paintTime(time);
@@ -399,7 +399,7 @@ export function appendTurn(
 
 /** The caption identifies the IM speaker; clocks sit outside the bubble. */
 function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
-  const line = h("div", "speaker-line mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
+  const line = h("div", "speaker-line mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
   const who = speaker?.name ?? speaker?.id;
   if (who) {
     const label = h("span", "font-semibold text-inherit", who);
@@ -536,7 +536,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     });
   if (origin.kind === "chat-command" && !origin.statusSnapshot) {
     if (origin.sessions) linkRuns(content, origin.sessions, deps.select);
-    if (origin.statusSnapshotError) content.append(h("p", "text-amber-700 mt-2", origin.statusSnapshotError));
+    if (origin.statusSnapshotError) content.append(h("p", "text-amber-700 mt-1.5", origin.statusSnapshotError));
   }
   if (origin.kind === "task-callback") {
     // The child wrote these paths, so they resolve against its cwd, not this session's.
@@ -951,7 +951,7 @@ export function appendPager(onClick: () => void): HTMLButtonElement {
   const more = button("Earlier session");
   more.id = "chain-pager";
   more.onclick = onClick;
-  const row = h("div", "my-3 flex justify-center", more);
+  const row = h("div", "my-4 flex justify-center", more);
   row.dataset.kind = "pager";
   turnsPane.append(row);
   return more;

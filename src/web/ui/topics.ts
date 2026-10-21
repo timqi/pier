@@ -74,7 +74,7 @@ export function tagRow(row: HTMLElement, problem: string, jump: Jump): void {
     const kids = [...row.children];
     const chipRow = kids.find((el) => el.classList.contains("chip-row"));
     // In a chip row the row's gap spaces it; alone, its own margin does.
-    label = h("button", `topic-tag flex items-center gap-1 cursor-pointer text-left text-[11px] leading-tight ${chipRow ? "" : "mb-1"}`);
+    label = h("button", `topic-tag flex items-center gap-1 cursor-pointer text-left text-[11px] leading-tight ${chipRow ? "" : "mb-1.5"}`);
     label.setAttribute("type", "button");
     const caption = kids.find((el) => el.classList.contains("speaker-line"));
     if (caption) caption.after(label);

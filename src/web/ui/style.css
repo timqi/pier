@@ -331,9 +331,10 @@ main {
      Everything that pads by the heading reads it from here — the dock's own
      footprint is the same idea, measured live into --dock-h by composer.ts. */
   --head-h: calc(3rem + 8px);
-  /* The reading column — transcript, queue card, composer: 35–45 CJK
-     characters a line in a bubble. */
-  --read-w: 44rem;
+  /* The chat column — transcript, queue card, composer: ~960px at the 18px root,
+     one inset for all three so they share both edges. */
+  --read-w: 53.5rem;
+  --col-pad: max(var(--gutter, 1rem), calc((100% - var(--read-w)) / 2));
 }
 /* Explicit column on everything: auto-placement would push an overlapping
    item into an implicit second column rather than stack it. */
@@ -350,6 +351,8 @@ main > section, #turns { grid-row: 1 / -1; }
 /* A running dot holds still: an endless pulse repaints the page for as long as the work runs. */
 .running-dot { outline: 1px solid var(--color-neutral-500); outline-offset: 2px; }
 .open-item-stage, .open-item-meta { margin-top: 3px; white-space: pre-wrap; }
+/* Below md the bar's lead is the status glyph and the count (index.html). */
+@media (width < 48rem) { #status-item-state > .status-label { display: none; } }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
@@ -361,9 +364,7 @@ main > section, #turns { grid-row: 1 / -1; }
    Attaching it to the pill instead would have to unround its top corners
    and hide its top border in two more states, for a seam either way. */
 #queue-panel {
-  width: calc(100% - 2rem);
-  max-width: var(--read-w);
-  margin-inline: auto;
+  margin-inline: var(--col-pad);
   border: 1px solid var(--glass-edge);
   border-radius: 1.25rem;
   box-shadow: var(--glass-shadow);
@@ -503,30 +504,40 @@ main {
 .pagehead-hug { width: fit-content; margin-inline: auto; max-width: calc(100% - 16px); }
 /* The ends are under the floating chrome (grid above), so they pad by what
    covers them, and rows dissolve into the pane's edges instead of being cut
-   at a chrome boundary. */
+   at a chrome boundary. An end row's own --turn-gap is its distance from the
+   chrome; the dock's top 0.5rem (`#composer` pt-2) is clear glass, paid back. */
 #turns {
   padding:
-    calc(var(--head-h) + 0.75rem)
-    max(1rem, calc((100% - var(--read-w)) / 2))
-    calc(var(--dock-h, 4rem) + 0.5rem);
+    var(--head-h)
+    var(--col-pad)
+    calc(var(--dock-h, 4rem) - 0.5rem);
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts reveal). */
-  scroll-padding-block: calc(var(--head-h) + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
+  scroll-padding-block: calc(var(--head-h) + var(--turn-gap)) calc(var(--dock-h, 4rem) - 0.5rem + var(--turn-gap));
+  /* The stream's two steps: between turns and their separator lines (`my-4`
+     in chat.ts and folds.ts, which collapse into it), and within a bubble or
+     a continuation (`mb-1.5` under a header). */
+  --turn-gap: 1rem;
+  --tight-gap: 0.375rem;
   overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
   /* The fade is complete across the heading's 8px inset (margin above): a row
      showing through that strip is a ghost line over the bar, which iOS 26's
      scroll edge effect smears into the status bar. */
   mask-image: linear-gradient(to bottom, transparent 8px, black 2.5rem, black calc(100% - 2rem), transparent);
 }
+/* A pointer's row toolbar and time sit outside the bubble (`.message-tools`,
+   `[data-time]`), so the column keeps them a gutter where a full-width reply would clip them. */
+@media (hover: hover) { main { --gutter: 4.5rem; } }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
   max-width: 88%;
-  margin-block: 0.875rem;
+  margin-block: var(--turn-gap);
   padding: 0.75rem 1rem;
   border-radius: 1.375rem;
   overflow-wrap: anywhere;
 }
-#turns > [data-grouped] { margin-top: -0.5rem; }
+/* Margins collapse: a continuation sums to the tight step, not the turn gap. */
+#turns > [data-grouped] { margin-top: calc(var(--tight-gap) - var(--turn-gap)); }
 #turns > [data-kind="user"] {
   margin-left: auto;
   border-bottom-right-radius: 0.375rem;
@@ -535,6 +546,7 @@ main {
   box-shadow: inset 0 0 0 1px var(--color-indigo-300);
 }
 #turns > [data-kind="assistant"] {
+  max-width: 100%;
   margin-right: auto;
   border-bottom-left-radius: 0.375rem;
   background: var(--color-white);
@@ -582,7 +594,7 @@ main {
 .chip-details > * + * { margin-top: 0.375rem; }
 .chip-details:has(> :not([hidden])) { margin-block: 0.375rem 0.75rem; }
 /* The words follow the row, whatever came between. */
-.chip-row ~ :is(.md, .stream) { margin-top: 0.25rem; }
+.chip-row ~ :is(.md, .stream) { margin-top: var(--tight-gap); }
 /* A grey line that opens to what it folds (folds.ts): no material of its own. */
 .line-fold { position: relative; cursor: pointer; transition: color 120ms; }
 .line-fold:hover, .line-fold[aria-expanded="true"] { color: var(--color-neutral-600); }
@@ -702,15 +714,11 @@ main {
   .run-model-line .run-model-id { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
   .run-model-line .run-model:has(.run-tier) .run-model-id { display: none; }
 }
-#composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
+#composer { --composer-control-size: 2rem; position: relative; z-index: 1; padding-inline: var(--col-pad); }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
 /* The one control on the coloured gradient; `.glass` below picks the token up. */
-#composer > div {
-  --glass-shadow: var(--glass-shadow-raised);
-  max-width: var(--read-w);
-  margin-inline: auto;
-}
+#composer > div { --glass-shadow: var(--glass-shadow-raised); }
 #composer > div:focus-within {
   box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
 }
@@ -789,11 +797,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 
 @media (width < 48rem) {
-  #composer { --composer-control-size: 2.25rem; padding-inline: 0.75rem; }
-  /* The card takes the composer's inset, which is narrower here than the 1rem
-     its px-4 leaves above md — two edges a few pixels apart in the same dock
-     read as a misalignment, not as two elements. */
-  #queue-panel { width: calc(100% - 1.5rem); }
+  main { --col-pad: 0.75rem; }
+  #composer { --composer-control-size: 2.25rem; }
   /* At this width the meta chips do not fit beside a session's name, so they
      wrap to a second line of the bar, and only when they are the kind that has
      to be seen without opening anything (data-urgent, session-header.ts). The
@@ -811,7 +816,6 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #bar #session-meta:not([data-urgent]) { display: none; }
   /* The conversation's one chip is the context, short enough to stay beside the title. */
   #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
-  #turns { padding-inline: 0.625rem; }
   /* A reply is the reading: on a phone it has no side to give away. */
   #turns > [data-kind="assistant"] { max-width: 100%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }

@@ -956,16 +956,16 @@ describe("the turn's bubble", () => {
     callback("r1");
     chat.completeTurn("Other.\n<topic>deploy</topic>", { completedAt: 4, durationMs: 1, tokens: 1 });
     expect(chips()).toEqual(["topic-tag", "system"]);
-    expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
+    expect(chipRow().children[0]!.classList.contains("mb-1.5")).toBe(false);
     expect(bubble().dataset.topic).toBe("deploy");
     // A bare tagged reply grows its chip row when a run lands after it.
     chat.appendTurn("user", "more", false, 5);
     chat.completeTurn("Later.\n<topic>docs</topic>", { completedAt: 6, durationMs: 1, tokens: 1 });
     expect(chipRow()).toBeUndefined();
-    expect(bubble().children[0]!.classList.contains("mb-1")).toBe(true);
+    expect(bubble().children[0]!.classList.contains("mb-1.5")).toBe(true);
     activity.renderBackgroundRun(run("r2"));
     expect(chips()).toEqual(["topic-tag", "background-run"]);
-    expect(chipRow().children[0]!.classList.contains("mb-1")).toBe(false);
+    expect(chipRow().children[0]!.classList.contains("mb-1.5")).toBe(false);
     expect(parts()).toEqual(["chip-row", "chip-details", "md", "message-tools"]);
   });
 

@@ -72,9 +72,10 @@
       <div id="status-lead" class="mr-auto flex min-w-0 items-center gap-0.5 text-[13px]">
         <button type="button" id="status-item" aria-haspopup="dialog"
           class="hidden min-w-0 max-w-[36rem] cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 hover:bg-neutral-100">
-          <span id="status-item-dot" class="h-2 w-2 flex-none rounded-full"></span>
+          <span id="status-item-dot" class="h-2 w-2 flex-none rounded-full max-md:hidden"></span>
           <span id="status-item-title" class="min-w-0 truncate text-neutral-800 max-md:hidden"></span>
-          <span id="status-item-stage" class="min-w-0 shrink-[3] truncate text-[12px] text-neutral-500 max-md:hidden"></span>
+          <span id="status-item-state" class="text-[12px]"></span>
+          <span id="status-item-stage" class="min-w-0 shrink-[3] truncate text-[12px] text-neutral-600 max-md:hidden"></span>
           <span id="status-item-count" class="text-[12px] tabular-nums text-neutral-600 md:hidden"></span>
         </button>
         <button type="button" id="status-next" aria-label="Next open item"
@@ -113,7 +114,7 @@
            (18px leading) rather than shrinking the turns pane any further. -->
       <ul id="queue-rows" class="flex max-h-[6rem] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
     </div>
-    <form id="composer" class="flex-none px-4 pb-4 pt-2">
+    <form id="composer" class="flex-none pb-4 pt-2">
       <div class="glass rounded-[1.75rem] border border-neutral-200 px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- The row the next send answers (composer.ts setQuote). -->

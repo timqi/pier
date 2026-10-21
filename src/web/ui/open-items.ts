@@ -1,9 +1,13 @@
 // The open-item row used by the status panel, its lead in the bar and fixed command cards.
 
+import { Check, CircleAlert, Clock, X, type IconNode } from "lucide";
 import { openItemDestination, openItemGroups } from "../../core/open-items.js";
+import { waitsOnYou } from "../../core/reply.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
 import { h } from "./dom.js";
+import { icon } from "./icons.js";
 import { topicColour } from "./topics.js";
+import { runningDot } from "./turn-activity.js";
 
 interface Actions {
   openItem: (target: OpenItemTarget) => void;
@@ -11,17 +15,43 @@ interface Actions {
   grouped?: boolean;
 }
 
-/** The second line: status label, then stage. */
-export function stageLine(item: OpenItemPresentation, grouped = false): string {
-  const label = grouped && item.status === "waiting on you" ? "" : item.statusLabel;
-  // "Needs you in the design session · …": the place reads as part of the label.
-  return [label, item.stage].filter(Boolean).join(item.waitsIn ? " " : " · ");
+/** A status's word, tone and glyph; running wears the still sky dot every run does.
+ *  `stopped` is a run that failed, was cancelled or interrupted: the metadata names which. */
+const STATUS: Record<OpenItemPresentation["status"], { label: string; tone: string; glyph: IconNode | null }> = {
+  "waiting on you": { label: "waiting on you", tone: "text-amber-700", glyph: CircleAlert },
+  running: { label: "in progress", tone: "text-sky-700", glyph: null },
+  queued: { label: "queued", tone: "text-neutral-500", glyph: Clock },
+  "pending release": { label: "pending release", tone: "text-green-700", glyph: Check },
+  stopped: { label: "failed", tone: "text-red-600", glyph: X },
+};
+
+/** The whole second line, the tooltip's: status word, then the stage as worded. */
+export const stageLine = (item: OpenItemPresentation): string =>
+  [STATUS[item.status].label, item.stage].filter(Boolean).join(" · ");
+
+/** The stage as one short phrase beside the status mark: a wait's place and age leave
+ *  (the click goes there, the tooltip keeps them) and the first clause stays, a question
+ *  with its mark. */
+export function stagePhrase(item: OpenItemPresentation): string {
+  const parts = item.stage.split(" · ");
+  while (waitsOnYou(item.status) && /^(?:in the design session|<1m|\d+[mhd])$/.test(parts[0] ?? "")) parts.shift();
+  const rest = parts.join(" · ");
+  const cut = /(?<=[?？!！])|[。；，;]|[.,](?=\s)/.exec(rest);
+  return (cut?.index ? rest.slice(0, cut.index) : rest) || (item.waitsIn ? "in the design session" : "");
+}
+
+/** The status mark: glyph and word in the status's tone; `labelled` false leaves the glyph.
+ *  Only the tone is swapped, so the element keeps its own classes (the bar's lead its size). */
+export function paintStatus(el: HTMLElement, item: OpenItemPresentation, labelled = true): void {
+  const { label, tone, glyph } = STATUS[item.status];
+  el.classList.remove(...Object.values(STATUS).map((s) => s.tone));
+  el.classList.add("open-item-status", "inline-flex", "flex-none", "items-center", "gap-1", "font-medium", tone);
+  el.replaceChildren(glyph ? icon(glyph, "h-3 w-3") : runningDot(), ...(labelled ? [h("span", "status-label", label)] : []));
 }
 
 /** The topic dot, the same on a row and on the bar's lead item. */
 export function paintDot(dot: HTMLElement, item: OpenItemPresentation): void {
   dot.style.background = item.key.startsWith("item:") ? topicColour(item.problem) : "var(--color-neutral-400)";
-  dot.classList.toggle("running-dot", item.status === "running");
   dot.title = item.status;
 }
 
@@ -35,7 +65,9 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   }
   const dot = h("span", "open-item-dot h-2 w-2 flex-none rounded-full");
   const title = h("span", "open-item-title block text-sm text-neutral-900");
-  const stage = h("span", "open-item-stage block text-xs text-neutral-500");
+  const status = h("span", "");
+  const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
+  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase);
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
   const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot, h("span", "min-w-0 flex-1", title, stage, metadata));
   main.setAttribute("type", "button");
@@ -43,17 +75,17 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   updates.set(li, (item, a) => {
     li.dataset.rowKey = item.key;
     title.textContent = item.title;
-    // The title is short; the head's full wording stays one hover away.
-    if (item.title !== item.problem) main.title = item.problem;
+    phrase.textContent = stagePhrase(item);
+    // Title and phrase are short; the head's full wording stays one hover away.
+    const full = [item.title !== item.problem ? item.problem : "", phrase.textContent !== item.stage ? stageLine(item) : ""];
+    if (full.some(Boolean)) main.title = full.filter(Boolean).join("\n");
     else main.removeAttribute("title");
-    stage.textContent = stageLine(item, a.grouped);
-    stage.classList.toggle("text-amber-700", item.status === "waiting on you");
-    stage.classList.toggle("text-neutral-500", item.status !== "waiting on you");
-    stage.classList.toggle("hidden", !stage.textContent);
+    // A grouped card's head already says `Waiting on you`.
+    paintStatus(status, item, !(a.grouped && waitsOnYou(item.status)));
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
-    main.setAttribute("aria-label", `${item.title} · ${item.status}`);
+    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}`);
     const to = openItemDestination(item);
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");
     else main.removeAttribute("aria-current");

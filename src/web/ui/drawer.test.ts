@@ -80,8 +80,10 @@ it("leads with the most urgent row, cycles with the counter, and is absent with 
   drawer.renderDrawer();
   expect(badge).toHaveBeenLastCalledWith(2);
   expect(shown("#status-item-title")).toBe("done");
-  expect(shown("#status-item-stage")).toBe("Needs you · turn finished — not viewed yet");
-  expect(lead().title).toBe("done — Needs you · turn finished — not viewed yet");
+  expect(shown("#status-item-state")).toBe("waiting on you");
+  expect(doc.querySelector("#status-item-state")!.className).toContain("text-amber-700");
+  expect(shown("#status-item-stage")).toBe("turn finished — not viewed yet");
+  expect(lead().title).toBe("done — waiting on you · turn finished — not viewed yet");
   expect(next().textContent).toBe("1/3");
   next().onclick?.(); next().onclick?.();
   expect([shown("#status-item-title"), next().textContent]).toEqual(["run", "3/3"]);
@@ -93,9 +95,13 @@ it("leads with the most urgent row, cycles with the counter, and is absent with 
   sessions.unshift(row("new", { unread: true }));
   drawer.renderDrawer(); expect([shown("#status-item-title"), next().textContent]).toEqual(["new", "1/4"]);
   sessions = [];
+  doc.querySelector("#status-item-state")!.classList.add("text-[12px]"); // index.html's size
   open = { items: [{ problem: "a", stage: "", runs: [], status: "stopped" }], unlisted: [] };
   drawer.renderDrawer();
-  expect(shown("#status-item-stage")).toBe("Stopped");
+  expect([shown("#status-item-state"), shown("#status-item-stage")]).toEqual(["failed", ""]);
+  expect(doc.querySelector("#status-item-state")!.className).toContain("text-red-600");
+  expect(doc.querySelector("#status-item-state")!.className).toContain("text-[12px]");
+  expect(doc.querySelector("#status-item-state")!.className).not.toContain("text-amber-700");
   expect(next().classList.contains("hidden")).toBe(true);
   lead().onclick?.(); expect(panelRows()).toHaveLength(1);
   expect(menu.openPanel).toHaveBeenLastCalledWith(lead(), expect.anything());
@@ -128,21 +134,26 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   drawer.renderDrawer(); drawer.openDrawer();
   expect(labels()).toEqual(["稳定标题", "free", "merged", "gone", "auth review", "Queued one", "queued"]);
   expect([shown("#status-item-title"), next().textContent]).toEqual(["稳定标题", "1/7"]);
-  // How long it has waited, not how long ago its run succeeded.
-  expect(item("item:原始完整问题").querySelector(".open-item-stage")!.textContent).toBe("Needs you · 10m · 是否合并？授权只限本分支。");
+  // The question's first clause beside the status; the wait and the rest are the tooltip's.
+  const status = (key: string) => item(key).querySelector(".open-item-status")!;
+  const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
+  expect([status("item:原始完整问题").textContent, phrase("item:原始完整问题")]).toEqual(["waiting on you", "是否合并？"]);
+  expect(status("item:原始完整问题").className).toContain("text-amber-700");
+  expect([status("item:auth").textContent, phrase("item:auth")]).toEqual(["in progress", "实现中"]);
+  expect(status("item:auth").className).toContain("text-sky-700");
+  expect(status("item:auth").querySelector(".running-dot")).not.toBeNull();
+  expect([status("item:gone").textContent, status("item:merged").textContent, status("run:q").textContent]).toEqual(["failed", "pending release", "queued"]);
+  expect(status("item:gone").className).toContain("text-red-600");
   expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
   expect(doc.querySelectorAll(".row-status")).toHaveLength(0);
   const dot = (key: string) => item(key).querySelector(".open-item-dot")!;
   expect(dot("item:auth").style.background).toBe(topicColour("auth"));
-  expect(dot("item:auth").classList.contains("running-dot")).toBe(true);
-  expect(dot("item:原始完整问题").classList.contains("running-dot")).toBe(false);
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
-  expect(dot("run:q").classList.contains("running-dot")).toBe(false);
-  expect(item("session:free").querySelector(".open-item-stage")!.textContent).toBe("Needs you · turn finished — not viewed yet");
+  expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
   expect(doc.querySelectorAll(".open-item").every((li) => li.querySelectorAll("button").length === 1)).toBe(true);
-  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题");
+  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
@@ -196,15 +207,17 @@ it("retains same-titled designs on refresh, focus and navigation", () => {
   }
 });
 
-it("says where a design's wait is answered, the place read as part of the label", () => {
+it("says where a design's wait is answered: the phrase when nothing else is, the tooltip always", () => {
   vi.spyOn(Date, "now").mockReturnValue(2 * 3_600_000);
   open = { items: [
     { problem: "rail", stage: "two layouts", status: "waiting on you", designSessionId: "d", waitsIn: "d", runs: [run("r", { state: "succeeded", finishedAt: 0, targetSessionId: "d" })] },
     { problem: "bare", stage: "", status: "waiting on you", designSessionId: "e", waitsIn: "e", runs: [run("q", { state: "succeeded", finishedAt: 0, targetSessionId: "e" })] },
   ], unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(item("item:rail").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · 2h · two layouts");
-  expect(item("item:bare").querySelector(".open-item-stage")!.textContent).toBe("Needs you in the design session · 2h");
+  const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
+  expect(phrase("item:rail")).toBe("two layouts");
+  expect(phrase("item:bare")).toBe("in the design session");
+  expect(item("item:rail").querySelector(".session-open")!.title).toBe("rail\nwaiting on you · in the design session · 2h · two layouts");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -242,3 +255,15 @@ it("opens the panel from the lead and ⌘⇧P, closing on a second press", () =>
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "a", targetSessionId: "a" }] }));
 });
 
+
+it("trims a stage to its first clause, a question keeping its mark, never inside a version or a file name", async () => {
+  const { stagePhrase } = await import("./open-items.js");
+  const { openItemPresentation } = await import("../../core/open-items.js");
+  const phrase = (stage: string, status: "running" | "waiting on you" = "running") =>
+    stagePhrase(openItemPresentation({ problem: "p", stage, status, runs: [] }, 0));
+  expect(phrase("waiting on you: merge chat-layout? review clean after round 2", "waiting on you")).toBe("merge chat-layout?");
+  expect(phrase("Cobo 按策略拒签 input #0，需把 0x21 哈希发 Cobo 加白后重提")).toBe("Cobo 按策略拒签 input #0");
+  expect(phrase("release v0.4.20 from main.ts. Then tag it")).toBe("release v0.4.20 from main.ts");
+  expect(phrase("开发中：待办状态化、间距统一")).toBe("开发中：待办状态化、间距统一");
+  expect(phrase("")).toBe("");
+});

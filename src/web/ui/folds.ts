@@ -66,7 +66,7 @@ function isQuiet(row: HTMLElement): boolean {
 function silenceLine(): HTMLElement {
   const toggle = foldButton();
   toggle.title = "Replies that stayed silent";
-  const line = h("div", "my-2 text-[11.5px] leading-tight text-neutral-400", toggle);
+  const line = h("div", "my-4 text-[11.5px] leading-tight text-neutral-400", toggle);
   line.dataset.kind = "fold";
   toggle.onclick = () => setFold(line, !foldOpen(line));
   return line;
