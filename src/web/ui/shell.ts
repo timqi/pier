@@ -34,5 +34,17 @@ export function onOpenUrl(fn: (url: string) => void): void {
     .catch((err: unknown) => console.warn("shell: listening for open-url failed", err));
 }
 
-// The server writes `$PIER_TITLE` into the page title; the shell names the instance from it.
-invoke("page_title", { title: document.title });
+/** The accent as `#rrggbb`: the ramp is authored in oklch (style.css), and a
+ *  canvas is the one converter to sRGB the page already has. */
+function accentHex(): string | undefined {
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  if (!ctx) return undefined;
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--color-indigo-600");
+  ctx.fillRect(0, 0, 1, 1);
+  const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// The server writes `$PIER_TITLE` into the page title and the accent onto
+// `<html>`; the shell names and colours the instance's rail row from them.
+if (tauri) invoke("page_title", { title: document.title, accent: accentHex() });
