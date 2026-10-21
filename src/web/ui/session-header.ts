@@ -260,13 +260,13 @@ function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "c
   return openPanel(anchor, panel);
 }
 
-async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo): Promise<void> {
+async function pickModel(anchor: HTMLElement, id: string, fromMenu = false): Promise<void> {
   const loading = h("div", "px-3 py-3 text-[15px] text-neutral-500", "Loading models…");
   const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full", loading);
   // What the panel is showing right now — the placeholder, then the picker the
   // cache drew, then the picker the read reconciled.
   let shown: HTMLElement = loading;
-  if (session) content.prepend(panelHead(anchor, session.title ?? untitled(session.cwd), "Close model picker"));
+  if (fromMenu) content.prepend(panelHead(anchor, "Close model picker"));
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.
   const visible = (): boolean => shown.isConnected && !shown.closest("[inert]");
@@ -367,17 +367,15 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
-/** Head of a follow-up panel: back to the menu, its title, close. */
-function panelHead(anchor: HTMLElement, text: string, closeLabel: string): HTMLElement {
+/** Head of a follow-up panel: back to the menu and close. */
+function panelHead(anchor: HTMLElement, closeLabel: string): HTMLElement {
   const arrow = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
   arrow.setAttribute("aria-label", "Back to session actions");
   arrow.onclick = () => barMenu(anchor);
   const close = h("button", "icon-btn h-11 w-11", icon(X));
   close.setAttribute("aria-label", closeLabel);
   close.onclick = closeMenu;
-  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", text);
-  title.title = title.textContent ?? "";
-  return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", arrow, title, close);
+  return h("div", "flex items-center justify-between border-b border-neutral-200 pb-2 mb-2", arrow, close);
 }
 
 /** The bar's ⋯. Session info and the model need a session, so before the
@@ -413,7 +411,7 @@ function barMenu(anchor: HTMLElement): void {
       label: "Model & reasoning…",
       separatorBefore: true,
       hint: currentModel?.id ?? "…",
-      onSelect: () => s && void pickModel(anchor, s.id, s),
+      onSelect: () => s && void pickModel(anchor, s.id, true),
       ...later,
     },
     {
