@@ -17,7 +17,7 @@ updates this document.
 
 ## Materials
 
-- **Solid**: replies, modal forms, file previews, menus and popovers.
+- **Solid**: replies, the docked status rail, modal forms, file previews, menus and popovers.
 - **Glass + hairline + shadow**: navigation and floating controls only. One
   token set — canvas one step darker than the panel, neutral translucent
   hairline (light in dark mode), top-edge highlight, two-part shadow (wide
@@ -42,10 +42,10 @@ updates this document.
 
 ## Layout
 
-- **One column**: the conversation is a 44rem reading column (`--read-w`: transcript, queue card, composer) centred in the pane; from 68.625rem (1098px) the column is pinned to the left, the status panel docks as the one rail right beside it, only while it has rows, the spare width stays on the right, and the rail's arrival never moves the column.
+- **One column**: the conversation is a 44rem reading column (`--read-w`: transcript, queue card, composer) centred in the pane; from 68.625rem (1098px) the column, a 1rem gap and the status rail's slot (14–17.5rem) centre as one block under the full-width bar; the slot is reserved with or without rows, so the rail's arrival never moves the column.
 - **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens the status panel, its amber `needs you` counting the panel's `waiting on you` rows; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left; nothing is phone-only but the menu primitive's sheets.
 - **Status rows**: the panel and `/status` share a topic dot, a two-line title, a wrapping second line saying what the user is needed for and useful time/goal/worker metadata; `Needs you` is amber second-line text, other necessary statuses are neutral text, and no row reserves a badge column. A row is one control, a 44px target on coarse pointers, its full problem a tooltip when the title is shorter; refresh preserves focus by item identity.
-- **Status panel**: one flat waiting-first list uses the existing popover at ≥640px and sheet below it; from 68.625rem it docks in a rail of up to 17.5rem on the canvas below the bar, without enclosing glass, border or shadow. It takes natural height up to the smaller of 60dvh and the space above the composer; only the list scrolls, below quiet 12px counts. Hover, focus and selection use restrained neutral surfaces; `/status` keeps its solid reading card and counted groups.
+- **Status panel**: one flat waiting-first list uses the existing popover at ≥640px and sheet below it; from 68.625rem it docks in a rail of up to 17.5rem below the bar on the assistant bubble's material (solid `--color-white`, `neutral-200` inset hairline, the same light shadow, 1.375rem radius, 0.75rem 1rem padding), its top aligned with the first bubble's. It takes natural height up to the smaller of 60dvh and the space above the composer; only the list scrolls, below quiet 12px counts. Hover, focus and selection use restrained neutral surfaces; `/status` keeps its solid reading card and counted groups.
 - **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. `+` and send/stop stay on the draft's row at every length, bottom-aligned beside it, while the text grows upward between them; its height is read again when the width changes.
 - **Menus**: labels align without a reserved selection column; only selectable

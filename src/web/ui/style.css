@@ -359,16 +359,24 @@ main > section, #turns { grid-row: 1 / -1; }
 @media (pointer: coarse) {
   .open-item .session-open { min-height: 44px; min-width: 44px; }
 }
-/* Wide, the column is pinned 1rem from the left whether or not the rail is
-   there, so the rail's arrival never moves it; the spare width is all on the
-   right. 68.625rem is the 1rem inset, --read-w, a 1rem gap, the rail's 14rem
-   floor and the 1rem that clears #turns' scrollbar — 61 of the root's 18px
-   rem, written in the 16px rem a media query reads. `main` outranks the base
-   rules below, which centre the column. */
+/* Wide, the column, a 1rem gap and the rail's slot centre as one block, the
+   slot reserved with or without rows so the rail's arrival never moves the
+   column. 68.625rem is the slot's 14rem floor plus --read-w, the gap and 1rem
+   each side that clears #turns' scrollbar — 61 of the root's 18px rem, written
+   in the 16px rem a media query reads. The vars hold `100%` unresolved: each
+   use reads it against main's width, which is why #composer pads rather than
+   its div's margins. `main` outranks the base rules below. */
 @media (width >= 68.625rem) {
-  main #turns { padding-inline: 1rem calc(100% - var(--read-w) - 1rem); }
-  main #queue-panel { margin-inline: 1rem auto; }
-  main #composer > div { margin-inline: 0 auto; }
+  main {
+    --rail-w: clamp(14rem, 100% - var(--read-w) - 3rem, 17.5rem);
+    --block-l: calc((100% - var(--read-w) - 1rem - var(--rail-w)) / 2);
+    --block-r: calc(var(--block-l) + 1rem + var(--rail-w));
+  }
+  main #turns { padding-inline: var(--block-l) var(--block-r); }
+  main #queue-panel { margin-inline: var(--block-l) var(--block-r); }
+  main #composer { padding-inline: var(--block-l) var(--block-r); }
+  main #composer > div { margin-inline: 0; }
+  /* The assistant bubble's material: a reading surface like the replies, not glass. */
   main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
     display: flex;
     grid-row: 1 / -1;
@@ -376,9 +384,13 @@ main > section, #turns { grid-row: 1 / -1; }
     justify-self: start;
     position: relative;
     z-index: 1;
-    width: min(17.5rem, calc(100% - var(--read-w) - 3rem));
-    margin: calc(var(--head-h) + 0.75rem) 0 0 calc(var(--read-w) + 2rem);
+    width: var(--rail-w);
+    margin: calc(var(--head-h) + 0.75rem + 0.875rem) 0 0 calc(var(--block-l) + var(--read-w) + 1rem);
     max-height: min(60dvh, calc(100dvh - var(--head-h) - var(--dock-h, 4rem) - 2rem));
+    padding: 0.75rem 1rem;
+    border-radius: 1.375rem;
+    background: var(--color-white);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
   }
   main:has(#status-side:not([data-empty])) #status-chip { display: none; }
 }
