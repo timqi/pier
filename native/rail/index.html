@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pier</title>
+    <link rel="stylesheet" href="./rail.css" />
+    <script type="module" src="./rail.ts"></script>
+  </head>
+  <body>
+    <ul id="instances"></ul>
+    <form id="add" hidden>
+      <input name="url" placeholder="URL or pier login link" autocomplete="off" spellcheck="false" required />
+    </form>
+    <button id="plus" type="button" title="Add an instance (Ctrl/⌘ N)">+</button>
+    <p id="toast" role="alert" hidden></p>
+  </body>
+</html>

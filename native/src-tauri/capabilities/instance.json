@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "instance",
+  "description": "An instance's web UI, at the URL the user entered: the bridge's three calls and its listen, no emit to the rail or another instance.",
+  "webviews": ["i-*"],
+  "remote": { "urls": ["http://*:*", "https://*:*"] },
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-set-badge", "allow-notify", "allow-page-title"]
+}

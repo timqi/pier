@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pier",
+  "version": "0.1.0",
+  "identifier": "com.timqi.pier-client",
+  "build": {
+    "frontendDist": "../rail/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["../../src/web/ui/public/icon-512.png"]
+  }
+}

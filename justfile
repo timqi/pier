@@ -21,6 +21,17 @@ release bump="patch":
 icons:
     npx -y -p @resvg/resvg-js -p tsx tsx scripts/render-icons.ts
 
+# The native shell (docs/design/14-native-client.md), debug build. Linux needs
+# libwebkit2gtk-4.1-dev, libxdo-dev and the rest of Tauri 2's prerequisites.
+native-dev:
+    npx vite build -c native/vite.config.ts
+    cd native/src-tauri && cargo run
+
+# A local bundle under native/src-tauri/target/release/bundle; needs `cargo install tauri-cli --version '^2' --locked`.
+native:
+    npx vite build -c native/vite.config.ts
+    cd native/src-tauri && cargo tauri build
+
 # Non-blank, non-comment lines per area, tests excluded — the Budgets table in AGENTS.md.
 size:
     #!/usr/bin/env bash
@@ -29,5 +40,6 @@ size:
         printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'))"
     done
     printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -vE '\.test(kit)?\.ts$'))"
+    printf '%-11s %6s\n' native "$(count $(find native -name node_modules -prune -o -name target -prune -o -name dist -prune -o \( -name '*.rs' -o -name '*.ts' \) -not -name '*_test.rs' -print))"
     echo; echo "modules over 750:"
     for f in $(find src -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'); do n=$(count "$f"); [ "$n" -gt 750 ] && echo "  $n $f"; done | sort -rn

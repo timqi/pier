@@ -29,13 +29,14 @@
     "build:assets": "mkdir -p dist/web && rm -rf dist/web/public && cp -r src/web/public dist/web/public",
     "prepack": "npm run build",
     "build:web": "vite build",
-    "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p native/rail/tsconfig.json",
     "lint": "oxlint src --format=default --deny-warnings",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/api": "^2.12.4",
     "oxlint": "^1.79.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",

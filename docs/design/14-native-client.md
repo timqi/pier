@@ -65,7 +65,7 @@ surface with focus; everything else is the web UI's own keyboard.
 ## Repository
 
 - `native/` beside `src/`: `src-tauri/` (Rust) and the rail page (TS, built
-  by the same Vite config as a second entry); `just native-dev`, `just native`.
+  by `native/vite.config.ts`); `just native-dev`, `just native`.
 - Budget line: `native/` ≤ 600 non-blank lines (Rust + TS); the server-side
   change is the `notification` workspace event alone (~20 lines in `push.ts`
   and `server.ts`), the UI change `shell.ts` and two call sites.
