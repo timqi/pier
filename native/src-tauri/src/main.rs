@@ -285,6 +285,24 @@ fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res
     layout(&window).map_err(text)
 }
 
+/// Reloads an instance's page from the shell, not its script, so a hung page reloads too; a
+/// page whose assets were rebuilt under it recovers only by loading again.
+fn reload(app: &AppHandle, id: &str) -> Res {
+    let webview = app.get_webview(id).ok_or_else(|| format!("{id} has no webview"))?;
+    // WebKit hands a reload to the page's process, which a hung script never answers, and flags
+    // it unresponsive only seconds later: Linux always reloads in a new process.
+    #[cfg(target_os = "linux")]
+    let reloaded = webview.with_webview(|platform| {
+        use webkit2gtk::WebViewExt;
+        let page = platform.inner();
+        page.terminate_web_process();
+        page.reload();
+    });
+    #[cfg(not(target_os = "linux"))]
+    let reloaded = webview.reload();
+    reloaded.map_err(text)
+}
+
 /// Shows one instance and hides the rest, so an inactive page reads `document.hidden`.
 fn show_instance(app: &AppHandle, shell: &Shell, id: &str) -> Res {
     let mut live = shell.lock();
@@ -557,12 +575,17 @@ fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
     }
 }
 
-/// The tab bar's menu button: the Instances menu, dropped at `x`, `y` in the bar.
+/// The tab bar's menus, dropped at `x`, `y` in the bar: a tab's own for `tab`, else the
+/// menu button's, which is Instances.
 #[tauri::command]
-fn popup(app: AppHandle, window: Window, x: f64, y: f64) -> Res {
+fn popup(app: AppHandle, window: Window, tab: Option<String>, x: f64, y: f64) -> Res {
+    let at = LogicalPosition::new(x, y);
+    if let Some(id) = tab {
+        let reload = MenuItem::with_id(&app, format!("reload:{id}"), "Reload", true, None::<&str>).map_err(text)?;
+        return window.popup_menu_at(&Menu::with_items(&app, &[&reload]).map_err(text)?, at).map_err(text);
+    }
     let menu = app.menu().and_then(|m| m.get(INSTANCES)).and_then(|i| i.as_submenu().cloned());
-    let menu = menu.ok_or("no Instances menu")?;
-    window.popup_menu_at(&menu, LogicalPosition::new(x, y)).map_err(text)
+    window.popup_menu_at(&menu.ok_or("no Instances menu")?, at).map_err(text)
 }
 
 /// Accelerators on the app menu, so they fire while an instance's page has focus. Only macOS
@@ -586,7 +609,20 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         instances.append(&item(format!("nth-{n}"), format!("Instance {n}"), format!("CmdOrCtrl+{n}"))?)?;
     }
     menu.append(&instances)?;
+    // An item holds one accelerator: F5's is a second Reload, in a submenu `⋯` does not show.
+    if !cfg!(target_os = "macos") {
+        let f5 = item("reload-f5".into(), "Reload Instance".into(), "F5".into())?;
+        menu.append(&Submenu::with_items(app, "View", true, &[&f5])?)?;
+    }
     Ok(menu)
+}
+
+/// The instance a menu item reloads: a tab menu's own, Reload Instance's the active one.
+fn reloads(item: &str, active: impl FnOnce() -> Option<String>) -> Option<String> {
+    match item {
+        "reload" | "reload-f5" => active(),
+        _ => item.strip_prefix("reload:").map(str::to_owned),
+    }
 }
 
 fn on_menu(app: &AppHandle, event: MenuEvent) {
@@ -599,14 +635,15 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             .and_then(|()| app.emit_to(TABS, "add", ()).map_err(text)),
         "prev" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + len - 1) % len)),
         "next" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + 1) % len)),
-        // A page whose assets were rebuilt under it recovers only by loading again.
-        "reload" => shell.lock().active.clone().map_or(Ok(()), |id| {
-            app.get_webview(&id).ok_or_else(|| format!("{id} has no webview"))?.reload().map_err(text)
-        }),
-        id => match id.strip_prefix("nth-").and_then(|n| n.parse::<usize>().ok()) {
-            Some(n) => show_at(app, &shell, |_, _| n.saturating_sub(1)),
-            None => Ok(()),
-        },
+        id => {
+            if let Some(n) = id.strip_prefix("nth-").and_then(|n| n.parse::<usize>().ok()) {
+                show_at(app, &shell, |_, _| n.saturating_sub(1))
+            } else if let Some(id) = reloads(id, || shell.lock().active.clone()) {
+                reload(app, &id)
+            } else {
+                Ok(())
+            }
+        }
     };
     if let Err(e) = done {
         report(app, e);

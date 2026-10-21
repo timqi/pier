@@ -103,6 +103,10 @@ function render(rows: Row[]): void {
         li.classList.remove("confirm");
         remove.textContent = "×";
       };
+      li.oncontextmenu = (e) => {
+        e.preventDefault();
+        void call("popup", { tab: row.id, x: e.clientX, y: e.clientY });
+      };
       li.ondragstart = (e) => e.dataTransfer?.setData("text/plain", row.id);
       li.ondragover = (e) => e.preventDefault();
       li.ondrop = (e) => {

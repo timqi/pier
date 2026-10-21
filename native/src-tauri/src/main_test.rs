@@ -48,3 +48,27 @@ fn a_finished_load_waits_only_its_grace() {
     assert!(verdict(&rx, Duration::from_secs(5), GRACE).is_some());
     assert!(started.elapsed() < Duration::from_secs(1));
 }
+
+fn active() -> Option<String> {
+    Some("a1".into())
+}
+
+#[test]
+fn reload_instance_reloads_the_active_tab() {
+    assert_eq!(reloads("reload", active).as_deref(), Some("a1"));
+    assert_eq!(reloads("reload-f5", active).as_deref(), Some("a1"));
+    assert_eq!(reloads("reload", || None), None);
+}
+
+#[test]
+fn a_tab_menu_reload_reloads_its_own_tab() {
+    assert_eq!(reloads("reload:b2", active).as_deref(), Some("b2"));
+    assert_eq!(reloads("reload:b2", || None).as_deref(), Some("b2"));
+}
+
+#[test]
+fn other_items_reload_nothing_nor_read_the_active_tab() {
+    for item in ["add", "prev", "next", "nth-1", "reloaded"] {
+        assert_eq!(reloads(item, || panic!("{item} read the active tab")), None, "{item}");
+    }
+}
