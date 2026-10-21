@@ -28,13 +28,15 @@ use tauri_plugin_notification::{ActionPerformed, NotificationExt};
 
 const WINDOW: &str = "main";
 const TABS: &str = "tabs";
-const TABS_HEIGHT: f64 = 38.0;
+/// Twice the 16pt line macOS centres its traffic lights on, so the tabs sit level with them.
+const TABS_HEIGHT: f64 = 32.0;
 const INSTANCES: &str = "instances";
 
 type Res<T = ()> = Result<T, String>;
 
 struct Shell {
-    /// `pier-client/` in the platform config dir: the list and every instance's data.
+    /// `pier-client/` in the platform config dir, `pier-client-dev/` for a debug build:
+    /// the list and every instance's data, whose cookie stores the two builds do not share.
     dir: PathBuf,
     state: Mutex<Live>,
 }
@@ -325,11 +327,27 @@ enum Probed {
     Left(Url),
 }
 
+/// The probe's verdict from its events. WebKit reports the title after the load finishes,
+/// so a finished load waits up to `grace` for it.
+fn verdict(rx: &mpsc::Receiver<Probed>, wait: Duration, grace: Duration) -> Option<String> {
+    let (mut deadline, mut title, mut loaded) = (Instant::now() + wait, String::new(), false);
+    loop {
+        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(Probed::Title(t)) if t == "Pier" => return None,
+            Ok(Probed::Title(t)) => title = t,
+            Ok(Probed::Loaded) => (loaded, deadline) = (true, deadline.min(Instant::now() + grace)),
+            Ok(Probed::Left(url)) => return Some(format!("it redirects to {url}")),
+            Err(_) if !loaded => return Some(format!("no answer within {}s", wait.as_secs())),
+            Err(_) if title.is_empty() => return Some("its /login has no title".to_owned()),
+            Err(_) => return Some(format!("its /login is titled \"{title}\"")),
+        }
+    }
+}
+
 /// Why `origin` does not look like Pier, if it does not: every Pier serves `/login`, signed
 /// out, as a page titled "Pier". Loaded in a hidden throwaway webview with no cookie jar
 /// and no IPC, so the shell still opens no connection of its own.
 async fn probe(app: &AppHandle, instance: &Instance) -> Res<Option<String>> {
-    const WAIT: Duration = Duration::from_secs(10);
     let window = app.get_window(WINDOW).ok_or("the window is gone")?;
     let login = Url::parse(&instance.url).and_then(|u| u.join("/login")).map_err(text)?;
     let (tx, rx) = mpsc::channel();
@@ -351,20 +369,8 @@ async fn probe(app: &AppHandle, instance: &Instance) -> Res<Option<String>> {
     let webview = window.add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0));
     let webview = webview.map_err(text)?;
     webview.hide().map_err(text)?;
-    let waited = tauri::async_runtime::spawn_blocking(move || {
-        let (deadline, mut title) = (Instant::now() + WAIT, String::new());
-        loop {
-            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(Probed::Title(t)) if t == "Pier" => return None,
-                Ok(Probed::Title(t)) => title = t,
-                Ok(Probed::Loaded) if title.is_empty() => return Some("its /login did not load".to_owned()),
-                Ok(Probed::Loaded) => return Some(format!("its /login is titled \"{title}\"")),
-                Ok(Probed::Left(url)) => return Some(format!("it redirects to {url}")),
-                Err(_) => return Some(format!("no answer within {}s", WAIT.as_secs())),
-            }
-        }
-    });
-    let verdict = waited.await.map_err(text);
+    let (wait, grace) = (Duration::from_secs(10), Duration::from_secs(2));
+    let verdict = tauri::async_runtime::spawn_blocking(move || verdict(&rx, wait, grace)).await.map_err(text);
     webview.close().map_err(text)?;
     verdict
 }
@@ -387,8 +393,9 @@ async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool
     show_instance(&app, &shell, &instance.id).map(|()| None)
 }
 
+/// Its data goes with it: the cookie jar, so a re-added instance signs in afresh.
 #[tauri::command]
-fn remove(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
+async fn remove(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
     let mut at = 0;
     edit(&app, &shell, |all| {
         at = position(all, &id)?;
@@ -397,6 +404,18 @@ fn remove(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
     })?;
     if let Some(webview) = app.get_webview(&id) {
         webview.close().map_err(text)?;
+    }
+    // WebKit refuses to remove a store the webview closed a moment ago still holds.
+    #[cfg(target_os = "macos")]
+    for retry in 1.. {
+        match app.remove_data_store(store::store_key(&id)).await {
+            Ok(()) => break,
+            Err(e) if retry == 8 => return Err(format!("removing the instance's data: {e}")),
+            Err(_) => {
+                let pause = move || std::thread::sleep(Duration::from_millis(100 * retry));
+                tauri::async_runtime::spawn_blocking(pause).await.map_err(text)?;
+            }
+        }
     }
     match fs::remove_dir_all(shell.data_dir(&id)) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(format!("removing the instance's data: {e}")),
@@ -452,6 +471,7 @@ fn set_badge(app: AppHandle, shell: State<'_, Shell>, webview: Webview, count: u
     surfaced(&app, known)
 }
 
+/// Titled `<instance> · <title>`: with several instances, the push's own title does not say which.
 #[tauri::command]
 fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String, tag: String) -> Res {
     if !url.starts_with("/app/") {
@@ -459,6 +479,8 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     }
     // As Web Push's `tag`: a session's later notification replaces its earlier
     // one, where the platform can close it (Linux; macOS stacks regardless).
+    let live = app.state::<Shell>().lock().instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
+    let title = live.map_or(title.clone(), |name| format!("{name} · {title}"));
     let mut hasher = DefaultHasher::new();
     (webview.label(), &tag).hash(&mut hasher);
     let id = hasher.finish() as i32;
@@ -554,6 +576,7 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &item("add".into(), "Add Instance…".into(), "CmdOrCtrl+N".into())?,
             &item("prev".into(), "Previous Instance".into(), "CmdOrCtrl+Shift+[".into())?,
             &item("next".into(), "Next Instance".into(), "CmdOrCtrl+Shift+]".into())?,
+            &item("reload".into(), "Reload Instance".into(), "CmdOrCtrl+R".into())?,
         ],
     )?;
     for n in 1..=9 {
@@ -573,6 +596,10 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             .and_then(|()| app.emit_to(TABS, "add", ()).map_err(text)),
         "prev" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + len - 1) % len)),
         "next" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + 1) % len)),
+        // A page whose assets were rebuilt under it recovers only by loading again.
+        "reload" => shell.lock().active.clone().map_or(Ok(()), |id| {
+            app.get_webview(&id).ok_or_else(|| format!("{id} has no webview"))?.reload().map_err(text)
+        }),
         id => match id.strip_prefix("nth-").and_then(|n| n.parse::<usize>().ok()) {
             Some(n) => show_at(app, &shell, |_, _| n.saturating_sub(1)),
             None => Ok(()),
@@ -584,7 +611,8 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
 }
 
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let shell = Shell { dir: app.path().config_dir()?.join("pier-client"), state: Mutex::default() };
+    let dir = if cfg!(debug_assertions) { "pier-client-dev" } else { "pier-client" };
+    let shell = Shell { dir: app.path().config_dir()?.join(dir), state: Mutex::default() };
     let mut errors = Vec::new();
     let instances = store::load(&shell.store()).unwrap_or_else(|e| {
         errors.push(e);
@@ -652,3 +680,7 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+#[path = "main_test.rs"]
+mod tests;

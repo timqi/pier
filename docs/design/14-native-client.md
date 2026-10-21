@@ -14,23 +14,29 @@ for a few weeks, and is deleted whole if it is not.
   bundled browser engine; the Rust side is instance bookkeeping, the tab
   bar, the badge and the notification call, nothing about chat.
 - **Instance** = `{name, url}` in the shell's own store
-  (`~/.config/pier-client/instances.json`). Auth is the instance's own: each
-  webview keeps a persistent cookie jar of its own, and the operator signs in
+  (`~/.config/pier-client/instances.json`; a debug build keeps its own list
+  in `pier-client-dev/`, as its cookie stores are not the bundle's). Auth is
+  the instance's own: each webview keeps a persistent cookie jar of its own, and the operator signs in
   with the password, a passkey or a `pier login` link as in a browser. The
   shell holds no credential and opens no HTTP connection of its own.
-- **Tab bar**: one row across the top, a tab per instance (dot in the
+- **Tab bar**: one 32px row across the top, a tab per instance (dot in the
   instance's accent, name, red unread count), then `+`; the instance's page
-  fills the window below. Click switches the visible webview, the others stay
+  fills the window below. A tab is a 24px rounded pill, 180px wide until the
+  window is too narrow, its name truncated with an ellipsis; the shown one is
+  raised on `Canvas`, its `×` always visible, the others' only on hover. On
+  macOS the row's centre line is the traffic lights'. Click switches the visible webview, the others stay
   mounted so SSE streams and composer drafts survive a switch. Add = paste a
   URL or a `pier login` link into the field `+` opens (sets url and signs in
-  at once); `×` then `Remove` removes, double-click on the name renames, drag
-  reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
+  at once); `×` then `Remove` removes it with its cookie jar and storage
+  (macOS: its WebKit data store; Linux: its data directory), double-click on
+  the name renames, drag reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
   page title. An error shows as a red toast over the bar for 8s; a click
   dismisses it.
 - **Origin guard**: before adding, a hidden throwaway webview (no cookie
   jar, no IPC) loads `<origin>/login`, which every Pier serves signed out
-  titled `Pier`; a different title, a failed load, a redirect off the origin
-  or 10s without an answer shows a warning, and submitting the same input
+  titled `Pier`; a different title, no title within 2s of the load finishing
+  (WebKit reports the title after the load), a redirect off the origin or 10s
+  without an answer shows a warning, and submitting the same input
   again adds it anyway. http and https are both accepted.
 - **Navigation**: an instance's tab loads only its own origin (scheme, host
   and port; `about:`/`data:` frames aside), a `target=_blank` link to it
@@ -43,8 +49,8 @@ for a few weeks, and is deleted whole if it is not.
 - **Title bar**: the tab bar is the title bar. macOS keeps its traffic
   lights over the bar's left end (overlay title bar, hidden title); elsewhere
   the window has no system frame and no menu bar, and the bar draws
-  minimize, maximize and close at its right end. `⋯` at the right end pops
-  up the Instances menu. The bar's empty space drags the window, a double
+  minimize, maximize and close at its right end, with `⋯` before them
+  popping up the Instances menu, which macOS keeps in its menu bar. The bar's empty space drags the window, a double
   click maximizes or restores; on Linux each webview's outer 5px resizes the
   window, unless it is maximized or fullscreen. On Windows only the shadow's
   frame outside the left, right and bottom edges resizes; the top edge lies
@@ -69,8 +75,9 @@ one ~30-line module; in a browser every call is a no-op.
   stream, and `GET /api/events` forwards it only to the web session the push
   targets (every one for the "every device" case). The UI in a browser
   ignores the event (push already covers it); in the shell the bridge hands
-  it to the native notification. Body is the same `preview(reply.text)` the
-  push sends — the topic is in it. Click: the shell focuses the window and
+  it to the native notification, titled `<instance name> · <title>` by the
+  shell so it says which instance spoke. Body is the same
+  `preview(reply.text)` the push sends — the topic is in it. Click: the shell focuses the window and
   that instance and sets the page's hash from `url` itself; an instance page
   holds no event permission, so no page can hear the tab bar's or another's.
 - **Visibility**: a hidden instance's webview must read
@@ -82,8 +89,9 @@ one ~30-line module; in a browser every call is a no-op.
 ## Keyboard
 
 `Cmd+1…9` (Ctrl on Linux) switch to the Nth instance, `Cmd+Shift+[` / `]`
-previous / next, `Cmd+N` add an instance. They are the Instances menu's
-accelerators: in the menu bar on macOS, in the hidden menu bar elsewhere,
+previous / next, `Cmd+N` add an instance, `Cmd+R` reload the shown instance
+(a page whose assets were rebuilt under it recovers only so). They are the
+Instances menu's accelerators: in the menu bar on macOS, in the hidden menu bar elsewhere,
 which still fires them. The tab bar is the only native surface with focus;
 everything else is the web UI's own keyboard.
 
