@@ -319,17 +319,24 @@ describe("pier vault run", () => {
     ];
     const { home, asked } = await fakePier(200, { result: { hits } });
     const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: home, TZ: "UTC" };
-    const lines = await run(["search", "the", "parser", "--limit", "5", "--in", "pier", "--role", "user", "--since", "2025-01-01"], { env });
+    const lines = await run(["search", "the", "parser", "--limit", "5", "--in", "main", "--role", "user", "--since", "2025-01-01"], { env });
     expect(lines.stdout).toBe("2025-01-02 03:04 \u00b7 Pier \u00b7 user: the parser broke\n2025-01-02 03:04 \u00b7 Fix the build \u00b7 assistant: fixed\n");
     expect(lines.code).toBe(0);
     expect(asked).toEqual([{ method: "POST", url: "/search", body: {
-      params: { q: "the parser", limit: 5, in: "pier", role: "user", since: Date.UTC(2025, 0, 1) }, sessionId: "sess-1",
+      params: { q: "the parser", limit: 5, in: "main", role: "user", since: Date.UTC(2025, 0, 1) }, sessionId: "sess-1",
     } }]);
+    // `--around` copies a hit line's time back and replaces the words.
+    const replay = await run(["search", "--around", "2025-01-02 03:04", "--in", "s2", "--limit", "30"], { env });
+    expect(replay.code).toBe(0);
+    expect(replay.stdout).toBe(lines.stdout);
+    expect(asked[1]).toEqual({ method: "POST", url: "/search", body: { params: { around: at, in: "s2", limit: 30 }, sessionId: "sess-1" } });
+    await run(["search", "--around", "2025-01-02"], { env });
+    expect((asked[2] as { body: { params: unknown } }).body.params).toEqual({ around: Date.UTC(2025, 0, 2) });
     const json = await run(["search", "parser", "--json"], { env });
     expect(JSON.parse(json.stdout)).toEqual({ hits });
     const before = Date.now();
     await run(["search", "parser", "--since", "2d"], { env });
-    const since = (asked[2] as { body: { params: { since: number } } }).body.params.since;
+    const since = (asked[4] as { body: { params: { since: number } } }).body.params.since;
     expect(since).toBeGreaterThanOrEqual(before - 2 * 86_400_000);
     expect(since).toBeLessThanOrEqual(Date.now() - 2 * 86_400_000);
 
@@ -344,12 +351,23 @@ describe("pier vault run", () => {
     // Usage and a bad scope never touch the socket.
     const bare = await run(["search"], { env: { ...env, PIER_HOME: refused.home } });
     expect(bare.code).toBe(2);
-    for (const [flag, value, why] of [["--since", "last week", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--since", "2025-02-30", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--role", "tool", "--role takes user or assistant"]]) {
+    for (const [flag, value, why] of [["--since", "last week", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--since", "2025-02-30", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--since", "2025-01-02 03:04", "--since takes <N>h, <N>d or YYYY-MM-DD"], ["--role", "tool", "--role takes user or assistant"]]) {
       const bad = await run(["search", "x", flag!, value!], { env: { ...env, PIER_HOME: refused.home } });
       expect(bad.code).toBe(2);
       expect(bad.stderr.startsWith(`search: ${why!}\nusage: pier search`)).toBe(true);
     }
-    const twice = await run(["search", "x", "--in", "pier", "--in", "s2"], { env: { ...env, PIER_HOME: refused.home } });
+    for (const [argv, why] of [
+      [["--around", "2025-01-02 24:00"], "--around takes YYYY-MM-DD HH:MM or YYYY-MM-DD"],
+      [["--around", "2025-01-02T03:04"], "--around takes YYYY-MM-DD HH:MM or YYYY-MM-DD"],
+      [["x", "--around", "2025-01-02"], "--around replays the conversation: no words, --since or --role beside it"],
+      [["--around", "2025-01-02", "--since", "7d"], "--around replays the conversation: no words, --since or --role beside it"],
+      [["--around", "2025-01-02", "--role", "user"], "--around replays the conversation: no words, --since or --role beside it"],
+    ] as [string[], string][]) {
+      const bad = await run(["search", ...argv], { env: { ...env, PIER_HOME: refused.home } });
+      expect(bad.code).toBe(2);
+      expect(bad.stderr.startsWith(`search: ${why}\nusage: pier search`)).toBe(true);
+    }
+    const twice = await run(["search", "x", "--in", "main", "--in", "s2"], { env: { ...env, PIER_HOME: refused.home } });
     expect(twice.code).toBe(2);
     expect(twice.stderr).toContain("search: --in takes one place");
     expect(refused.asked).toHaveLength(1);

@@ -48,15 +48,27 @@ describe("searchMessages", () => {
     expect(f.scopes).toEqual([{ limit: 10, exclude: [] }]);
   });
 
-  it("searches only the conversation with `in: pier`, only one session with an id", async () => {
+  it("searches only the conversation with `in: main` (`pier` its alias), only one session with an id", async () => {
     const f = factory(rows);
-    const pier = await searchMessages(f, () => ["p1"])({ q: "said", in: "pier" });
-    expect(pier.hits.map((h) => h.sessionId)).toEqual(["p1"]);
+    const main = await searchMessages(f, () => ["p1"])({ q: "said", in: "main" });
+    expect(main.hits.map((h) => h.sessionId)).toEqual(["p1"]);
+    expect((await searchMessages(f, () => ["p1"])({ q: "said", in: "pier" })).hits.map((h) => h.sessionId)).toEqual(["p1"]);
     const one = await searchMessages(f, () => ["p1"])({ q: "said", in: "w1" });
     expect(one.hits.map((h) => [h.sessionId, h.at])).toEqual([["w1", 5], ["w1", 1]]);
     // A chain member asked for by id is still Pier.
     expect((await searchMessages(f, () => ["p1"])({ q: "said", in: "p1" })).hits[0]).toMatchObject({ place: "Pier", pier: true });
-    expect(f.scopes.map((s) => s.sessions)).toEqual([["p1"], ["w1"], ["p1"]]);
+    expect(f.scopes.map((s) => s.sessions)).toEqual([["p1"], ["p1"], ["w1"], ["p1"]]);
+  });
+
+  it("replays the conversation around a time in one pass, or one session by id", async () => {
+    const f = factory(rows);
+    const main = await searchMessages(f, () => ["p2", "p1"])({ around: 3 });
+    expect(main.hits.map((h) => [h.sessionId, h.place])).toEqual([["p2", "Pier"], ["p1", "Pier"]]);
+    expect((await searchMessages(f, () => ["p2", "p1"])({ around: 3, in: "w1", limit: 2 })).hits.map((h) => h.place)).toEqual(["Fix the parser", "Fix the parser"]);
+    expect(f.scopes).toEqual([{ limit: 10, around: 3, sessions: ["p2", "p1"] }, { limit: 2, around: 3, sessions: ["w1"] }]);
+    // An empty chain replays nothing rather than every session.
+    expect((await searchMessages(f, () => [])({ around: 3 })).hits).toEqual([]);
+    expect(f.scopes[2]).toEqual({ limit: 10, around: 3, sessions: [] });
   });
 
   it.each([
@@ -69,8 +81,14 @@ describe("searchMessages", () => {
     [{ q: "x", since: -1 }, "since must be a non-negative integer of ms"],
     [{ q: "x", since: "7d" }, "since must be a non-negative integer of ms"],
     [{ q: "x", role: "tool" }, "role must be user or assistant"],
-    [{ q: "x", in: "" }, "in must be pier or a session id"],
-    [{ q: "x", in: ["pier", "s1"] }, "in must be pier or a session id"],
+    [{ q: "x", in: "" }, "in must be main or a session id"],
+    [{ q: "x", in: ["main", "s1"] }, "in must be main or a session id"],
+    [{ around: -1 }, "around must be a non-negative integer of ms"],
+    [{ around: "2025-10-19 14:32" }, "around must be a non-negative integer of ms"],
+    [{ around: 3, q: "x" }, "around replays the conversation: no q, since or role beside it"],
+    [{ around: 3, since: 0 }, "around replays the conversation: no q, since or role beside it"],
+    [{ around: 3, role: "user" }, "around replays the conversation: no q, since or role beside it"],
+    [{ around: 3, limit: 0 }, "limit must be an integer from 1 to 50"],
   ])("refuses %j before searching", async (params, error) => {
     const f = factory(rows);
     await expect(searchMessages(f, () => [])(params)).rejects.toThrow(error);

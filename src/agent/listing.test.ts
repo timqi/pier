@@ -399,6 +399,28 @@ describe("the on-disk index", () => {
     expect(listing.search("解析", { limit: 2 }).map((h) => h.at)).toEqual([80_000, 70_000]);
   });
 
+  it("replays a window around a time with an empty query, in time order, each message whole", async () => {
+    const long = `start ${"x".repeat(700)} end`;
+    await write("--p--", "s1", [header("s1", "/p"), user("one", 10_000), assistant(long, 20_000), user("three", 30_000), assistant("four", 40_000)]);
+    await write("--q--", "s2", [header("s2", "/q"), user("five", 50_000), assistant("six", 60_000), user("seven", 70_000)]);
+    await listing.scan();
+    const at = (scope: Omit<SearchScope, "limit">, limit = 10): number[] => listing.search("", { limit, ...scope }).map((h) => h.at);
+    // Half before, the rest at or after; the time itself is "after".
+    expect(at({ around: 40_000 }, 4)).toEqual([20_000, 30_000, 40_000, 50_000]);
+    expect(at({ around: 40_000 }, 3)).toEqual([30_000, 40_000, 50_000]);
+    // A short side gives its slack to the other, in both directions.
+    expect(at({ around: 15_000 }, 4)).toEqual([10_000, 20_000, 30_000, 40_000]);
+    expect(at({ around: 65_000 }, 4)).toEqual([40_000, 50_000, 60_000, 70_000]);
+    expect(at({ around: 0 })).toEqual([10_000, 20_000, 30_000, 40_000, 50_000, 60_000, 70_000]);
+    // Scoped to sessions; whole text, no cut; nothing in the window is [].
+    expect(at({ around: 40_000, sessions: ["s2"] }, 2)).toEqual([50_000, 60_000]);
+    expect(at({ around: 40_000, sessions: [] })).toEqual([]);
+    expect(listing.search("", { limit: 1, around: 20_000 })[0]?.text).toBe(long);
+    expect(listing.search("", { limit: 1, around: 20_000 })[0]).toMatchObject({ sessionId: "s1", role: "assistant" });
+    // Without `around` an empty query is still nothing.
+    expect(listing.search("", { limit: 10 })).toEqual([]);
+  });
+
   it("cuts the text from what was said with chat markup off, centered on the match", async () => {
     const said = new IndexedListing(dir, db, (text) => splitSpeaker(text).text, saidText);
     const filler = "x".repeat(200);

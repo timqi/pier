@@ -308,17 +308,20 @@ export class IndexedListing implements SessionListing {
    *  two-character term is what a CJK word often is: substring scan instead —
    *  one short term puts the whole query on that path. The scope filters the
    *  UNINDEXED columns; an id list travels as one JSON parameter, so the
-   *  statement text stays one per filter shape. */
+   *  statement text stays one per filter shape. An empty query with `around`
+   *  replays: the window's two sides are two reads, each of `limit` rows so a
+   *  short side can hand its slack to the other. */
   search(query: string, scope: SearchScope): SearchHit[] {
     const terms = termsOf(query);
-    if (!terms.length || scope.sessions?.length === 0) return [];
+    const replay = !terms.length && scope.around !== undefined;
+    if ((!terms.length && !replay) || scope.sessions?.length === 0) return [];
     const where: string[] = [];
     const params: (string | number)[] = [];
     const short = !terms.every((term) => [...term].length >= 3);
-    if (short) {
+    if (short && !replay) {
       where.push(...terms.map(() => "text LIKE ? ESCAPE '\\'"));
       params.push(...terms.map((term) => `%${term.replaceAll(/[\\%_]/g, "\\$&")}%`));
-    } else {
+    } else if (!replay) {
       where.push("text MATCH ?");
       // Quoted: a term is a string to find, never FTS syntax.
       params.push(terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND "));
@@ -331,15 +334,22 @@ export class IndexedListing implements SessionListing {
     if (scope.role) filter("role = ?", scope.role);
     if (scope.sessions) filter("session_id IN (SELECT value FROM json_each(?))", JSON.stringify(scope.sessions));
     if (scope.exclude?.length) filter("session_id NOT IN (SELECT value FROM json_each(?))", JSON.stringify(scope.exclude));
-    const rows = this.#sql()(
-      `SELECT session_id, role, at, text FROM session_fts WHERE ${where.join(" AND ")}
-       ORDER BY ${short ? "" : "bm25(session_fts), "}at DESC LIMIT ?`,
-    ).all(...params, scope.limit) as unknown as FtsRow[];
+    const read = (bound: string, order: string): FtsRow[] => this.#sql()(
+      `SELECT session_id, role, at, text FROM session_fts WHERE ${[...where, ...(bound ? [bound] : [])].join(" AND ")}
+       ORDER BY ${order} LIMIT ?`,
+    ).all(...params, ...(bound ? [scope.around!] : []), scope.limit) as unknown as FtsRow[];
+    let rows: FtsRow[];
+    if (replay) {
+      const before = read("at < ?", "at DESC");
+      const after = read("at >= ?", "at ASC");
+      const take = Math.min(after.length, scope.limit - Math.min(before.length, Math.floor(scope.limit / 2)));
+      rows = [...before.slice(0, scope.limit - take).reverse(), ...after.slice(0, take)];
+    } else rows = read("", `${short ? "" : "bm25(session_fts), "}at DESC`);
     return rows.map((row) => ({
       sessionId: row.session_id,
       role: row.role,
       at: row.at,
-      text: around(this.plain(row.text), terms),
+      text: replay ? this.plain(row.text) : around(this.plain(row.text), terms),
     }));
   }
 

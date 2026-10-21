@@ -587,12 +587,16 @@ export interface SearchScope {
   sessions?: string[];
   /** Every session but these; empty excludes none. */
   exclude?: string[];
+  /** ms; with an empty query, the replay: `limit` messages in time order,
+   *  `floor(limit/2)` before this time and the rest at or after it, a short
+   *  side giving its slack to the other, each `text` whole. */
+  around?: number;
 }
 
 /** One message that matched the query: `text` is the message with chat markup
- *  off, cut to ~600 characters around the first match, `…` at a cut, nothing
- *  marked. `at` names the turn — `ChatTurn.at` for a user turn,
- *  `meta.completedAt` for a reply. */
+ *  off, cut to ~600 characters around the first match (whole in a replay),
+ *  `…` at a cut, nothing marked. `at` names the turn — `ChatTurn.at` for a
+ *  user turn, `meta.completedAt` for a reply. */
 export interface SearchHit {
   sessionId: string;
   role: "user" | "assistant";
@@ -623,7 +627,8 @@ export interface AgentFactory {
   readSystemPrompt(sessionId: string): Promise<SystemPrompt | null | undefined>;
   /** Messages that say the query — user messages and replies, never steps —
    *  one hit per message, several from one session alike, ranked best match
-   *  then newest. How the text is indexed is the backend's business; core sees
-   *  the hits inside `scope`. */
+   *  then newest; an empty query with `scope.around` is the replay, oldest
+   *  first. How the text is indexed is the backend's business; core sees the
+   *  hits inside `scope`. */
   search(query: string, scope: SearchScope): Promise<SearchHit[]>;
 }

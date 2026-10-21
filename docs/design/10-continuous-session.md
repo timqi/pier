@@ -57,6 +57,7 @@ The role contracts, `reviewPrompt`, `fixPrompt` and Pier's `[Pier: …]` notes u
 | Word | Means | Not |
 | --- | --- | --- |
 | user | the human in the conversation | them, the requester |
+| conversation | the continuous conversation: the main session and every session before it (`main_chain`) | chain, series |
 | main session | the continuous conversation's current session, "you" in `DISPATCHER` | head (code and docs only), dispatcher |
 | supervisor | the session that launched a run and reads its result: the main session or a build lead | the agent that delegated it, parent |
 | run | one `pier task run` and the agent working it; `worker` or `lead` when the role matters | child, job |
@@ -107,7 +108,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
   the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
-  is `rg` over `memory/` and `pier search --in pier <q>` over what the user
+  is `rg` over `memory/` and `pier search --in main <q>` over what the user
   and Pier said; `--since` narrows a time such as last week
   ([08](08-cli-socket.md)); no vector store.
 

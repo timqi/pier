@@ -123,7 +123,7 @@ exists to catch.
 
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
-| `core/` | 1.8k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
+| `core/` | 1.85k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands; `pier search --around`, the replay's argv and host validation, is the lines past 1.8k |
 | `channels/` | 4.8k | two adapters in one shape plus the shared layer that would otherwise be copied between them; the home chat's status message, laid out as the web sidebar in each platform's rich format, on both adapters, is the lines past 4.6k |
 | `web/` | 12.7k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette |
 | `agent/` | 2.95k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |

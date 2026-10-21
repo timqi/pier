@@ -18,7 +18,8 @@ export interface SearchCliIo {
   stderr(line: string): void;
 }
 
-const USAGE = "usage: pier search <q...> [--in pier|<sessionId>] [--since <N>h|<N>d|YYYY-MM-DD] [--role user|assistant] [--limit N] [--json]";
+const USAGE = "usage: pier search <q...> [--in main|<sessionId>] [--since <N>h|<N>d|YYYY-MM-DD] [--role user|assistant] [--limit N] [--json]\n"
+  + "       pier search --around \"YYYY-MM-DD HH:MM\" [--in main|<sessionId>] [--limit N] [--json]";
 const ROLES = ["user", "assistant"];
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
 // sv-SE spells local time as YYYY-MM-DD HH:MM.
@@ -31,19 +32,29 @@ const processIo: SearchCliIo = {
 
 /** `/search`'s params to hits: Pier's (every `chain()` member) first, then, for
  *  what the limit still allows, every other session's; each named by its place —
- *  `Pier`, or its session's title as it is now, its id when gone from disk. */
+ *  `Pier`, or its session's title as it is now, its id when gone from disk.
+ *  `around` replays one place instead, the conversation unless `in` names a
+ *  session; `pier` is `main`'s older spelling, kept so a memory or script holds. */
 export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, chain: () => string[]) => async (params: unknown): Promise<{ hits: Hit[] }> => {
-  const { q, limit = 10, since, role, in: where } = (params ?? {}) as Record<string, unknown>;
+  const { q, limit = 10, since, role, in: where, around } = (params ?? {}) as Record<string, unknown>;
   const query = typeof q === "string" ? q.trim() : "";
-  if (!query) throw new Error("q must be non-empty words to search for");
+  if (around !== undefined) {
+    if (!Number.isInteger(around) || (around as number) < 0) throw new Error("around must be a non-negative integer of ms");
+    if (query || since !== undefined || role !== undefined) throw new Error("around replays the conversation: no q, since or role beside it");
+  } else if (!query) throw new Error("q must be non-empty words to search for");
   if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 50) throw new Error("limit must be an integer from 1 to 50");
   if (since !== undefined && (!Number.isInteger(since) || (since as number) < 0)) throw new Error("since must be a non-negative integer of ms");
   if (role !== undefined && !ROLES.includes(role as string)) throw new Error("role must be user or assistant");
-  if (where !== undefined && (typeof where !== "string" || !where)) throw new Error("in must be pier or a session id");
-  const scope: SearchScope = { limit: limit as number, ...(since === undefined ? {} : { since: since as number }), ...(role === undefined ? {} : { role: role as SearchScope["role"] }) };
+  if (where !== undefined && (typeof where !== "string" || !where)) throw new Error("in must be main or a session id");
+  const scope: SearchScope = {
+    limit: limit as number,
+    ...(since === undefined ? {} : { since: since as number }),
+    ...(role === undefined ? {} : { role: role as SearchScope["role"] }),
+    ...(around === undefined ? {} : { around: around as number }),
+  };
   const members = chain();
   let hits: SearchHit[];
-  if (where === "pier") hits = await factory.search(query, { ...scope, sessions: members });
+  if (where === "main" || where === "pier" || (where === undefined && around !== undefined)) hits = await factory.search(query, { ...scope, sessions: members });
   else if (where !== undefined) hits = await factory.search(query, { ...scope, sessions: [where as string] });
   else {
     hits = members.length ? await factory.search(query, { ...scope, sessions: members }) : [];
@@ -57,16 +68,22 @@ export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, c
   };
 };
 
+/** `YYYY-MM-DD HH:MM` local, the time a hit line prints, or a date's local
+ *  midnight, to ms. */
+function localMs(value: string): number | undefined {
+  const date = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?$/.exec(value);
+  if (!date) return undefined;
+  const parts = [Number(date[1]), Number(date[2]) - 1, Number(date[3]), Number(date[4] ?? 0), Number(date[5] ?? 0)] as const;
+  const at = new Date(...parts);
+  // Date rolls 2025-02-30 into March and 24:00 into the next day; a moment that does not exist is refused.
+  return [at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(), at.getMinutes()].join() === parts.join() ? at.getTime() : undefined;
+}
+
 /** `--since` to ms: hours or days back from now, or a date's local midnight. */
 function sinceMs(value: string): number | undefined {
   const back = /^(\d+)([hd])$/.exec(value);
   if (back) return Date.now() - Number(back[1]) * (back[2] === "h" ? 3_600_000 : 86_400_000);
-  const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!date) return undefined;
-  const [y, m, d] = [Number(date[1]), Number(date[2]) - 1, Number(date[3])];
-  const at = new Date(y, m, d);
-  // Date rolls 2025-02-30 into March; a day that does not exist is refused.
-  return at.getFullYear() === y && at.getMonth() === m && at.getDate() === d ? at.getTime() : undefined;
+  return value.includes(" ") ? undefined : localMs(value);
 }
 
 /** One line per hit, or the answer's object with `--json`. */
@@ -75,22 +92,25 @@ export async function runSearchCli(argv: string[], post: SearchPost, io: SearchC
     io.stderr(`search: ${why}\n${USAGE}`);
     return 2;
   };
-  let v: { in?: string[]; since?: string; role?: string; limit?: string; json?: boolean } = {};
+  let v: { in?: string[]; since?: string; role?: string; limit?: string; json?: boolean; around?: string } = {};
   let words: string[] = [];
   try {
     ({ values: v, positionals: words } = parseArgs({ args: argv, allowPositionals: true, strict: true, options: {
-      in: { type: "string", multiple: true }, since: { type: "string" }, role: { type: "string" }, limit: { type: "string" }, json: { type: "boolean" },
+      in: { type: "string", multiple: true }, since: { type: "string" }, role: { type: "string" }, limit: { type: "string" }, json: { type: "boolean" }, around: { type: "string" },
     } }));
   } catch (err) {
     return usage(err instanceof Error ? err.message : String(err));
   }
-  if (!words.length) return usage("say what to search for");
+  if (v.around !== undefined && (words.length || v.since !== undefined || v.role !== undefined)) return usage("--around replays the conversation: no words, --since or --role beside it");
+  if (!words.length && v.around === undefined) return usage("say what to search for");
   if ((v.in?.length ?? 0) > 1) return usage("--in takes one place");
+  const around = v.around === undefined ? undefined : localMs(v.around);
+  if (v.around !== undefined && around === undefined) return usage("--around takes YYYY-MM-DD HH:MM or YYYY-MM-DD");
   const since = v.since === undefined ? undefined : sinceMs(v.since);
   if (v.since !== undefined && since === undefined) return usage("--since takes <N>h, <N>d or YYYY-MM-DD");
   if (v.role !== undefined && !ROLES.includes(v.role)) return usage("--role takes user or assistant");
   const { status, body } = await post({
-    q: words.join(" "),
+    ...(around === undefined ? { q: words.join(" ") } : { around }),
     ...(v.limit === undefined ? {} : { limit: Number(v.limit) }),
     ...(since === undefined ? {} : { since }),
     ...(v.role === undefined ? {} : { role: v.role }),
