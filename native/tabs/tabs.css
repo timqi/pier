@@ -4,7 +4,7 @@ body { margin: 0; height: 100vh; display: flex; align-items: center; gap: 2px; p
 :root[data-os="mac"] :is(#controls, #menu) { display: none; }
 ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 2px; min-width: 0; }
 /* A width, not a basis: WebKit sizes the list by content and would squeeze every tab to its name. */
-li { display: flex; align-items: center; gap: 6px; width: 180px; flex: 0 1 auto; min-width: 56px; height: 24px; box-sizing: border-box; padding: 0 4px 0 10px; border-radius: 6px; cursor: default; }
+li { display: flex; align-items: center; gap: 6px; width: 180px; flex: 0 1 auto; min-width: 56px; height: 28px; box-sizing: border-box; padding: 0 4px 0 10px; font-size: 14px; border-radius: 6px; cursor: default; }
 li:hover { background: color-mix(in srgb, CanvasText 6%, transparent); }
 li.active { background: Canvas; box-shadow: 0 0 0 0.5px color-mix(in srgb, CanvasText 14%, transparent), 0 1px 2px rgb(0 0 0 / 0.08); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: GrayText; }
@@ -16,7 +16,7 @@ li.active .name { font-weight: 600; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 .close { flex: none; display: none; opacity: 0.6; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; line-height: 18px; }
 li:hover .close, li.active .close { display: block; }
-#plus, #menu { flex: none; width: 24px; height: 24px; margin-left: 2px; border-radius: 6px; font-size: 16px; line-height: 1; }
+#plus, #menu { flex: none; width: 28px; height: 28px; margin-left: 2px; border-radius: 6px; font-size: 16px; line-height: 1; }
 #plus:hover, #menu:hover, .close:hover { background: color-mix(in srgb, CanvasText 10%, transparent); }
 form { flex: 0 0 280px; }
 input { box-sizing: border-box; width: 100%; font: inherit; padding: 2px 6px; }
@@ -27,4 +27,4 @@ input:read-only { cursor: progress; opacity: 0.6; }
 #controls button:hover { background: color-mix(in srgb, CanvasText 10%, transparent); }
 #controls #close:hover { background: #d93025; color: white; }
 svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
-#toast { position: absolute; right: 190px; top: 3px; max-width: 50%; margin: 0; padding: 0 10px; line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; background: #d93025; color: white; user-select: text; }
+#toast { position: absolute; right: 190px; top: 6px; max-width: 50%; margin: 0; padding: 0 10px; line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; background: #d93025; color: white; user-select: text; }

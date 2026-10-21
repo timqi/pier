@@ -29,8 +29,9 @@ use tauri_plugin_notification::{ActionPerformed, NotificationExt};
 
 const WINDOW: &str = "main";
 const TABS: &str = "tabs";
-/// Twice the 16pt line macOS centres its traffic lights on, so the tabs sit level with them.
-const TABS_HEIGHT: f64 = 32.0;
+/// Safari's tab bar height, so the 28px tabs clear the window's top edge. macOS keeps its traffic
+/// lights centred on a 16pt line, ~3px above this row's centre; tauri's WindowBuilder cannot move them.
+const TABS_HEIGHT: f64 = 38.0;
 const INSTANCES: &str = "instances";
 
 type Res<T = ()> = Result<T, String>;

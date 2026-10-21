@@ -29,12 +29,12 @@ for a few weeks, and is deleted whole if it is not.
 - **A closed instance is unreachable**: no SSE stream, so no native
   notification, no unread count and nothing on the Dock / taskbar badge until
   it is opened again. Accepted as the price of not running it.
-- **Tab bar**: one 32px row across the top, a tab per open instance (dot in the
+- **Tab bar**: one 38px row across the top, a tab per open instance (dot in the
   instance's accent, name, red unread count), then `+`; the instance's page
-  fills the window below. A tab is a 24px rounded pill, 180px wide until the
+  fills the window below. A tab is a 28px rounded pill with a 14px name, 180px wide until the
   window is too narrow, its name truncated with an ellipsis; the shown one is
   raised on `Canvas`, its `×` always visible, the others' only on hover. On
-  macOS the row's centre line is the traffic lights'. Click switches the visible webview, the other open
+  macOS the traffic lights keep the system's position, about 3px above the row's centre line. Click switches the visible webview, the other open
   ones stay mounted so SSE streams and composer drafts survive a switch. Add = paste a
   URL or a `pier login` link into the field Add Instance… opens (sets url and signs in
   at once) and opens its tab; Remove and Delete Data removes it with its cookie jar and storage
