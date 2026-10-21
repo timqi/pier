@@ -378,6 +378,14 @@ describe("toChatTurns", () => {
       expect(failed[1]).toMatchObject({ role: "assistant", error: "This operation was aborted" });
       expect(failed[1]!.cut).toBeUndefined();
     }
+    // A provider error the stop landed on mid-retry is a failure the restart does not hide.
+    const overloaded = toChatTurns([
+      ...cutShort.slice(0, -1),
+      { role: "assistant", timestamp: 3000, content: [], stopReason: "error", errorMessage: "overloaded" },
+      { role: "custom", customType: "pier.system-input", content: "continue", details: restart, timestamp: 4000 },
+    ]);
+    expect(overloaded[1]).toMatchObject({ role: "assistant", error: "overloaded" });
+    expect(overloaded[1]!.cut).toBeUndefined();
   });
 
   it("attaches the thinking + tool activity that preceded each answer", () => {

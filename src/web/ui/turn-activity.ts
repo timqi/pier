@@ -479,6 +479,13 @@ export function finishActivity(status: ActivityStatus): void {
     activity.sawError || (allFailed && status === "done") ? "failed"
       : status === "done" && activity.toolRows.size ? "interrupted" : status,
   );
+  // A log with nothing in it (a turn cut before its first step) is no disclosure.
+  if (!activity.rowsEl.childElementCount) {
+    chipDetails.delete(activity.chip);
+    activity.chip.removeAttribute("aria-expanded");
+    activity.chip.onclick = null;
+    activity.rowsEl.remove();
+  }
   activity = null;
 }
 

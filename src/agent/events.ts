@@ -276,8 +276,9 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     if (m.role === "assistant" && m.stopReason === "error" && messages[i + 1]?.role !== "assistant") {
       flush("assistant", hasTools ? "" : text, turnMetaAt(messages, i), undefined, m.timestamp);
       // Pier's stop aborts the run as an error; the restart input picking it
-      // back up says it was a cut, not a failure.
-      if (restartFollows(messages, i)) turns[turns.length - 1]!.cut = "restart";
+      // back up says it was a cut, not a failure. A provider error the stop
+      // landed on while Pi waited to retry is still the error.
+      if (/aborted/i.test(m.errorMessage ?? "") && restartFollows(messages, i)) turns[turns.length - 1]!.cut = "restart";
       else turns[turns.length - 1]!.error = m.errorMessage || "unknown agent error";
       candidate = undefined;
       continue;

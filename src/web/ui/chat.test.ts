@@ -1231,6 +1231,9 @@ describe("the turn's bubble", () => {
       expect(chip.classList.contains("text-neutral-500")).toBe(true);
       expect(chip.querySelector("svg")).toBeTruthy(); // a glyph, which a plain done chip has not
     }
+    // With steps the chip discloses its log; with none it is not a disclosure at all.
+    expect([...cut].map((c) => c.getAttribute("aria-expanded"))).toEqual(["false", "false", null]);
+    expect(pane().querySelectorAll(".activity-log")).toHaveLength(2);
     // No text: the chip row is the bubble's whole content; with text, the text stays.
     const [empty, partial, bare] = pane().querySelectorAll("[data-kind='assistant']");
     expect(chips(empty)).toEqual(["activity"]);
