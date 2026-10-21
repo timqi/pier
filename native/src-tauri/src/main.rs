@@ -3,7 +3,7 @@
 mod store;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Display,
     fs,
     future::Future,
@@ -48,6 +48,8 @@ struct Live {
     unread: HashMap<String, u32>,
     accent: HashMap<String, String>,
     active: Option<String>,
+    /// Instances whose capability is added: Tauri appends a repeated one rather than replacing it.
+    granted: HashSet<String>,
     /// What went wrong before the tab bar could show it; `list` hands it over.
     startup_error: Option<String>,
     badge_logged: bool,
@@ -243,14 +245,17 @@ fn to_browser(app: &AppHandle, url: &Url) {
 /// commands are granted to its own origin only, so a foreign page in it has no IPC.
 fn mount(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res {
     let window = app.get_window(WINDOW).ok_or("the window is gone")?;
-    let capability = ["allow-set-badge", "allow-notify", "allow-page-title"].into_iter().fold(
-        CapabilityBuilder::new(format!("instance-{}", instance.id))
-            .webview(&instance.id)
-            .remote(instance.url.clone())
-            .local(false),
-        CapabilityBuilder::permission,
-    );
-    app.add_capability(capability).map_err(text)?;
+    if !shell.lock().granted.contains(&instance.id) {
+        let capability = ["allow-set-badge", "allow-notify", "allow-page-title"].into_iter().fold(
+            CapabilityBuilder::new(format!("instance-{}", instance.id))
+                .webview(&instance.id)
+                .remote(instance.url.clone())
+                .local(false),
+            CapabilityBuilder::permission,
+        );
+        app.add_capability(capability).map_err(text)?;
+        shell.lock().granted.insert(instance.id.clone());
+    }
     let (handle, own) = (app.clone(), instance.clone());
     let keep = move |url: &Url| {
         own.keeps(url) || {
@@ -429,62 +434,64 @@ fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> Res {
     let mut first = instance.app_url()?;
     first.set_fragment(hash);
     mount(app, shell, &instance, first)?;
-    edit(app, shell, |all| {
+    let saved = edit(app, shell, |all| {
         let at = position(all, id)?;
         all[at].closed = false;
         Ok(())
-    })?;
+    });
+    // A list that will not save keeps it closed, so its webview goes too.
+    if let Err(e) = saved {
+        let closed = app.get_webview(id).ok_or_else(|| format!("{id} has no webview"));
+        return Err(match closed.and_then(|w| w.close().map_err(text)) {
+            Ok(()) => e,
+            Err(c) => format!("{e}; closing it: {c}"),
+        });
+    }
     show_instance(app, shell, id)
 }
 
-/// Its tab's index, taken before the list changes, so `unmount` shows the tab in its place.
-fn tab_at(shell: &Shell, id: &str) -> Option<usize> {
-    tabs(&shell.lock().instances).iter().position(|i| i.id == id)
-}
-
-/// Closes an instance's webview, freeing what it held, and forgets its unread count.
-fn unmount(app: &AppHandle, shell: &Shell, id: &str, at: Option<usize>) -> Res {
+/// Closes an instance's webview, then applies `change` to it in the list; a webview that will
+/// not close changes nothing. A list that will not save still loses the tab, closed in memory
+/// only, since its webview is gone: a restart reopens it.
+fn take_down(app: &AppHandle, shell: &Shell, id: &str, change: impl FnOnce(&mut Vec<Instance>, usize)) -> Res {
+    let at = tabs(&shell.lock().instances).iter().position(|i| i.id == id);
     if let Some(webview) = app.get_webview(id) {
         webview.close().map_err(text)?;
     }
+    let saved = edit(app, shell, |all| {
+        let at = position(all, id)?;
+        change(all, at);
+        Ok(())
+    });
     let was_active = {
         let mut live = shell.lock();
+        if saved.is_err() {
+            live.instances.iter_mut().filter(|i| i.id == id).for_each(|i| i.closed = true);
+        }
         live.unread.remove(id);
         live.accent.remove(id);
         publish(app, &mut live);
         live.active.take_if(|active| active == id).is_some()
     };
-    match at {
-        Some(at) if was_active => show_at(app, shell, |_, len| at.min(len - 1)),
-        _ => Ok(()),
+    if let (Some(at), true) = (at, was_active) {
+        if let Err(e) = show_at(app, shell, |_, len| at.min(len - 1)) {
+            report(app, e);
+        }
     }
+    saved
 }
 
 /// Its data stays, so reopening it from `+` finds it signed in. Async, as `add`.
 #[tauri::command]
 async fn close(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
-    let at = tab_at(&shell, &id);
-    edit(&app, &shell, |all| {
-        let at = position(all, &id)?;
-        all[at].closed = true;
-        Ok(())
-    })?;
-    unmount(&app, &shell, &id, at)
+    take_down(&app, &shell, &id, |all, at| all[at].closed = true)
 }
 
 /// Its data goes with it: the cookie jar, so a re-added instance signs in afresh.
 async fn remove(app: &AppHandle, id: &str) -> Res {
-    let shell = app.state::<Shell>();
-    let at = tab_at(&shell, id);
-    edit(app, &shell, |all| {
-        all.remove(position(all, id)?);
-        Ok(())
-    })?;
-    let shown = unmount(app, &shell, id, at);
+    take_down(app, &app.state::<Shell>(), id, |all, at| drop(all.remove(at)))?;
     // Last, so data that will not go leaves no blank window behind.
-    let removed = remove_data(app, id).await.map_err(|e| format!("removing the instance's data: {e}"));
-    let errors: Vec<String> = [shown, removed].into_iter().filter_map(Result::err).collect();
-    errors.is_empty().then_some(()).ok_or_else(|| errors.join("; "))
+    remove_data(app, id).await.map_err(|e| format!("removing the instance's data: {e}"))
 }
 
 /// On macOS its WebKit data store, retried: WebKit refuses one a just-closed webview still holds.
