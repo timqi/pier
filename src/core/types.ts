@@ -424,6 +424,9 @@ export interface ChatTurn {
    *  refused before it began (no model, no key). The live `error` event's
    *  durable twin, so a reload still says why nothing was answered. */
   error?: string;
+  /** Assistant turns only: the turn Pier's stop cut short, continued by the
+   *  restart input that follows it — no failure, so no `error`. */
+  cut?: "restart";
   /** When it arrived, ms epoch — user and system turns, which have no `meta`
    *  to carry it. Absent when Pi stamped the message without one. */
   at?: number;

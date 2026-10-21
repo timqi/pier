@@ -354,6 +354,32 @@ describe("toChatTurns", () => {
     ]);
   });
 
+  it("reads a turn Pier's stop aborted as cut when a restart input continues it, else as failed", () => {
+    const cutShort: PiMessage[] = [
+      { role: "user", content: "go", timestamp: 1000 },
+      { role: "assistant", timestamp: 1500, content: [{ type: "toolCall", id: "a", name: "bash", arguments: {} }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "a", content: "ok", timestamp: 2000 },
+      { role: "assistant", timestamp: 3000, content: [{ type: "text", text: "Half" }], stopReason: "error", errorMessage: "This operation was aborted" },
+    ];
+    const restart = { kind: "restart", at: 4000, downMs: 500 };
+    const restarted = toChatTurns([
+      ...cutShort,
+      // A system prompt record between them is no turn.
+      { role: "system", content: "" },
+      { role: "custom", customType: "pier.system-input", content: "continue", details: restart, timestamp: 4000 },
+    ]);
+    expect(restarted[1]).toMatchObject({ role: "assistant", text: "Half", cut: "restart" });
+    expect(restarted[1]!.error).toBeUndefined();
+    expect(restarted[1]!.steps).toHaveLength(1);
+    expect(restarted[2]).toMatchObject({ role: "system", origin: { kind: "restart" } });
+    // No restart picked it up, or another turn came first: it stays a failure.
+    for (const after of [[], [{ role: "user", content: "hello", timestamp: 4000 }]] as PiMessage[][]) {
+      const failed = toChatTurns([...cutShort, ...after]);
+      expect(failed[1]).toMatchObject({ role: "assistant", error: "This operation was aborted" });
+      expect(failed[1]!.cut).toBeUndefined();
+    }
+  });
+
   it("attaches the thinking + tool activity that preceded each answer", () => {
     const turns = toChatTurns([
       { role: "user", content: "go", timestamp: 1000 },

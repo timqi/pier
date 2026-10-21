@@ -275,7 +275,10 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     // Only the attempt that ended the turn: one Pi retried past is no failure.
     if (m.role === "assistant" && m.stopReason === "error" && messages[i + 1]?.role !== "assistant") {
       flush("assistant", hasTools ? "" : text, turnMetaAt(messages, i), undefined, m.timestamp);
-      turns[turns.length - 1]!.error = m.errorMessage || "unknown agent error";
+      // Pier's stop aborts the run as an error; the restart input picking it
+      // back up says it was a cut, not a failure.
+      if (restartFollows(messages, i)) turns[turns.length - 1]!.cut = "restart";
+      else turns[turns.length - 1]!.error = m.errorMessage || "unknown agent error";
       candidate = undefined;
       continue;
     }
@@ -287,6 +290,18 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
   // Activity with no answer after it (aborted run) still belongs on the page.
   if (steps.length) flush("assistant", "");
   return turns;
+}
+
+/** The next message that renders as a turn is a restart input; a system
+ *  prompt record between them is no turn. */
+function restartFollows(messages: PiMessage[], index: number): boolean {
+  for (let i = index + 1; i < messages.length; i++) {
+    const m = messages[i]!;
+    const origin = systemOrigin(m);
+    if (origin) return origin.kind === "restart";
+    if (m.role === "user" || m.role === "assistant") return false;
+  }
+  return false;
 }
 
 /** Translate one Pi session event into zero or more Pier payloads. */

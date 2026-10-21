@@ -2,7 +2,7 @@
 // steps) and the background runs, rendered as chips in the reply bubble's chip
 // row (chat.ts), each chip its own fold over its detail.
 
-import { Check, Clock, Minus, Pause, X, type IconNode } from "lucide";
+import { Check, Clock, Minus, Pause, RefreshCcw, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
@@ -259,7 +259,7 @@ const kinChips = (run: BackgroundRun): HTMLElement[] =>
 
 // --- activity group ------------------------------------------------------------------
 
-type ActivityStatus = "running" | "done" | "failed" | "interrupted";
+type ActivityStatus = "running" | "done" | "failed" | "interrupted" | "restarted";
 
 interface ToolRow {
   el: HTMLDetailsElement;
@@ -372,11 +372,14 @@ const STATUS_STYLE: Record<ActivityStatus, string> = {
   done: "text-neutral-500",
   failed: "text-red-600",
   interrupted: "text-amber-700",
+  // Pier's own stop cut it, and the next turn continues it: no failure.
+  restarted: "text-neutral-500",
 };
 
 const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, IconNode> = {
   failed: X,
   interrupted: Pause,
+  restarted: RefreshCcw,
 };
 
 function statusIconEl(status: ActivityStatus): HTMLElement | SVGElement {
@@ -580,8 +583,9 @@ export function replayActivity(
   /** Index of this turn in the snapshot, for fetching its detail on demand.
    *  Absent only for a group with no turn to point at. */
   turnIndex?: number,
-  /** The turn ended on an error: the group settles as failed, as the live one did. */
-  failed = false,
+  /** The turn ended on an error: the group settles as failed, as the live one
+   *  did; or Pier's stop cut it (ChatTurn.cut). */
+  end?: "failed" | "restarted",
 ): void {
   const start = Date.now() - durationMs; // headline duration is now - startTs
   // Detail still on the server: fetched on the first open.
@@ -609,8 +613,8 @@ export function replayActivity(
   // The turn still running keeps its group open, so the live stream counts on
   // into it instead of opening a second bubble beneath the replayed one.
   if (live) return;
-  if (failed) noteTurnError();
-  finishActivity(steps.some((s) => s.kind === "tool" && !s.done) ? "interrupted" : "done");
+  if (end === "failed") noteTurnError();
+  finishActivity(end === "restarted" ? "restarted" : steps.some((s) => s.kind === "tool" && !s.done) ? "interrupted" : "done");
 }
 
 /** Args and output are ~90% of a transcript and live behind this very chip,

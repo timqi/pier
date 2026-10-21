@@ -136,7 +136,9 @@ agent run (those resume through the run):
 
 The router already forwards a `system-input` event to the chat before the
 turn it triggers, so IM sees "Pier restarted … continuing" as a note over the
-resumed reply, and the web timeline renders it in place. No UI change.
+resumed reply, and the web timeline renders it in place. The turn it
+continues, which Pi records as an `error` stop, is `ChatTurn.cut`: on the web a
+grey `restarted` steps chip over its partial text, never a red failure.
 
 ### Task runs
 

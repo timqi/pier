@@ -98,6 +98,9 @@ updates this document.
   and the run's name in the bubble's type; the count of chips
   is the count of things that happened, and no chip summarises the others.
   An error or silent body carries the same row on its own material.
+- A turn Pier's own stop cut, continued by the restart input after it, is no
+  failure: its steps chip reads grey `restarted` with a `RefreshCcw` glyph, the
+  grey of cancelled and skipped, and it carries no error row.
 - Consecutive silent replies fold under one grey line, `· N background
   updates`, no material of its own: closed by default and after the topic's
   final reply, opened and closed only by its click (`aria-expanded`, a 44px

@@ -1209,6 +1209,33 @@ describe("the turn's bubble", () => {
     expect(chipRow()).toBeUndefined();
   });
 
+  it("draws a turn Pier's stop cut as a grey restarted chip, keeping its text, never a red failure", () => {
+    const steps = [{ kind: "tool" as const, id: "c1", toolName: "bash", args: {}, done: false }];
+    const meta = { completedAt: 5000, durationMs: 5000, tokens: 1 };
+    const restart = { kind: "restart" as const, at: 6000, downMs: 500 };
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: "", cut: "restart", steps, meta },
+      { role: "system", text: "continue", origin: restart, at: 6000 },
+      { role: "assistant", text: "Half an answer", cut: "restart", steps, meta },
+      { role: "system", text: "continue", origin: restart, at: 7000 },
+    ], "idle", []);
+    expect(kinds()).not.toContain("error");
+    const cut = pane().querySelectorAll("[data-kind='activity']");
+    expect(cut).toHaveLength(2);
+    for (const chip of cut) {
+      expect(chip.textContent).toBe("restarted \u00b7 1 step \u00b7 5s");
+      expect(chip.dataset.status).toBe("restarted");
+      expect(chip.classList.contains("text-neutral-500")).toBe(true);
+      expect(chip.querySelector("svg")).toBeTruthy(); // a glyph, which a plain done chip has not
+    }
+    // No text: the chip row is the bubble's whole content; with text, the text stays.
+    const [empty, partial] = pane().querySelectorAll("[data-kind='assistant']");
+    expect(chips(empty)).toEqual(["activity"]);
+    expect("pending" in empty!.dataset).toBe(false);
+    expect(partial!.textContent).toContain("Half an answer");
+  });
+
   it("folds consecutive silent replies under one closed grey line that its click opens and closes", () => {
     chat.renderSnapshot([
       { role: "user", text: "go", at: 1 },

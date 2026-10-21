@@ -995,7 +995,7 @@ export function renderSnapshot(
       const live = state === "streaming" && i === turns.length - 1 && t.role === "assistant";
       const steps = t.steps;
       if (steps?.length) {
-        replayActivity(steps, t.meta?.durationMs, live, i, !!t.error);
+        replayActivity(steps, t.meta?.durationMs, live, i, t.error ? "failed" : t.cut ? "restarted" : undefined);
         // Launched during the turn: chips of the bubble the answer fills.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
         // Cut short before it spoke: the steps chip is the bubble's whole content.
