@@ -27,7 +27,7 @@ const foldOpen = (line: HTMLElement): boolean => line.querySelector("button")!.g
 
 /** Where one session of the continuous conversation ends and the next begins. */
 export function dividerLine(reason: ChainReason, when = ""): HTMLElement {
-  const line = h("div", "my-4 text-center text-[11px] text-neutral-400", when ? `${DIVIDER[reason]} \u00b7 ${when}` : DIVIDER[reason]);
+  const line = h("div", "my-3 text-center text-[11px] text-neutral-400", when ? `${DIVIDER[reason]} \u00b7 ${when}` : DIVIDER[reason]);
   line.dataset.kind = "divider";
   return line;
 }
@@ -66,7 +66,7 @@ function isQuiet(row: HTMLElement): boolean {
 function silenceLine(): HTMLElement {
   const toggle = foldButton();
   toggle.title = "Replies that stayed silent";
-  const line = h("div", "my-4 text-[11.5px] leading-tight text-neutral-400", toggle);
+  const line = h("div", "my-3 text-[11.5px] leading-tight text-neutral-400", toggle);
   line.dataset.kind = "fold";
   toggle.onclick = () => setFold(line, !foldOpen(line));
   return line;
