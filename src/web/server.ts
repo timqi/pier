@@ -586,7 +586,16 @@ export function createServer(
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const send = boundedWriter(stream, "workspace");
-      const unsubscribe = hub.subscribeWorkspace((e) => send(`data: ${JSON.stringify(e)}\n\n`));
+      const me = sessionIdOf(c);
+      const unsubscribe = hub.subscribeWorkspace((e) => {
+        if (e.type === "notification") {
+          // Only the browser the push targets; another one's session id stays off its wire.
+          const { browser, ...rest } = e;
+          if (browser !== undefined && browser !== me) return;
+          e = rest;
+        }
+        send(`data: ${JSON.stringify(e)}\n\n`);
+      });
       stream.onAbort(unsubscribe);
       while (!stream.aborted) {
         await stream.sleep(HEARTBEAT_MS);

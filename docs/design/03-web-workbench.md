@@ -44,7 +44,7 @@ surface owns its routes and is mounted beside it.
 | `GET /api/tasks` | *(served by `tasks/routes.ts`, as are the three below)* `TaskRow[]` (`tasks/types.ts`): every non-archived `kind: "task"` definition with `lastRun` |
 | `GET /api/tasks/:id/runs` | the task's newest 20 `TaskRun`s; 404 unknown task |
 | `POST /api/tasks/:id/pause`, `/resume` | `setEnabled`; answers the definition. 400 unknown, archived-on-resume, or a task Pier owns |
-| `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
+| `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. The one exception is `notification` (`title`, `body`, `url`, `tag`), each Web Push's copy for the native shell, sent only to the web session the push targets (every one when untargeted). |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
 | `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title and the accent onto `<html data-accent>`, `no-cache` |

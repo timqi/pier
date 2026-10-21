@@ -6,6 +6,7 @@
 import { failure, getJson, mustGetJson, sendJson } from "./api.js";
 import { agoLabel, h } from "./dom.js";
 import { badge, button, card, deviceRow, empty, setStatus, toggle } from "./form.js";
+import { setBadge } from "./shell.js";
 
 /** Whether this browser was asked to notify. Kept locally because permission
  *  is not intent: a granted permission that the person then switched off here
@@ -160,6 +161,7 @@ function watchInstallability(): void {
 /** The home-screen icon's unread count. Silently unsupported on desktop
  *  Firefox and in a plain tab; that is the API's own contract, not a failure. */
 export function setUnreadBadge(count: number): void {
+  if (setBadge(count)) return;
   const nav = navigator as Navigator & {
     setAppBadge?: (n?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
+import type { WorkspaceEvent } from "../core/types.js";
 import { openDb } from "../db.js";
 import { Secrets } from "../secrets.js";
 import { AuthStore } from "./auth.js";
@@ -373,6 +374,25 @@ describe("the finished-turn trigger", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     expect(sent).toHaveLength(0);
     expect(skips()).toEqual(["no push for s1: the browser that spoke is not subscribed"]);
+  });
+
+  it("emits the notification on the workspace stream even with nothing subscribed", async () => {
+    // A shell webview has no push subscription; this event is all it gets.
+    const { hub, auth, browserOf } = setup(6_000);
+    const events: WorkspaceEvent[] = [];
+    hub.subscribeWorkspace((e) => events.push(e));
+    const browser = sessionOf(auth, "10.0.0.3");
+    browserOf.mockReturnValue(browser);
+    finishTurn(hub);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(events.filter((e) => e.type === "notification")).toEqual([{
+      type: "notification",
+      title: "pier",
+      body: "all done",
+      url: "/app/#/session/s1",
+      tag: "s1",
+      browser,
+    }]);
   });
 
   it("notifies every device when no browser has spoken", async () => {

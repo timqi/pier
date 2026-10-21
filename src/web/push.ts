@@ -182,6 +182,8 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
   /** A failure is logged with what the service said: a notification that never
    *  arrives is otherwise indistinguishable from one nobody tapped. */
   async function deliver(payload: PushPayload, browser?: string): Promise<{ sent: number; failed: number }> {
+    // Before the subscription filter: a shell webview has no subscription.
+    hub.emitWorkspace({ type: "notification", ...payload, browser });
     const targets = store.list().filter((row) => browser === undefined || row.sessionId === browser);
     if (!targets.length) {
       // A browser that spoke with notifications off is told nothing, by choice.

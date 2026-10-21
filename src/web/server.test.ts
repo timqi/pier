@@ -2139,6 +2139,32 @@ describe("workbench server", () => {
     expect(emitted).toBeLessThan(200_000);
     await res.body!.cancel().catch(() => {});
   });
+
+  it("forwards a notification only to the browser it targets, every one when untargeted", async () => {
+    const { app, hub } = setup();
+    const open = async (cookie?: string) =>
+      (await app.request("/api/events", cookie ? { headers: { cookie } } : {})).body!.getReader();
+    const readers = { a: await open("pier_session=a.sig"), b: await open("pier_session=b.sig"), none: await open() };
+    const note = { title: "pier", body: "done", url: "/app/#/session/s1", tag: "s1" };
+    hub.emitWorkspace({ type: "notification", ...note, browser: "a" });
+    hub.emitWorkspace({ type: "notification", ...note, tag: "all" });
+    hub.emitWorkspace({ type: "sessions-changed" });
+    const frames = async (reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> => {
+      let text = "";
+      while (!text.includes("sessions-changed")) text += new TextDecoder().decode((await reader.read()).value);
+      await reader.cancel();
+      return text;
+    };
+    const a = await frames(readers.a);
+    expect(a).toContain(`data: ${JSON.stringify({ type: "notification", ...note })}\n\n`);
+    expect(a).toContain('"tag":"all"');
+    // Neither another browser nor one without a session sees a targeted one.
+    for (const other of [await frames(readers.b), await frames(readers.none)]) {
+      expect(other).not.toContain('"tag":"s1"');
+      expect(other).toContain('"tag":"all"');
+    }
+    expect(a).not.toContain("browser");
+  });
 });
 
 describe("configuration reaching live sessions", () => {
