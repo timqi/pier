@@ -5,7 +5,9 @@ mod store;
 use std::{
     collections::HashMap,
     fmt::Display,
-    fs, io,
+    fs,
+    hash::{DefaultHasher, Hash, Hasher},
+    io,
     path::PathBuf,
     process::Command,
     sync::{Mutex, MutexGuard, PoisonError},
@@ -279,18 +281,28 @@ fn set_badge(app: AppHandle, shell: State<'_, Shell>, webview: Webview, count: u
 }
 
 #[tauri::command]
-fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String) -> Res {
+fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String, tag: String) -> Res {
     if !url.starts_with("/app/") {
         return surfaced(&app, Err(format!("not a workbench path: {url}")));
     }
-    let shown = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .extra("instance", webview.label())
-        .extra("url", url)
-        .show()
+    // As Web Push's `tag`: a session's later notification replaces its earlier
+    // one, where the platform can close it (Linux; macOS stacks regardless).
+    let mut hasher = DefaultHasher::new();
+    (webview.label(), &tag).hash(&mut hasher);
+    let id = hasher.finish() as i32;
+    let notifications = app.notification();
+    let shown = notifications
+        .remove_active(vec![id])
+        .and_then(|()| {
+            notifications
+                .builder()
+                .id(id)
+                .title(title)
+                .body(body)
+                .extra("instance", webview.label())
+                .extra("url", url)
+                .show()
+        })
         .map_err(|e| format!("notification: {e}"));
     surfaced(&app, shown)
 }
