@@ -343,8 +343,8 @@ main > section, #turns { grid-row: 1 / -1; }
 #queue-panel { grid-row: 2; }
 #composer { grid-row: 3; }
 :is(#bar, #queue-panel, #composer) { position: relative; z-index: 1; }
-/* The status panel's list, docked in the right gutter where the window has
-   room for it beside the centred reading column (drawer.ts `WIDE`); gone with
+/* The status panel's list, docked beside the reading column where the window
+   has room for both (drawer.ts `WIDE`); gone with
    no rows and under a Console view, whose open hides the bar. */
 #status-side { display: none; }
 .open-item { margin-block: 8px; padding: 4px 6px; border-radius: 10px; overflow-wrap: anywhere; }
@@ -359,20 +359,25 @@ main > section, #turns { grid-row: 1 / -1; }
 @media (pointer: coarse) {
   .open-item .session-open { min-height: 44px; min-width: 44px; }
 }
-/* The rail overlays the gutter, so its arrival never re-centres the column;
-   the 1rem inset clears #turns' scrollbar. 85.5rem is --read-w plus two
-   gutters of the rail's 14rem floor, inset and a 1rem gap — 76 of the root's
-   18px rem, written in the 16px rem a media query reads. */
-@media (width >= 85.5rem) {
+/* Wide, the column is pinned 1rem from the left whether or not the rail is
+   there, so the rail's arrival never moves it; the spare width is all on the
+   right. 68.625rem is the 1rem inset, --read-w, a 1rem gap, the rail's 14rem
+   floor and the 1rem that clears #turns' scrollbar — 61 of the root's 18px
+   rem, written in the 16px rem a media query reads. `main` outranks the base
+   rules below, which centre the column. */
+@media (width >= 68.625rem) {
+  main #turns { padding-inline: 1rem calc(100% - var(--read-w) - 1rem); }
+  main #queue-panel { margin-inline: 1rem auto; }
+  main #composer > div { margin-inline: 0 auto; }
   main:has(#bar:not(.hidden)) #status-side:not([data-empty]) {
     display: flex;
     grid-row: 1 / -1;
     align-self: start;
-    justify-self: end;
+    justify-self: start;
     position: relative;
     z-index: 1;
-    width: min(17.5rem, calc((100% - var(--read-w)) / 2 - 2rem));
-    margin: calc(var(--head-h) + 0.75rem) 1rem 0 0;
+    width: min(17.5rem, calc(100% - var(--read-w) - 3rem));
+    margin: calc(var(--head-h) + 0.75rem) 0 0 calc(var(--read-w) + 2rem);
     max-height: min(60dvh, calc(100dvh - var(--head-h) - var(--dock-h, 4rem) - 2rem));
   }
   main:has(#status-side:not([data-empty])) #status-chip { display: none; }
