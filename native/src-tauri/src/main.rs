@@ -689,8 +689,23 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &item("prev".into(), "Previous Instance".into(), "CmdOrCtrl+Shift+[".into())?,
             &item("next".into(), "Next Instance".into(), "CmdOrCtrl+Shift+]".into())?,
             &item("reload".into(), "Reload Instance".into(), "CmdOrCtrl+R".into())?,
+            &item("close-tab".into(), "Close Tab".into(), "CmdOrCtrl+W".into())?,
         ],
     )?;
+    // Close Tab takes ⌘W from the default menu's Close Window items, found by kind and title: a menu
+    // left empty goes with it, and so does a separator that would end one.
+    #[cfg(target_os = "macos")]
+    for sub in menu.items()?.iter().filter_map(tauri::menu::MenuItemKind::as_submenu) {
+        let titles: Vec<_> = sub.items()?.iter().map(|i| i.as_predefined_menuitem().map(|p| p.text())).collect();
+        let title = |at: usize| titles.get(at).and_then(|t| t.as_ref()?.as_ref().ok()).map(|t| t.replace('&', ""));
+        let Some(at) = (0..titles.len()).find(|&at| title(at).as_deref() == Some("Close Window")) else { continue };
+        sub.remove_at(at)?;
+        if titles.len() == 1 {
+            menu.remove(sub)?;
+        } else if at + 1 == titles.len() && at > 0 && title(at - 1).as_deref() == Some("") {
+            sub.remove_at(at - 1)?;
+        }
+    }
     for n in 1..=9 {
         instances.append(&item(format!("nth-{n}"), format!("Instance {n}"), format!("CmdOrCtrl+{n}"))?)?;
     }
@@ -721,6 +736,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             .and_then(|()| app.emit_to(TABS, "add", ()).map_err(text)),
         "prev" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + len - 1) % len)),
         "next" => show_at(app, &shell, |at, len| at.map_or(0, |at| (at + 1) % len)),
+        "close-tab" => app.emit_to(TABS, "close-tab", ()).map_err(text),
         id => {
             if let Some(n) = id.strip_prefix("nth-").and_then(|n| n.parse::<usize>().ok()) {
                 show_at(app, &shell, |_, _| n.saturating_sub(1))

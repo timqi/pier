@@ -33,9 +33,9 @@ function fail(error: unknown): void {
 const call = (command: string, args: Record<string, unknown>): Promise<void> =>
   invoke<void>(command, args).catch(fail);
 
-// A state that arrives mid-rename waits, or it would wipe the edit.
+// The latest state; one that arrives mid-rename waits to render, or it would wipe the edit.
 let editing = false;
-let pending: Row[] | null = null;
+let rows: Row[] = [];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = ""): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -64,16 +64,13 @@ function rename(row: Pick<Row, "id" | "name">, name: HTMLElement): void {
     name.removeAttribute("contenteditable");
     const next = name.textContent?.trim() ?? "";
     if (next !== row.name) void call("rename", { id: row.id, name: next });
-    if (pending) render(pending);
+    render(rows);
   };
 }
 
-function render(rows: Row[]): void {
-  if (editing) {
-    pending = rows;
-    return;
-  }
-  pending = null;
+function render(next: Row[]): void {
+  rows = next;
+  if (editing) return;
   list.replaceChildren(
     ...rows.map((row) => {
       const li = el("li", row.active ? "active" : "");
@@ -173,4 +170,10 @@ button("menu").onclick = popup("⋯");
 await listen<Row[]>("state", (e) => render(e.payload));
 await listen<string>("error", (e) => fail(e.payload));
 await listen("add", openAdd);
+// As Safari, the last tab's Cmd+W closes the window instead, which keeps the tab for the next launch.
+await listen("close-tab", () => {
+  const active = rows.find((row) => row.active)?.id;
+  if (active && rows.length > 1) void call("close", { id: active });
+  else void win.close().catch(fail);
+});
 await call("list", {});

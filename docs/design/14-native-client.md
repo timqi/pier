@@ -105,7 +105,9 @@ one ~30-line module; in a browser every call is a no-op.
 
 `Cmd+1…9` (Ctrl on Linux) switch to the Nth open tab, `Cmd+Shift+[` / `]`
 previous / next open tab, `Cmd+N` add an instance, `Cmd+R` (and `F5` off macOS) reload
-the shown instance (a page whose assets were rebuilt under it recovers only so). They are the
+the shown instance (a page whose assets were rebuilt under it recovers only so), `Cmd+W`
+closes the shown tab, and on the last tab the window, as Safari (the tab stays open for the
+next launch); macOS's default Close Window loses `Cmd+W` to it. They are the
 Instances menu's accelerators: in the menu bar on macOS, in the hidden menu bar elsewhere,
 which still fires them. The tab bar is the only native surface with focus;
 everything else is the web UI's own keyboard.
@@ -122,12 +124,12 @@ everything else is the web UI's own keyboard.
 
 - `native/` beside `src/`: `src-tauri/` (Rust) and the tab bar page (TS,
   built by `native/vite.config.ts`); `just native-dev`, `just native`.
-- Budget line: `native/` ≤ 950 non-blank lines (Rust + TS), the lines past
+- Budget line: `native/` ≤ 965 non-blank lines (Rust + TS), the lines past
   830 the user's follow-ups (the instance's name on notifications, the origin
   guard's wait for the title, the data store removal's retry), the lines past
   845 Reload's tab menu, `F5` and Linux's hung-process replacement, the lines
   past 880 tabs opened and closed on demand, the `+` menu and the webviews
-  built off the main thread; the server-side
+  built off the main thread, the lines past 950 `Cmd+W` closing a tab; the server-side
   change is the `notification` workspace event alone (~20 lines in `push.ts`
   and `server.ts`), the UI change `shell.ts` and two call sites.
 - New toolchain: Rust + cargo lockfile, reviewed on upgrade like
