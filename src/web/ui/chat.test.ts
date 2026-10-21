@@ -308,7 +308,7 @@ it.each([["failed", { error: "overloaded" }], ["was cut by a restart", { cut: "r
     { role: "user", text: "Ship it" },
     { role: "assistant", text: "Half.\n\n---\n[Half]", ...after },
   ], "idle", []);
-  const buttons = doc.querySelector("#turns")!.querySelectorAll("button").map((b) => b.textContent).filter(Boolean);
+  const buttons = doc.querySelector("#turns")!.querySelectorAll("button").filter((b) => b.dataset.kind !== "activity").map((b) => b.textContent).filter(Boolean);
   expect(buttons).toEqual(["Ship it", "Wait"]);
 });
 
@@ -1219,11 +1219,15 @@ describe("the turn's bubble", () => {
       { role: "system", text: "continue", origin: restart, at: 6000 },
       { role: "assistant", text: "Half an answer", cut: "restart", steps, meta },
       { role: "system", text: "continue", origin: restart, at: 7000 },
+      { role: "assistant", text: "", cut: "restart", meta },
+      { role: "system", text: "continue", origin: restart, at: 8000 },
     ], "idle", []);
     expect(kinds()).not.toContain("error");
     const cut = pane().querySelectorAll("[data-kind='activity']");
-    expect(cut).toHaveLength(2);
-    for (const chip of cut) {
+    expect(cut).toHaveLength(3);
+    // Cut before any step: the chip alone says it, with no step count.
+    expect(cut[2]!.textContent).toBe("restarted \u00b7 5s");
+    for (const chip of [...cut].slice(0, 2)) {
       expect(chip.textContent).toBe("restarted \u00b7 1 step \u00b7 5s");
       expect(chip.dataset.status).toBe("restarted");
       expect(chip.classList.contains("text-neutral-500")).toBe(true);
