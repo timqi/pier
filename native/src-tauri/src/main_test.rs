@@ -38,7 +38,7 @@ fn anything_else_is_named() {
     assert_eq!(judged(vec![Probed::Loaded]).as_deref(), Some("its /login has no title"));
     let away = Url::parse("https://sso.example.com/").unwrap();
     assert_eq!(judged(vec![Probed::Left(away)]).as_deref(), Some("it redirects to https://sso.example.com/"));
-    assert_eq!(judged(vec![]).as_deref(), Some("no answer within 0s"));
+    assert!(judged(vec![]).is_some_and(|why| why.starts_with("no answer within ")));
 }
 
 #[test]

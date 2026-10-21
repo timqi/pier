@@ -405,32 +405,35 @@ async fn remove(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
     if let Some(webview) = app.get_webview(&id) {
         webview.close().map_err(text)?;
     }
-    // WebKit refuses to remove a store the webview closed a moment ago still holds.
+    let was_active = {
+        let mut live = shell.lock();
+        live.unread.remove(&id);
+        live.accent.remove(&id);
+        publish(&app, &mut live);
+        live.active.take_if(|active| *active == id).is_some()
+    };
+    let shown = if was_active { show_at(&app, &shell, |_, len| at.min(len - 1)) } else { Ok(()) };
+    // Last, so data that will not go leaves no blank window behind.
+    let removed = remove_data(&app, &id).await.map_err(|e| format!("removing the instance's data: {e}"));
+    let errors: Vec<String> = [shown, removed].into_iter().filter_map(Result::err).collect();
+    errors.is_empty().then_some(()).ok_or_else(|| errors.join("; "))
+}
+
+/// On macOS its WebKit data store, retried: WebKit refuses one a just-closed webview still holds.
+async fn remove_data(app: &AppHandle, id: &str) -> Res {
     #[cfg(target_os = "macos")]
     for retry in 1.. {
-        match app.remove_data_store(store::store_key(&id)).await {
+        match app.remove_data_store(store::store_key(id)).await {
             Ok(()) => break,
-            Err(e) if retry == 8 => return Err(format!("removing the instance's data: {e}")),
+            Err(e) if retry == 8 => return Err(text(e)),
             Err(_) => {
                 let pause = move || std::thread::sleep(Duration::from_millis(100 * retry));
                 tauri::async_runtime::spawn_blocking(pause).await.map_err(text)?;
             }
         }
     }
-    match fs::remove_dir_all(shell.data_dir(&id)) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(format!("removing the instance's data: {e}")),
-        _ => {}
-    }
-    let mut live = shell.lock();
-    live.unread.remove(&id);
-    live.accent.remove(&id);
-    publish(&app, &mut live);
-    let was_active = live.active.take_if(|active| *active == id).is_some();
-    drop(live);
-    if was_active {
-        return show_at(&app, &shell, |_, len| at.min(len - 1));
-    }
-    Ok(())
+    let gone = fs::remove_dir_all(app.state::<Shell>().data_dir(id));
+    gone.or_else(|e| (e.kind() == io::ErrorKind::NotFound).then_some(()).ok_or_else(|| text(e)))
 }
 
 /// An empty name hands naming back to the page title.
