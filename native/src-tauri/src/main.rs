@@ -1,4 +1,4 @@
-//! Pier's native client: one frameless window, a tab per Pier instance over one webview each.
+//! Pier's native client: one frameless window, a tab per open Pier instance over one webview each.
 
 mod store;
 
@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     fs,
+    future::Future,
     hash::{DefaultHasher, Hash, Hasher},
     io,
     path::PathBuf,
@@ -18,7 +19,7 @@ use serde_json::{json, Value};
 use store::Instance;
 use tauri::{
     ipc::CapabilityBuilder,
-    menu::{Menu, MenuEvent, MenuItem, Submenu},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
     webview::{NewWindowResponse, PageLoadEvent},
     window::WindowBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewBuilder, WebviewUrl, Window,
@@ -74,6 +75,11 @@ fn position(all: &[Instance], id: &str) -> Res<usize> {
     all.iter().position(|i| i.id == id).ok_or_else(|| format!("no instance {id}"))
 }
 
+/// The open instances, in the list's order: the tabs.
+fn tabs(all: &[Instance]) -> Vec<&Instance> {
+    all.iter().filter(|i| !i.closed).collect()
+}
+
 /// Logs `message` and shows it on the tab bar: a failure is never only a log line.
 fn report(app: &AppHandle, message: impl Display) {
     eprintln!("pier-client: {message}");
@@ -92,9 +98,8 @@ fn surfaced(app: &AppHandle, result: Res) -> Res {
 
 /// Pushes the tabs to the tab bar and their unread sum to the Dock / taskbar badge.
 fn publish(app: &AppHandle, live: &mut Live) {
-    let rows: Vec<Value> = live
-        .instances
-        .iter()
+    let rows: Vec<Value> = tabs(&live.instances)
+        .into_iter()
         .map(|i| {
             let (unread, accent) = (live.unread.get(&i.id).copied().unwrap_or(0), live.accent.get(&i.id));
             json!({ "id": i.id, "name": i.name, "url": i.url, "unread": unread, "accent": accent,
@@ -320,13 +325,13 @@ fn show_instance(app: &AppHandle, shell: &Shell, id: &str) -> Res {
     Ok(())
 }
 
-/// Shows the instance `pick` names from the active one's index and the count; none when the list is empty.
+/// Shows the tab `pick` names from the active one's index and the count; none when no tab is open.
 fn show_at(app: &AppHandle, shell: &Shell, pick: impl FnOnce(Option<usize>, usize) -> usize) -> Res {
     let id = {
         let live = shell.lock();
-        let (all, len) = (&live.instances, live.instances.len());
-        let active = live.active.as_deref().and_then(|a| position(all, a).ok());
-        (len > 0).then(|| pick(active, len)).and_then(|n| all.get(n)).map(|i| i.id.clone())
+        let tabs = tabs(&live.instances);
+        let active = live.active.as_deref().and_then(|a| tabs.iter().position(|i| i.id == a));
+        (!tabs.is_empty()).then(|| pick(active, tabs.len())).and_then(|n| tabs.get(n)).map(|i| i.id.clone())
     };
     id.map_or(Ok(()), |id| show_instance(app, shell, &id))
 }
@@ -411,28 +416,73 @@ async fn add(app: AppHandle, shell: State<'_, Shell>, input: String, force: bool
     show_instance(&app, &shell, &instance.id).map(|()| None)
 }
 
-/// Its data goes with it: the cookie jar, so a re-added instance signs in afresh.
-#[tauri::command]
-async fn remove(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
-    let mut at = 0;
-    edit(&app, &shell, |all| {
-        at = position(all, &id)?;
-        all.remove(at);
+/// Opens a listed instance's tab, or shows its open one; `hash`, if any, is the page it shows.
+fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> Res {
+    if let Some(webview) = app.get_webview(id) {
+        show_instance(app, shell, id)?;
+        // Set from here, not sent as an event: an instance page holds no event
+        // permission, so no page can hear another's.
+        return hash
+            .map_or(Ok(()), |hash| webview.eval(format!("location.hash = {}", Value::from(hash))).map_err(text));
+    }
+    let instance = shell.lock().instances.iter().find(|i| i.id == id).cloned().ok_or(format!("no instance {id}"))?;
+    let mut first = instance.app_url()?;
+    first.set_fragment(hash);
+    mount(app, shell, &instance, first)?;
+    edit(app, shell, |all| {
+        let at = position(all, id)?;
+        all[at].closed = false;
         Ok(())
     })?;
-    if let Some(webview) = app.get_webview(&id) {
+    show_instance(app, shell, id)
+}
+
+/// Its tab's index, taken before the list changes, so `unmount` shows the tab in its place.
+fn tab_at(shell: &Shell, id: &str) -> Option<usize> {
+    tabs(&shell.lock().instances).iter().position(|i| i.id == id)
+}
+
+/// Closes an instance's webview, freeing what it held, and forgets its unread count.
+fn unmount(app: &AppHandle, shell: &Shell, id: &str, at: Option<usize>) -> Res {
+    if let Some(webview) = app.get_webview(id) {
         webview.close().map_err(text)?;
     }
     let was_active = {
         let mut live = shell.lock();
-        live.unread.remove(&id);
-        live.accent.remove(&id);
-        publish(&app, &mut live);
-        live.active.take_if(|active| *active == id).is_some()
+        live.unread.remove(id);
+        live.accent.remove(id);
+        publish(app, &mut live);
+        live.active.take_if(|active| active == id).is_some()
     };
-    let shown = if was_active { show_at(&app, &shell, |_, len| at.min(len - 1)) } else { Ok(()) };
+    match at {
+        Some(at) if was_active => show_at(app, shell, |_, len| at.min(len - 1)),
+        _ => Ok(()),
+    }
+}
+
+/// Its data stays, so reopening it from `+` finds it signed in. Async, as `add`.
+#[tauri::command]
+async fn close(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
+    let at = tab_at(&shell, &id);
+    edit(&app, &shell, |all| {
+        let at = position(all, &id)?;
+        all[at].closed = true;
+        Ok(())
+    })?;
+    unmount(&app, &shell, &id, at)
+}
+
+/// Its data goes with it: the cookie jar, so a re-added instance signs in afresh.
+async fn remove(app: &AppHandle, id: &str) -> Res {
+    let shell = app.state::<Shell>();
+    let at = tab_at(&shell, id);
+    edit(app, &shell, |all| {
+        all.remove(position(all, id)?);
+        Ok(())
+    })?;
+    let shown = unmount(app, &shell, id, at);
     // Last, so data that will not go leaves no blank window behind.
-    let removed = remove_data(&app, &id).await.map_err(|e| format!("removing the instance's data: {e}"));
+    let removed = remove_data(app, id).await.map_err(|e| format!("removing the instance's data: {e}"));
     let errors: Vec<String> = [shown, removed].into_iter().filter_map(Result::err).collect();
     errors.is_empty().then_some(()).ok_or_else(|| errors.join("; "))
 }
@@ -467,11 +517,13 @@ fn rename(app: AppHandle, shell: State<'_, Shell>, id: String, name: String) -> 
     })
 }
 
+/// Moves `id` to where the tab it was dropped `onto` stands in the list, closed instances included.
 #[tauri::command]
-fn reorder(app: AppHandle, shell: State<'_, Shell>, id: String, to: usize) -> Res {
+fn reorder(app: AppHandle, shell: State<'_, Shell>, id: String, onto: String) -> Res {
     edit(&app, &shell, |all| {
+        let to = position(all, &onto)?;
         let instance = all.remove(position(all, &id)?);
-        all.insert(to.min(all.len()), instance);
+        all.insert(to, instance);
         Ok(())
     })
 }
@@ -550,7 +602,8 @@ fn instance_field<'a>(performed: &'a ActionPerformed, key: &str) -> Option<&'a s
     performed.notification()?.extra().get(key)?.as_str()
 }
 
-/// A click on a notification brings the window, then the instance, then the page at `url`.
+/// A click on a notification brings the window, then the instance, opening its tab if
+/// it was closed since, then the page at `url`.
 fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
     if performed.action_id() != "tap" {
         return;
@@ -558,30 +611,55 @@ fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
     let (Some(id), Some(url)) = (instance_field(performed, "instance"), instance_field(performed, "url")) else {
         return report(app, "a notification click arrived without its instance");
     };
-    let window = app.get_window(WINDOW);
-    let opened = window
-        .ok_or_else(|| "the window is gone".to_owned())
-        .and_then(|w| w.unminimize().and_then(|()| w.show()).and_then(|()| w.set_focus()).map_err(text))
-        .and_then(|()| show_instance(app, &app.state::<Shell>(), id))
-        // Set from here, not sent as an event: an instance page holds no event
-        // permission, so no page can hear another's.
-        .and_then(|()| app.get_webview(id).ok_or_else(|| format!("{id} has no webview")))
-        .and_then(|w| {
-            let hash = url.split_once('#').map_or("", |(_, hash)| hash);
-            w.eval(format!("location.hash = {}", Value::from(hash))).map_err(text)
-        });
-    if let Err(e) = opened {
-        report(app, format!("opening a notification: {e}"));
-    }
+    let (app, id, hash) = (app.clone(), id.to_owned(), url.split_once('#').map_or("", |(_, h)| h).to_owned());
+    detach(&app.clone(), async move {
+        app.get_window(WINDOW)
+            .ok_or_else(|| "the window is gone".to_owned())
+            .and_then(|w| w.unminimize().and_then(|()| w.show()).and_then(|()| w.set_focus()).map_err(text))
+            .and_then(|()| open(&app, &app.state::<Shell>(), &id, Some(&hash)))
+            .map_err(|e| format!("opening a notification: {e}"))
+    });
 }
 
-/// The tab bar's menus, dropped at `x`, `y` in the bar: a tab's own for `tab`, else the
-/// menu button's, which is Instances.
+/// Off the calling thread, which may be the main one: a webview built or a data store
+/// removed from it can deadlock.
+fn detach(app: &AppHandle, work: impl Future<Output = Res> + Send + 'static) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = work.await {
+            report(&app, e);
+        }
+    });
+}
+
+/// `+`'s menu: every listed instance, the open ones checked, to open; then Add, and Remove.
+fn saved(app: &AppHandle, all: &[Instance]) -> tauri::Result<Menu<tauri::Wry>> {
+    let item = |id: String, label: &str| MenuItem::with_id(app, id, label, true, None::<&str>);
+    let menu = Menu::new(app)?;
+    let remove = Submenu::new(app, "Remove and Delete Data", !all.is_empty())?;
+    for i in all {
+        menu.append(&CheckMenuItem::with_id(app, format!("open:{}", i.id), &i.name, true, !i.closed, None::<&str>)?)?;
+        remove.append(&item(format!("remove:{}", i.id), &i.name)?)?;
+    }
+    if !all.is_empty() {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    menu.append_items(&[&item("add".into(), "Add Instance…")?, &remove])?;
+    Ok(menu)
+}
+
+/// The tab bar's menus, dropped at `x`, `y` in the bar: `+`'s for `+`, the menu button's,
+/// which is Instances, for `⋯`, else the tab's own whose id `menu` is.
 #[tauri::command]
-fn popup(app: AppHandle, window: Window, tab: Option<String>, x: f64, y: f64) -> Res {
+fn popup(app: AppHandle, shell: State<'_, Shell>, window: Window, menu: String, x: f64, y: f64) -> Res {
     let at = LogicalPosition::new(x, y);
-    if let Some(id) = tab {
-        let reload = MenuItem::with_id(&app, format!("reload:{id}"), "Reload", true, None::<&str>).map_err(text)?;
+    if menu == "+" {
+        // Built before the popup, which holds the thread: the list's lock is not held across it.
+        let saved = saved(&app, &shell.lock().instances).map_err(text)?;
+        return window.popup_menu_at(&saved, at).map_err(text);
+    }
+    if menu != "⋯" {
+        let reload = MenuItem::with_id(&app, format!("reload:{menu}"), "Reload", true, None::<&str>).map_err(text)?;
         return window.popup_menu_at(&Menu::with_items(&app, &[&reload]).map_err(text)?, at).map_err(text);
     }
     let menu = app.menu().and_then(|m| m.get(INSTANCES)).and_then(|i| i.as_submenu().cloned());
@@ -640,6 +718,16 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
                 show_at(app, &shell, |_, _| n.saturating_sub(1))
             } else if let Some(id) = reloads(id, || shell.lock().active.clone()) {
                 reload(app, &id)
+            } else if id.starts_with("open:") || id.starts_with("remove:") {
+                let (handle, item) = (app.clone(), id.to_owned());
+                detach(app, async move {
+                    match item.split_once(':') {
+                        Some(("open", id)) => open(&handle, &handle.state::<Shell>(), id, None),
+                        Some((_, id)) => remove(&handle, id).await,
+                        None => Ok(()),
+                    }
+                });
+                Ok(())
             } else {
                 Ok(())
             }
@@ -687,12 +775,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let shell = app.state::<Shell>();
-    for instance in &instances {
+    for instance in instances.iter().filter(|i| !i.closed) {
         if let Err(e) = instance.app_url().and_then(|url| mount(app.handle(), &shell, instance, url)) {
             errors.push(format!("{}: {e}", instance.name));
         }
     }
-    if let Some(first) = instances.first() {
+    if let Some(first) = instances.iter().find(|i| !i.closed) {
         if let Err(e) = show_instance(app.handle(), &shell, &first.id) {
             errors.push(e);
         }
@@ -711,7 +799,7 @@ fn main() {
         .menu(menu)
         .on_menu_event(on_menu)
         .invoke_handler(tauri::generate_handler![
-            list, add, remove, rename, reorder, select, popup, set_badge, notify, page_title
+            list, add, close, rename, reorder, select, popup, set_badge, notify, page_title
         ])
         .setup(setup)
         .run(tauri::generate_context!());

@@ -10,24 +10,34 @@ for a few weeks, and is deleted whole if it is not.
 ## Shape
 
 - **Tauri 2** (`native/`): a Rust shell over the system webview (WebKit on
-  both platforms), one webview per instance, each loading `<url>/app/`. No
+  both platforms), one webview per open instance, each loading `<url>/app/`. No
   bundled browser engine; the Rust side is instance bookkeeping, the tab
   bar, the badge and the notification call, nothing about chat.
-- **Instance** = `{name, url}` in the shell's own store
+- **Instance** = `{name, url, closed}` in the shell's own store
   (`~/.config/pier-client/instances.json`; a debug build keeps its own list
   in `pier-client-dev/`, as its cookie stores are not the bundle's). Auth is
   the instance's own: each webview keeps a persistent cookie jar of its own, and the operator signs in
   with the password, a passkey or a `pier login` link as in a browser. The
   shell holds no credential and opens no HTTP connection of its own.
-- **Tab bar**: one 32px row across the top, a tab per instance (dot in the
+- **Open on demand**: a tab is an open instance, in the list's order; only
+  an open instance has a webview, so a closed one costs nothing. `+` pops up
+  the list, the open ones checked: picking one opens its tab (or shows it),
+  then Add Instance…, then Remove and Delete Data ▸ per instance. A tab's `×`
+  closes it and destroys its webview; the instance stays listed and keeps its
+  data store, so reopening finds it signed in. Which tabs are open is the
+  list's `closed` flag, so a restart reopens the same tabs, the first shown.
+- **A closed instance is unreachable**: no SSE stream, so no native
+  notification, no unread count and nothing on the Dock / taskbar badge until
+  it is opened again. Accepted as the price of not running it.
+- **Tab bar**: one 32px row across the top, a tab per open instance (dot in the
   instance's accent, name, red unread count), then `+`; the instance's page
   fills the window below. A tab is a 24px rounded pill, 180px wide until the
   window is too narrow, its name truncated with an ellipsis; the shown one is
   raised on `Canvas`, its `×` always visible, the others' only on hover. On
-  macOS the row's centre line is the traffic lights'. Click switches the visible webview, the others stay
-  mounted so SSE streams and composer drafts survive a switch. Add = paste a
-  URL or a `pier login` link into the field `+` opens (sets url and signs in
-  at once); `×` then `Remove` removes it with its cookie jar and storage
+  macOS the row's centre line is the traffic lights'. Click switches the visible webview, the other open
+  ones stay mounted so SSE streams and composer drafts survive a switch. Add = paste a
+  URL or a `pier login` link into the field Add Instance… opens (sets url and signs in
+  at once) and opens its tab; Remove and Delete Data removes it with its cookie jar and storage
   (macOS: its WebKit data store; Linux: its data directory), double-click on
   the name renames, drag reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
   page title. An error shows as a red toast over the bar for 8s; a click
@@ -83,7 +93,7 @@ one ~30-line module; in a browser every call is a no-op.
   it to the native notification, titled `<instance name> · <title>` by the
   shell so it says which instance spoke. Body is the same
   `preview(reply.text)` the push sends — the topic is in it. Click: the shell focuses the window and
-  that instance and sets the page's hash from `url` itself; an instance page
+  that instance, reopening its tab if it was closed since, and sets the page's hash from `url` itself; an instance page
   holds no event permission, so no page can hear the tab bar's or another's.
 - **Visibility**: a hidden instance's webview must read
   `document.hidden === true`, or the UI acks every turn as seen
@@ -93,8 +103,8 @@ one ~30-line module; in a browser every call is a no-op.
 
 ## Keyboard
 
-`Cmd+1…9` (Ctrl on Linux) switch to the Nth instance, `Cmd+Shift+[` / `]`
-previous / next, `Cmd+N` add an instance, `Cmd+R` (and `F5` off macOS) reload
+`Cmd+1…9` (Ctrl on Linux) switch to the Nth open tab, `Cmd+Shift+[` / `]`
+previous / next open tab, `Cmd+N` add an instance, `Cmd+R` (and `F5` off macOS) reload
 the shown instance (a page whose assets were rebuilt under it recovers only so). They are the
 Instances menu's accelerators: in the menu bar on macOS, in the hidden menu bar elsewhere,
 which still fires them. The tab bar is the only native surface with focus;

@@ -12,7 +12,7 @@
     "core:window:allow-close",
     "allow-list",
     "allow-add",
-    "allow-remove",
+    "allow-close",
     "allow-rename",
     "allow-reorder",
     "allow-select",

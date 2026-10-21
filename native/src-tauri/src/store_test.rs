@@ -50,6 +50,18 @@ fn the_list_round_trips_and_starts_empty() {
 }
 
 #[test]
+fn a_closed_tab_is_remembered_and_a_list_without_the_field_is_all_open() {
+    let path = scratch("closed");
+    let (mut instance, _) = Instance::parse("https://a.example").unwrap();
+    save(&path, std::slice::from_ref(&instance)).unwrap();
+    assert!(!fs::read_to_string(&path).unwrap().contains("closed"));
+    assert!(!load(&path).unwrap()[0].closed);
+    instance.closed = true;
+    save(&path, std::slice::from_ref(&instance)).unwrap();
+    assert!(load(&path).unwrap()[0].closed);
+}
+
+#[test]
 fn a_malformed_list_is_set_aside_not_overwritten() {
     let path = scratch("malformed");
     fs::create_dir_all(path.parent().unwrap()).unwrap();

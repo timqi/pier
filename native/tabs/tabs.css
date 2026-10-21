@@ -14,11 +14,10 @@ li.active .name { font-weight: 600; }
 .unread { flex: none; font-size: 11px; line-height: 16px; min-width: 16px; box-sizing: border-box; text-align: center; font-variant-numeric: tabular-nums; padding: 0 4px; border-radius: 8px; background: #d93025; color: white; }
 .unread:empty { display: none; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-.remove { flex: none; display: none; opacity: 0.6; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; line-height: 18px; }
-li:hover .remove, li.active .remove, li.confirm .remove { display: block; }
-li.confirm .remove { opacity: 1; color: #d93025; }
+.close { flex: none; display: none; opacity: 0.6; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; line-height: 18px; }
+li:hover .close, li.active .close { display: block; }
 #plus, #menu { flex: none; width: 24px; height: 24px; margin-left: 2px; border-radius: 6px; font-size: 16px; line-height: 1; }
-#plus:hover, #menu:hover, .remove:hover { background: color-mix(in srgb, CanvasText 10%, transparent); }
+#plus:hover, #menu:hover, .close:hover { background: color-mix(in srgb, CanvasText 10%, transparent); }
 form { flex: 0 0 280px; }
 input { box-sizing: border-box; width: 100%; font: inherit; padding: 2px 6px; }
 input:read-only { cursor: progress; opacity: 0.6; }

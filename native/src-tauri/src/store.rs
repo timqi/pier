@@ -21,6 +21,9 @@ pub struct Instance {
     /// The user named it, so the page title no longer does.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub named: bool,
+    /// Its tab is closed: listed, its data kept, no webview.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
 }
 
 impl Instance {
@@ -34,7 +37,7 @@ impl Instance {
         }
         let url = link.origin().ascii_serialization();
         let first = if link.path().starts_with("/login/") { link } else { app_url(&url)? };
-        let instance = Self { id: new_id(), name: host(&url), url, named: false };
+        let instance = Self { id: new_id(), name: host(&url), url, named: false, closed: false };
         Ok((instance, first))
     }
 

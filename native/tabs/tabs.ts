@@ -1,4 +1,4 @@
-// The tab bar, which is also the title bar: a tab per Pier instance. Every action is a shell
+// The tab bar, which is also the title bar: a tab per open Pier instance. Every action is a shell
 // command, every state a `state` event from it.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -75,7 +75,7 @@ function render(rows: Row[]): void {
   }
   pending = null;
   list.replaceChildren(
-    ...rows.map((row, index) => {
+    ...rows.map((row) => {
       const li = el("li", row.active ? "active" : "");
       li.title = row.url;
       li.dataset.id = row.id;
@@ -86,33 +86,27 @@ function render(rows: Row[]): void {
       const dot = el("span", "dot");
       if (row.accent) dot.style.background = row.accent;
       const name = el("span", "name", row.name);
-      const remove = el("button", "remove", "×");
-      remove.title = "Remove";
-      li.append(dot, name, el("span", "unread", row.unread ? String(row.unread) : ""), remove);
+      const close = el("button", "close", "×");
+      close.title = "Close (stays under +)";
+      li.append(dot, name, el("span", "unread", row.unread ? String(row.unread) : ""), close);
       li.onclick = (e) => {
         // Selecting focuses the instance's page, which would end the rename a double click's second click starts.
         if (!editing && e.detail === 1) void call("select", { id: row.id });
       };
-      remove.onclick = (e) => {
+      close.onclick = (e) => {
         e.stopPropagation();
-        if (li.classList.contains("confirm")) return void call("remove", { id: row.id });
-        li.classList.add("confirm");
-        remove.textContent = "Remove";
-      };
-      li.onmouseleave = () => {
-        li.classList.remove("confirm");
-        remove.textContent = "×";
+        void call("close", { id: row.id });
       };
       li.oncontextmenu = (e) => {
         e.preventDefault();
-        void call("popup", { tab: row.id, x: e.clientX, y: e.clientY });
+        void call("popup", { menu: row.id, x: e.clientX, y: e.clientY });
       };
       li.ondragstart = (e) => e.dataTransfer?.setData("text/plain", row.id);
       li.ondragover = (e) => e.preventDefault();
       li.ondrop = (e) => {
         e.preventDefault();
         const id = e.dataTransfer?.getData("text/plain");
-        if (id && id !== row.id) void call("reorder", { id, to: index });
+        if (id && id !== row.id) void call("reorder", { id, onto: row.id });
       };
       return li;
     }),
@@ -130,7 +124,6 @@ function openAdd(): void {
   form.hidden = false;
   input.focus();
 }
-button("plus").onclick = openAdd;
 input.onkeydown = (e) => {
   if (e.key === "Escape") form.hidden = true;
 };
@@ -170,10 +163,12 @@ document.body.onmousemove = (e) => {
   void win.startDragging().catch(fail);
 };
 document.body.onmouseup = () => (pressed = false);
-button("menu").onclick = (e) => {
+const popup = (menu: string) => (e: MouseEvent) => {
   const at = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  void call("popup", { x: at.left, y: at.bottom });
+  void call("popup", { menu, x: at.left, y: at.bottom });
 };
+button("plus").onclick = popup("+");
+button("menu").onclick = popup("⋯");
 
 await listen<Row[]>("state", (e) => render(e.payload));
 await listen<string>("error", (e) => fail(e.payload));
