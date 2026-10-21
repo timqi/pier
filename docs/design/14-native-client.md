@@ -107,7 +107,9 @@ everything else is the web UI's own keyboard.
 
 - `native/` beside `src/`: `src-tauri/` (Rust) and the tab bar page (TS,
   built by `native/vite.config.ts`); `just native-dev`, `just native`.
-- Budget line: `native/` ≤ 830 non-blank lines (Rust + TS); the server-side
+- Budget line: `native/` ≤ 845 non-blank lines (Rust + TS), the lines past
+  830 the user's follow-ups (the instance's name on notifications, the origin
+  guard's wait for the title, the data store removal's retry); the server-side
   change is the `notification` workspace event alone (~20 lines in `push.ts`
   and `server.ts`), the UI change `shell.ts` and two call sites.
 - New toolchain: Rust + cargo lockfile, reviewed on upgrade like
