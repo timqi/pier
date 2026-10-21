@@ -64,7 +64,8 @@ updates this document.
   first at half the height — and every row, control and download in them is a
   44px target; a head with no tab row keeps its chips and close on one line,
   and a path too long for a phone wears its last segment instead.
-- **Model picker**: fills its panel; its head keeps only back and close controls.
+- **Model picker**: fills its panel; opened from ⋯, its head keeps only back and
+  close controls.
   Reasoning effort: inline disclosure with styled native radios, visible
   selection and focus, no nested overlay.
 - Action labels: 0.9375rem desktop / 1rem phone at 1.5.

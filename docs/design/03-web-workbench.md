@@ -221,7 +221,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   task message — `data-cause`, never a user message), a steps group
   (`N steps · <secs>`, one per stretch of work, a steered input between two;
   live `⟳ N steps · <secs> · writing…`; `failed · …` red, `interrupted · …`
-  amber), a launched run. Under the row the body: the reply, `Stayed silent
+  amber, `restarted · …` grey, `restarted · <secs>` for a turn cut before
+  any step), a launched run. Under the row the body: the reply, `Stayed silent
   — <reason>`, an error on its own material, or nothing for a turn cut short
   before it spoke. The bubble opens at the tail with its first chip or delta;
   the body fills it; a run launched after the reply joins the row's end; a

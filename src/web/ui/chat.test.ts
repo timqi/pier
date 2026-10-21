@@ -1224,19 +1224,21 @@ describe("the turn's bubble", () => {
     ], "idle", []);
     expect(kinds()).not.toContain("error");
     const cut = pane().querySelectorAll("[data-kind='activity']");
-    expect(cut).toHaveLength(3);
     // Cut before any step: the chip alone says it, with no step count.
-    expect(cut[2]!.textContent).toBe("restarted \u00b7 5s");
-    for (const chip of [...cut].slice(0, 2)) {
-      expect(chip.textContent).toBe("restarted \u00b7 1 step \u00b7 5s");
+    expect([...cut].map((c) => c.textContent)).toEqual(["restarted \u00b7 1 step \u00b7 5s", "restarted \u00b7 1 step \u00b7 5s", "restarted \u00b7 5s"]);
+    for (const chip of cut) {
       expect(chip.dataset.status).toBe("restarted");
       expect(chip.classList.contains("text-neutral-500")).toBe(true);
       expect(chip.querySelector("svg")).toBeTruthy(); // a glyph, which a plain done chip has not
     }
     // No text: the chip row is the bubble's whole content; with text, the text stays.
-    const [empty, partial] = pane().querySelectorAll("[data-kind='assistant']");
+    const [empty, partial, bare] = pane().querySelectorAll("[data-kind='assistant']");
     expect(chips(empty)).toEqual(["activity"]);
-    expect("pending" in empty!.dataset).toBe(false);
+    expect(chips(bare)).toEqual(["system", "activity"]); // the restart input is its cause
+    for (const bubble of [empty, bare]) {
+      expect(bubble!.querySelector(".md, .stream")).toBeNull();
+      expect("pending" in bubble!.dataset).toBe(false);
+    }
     expect(partial!.textContent).toContain("Half an answer");
   });
 
