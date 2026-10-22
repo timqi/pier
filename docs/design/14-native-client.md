@@ -105,8 +105,11 @@ not a server, so no launchd or systemd unit: quitting the app stops it.
   One start runs per instance at a time: an open during it waits for it. A spawned Pier that
   has exited is started again on the next open, and picking a tab whose start
   failed retries it.
-- **Close**: closing or removing a local tab leaves its Pier running until
-  the app quits.
+- **Close**: closing or removing a local tab stops the Pier the shell spawned
+  for it, held as a quit is when its page counts a session busy (a second
+  close within 8s goes ahead), then SIGTERM and SIGKILL after 10s; an
+  `external` one is left running. An open meanwhile waits for the stop and
+  spawns it again.
 - **Sign-in**: when the local tab lands on `/login`, the shell runs the
   command with `serve` swapped for `login` (`pier login`'s one-time link,
   the same `PIER_HOME`) and loads the link, at most once per 30s per tab: the
@@ -122,8 +125,7 @@ not a server, so no launchd or systemd unit: quitting the app stops it.
   page; one that cannot tell counts none), the first quit shows the count on
   the tab bar and a second within 8s quits; so does a second after the count
   itself failed. Then each spawned process group gets SIGTERM, and SIGKILL after
-  10s, all in parallel. A Dock Quit cannot be held, so it skips the warning, not the stop. A
-  closed tab's Pier is not asked.
+  10s, all in parallel. A Dock Quit cannot be held, so it skips the warning, not the stop.
 
 ## Bridge (`src/web/ui/shell.ts`)
 

@@ -59,8 +59,8 @@ struct Live {
     children: HashMap<String, Child>,
     /// Held by an instance's start, so an open meanwhile waits for it rather than starting another.
     starting: HashMap<String, Arc<tauri::async_runtime::Mutex<()>>>,
-    /// When a quit was held for a busy local Pier: the next one within 8s goes ahead.
-    quit_warned: Option<Instant>,
+    /// When a quit (`""`) or a tab's close (its id) was held for a busy local Pier: the next one within 8s goes ahead.
+    warned: HashMap<String, Instant>,
 }
 
 impl Shell {
@@ -359,17 +359,23 @@ async fn busy(app: &AppHandle, ids: &[String]) -> Res<u32> {
     tauri::async_runtime::spawn_blocking(count).await.map_err(text)
 }
 
-/// The app's quit: a busy local Pier the shell started holds the first one, a second within 8s goes ahead.
-async fn quit(app: AppHandle) -> Res {
-    let shell = app.state::<Shell>();
-    // Set before asking, so a quit whose question fails goes ahead the next time too.
-    let last = shell.lock().quit_warned.replace(Instant::now());
+/// Holds the first quit or close (`key`) while the open tabs of `ids` are busy, telling the user to
+/// `again`; a second within 8s goes ahead.
+async fn hold(app: &AppHandle, key: &str, ids: &[String], again: &str) -> Res {
+    // Set before asking, so one whose question fails goes ahead the next time too.
+    let last = app.state::<Shell>().lock().warned.insert(key.to_owned(), Instant::now());
     let warned = last.is_some_and(|at| at.elapsed() < Duration::from_secs(8));
-    let ids: Vec<String> = shell.lock().children.keys().cloned().collect();
-    let busy = if warned { 0 } else { busy(&app, &ids).await.map_err(|e| format!("{e}: quit again"))? };
+    let busy = if warned { 0 } else { busy(app, ids).await.map_err(|e| format!("{e}: {again}"))? };
     if busy > 0 {
-        return Err(format!("{busy} sessions on the local Pier are mid-turn or running a task: quit again to stop it"));
+        return Err(format!("{busy} sessions on the local Pier are mid-turn or running a task: {again} to stop it"));
     }
+    Ok(())
+}
+
+/// The app's quit: a busy local Pier the shell started holds the first one.
+async fn quit(app: AppHandle) -> Res {
+    let ids: Vec<String> = app.state::<Shell>().lock().children.keys().cloned().collect();
+    hold(&app, "", &ids, "quit again").await?;
     // `RunEvent::Exit` stops the Piers the shell started.
     app.exit(0);
     Ok(())
@@ -543,13 +549,20 @@ async fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> R
 
 /// Closes an instance's webview, then applies `change` to it in the list; a webview that will
 /// not close changes nothing. A list that will not save still loses the tab, closed in memory
-/// only, since its webview is gone: a restart reopens it.
-fn take_down(app: &AppHandle, shell: &Shell, id: &str, change: impl FnOnce(&mut Vec<Instance>, usize)) -> Res {
+/// only, since its webview is gone: a restart reopens it. The Pier the shell started for it stops,
+/// a busy one holding the first close; its start's gate is held, so a reopen meanwhile spawns anew.
+async fn take_down(app: &AppHandle, id: &str, change: impl FnOnce(&mut Vec<Instance>, usize)) -> Res {
+    let shell = app.state::<Shell>();
+    if shell.lock().children.contains_key(id) {
+        hold(app, id, &[id.to_owned()], "close again").await?;
+    }
+    let gate = shell.lock().starting.entry(id.to_owned()).or_default().clone();
+    let _starting = gate.lock().await;
     let at = tabs(&shell.lock().instances).iter().position(|i| i.id == id);
     if let Some(webview) = app.get_webview(id) {
         webview.close().map_err(text)?;
     }
-    let saved = edit(app, shell, |all| {
+    let saved = edit(app, &shell, |all| {
         let at = position(all, id)?;
         change(all, at);
         Ok(())
@@ -565,22 +578,24 @@ fn take_down(app: &AppHandle, shell: &Shell, id: &str, change: impl FnOnce(&mut 
         live.active.take_if(|active| active == id).is_some()
     };
     if let (Some(at), true) = (at, was_active) {
-        if let Err(e) = show_at(app, shell, |_, len| at.min(len - 1)) {
+        if let Err(e) = show_at(app, &shell, |_, len| at.min(len - 1)) {
             report(app, e);
         }
     }
+    let child = shell.lock().children.remove(id);
+    tauri::async_runtime::spawn_blocking(move || child.map(local::stop)).await.map_err(text)?;
     saved
 }
 
 /// Its data stays, so reopening it from `+` finds it signed in. Async, as `add`.
 #[tauri::command]
-async fn close(app: AppHandle, shell: State<'_, Shell>, id: String) -> Res {
-    take_down(&app, &shell, &id, |all, at| all[at].closed = true)
+async fn close(app: AppHandle, id: String) -> Res {
+    take_down(&app, &id, |all, at| all[at].closed = true).await
 }
 
 /// Its data goes with it: the cookie jar, so a re-added instance signs in afresh.
 async fn remove(app: &AppHandle, id: &str) -> Res {
-    take_down(app, &app.state::<Shell>(), id, |all, at| drop(all.remove(at)))?;
+    take_down(app, id, |all, at| drop(all.remove(at))).await?;
     // Last, so data that will not go leaves no blank window behind.
     remove_data(app, id).await.map_err(|e| format!("removing the instance's data: {e}"))
 }
@@ -743,8 +758,8 @@ fn saved(app: &AppHandle, live: &Live) -> tauri::Result<Menu<tauri::Wry>> {
         let owned = live.children.contains_key(&i.id) || app.get_webview(&i.id).is_none();
         let mark = i.command.as_ref().map_or("", |_| if owned { " \u{b7} local" } else { " \u{b7} external" });
         let label = format!("{}{mark}", i.name);
-        menu.append(&CheckMenuItem::with_id(app, format!("open:{}", i.id), label, true, !i.closed, None::<&str>)?)?;
-        remove.append(&item(format!("remove:{}", i.id), &i.name)?)?;
+        menu.append(&CheckMenuItem::with_id(app, format!("open:{}", i.id), &label, true, !i.closed, None::<&str>)?)?;
+        remove.append(&item(format!("remove:{}", i.id), &label)?)?;
     }
     if !all.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
