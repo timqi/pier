@@ -118,6 +118,22 @@ describe("a chat command's answer", () => {
   });
 });
 
+describe("a session holding only Pier's input", () => {
+  it("is on disk, so closing it loses nothing \u2014 a seeded head evicted before anyone spoke", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pier-seed-only-"));
+    const session = await factory.create({ cwd, model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+    await session.systemInput("seed digest", { kind: "session-seed", reason: "idle", previousSessionId: null }, "append");
+    await session.systemInput("nothing running", { kind: "chat-command", command: "stop" }, "append");
+    await session.dispose();
+    const resumed = await factory.resume(session.id);
+    expect((await resumed.history()).map((t) => t.text)).toEqual(["seed digest", "nothing running"]);
+    // Pi's own first write must still land once someone speaks.
+    await resumed.prompt("hello").catch(() => {});
+    await resumed.dispose();
+    expect((await factory.readHistory(session.id))?.map((t) => t.text).slice(0, 3)).toEqual(["seed digest", "nothing running", "hello"]);
+  });
+});
+
 describe("replaySystemPrompt", () => {
   it("is null before any request carried one", () => {
     expect(replaySystemPrompt([{ role: "user", content: "hi" }], ["base"])).toBeNull();

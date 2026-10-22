@@ -2,7 +2,7 @@
 // Implements the AgentFactory/AgentSession seam from src/core/types.ts on the
 // Pi SDK. No Pi type may appear in an exported signature.
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import {
   createAgentSession,
@@ -436,7 +436,7 @@ export class PiSession implements AgentSession {
     }
     try {
       // Without a turn Pi appends it now, or after a running turn's tool results.
-      return await this.pi.sendCustomMessage(
+      await this.pi.sendCustomMessage(
         { customType: "pier.system-input", content: text, display: true, details: origin },
         { triggerTurn: mode !== "append", deliverAs: mode === "prompt" || mode === "append" ? undefined : mode },
       );
@@ -445,6 +445,32 @@ export class PiSession implements AgentSession {
       const at = this.queuedInputs.indexOf(origin);
       if (at >= 0) this.queuedInputs.splice(at, 1);
       throw error;
+    }
+    this.persist();
+  }
+
+  /** Pi creates a session's file only at its first user or assistant message,
+   *  so a seed or command answer before one lives in memory alone and an
+   *  evicted session is gone from Pi. */
+  private persist(): void {
+    const manager = this.pi.sessionManager;
+    const file = manager.getSessionFile();
+    if (!file || existsSync(file)) return;
+    try {
+      writeFileSync(file, [manager.getHeader(), ...manager.getEntries()].map((e) => `${JSON.stringify(e)}\n`).join(""), { flag: "wx" });
+      // Re-read, so Pi counts the file as written and appends to it from here on.
+      manager.setSessionFile(file);
+      this.wrote();
+    } catch (err) {
+      // The input was taken; only its file is missing. A partial one would refuse Pi's own first write.
+      const message = `session ${this.pi.sessionId} could not be written to ${file} — it lives in memory until its first reply: ${String(err)}`;
+      log.error(message, err);
+      for (const fn of this.listeners) fn({ type: "error", message });
+      try {
+        rmSync(file, { force: true });
+      } catch (rmErr) {
+        log.error(`a partial ${file} stays; Pi's first write to it will fail`, rmErr);
+      }
     }
   }
 

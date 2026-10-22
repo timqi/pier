@@ -108,6 +108,8 @@ function fakePi() {
         getSessionName() {
           return this.name;
         },
+        // In memory: nothing for a system input to write.
+        getSessionFile: () => undefined,
       },
       prompt: (_text: string, options?: unknown) => {
         calls.push("prompt");
@@ -177,6 +179,17 @@ describe("a chat command's answer", () => {
     s.subscribe((event) => seen.push(event));
     await s.systemInput("nothing running", { kind: "chat-command", command: "stop" }, "append");
     expect(seen).toEqual([]);
+  });
+
+  it("is taken when its session's file cannot be written, and the write's failure is told as such", async () => {
+    const { fake, session: s } = session();
+    const file = join(mkdtempSync(join(tmpdir(), "pier-persist-")), "missing-dir", "s.jsonl");
+    Object.assign(fake.pi.sessionManager, { getSessionFile: () => file, getHeader: () => ({ type: "session" }), getEntries: () => [] });
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    await expect(s.systemInput("seed", { kind: "session-seed", reason: "first", previousSessionId: null }, "append")).resolves.toBeUndefined();
+    expect(fake.custom).toHaveLength(1);
+    expect(seen).toEqual([{ type: "error", message: expect.stringContaining(`could not be written to ${file}`) }]);
   });
 });
 
