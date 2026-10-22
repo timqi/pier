@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
   resetChat: vi.fn(),
   revealTopic: vi.fn(() => true),
   content: [] as string[],
+  isIOS: vi.fn(() => false),
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
@@ -39,7 +40,7 @@ vi.mock("./composer.js", () => ({
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
 }));
-vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
+vi.mock("./notifications.js", () => ({ initPush: vi.fn(), isIOS: h.isIOS }));
 vi.mock("./session-header.js", () => ({
   initHeader: (deps: typeof h.header) => { h.header = deps; }, noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
   setHeaderState: vi.fn(),
@@ -99,7 +100,7 @@ beforeEach(async () => {
   h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
   vi.stubGlobal("EventSource", Stream);
   vi.stubGlobal("__PIER_VERSION__", "test");
-  Object.assign(installPage(), { hidden: true });
+  Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
   // Listed oldest first, with `modified` the other way round: the client orders by birth.
   const rows = ["a", "b"].map((id, i) => ({ id, cwd: "/test", createdAt: 1 + i, modified: 9 - i, state: "idle" }));
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
@@ -297,6 +298,102 @@ describe("session loads", () => {
   });
 });
 
+// A turn counts as seen only on a visible, focused page showing it (web/push.ts).
+describe("acking an unread session", () => {
+  const page = { visibilityState: "visible", focus: true };
+  const onWindow = new Map<string, () => void>();
+  let fetcher: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    Stream.all = [];
+    Object.assign(page, { visibilityState: "visible", focus: true });
+    h.isIOS.mockReturnValue(false);
+    const doc = installPage();
+    Object.defineProperties(doc, {
+      hidden: { get: () => page.visibilityState !== "visible" },
+      visibilityState: { get: () => page.visibilityState },
+    });
+    Object.assign(doc, { hasFocus: () => page.focus });
+    let unread = true; // as the server keeps it: cleared by the ack
+    fetcher = vi.fn((url: string) => {
+      if (url === "/api/sessions/a/read") unread = false;
+      return Promise.resolve(url.endsWith("/history") ? snapshot("loaded")
+        : url === "/api/continuous" ? Response.json({ chain: [], rotateAt: 60_000 })
+        : url === "/api/continuous/open" ? Response.json({ items: [], unlisted: [] })
+        : Response.json([{ id: "a", cwd: "/test", createdAt: 1, state: "idle", unread }]));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    onWindow.clear();
+    vi.stubGlobal("window", {
+      addEventListener: (name: string, fn: () => void) => onWindow.set(name, fn),
+      fetch: fetcher, matchMedia: () => ({ matches: false, addEventListener: vi.fn() }),
+    });
+    await import("./main.js");
+    await settled();
+  });
+  const acks = () => fetcher.mock.calls.filter(([url]) => url === "/api/sessions/a/read").length;
+
+  it("acks a session opened on a visible, focused page", async () => {
+    h.views.select("a");
+    await settled();
+    expect(acks()).toBe(1);
+    expect(h.drawer.sessions()[0]?.unread).toBe(false);
+  });
+
+  it("does not ack on a visible page another app has the focus from, until it comes back", async () => {
+    page.focus = false;
+    onWindow.get("blur")?.();
+    h.views.select("a");
+    await settled();
+    expect(acks()).toBe(0);
+
+    page.focus = true;
+    onWindow.get("focus")?.();
+    expect(acks()).toBe(1);
+  });
+
+  it("trusts the blur over a hasFocus() that stayed true behind another app", async () => {
+    onWindow.get("blur")?.();
+    h.views.select("a");
+    await settled();
+    expect(acks()).toBe(0);
+  });
+
+  const hideAndReturn = () => {
+    page.visibilityState = "hidden";
+    onWindow.get("blur")?.();
+    document.dispatchEvent(new Event("visibilitychange"));
+    h.views.select("a");
+    page.visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  it("waits for the focus event after coming back visible, whatever hasFocus() says", async () => {
+    hideAndReturn();
+    await settled();
+    expect(acks()).toBe(0);
+
+    onWindow.get("focus")?.();
+    expect(acks()).toBe(1);
+  });
+
+  it("keeps a blurred window unfocused across a visibility change", async () => {
+    onWindow.get("blur")?.();
+    document.dispatchEvent(new Event("visibilitychange"));
+    h.views.select("a");
+    await settled();
+    expect(acks()).toBe(0);
+  });
+
+  it("acks on iOS coming back visible, which sends no focus event", async () => {
+    h.isIOS.mockReturnValue(true);
+    hideAndReturn();
+    await settled();
+    expect(acks()).toBe(1);
+  });
+});
+
 // A reconnect follows a gap whose events are gone: the session list re-lists.
 it("re-lists the sessions when the workspace stream reconnects", async () => {
   const workspace = Stream.all.find((s) => s.url === "/api/events");
@@ -357,7 +454,7 @@ describe("the continuous conversation", () => {
     chain = members;
     vi.resetModules();
     Stream.all = [];
-    Object.assign(installPage(), { hidden: true });
+    Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
     const fetcher = vi.fn((url: string) => {
       if (url === "/api/continuous") return Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));

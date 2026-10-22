@@ -14,7 +14,7 @@ import { setBadge } from "./shell.js";
 const WANTED_KEY = "pier.push";
 const SW_URL = "/app/sw.js";
 
-const isIOS = (): boolean =>
+export const isIOS = (): boolean =>
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 

@@ -45,7 +45,7 @@ import {
   setSkills,
   updateComposer,
 } from "./composer.js";
-import { initPush } from "./notifications.js";
+import { initPush, isIOS } from "./notifications.js";
 import { initReport } from "./report.js";
 import { notify } from "./shell.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
@@ -312,11 +312,13 @@ const refreshSessions = coalesce(async () => {
   if (following && head && head !== was) await followHead(head);
 });
 
-/** Focus, not just visibility: an installed workbench behind another app is
- *  still `document.hidden === false` on macOS, which would ack every turn and
- *  suppress the push (web/push.ts). */
+/** The window's own focus/blur, beside `hasFocus()`: a window behind another
+ *  app stays `visible` on macOS, and a WebKit `hasFocus()` can stay true there
+ *  too; either alone would ack the turn and suppress the push (web/push.ts). */
+let windowFocused = document.hasFocus();
+
 function maybeAckRead(): void {
-  if (document.hidden || !document.hasFocus() || !isChatVisible()) return;
+  if (document.visibilityState !== "visible" || !windowFocused || !document.hasFocus() || !isChatVisible()) return;
   const s = sessions.find((x) => x.id === currentId);
   if (!s?.unread) return;
   s.unread = false;
@@ -695,8 +697,14 @@ document.addEventListener("gesturestart", (ev) => ev.preventDefault());
 
 // Coming back to a hidden tab — or to an unfocused window — is the other way
 // turns get seen.
-document.addEventListener("visibilitychange", maybeAckRead);
-window.addEventListener("focus", maybeAckRead);
+document.addEventListener("visibilitychange", () => {
+  // Not `hasFocus()`, which WebKit can report behind another app; iOS brings a
+  // page back with no `focus` event, and with no other app beside it.
+  windowFocused = document.visibilityState === "visible" && (windowFocused || isIOS());
+  maybeAckRead();
+});
+window.addEventListener("focus", () => { windowFocused = true; maybeAckRead(); });
+window.addEventListener("blur", () => { windowFocused = false; });
 
 connectWorkspace();
 void refreshSessions().then(applyRoute);

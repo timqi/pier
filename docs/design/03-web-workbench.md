@@ -117,7 +117,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 | `POST /api/push/test` | send a test notification to every subscribed device, `{sent, failed}`; 409 when none is subscribed |
 
 - `streaming → idle` starts a 6s settle window; a session *still* unread when
-  it closes is notified. Sessions answering an IM conversation
+  it closes is notified. A client acks (`POST /api/sessions/:id/read`) only
+  while its page is `visible`, its window focused — no `blur` since the last
+  `focus`, which a return to `visible` does not grant except on iOS (no
+  `focus` event comes), and `document.hasFocus()` — and the chat shows that
+  session. Sessions answering an IM conversation
   (`router.conversationOf(id)`) are not, nor is a run all of whose non-empty
   turns stayed silent; the body is the last spoken turn's `splitReply(text).text`, markers off.
 - Only the browser that spoke is notified: a message, an edit or a queue
