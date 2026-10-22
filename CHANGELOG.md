@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2 — 2026-10-22
+
+### Changed
+
+- Open items: `<done>` can match a prefix of an open item's key; an unmatched `<done>` is reported to the main session and shown in `/status`.
+- Prompts separate the `<done>` tag from its text with an em dash.
+
 ## 0.5.1 — 2026-10-22
 
 ### Changed
