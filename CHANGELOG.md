@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 — 2026-10-22
+
+### Changed
+
+- Notifications: a finished turn counts as seen only while the window holds focus, so a visible window behind another app still gets its push; the push waits 3 seconds for the turn to be read, down from 6.
+- Web: the transcript floats two buttons above the composer — back to the tail, dotted when a message lands, and back to the main conversation.
+- Native: closing a local tab stops the Pier the shell spawned for it, a tab closed while its Pier starts stays closed, and notifications play the system sound once per session.
+
 ## 0.4.18 — 2026-10-12
 
 ### Changed
