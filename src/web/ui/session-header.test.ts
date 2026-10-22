@@ -195,6 +195,21 @@ it("shows ‹ with the head's dot on a child, and the child's phase tag", () => 
   expect(fake(document.querySelector("#chat-phase")).textContent).toBe("");
 });
 
+// The floating home button is the same way back, there only off the conversation.
+it("shows the floating 回到主会话 button on a run or another session, and it opens the conversation", () => {
+  const toMain = fake(document.querySelector("#to-main"));
+  expect(toMain.getAttribute("aria-label")).toBe("回到主会话");
+  expect(toMain.title).toBe("回到主会话");
+  current = { ...session(0), title: "run" };
+  header.renderHeader();
+  expect(toMain.hasAttribute("data-show")).toBe(true);
+  toMain.onclick?.();
+  expect(openContinuous).toHaveBeenCalledOnce();
+  conversation = true;
+  header.renderHeader();
+  expect(toMain.hasAttribute("data-show")).toBe(false);
+});
+
 // Subagents are the status panel's rows (drawer.ts): the meta row is model,
 // reasoning and context only, and a phone shows it just for a context near full.
 it("keeps the meta row to model, reasoning and context, urgent only under context pressure", () => {

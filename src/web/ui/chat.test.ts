@@ -546,6 +546,79 @@ describe("tail follow across the final render", () => {
     frame();
     expect(top).toBe(100);
   });
+
+  // The floating "to the bottom" button: there once follow is released, dotted
+  // for a row that landed while away, and its click is the way back to following.
+  it("shows the to-bottom button away from the tail, dots a new row, and re-arms follow on click", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const button = fake(doc.querySelector("#to-bottom"));
+    chat.appendTurn("user", "go", false, 1);
+    chat.completeTurn("Looking at it. ".repeat(40), { completedAt: 2, durationMs: 1, tokens: 1 });
+    frame();
+    expect(atEnd()).toBe(true);
+    expect(button.hasAttribute("data-show")).toBe(false);
+    pane.scrollTop = 100;
+    frame();
+    expect(button.hasAttribute("data-show")).toBe(true);
+    expect(button.hasAttribute("data-unread")).toBe(false);
+    chat.appendTurn("user", "from another tab", false, 3);
+    frame();
+    expect(top).toBe(100);
+    expect(button.hasAttribute("data-unread")).toBe(true);
+    expect(button.getAttribute("aria-label")).toBe("滚到底部（有新消息）");
+    button.click();
+    frame();
+    expect(atEnd()).toBe(true);
+    expect(button.hasAttribute("data-show")).toBe(false);
+    expect(button.hasAttribute("data-unread")).toBe(false);
+    chat.appendDelta("Streaming on. ".repeat(20));
+    frame();
+    expect(atEnd()).toBe(true); // following again
+  });
+
+  // The reply the reader left is not news when it lands: not redrawn in its
+  // bubble, nor re-placed below a message delivered mid-turn. Streaming into it
+  // away from the tail asks for no frame.
+  it("keeps the dot off for the reply the reader left, however its row is redrawn, with no frame per delta", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const button = fake(doc.querySelector("#to-bottom"));
+      chat.appendTurn("user", "go", false, 1);
+      chat.appendDelta("Looking at it. ".repeat(40));
+      frame();
+      pane.scrollTop = 100;
+      frame();
+      expect(button.hasAttribute("data-show")).toBe(true);
+      chat.appendDelta("More. ".repeat(20));
+      vi.advanceTimersByTime(STREAM_PAINT_MS);
+      mutated();
+      expect(frames).toHaveLength(0);
+      chat.completeTurn("Looking at it. Done.".repeat(40), { completedAt: 2, durationMs: 1, tokens: 1 });
+      frame();
+      expect(button.hasAttribute("data-unread")).toBe(false);
+
+      pane.scrollTop = pane.scrollHeight;
+      frame();
+      chat.appendTurn("user", "next", false, 3);
+      chat.appendDelta("Streaming. ".repeat(40));
+      chat.appendTurn("user", "steered in", false, 4); // closes the bubble; the reply lands below it
+      frame();
+      pane.scrollTop = 100;
+      frame();
+      expect(button.hasAttribute("data-unread")).toBe(false);
+      const tail = pane.lastElementChild;
+      chat.completeTurn("Streaming. Final.".repeat(40), { completedAt: 5, durationMs: 1, tokens: 1 });
+      frame();
+      expect(pane.lastElementChild).not.toBe(tail);
+      expect(button.hasAttribute("data-unread")).toBe(false);
+
+      chat.appendTurn("user", "from another tab", false, 6);
+      frame();
+      expect(button.hasAttribute("data-unread")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("file references", () => {

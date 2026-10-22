@@ -107,6 +107,7 @@ function openBubble(closed = false): HTMLElement {
   markReadonly(bubble);
   if (!bulk) bubble.dataset.enter = "";
   turnsPane.insertBefore(bubble, closed ? pendingBubble() : null);
+  landed(!closed);
   return bubble;
 }
 
@@ -187,18 +188,56 @@ turnsPane.addEventListener("scroll", () => {
   const up = top < lastTop - 4;
   lastTop = top;
   if (!bulk && (up || atBottom())) follow = atBottom();
+  paintToBottom();
 }, { passive: true });
+
+const toBottom = $("#to-bottom");
+/** Messages landed in the pane. A turn's reply counts once: its row is redrawn
+ *  when the turn ends, and re-placed below a message delivered mid-turn. */
+let landedSeq = 0;
+/** The open turn's reply is counted; cleared when the turn ends. */
+let replied = false;
+/** `landedSeq` when the reader was last at the tail, and at the last paint. */
+let seenSeq = 0;
+let paintedSeq = 0;
+
+function landed(reply = false): void {
+  if (reply && replied) return;
+  if (reply) replied = true;
+  landedSeq++;
+}
+
+/** Shown once follow is released away from the end, dotted when a message landed since. */
+function paintToBottom(): void {
+  const away = !follow && !atBottom();
+  if (!away) seenSeq = landedSeq;
+  paintedSeq = landedSeq;
+  const unread = landedSeq !== seenSeq;
+  toBottom.toggleAttribute("data-show", away);
+  toBottom.toggleAttribute("data-unread", unread);
+  toBottom.setAttribute("aria-label", unread ? "滚到底部（有新消息）" : "滚到底部");
+}
+
+toBottom.onclick = () => {
+  follow = true;
+  paintToBottom();
+  const instant = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  turnsPane.scrollTo({ top: turnsPane.scrollHeight, behavior: instant ? "auto" : "smooth" });
+};
 
 /** At most one re-pin per frame: a streaming block mutates every ~80ms and
  *  each scrollTop write flushes layout. 0 = nothing scheduled. */
 let pinning = 0;
 
 function repin(): void {
-  if (!follow || bulk || pinning) return;
+  // Away from the tail the only news is a landed message: streaming into the
+  // reply must not read layout every paint.
+  if ((!follow && landedSeq === paintedSeq) || bulk || pinning) return;
   pinning = requestAnimationFrame(() => {
     pinning = 0;
     // Re-checked: a frame is long enough for the user to have scrolled away.
     if (follow && !bulk) setTop(turnsPane.scrollHeight);
+    paintToBottom(); // a reader away from the tail gets no scroll event when a row lands
   });
 }
 
@@ -224,12 +263,15 @@ export function followTail(): void {
 export function keepScroll(fromBottom: number): void {
   setTop(turnsPane.scrollHeight - fromBottom);
   follow = atBottom();
+  seenSeq = landedSeq; // the same rows redrawn, nothing new
+  paintToBottom();
 }
 
 export function scrollBottom(force = false): void {
   if (bulk) return;
   if (force) follow = true;
   if (follow) setTop(turnsPane.scrollHeight);
+  paintToBottom();
 }
 
 /** How long a revealed row stays lit — the CSS animation's length, kept here
@@ -346,6 +388,7 @@ export function appendTurn(
   // chips opened. A user bubble or a status line closes that bubble as it stands.
   const pending = kind === "assistant" || (kind === "error" && !mid) ? pendingBubble() : null;
   if (!pending && !mid) endTurn();
+  if (!pending) landed(kind === "assistant");
   // Only user messages introduce a clock separator after a conversation gap.
   const stamp = kind === "user" && at !== undefined && stampDue(at) ? at : undefined;
   // Consecutive rows from the same sender read as one block (Slack grouping) —
@@ -563,10 +606,12 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     endTurn();
     card.dataset.kind = "system";
     turnsPane.append(card);
+    landed();
     trimRows();
   } else if (origin.kind === "session-seed") {
     endTurn();
     foldSeed(turnsPane, card, origin.reason);
+    landed();
     trimRows();
   } else {
     const cause = chip({ glyph: glyphEl(), label: state ? `${label} \u00b7 ${state}` : label, labelCls, ...(name ? { name } : {}) }, card);
@@ -909,6 +954,7 @@ export function completeTurn(text: string | undefined, meta?: TurnMeta, error?: 
   const answer = text ?? pending;
   if (answer) appendAssistant(answer, meta, true);
   else if (!error) endTurn();
+  replied = false;
 }
 
 /** An interrupted partial answer stays readable instead of disappearing; a
@@ -918,6 +964,7 @@ export function interruptTurn(): void {
   finishActivity("interrupted");
   if (partial) appendAssistant(partial);
   else endTurn();
+  replied = false;
 }
 
 /** Reset everything before a session snapshot re-render. */
@@ -934,6 +981,7 @@ export function resetChat(): void {
   trimNotice = null;
   lastStampAt = null;
   streamingEl = null;
+  replied = false;
   stopStreamPaint();
   resetActivity();
   resetSuggestions();
