@@ -1,7 +1,7 @@
 // The open-item row used by the status panel, its lead in the bar and fixed command cards.
 
 import { Check, CircleAlert, Clock, X, type IconNode } from "lucide";
-import { openItemDestination, openItemGroups } from "../../core/open-items.js";
+import { openItemDestination, openItemGroups, UNMATCHED_DONE } from "../../core/open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
 import { h } from "./dom.js";
@@ -101,6 +101,7 @@ export function openItemsCard(snapshot: OpenItemsSnapshot, actions: Actions): HT
     content.append(h("h3", "mt-3 mb-2 text-xs text-neutral-500", `${group.title} · ${group.items.length}`),
       h("ul", "", ...group.items.map((p) => openItemRow(p, { ...actions, grouped: true }))));
   }
+  if (snapshot.unmatched?.length) content.append(h("h3", "mt-3 mb-2 text-xs text-neutral-500", `${UNMATCHED_DONE} · ${snapshot.unmatched.length}`), h("ul", "", ...snapshot.unmatched.map((p) => h("li", "text-sm text-amber-700", p))));
   if (!snapshot.items.length) content.append(h("p", "text-xs text-neutral-500", "Nothing open."));
   return content;
 }

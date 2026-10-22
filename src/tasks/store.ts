@@ -33,8 +33,10 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
  *  surface lists of a probe that found nothing. */
 const KEPT_PROBES = 50;
 
-/** What may follow a `<done>` key inside a stored one written with another separator (`key。stage`). */
-const KEY_END = /^\s*\p{P}/u;
+/** The separators an `<open>` written without ` — ` puts after its key (`key。stage`, `key: stage`). */
+const KEY_END = /^\s*[。:：\-–—]/u;
+/** Does a `<done>` name this key: it exactly, or it and then one of those separators. */
+export const namesKey = (done: string, key: string): boolean => key === done || (key.startsWith(done) && KEY_END.test(key.slice(done.length)));
 
 /** The error of a run that cannot continue after a restart: not a result, not a cancel. */
 export const INTERRUPTED = "Pier restarted while the run was active";
@@ -495,22 +497,25 @@ export class TaskStore {
       .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[] }));
   }
 
-  /** Main's markers, in reply order, as one write; answers the rows each marker changed. */
-  markOpenItems(markers: OpenItemMarker[], now: number): number[] {
-    return this.transact(() => markers.map((m) => m.op === "open"
+  /** Main's markers, in reply order, as one write; answers the rows each marker changed and the keys its `<done>`s closed. */
+  markOpenItems(markers: OpenItemMarker[], now: number): { changed: number[]; closed: string[] } {
+    const closed: string[] = [];
+    const changed = this.transact(() => markers.map((m) => m.op === "open"
       ? this.claimRuns(m.problem, m.runIds, now) + Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
           ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
         .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes)
-      : this.closeItem(m.problem)));
+      : this.closeItem(m.problem, closed)));
+    return { changed, closed };
   }
 
-  /** The exact key, else the one item whose key is it and then punctuation — an `<open>` written
-   *  without ` — ` keyed the whole line; two such items close neither. */
-  private closeItem(problem: string): number {
-    const exact = Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(problem).changes);
-    if (exact) return exact;
-    const prefixed = this.openItems().filter((r) => r.problem.startsWith(problem) && KEY_END.test(r.problem.slice(problem.length)));
-    return prefixed.length === 1 ? Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(prefixed[0]!.problem).changes) : 0;
+  /** The exact key, else the one item `namesKey` finds — an `<open>` written without ` — `
+   *  keyed the whole line; two such items close neither. */
+  private closeItem(problem: string, closed: string[]): number {
+    const keys = this.openItems().map((r) => r.problem);
+    const named = keys.includes(problem) ? [problem] : keys.filter((key) => namesKey(problem, key));
+    if (named.length !== 1) return 0;
+    closed.push(named[0]!);
+    return Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(named[0]!).changes);
   }
 
   /** A run is behind one item: an `<open>` takes its runs off every other item. One left

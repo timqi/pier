@@ -204,6 +204,11 @@ describe("statusMessage", () => {
     ]);
   });
 
+  it("lists the head's unmatched <done> keys under the items", () => {
+    const sent = statusMessage({ text: "", snapshot: { version: 1, items: [item("Docs", "queued", "")], unmatched: ["fix <parser>"] } });
+    expect(sent.blocks.slice(-2)).toEqual([context("*Unmatched done · 1*"), section("*fix &lt;parser&gt;*")]);
+  });
+
   it("stays within Slack's 50 blocks", () => {
     const many = statusMessage(view(Array.from({ length: 60 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(5000), { metadata: ["elapsed 1m"] }))));
     expect(many.blocks.length).toBeLessThanOrEqual(50);

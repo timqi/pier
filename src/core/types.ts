@@ -177,6 +177,10 @@ export type SystemInputOrigin = {
   sourceSessionId?: string | null;
   source?: SystemInputSource;
 } | {
+  /** Pier's answer to the head's own open-item markers — a `<done>` that closed
+   *  nothing — appended without a turn, so the head's next prompt carries it. */
+  kind: "open-items";
+} | {
   /** The answer to a chat command the conversation took instead of the model
    *  (core/chain.ts), appended without a turn: the transcript shows it, and it
    *  never reaches the model's context. */
@@ -214,6 +218,8 @@ export interface OpenItemPresentation extends OpenItemTarget {
 export interface OpenItemsSnapshot {
   version: 1;
   items: OpenItemPresentation[];
+  /** The head's `<done>` keys that closed no item, still owed a resend. */
+  unmatched?: string[];
 }
 
 /** One read produces the compact answer, complete seed and fixed history content. */

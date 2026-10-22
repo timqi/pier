@@ -133,6 +133,7 @@ thread half only for the home chat; any other is refused.
 | a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; the status message and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
+| an unmatched `<done>` | `▤ open items` over the digest: the keys that closed nothing and the open keys to resend (`originLabel`, `open-items`) |
 | a failure | `⚠ failed` note |
 | a turn or agent run resumed | restart system input in the transcript and the note the chat gets before the reply |
 | a turn that could not resume | ledger note to its chat; log for web/task keys |
@@ -145,7 +146,7 @@ thread half only for the home chat; any other is refused.
   messages are still booked under the home conversation id and settled by the
   head's turn-end, which tells a silent turn whether it settled one (§Status).
   A chat command is not booked — its answer is a note, and no turn would
-  settle it — and neither is a `chat-command` or `session-seed` note
+  settle it — and neither is a `chat-command`, `open-items` or `session-seed` note
   (`awaitsTurn`): the message that caused a seed carries its own.
 
 ## Status

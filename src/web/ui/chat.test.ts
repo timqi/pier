@@ -86,6 +86,18 @@ it("replays fixed status rows as one control each, the full problem as its toolt
   vi.restoreAllMocks();
 });
 
+it("shows a /status snapshot's unmatched <done> keys, and an open-items note as a card of its own", () => {
+  const statusSnapshot: OpenItemsSnapshot = { version: 1, items: [], unmatched: ["fix parser"] };
+  expect(isOpenItemsSnapshot(statusSnapshot)).toBe(true);
+  expect(isOpenItemsSnapshot({ ...statusSnapshot, unmatched: [7] })).toBe(false);
+  chat.appendSystemInput("old", { kind: "chat-command", command: "status", statusSnapshot });
+  expect(card().textContent).toContain("Unmatched done · 1fix parser");
+  chat.appendSystemInput("[Pier: <done>x</done> closed no open item.]", { kind: "open-items" });
+  expect(card().dataset.kind).toBe("system");
+  expect(card().textContent).toContain("open items");
+  expect(card().textContent).toContain("closed no open item");
+});
+
 it("renders every card of a version-1 snapshot written with per-run details", () => {
   const item = (problem: string) => ({ key: `item:${problem}`, problem, title: problem, status: "running", statusLabel: "", stage: "", metadata: [],
     runs: [{ runId: `r-${problem}`, targetSessionId: null }], details: [{ text: problem, summary: "old", runId: `r-${problem}` }] });

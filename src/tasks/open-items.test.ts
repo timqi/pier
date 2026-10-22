@@ -391,8 +391,8 @@ describe("the open items", () => {
   it("keeps an item's place when an <open> updates it", () => {
     const r = rig();
     const open = (problem: string, stage: string) => ({ op: "open" as const, problem, stage, runIds: [] });
-    expect(r.store.markOpenItems([open("first", "a"), open("second", "b")], 1)).toEqual([1, 1]);
-    expect(r.store.markOpenItems([open("first", "a2"), { op: "done", problem: "never" }], 2)).toEqual([1, 0]);
+    expect(r.store.markOpenItems([open("first", "a"), open("second", "b")], 1).changed).toEqual([1, 1]);
+    expect(r.store.markOpenItems([open("first", "a2"), { op: "done", problem: "never" }], 2).changed).toEqual([1, 0]);
     expect(r.store.openItems().map((i) => [i.problem, i.stage])).toEqual([["first", "a2"], ["second", "b"]]);
   });
 
@@ -402,24 +402,25 @@ describe("the open items", () => {
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "investigating", runIds });
     const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
     r.store.markOpenItems([open("before"), open("VM pairing", "rt1"), open("after", "rt9")], 1);
-    expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2)).toEqual([2]);
-    expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3)).toEqual([2]);
+    expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2).changed).toEqual([2]);
+    expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3).changed).toEqual([2]);
     expect(rows()).toEqual([["before", []], ["VM pairing, logs and retry", ["rt1"]], ["after", ["rt9"]]]);
-    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing, also check logs" }], 4)).toEqual([0]);
+    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing" }, { op: "done", problem: "VM pairing, also check logs" }], 4).changed).toEqual([0, 0]);
   });
 
   // An <open> written with another separator than ` — ` keyed its whole line; the <done> naming its head still closes it.
-  it("closes the one item a <done> key starts, followed by punctuation, and none when two are", () => {
+  it("closes the one item a <done> key starts, followed by a separator a miswritten <open> uses, and none when two are", () => {
     const r = rig();
     const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
     const done = (problem: string) => ({ op: "done" as const, problem });
     const keys = () => r.store.openItems().map((i) => i.problem);
-    r.store.markOpenItems([open("顶栏条目关闭匹配。当前进度：排查中"), open("fix parser"), open("fix parser tests"), open("dup: a"), open("dup (b)")], 1);
-    expect(r.store.markOpenItems([done("顶栏条目关闭匹配"), done("fix pars"), done("dup")], 2)).toEqual([1, 0, 0]);
-    expect(keys()).toEqual(["fix parser", "fix parser tests", "dup: a", "dup (b)"]);
-    // A word, not punctuation, after the key is another item; the exact key wins over a prefixed one.
-    expect(r.store.markOpenItems([done("fix parser")], 3)).toEqual([1]);
-    expect(keys()).toEqual(["fix parser tests", "dup: a", "dup (b)"]);
+    r.store.markOpenItems([open("顶栏条目关闭匹配。当前进度：排查中"), open("auth：review"), open("fix parser"), open("fix parser tests"), open("dup: a"), open("dup – b"), open("pairing, logs")], 1);
+    expect(r.store.markOpenItems([done("顶栏条目关闭匹配"), done("auth"), done("fix pars"), done("dup"), done("pairing")], 2))
+      .toEqual({ changed: [1, 1, 0, 0, 0], closed: ["顶栏条目关闭匹配。当前进度：排查中", "auth：review"] });
+    expect(keys()).toEqual(["fix parser", "fix parser tests", "dup: a", "dup – b", "pairing, logs"]);
+    // A word after the key is another item; the exact key wins over a prefixed one.
+    expect(r.store.markOpenItems([done("fix parser")], 3)).toEqual({ changed: [1], closed: ["fix parser"] });
+    expect(keys()).toEqual(["fix parser tests", "dup: a", "dup – b", "pairing, logs"]);
   });
 
   it("collapses every item a run is behind into the one an <open> names, and leaves other runs where they are", () => {
@@ -429,7 +430,7 @@ describe("the open items", () => {
     // Rows written before the rule: one run behind three keys.
     for (const p of ["dup 1", "dup 2", "dup 3"]) r.item(p, "", ["rt1"], 1);
     r.store.markOpenItems([open("pair", "rt2", "rt3")], 1);
-    expect(r.store.markOpenItems([open("dup 2", "rt1")], 2)).toEqual([3]);
+    expect(r.store.markOpenItems([open("dup 2", "rt1")], 2).changed).toEqual([3]);
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
     r.store.markOpenItems([open("pair", "rt2", "rt3")], 3);
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
@@ -512,16 +513,31 @@ describe("the open items", () => {
     end("h0", "");
     expect(workspace).toEqual(["open-items-changed"]);
     expect(warn).toHaveBeenCalledWith("open items: <done> named no open item: never open");
-    // The unmatched key goes back to the head in the next seed, until a <done> closes an item.
+    // The unmatched key reaches the head's next prompt at once, with the keys it may resend, and stays in /status and the seed.
+    const h0 = sessions.get("h0")!;
+    expect(h0.systemInputs).toEqual([{ mode: "append", origin: { kind: "open-items" },
+      text: "[Pier: <done>never open</done> closed no open item. Resend <done> with one of these keys exactly:\n- open items]" }]);
     expect(service.unmatchedDone()).toEqual(["never open"]);
-    expect(openItemsStatus(service.openItems(), 1, service.unmatchedDone()).seed.split("\n"))
+    const owed = openItemsStatus(service.openItems(), 1, service.unmatchedDone());
+    expect(owed.seed.split("\n"))
       .toEqual(["- open items — worker running (run r1) · stopped", "- unmatched <done>: never open (closed nothing: resend <done> with an item's full key above)"]);
+    expect(owed.snapshot.unmatched).toEqual(["never open"]);
+    expect(owed.text).toMatch(/\n\nUnmatched done · 1\n\nnever open$/);
+
+    // An ambiguous key stays owed until the item it names closes; one naming nothing open is untouched.
+    end("h0", "<open>dup: a</open><open>dup: b</open><done>dup</done>");
+    expect(service.unmatchedDone()).toEqual(["never open", "dup"]);
+    expect(h0.systemInputs).toHaveLength(2);
+    end("h0", "<done>dup: a</done>");
+    expect(service.unmatchedDone()).toEqual(["never open"]);
+    expect(h0.systemInputs).toHaveLength(2);
+    workspace.length = 1;
 
     // A member no longer the head writes nothing.
     members.unshift("m1");
     end("h0", "<done>open items</done>");
-    expect(count()).toEqual({ n: 1 });
-    end("m1", "Merged.\n<open>open items — merged, restart pending</open>\n<done>open items</done>");
+    expect(count()).toEqual({ n: 2 });
+    end("m1", "Merged.\n<open>open items — merged, restart pending</open>\n<done>open items</done><done>dup: b</done>");
     expect(count()).toEqual({ n: 0 });
     expect(service.unmatchedDone()).toEqual([]);
     expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");

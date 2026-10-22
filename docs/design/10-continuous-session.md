@@ -162,10 +162,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   listener, when the session is `members()[0]`) and broadcasts
   `open-items-changed` when a row changed; a marker with no problem is logged
   and dropped. A `<done>` matching no key exactly closes the one item whose key
-  is it followed by punctuation (`key。stage`, an `<open>` written without ` — `),
-  none when two are; one that still closes nothing is logged as a warning and
-  named in the seed's `## Open` as `unmatched <done>: <key>` until a later
-  `<done>` closes an item (in memory, the last 5).
+  is it followed by `。` `:` `：` `-` `–` `—` (an `<open>` written without ` — `;
+  `namesKey`), none when two are; one that still closes nothing is logged, and
+  the head's next prompt carries an `open-items` system input, mode `append`, no
+  turn, naming it and the open keys. The last 5 such keys stay owed, each until
+  a `<done>` closes the item it names or nothing is open, in memory: the seed's
+  `## Open` lists them as `unmatched <done>: <key>`, `/status` under
+  `Unmatched done` (`OpenItemsSnapshot.unmatched`).
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
 - A run is behind one item: an `<open>` takes its run tokens off every other

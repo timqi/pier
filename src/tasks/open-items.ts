@@ -104,17 +104,21 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   };
 }
 
-/** The head's reply's markers, written: whether a row changed, whether a `<done>` closed one,
- *  and the `<done>` keys that named none, for the next seed to hand back. */
-export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): { changed: boolean; closed: boolean; unmatched: string[] } {
+/** The head's reply's markers, written: whether a row changed, the keys its `<done>`s closed,
+ *  and the `<done>` keys that closed none, for the head to be told. */
+export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): { changed: boolean; closed: string[]; unmatched: string[] } {
   const { markers, dropped } = openItemMarkers(text);
   for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
-  if (!markers.length) return { changed: false, closed: false, unmatched: [] };
-  const changed = store.markOpenItems(markers, now);
+  if (!markers.length) return { changed: false, closed: [], unmatched: [] };
+  const { changed, closed } = store.markOpenItems(markers, now);
   const unmatched = markers.flatMap((m, i) => (m.op === "done" && !changed[i] ? [m.problem] : []));
   for (const problem of unmatched) log.warn(`open items: <done> named no open item: ${problem}`);
-  return { changed: changed.some((n) => n > 0), closed: markers.some((m, i) => m.op === "done" && changed[i]! > 0), unmatched };
+  return { changed: changed.some((n) => n > 0), closed, unmatched };
 }
+
+/** The note the head's next prompt carries after a `<done>` closed nothing. */
+export const unmatchedNote = (unmatched: readonly string[], keys: readonly string[]): string =>
+  `[Pier: ${unmatched.map((p) => `<done>${p}</done>`).join(", ")} closed no open item. Resend <done> with one of these keys exactly:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
 
 /** Complete identities for the model; compact text and Web history share the same presentation.
  *  `unmatched`: `<done>` keys that closed nothing, named in the seed so the head resends the full key. */
@@ -122,14 +126,15 @@ export function openItemsStatus(open: OpenItems, now: number, unmatched: readonl
   const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted];
   const sessions = Object.fromEntries(runs.flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
   const unlisted = open.unlisted.map((r) => ({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" as const : "running" as const }));
+  const owed = open.items.length ? unmatched : [];
   const snapshot = { version: 1 as const, items: [
     ...open.items.map((i) => openItemPresentation(i, now)),
     ...unlisted.map((i) => ({ ...openItemPresentation(i, now, `run:${i.runs[0]!.runId}`), direct: true })),
-  ] };
+  ], ...(owed.length ? { unmatched: [...owed] } : {}) };
   // The full problem is the key the head's `<done>` names.
   const seed = [...open.items, ...unlisted].map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.length
     ? ` (${i.runs.map((r) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`).join(", ")})` : ""} · ${i.status}`)
-    .concat(open.items.length ? unmatched.map((p) => `- unmatched <done>: ${p} (closed nothing: resend <done> with an item's full key above)`) : [])
+    .concat(owed.map((p) => `- unmatched <done>: ${p} (closed nothing: resend <done> with an item's full key above)`))
     .join("\n") || NOTHING_OPEN;
   return { text: openItemsText(snapshot), seed, snapshot, sessions };
 }

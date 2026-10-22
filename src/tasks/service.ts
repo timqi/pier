@@ -18,9 +18,9 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { openItems, recordOpenItems } from "./open-items.js";
+import { openItems, recordOpenItems, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
-import { INTERRUPTED, type StatsRow, type TaskStore } from "./store.js";
+import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
 import type { CallbackMode, Goal, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
@@ -106,7 +106,7 @@ export class TaskService {
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
   private readonly goals: TaskGoals;
-  /** The head's `<done>` keys that closed nothing, until a later `<done>` closes an item; in memory only. */
+  /** The head's `<done>` keys that closed nothing, each until a `<done>` closes the item it names; in memory only. */
   private unmatched: string[] = [];
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
@@ -187,9 +187,17 @@ export class TaskService {
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
         try {
           const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now());
-          // A head that keeps missing gets its latest few back.
-          this.unmatched = [...new Set([...(closed ? [] : this.unmatched), ...unmatched])].slice(-5);
+          const keys = store.openItems().map((i) => i.problem);
+          // A head that keeps missing gets its latest few back; nothing open owes no resend.
+          this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(u, k))), ...unmatched])].slice(-5) : [];
           if (changed) hub.emitWorkspace({ type: "open-items-changed" });
+          if (unmatched.length && keys.length) {
+            const at = router.conversationOf(sessionId);
+            const head = at && router.sessionOf(at);
+            const failed = (why: string) => router.reportTo(sessionId, `open items: the unmatched <done> note could not reach the head: ${why}`);
+            if (!head) failed("not attached");
+            else head.systemInput(unmatchedNote(unmatched, keys), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
+          }
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
         }

@@ -4,7 +4,7 @@
 // the sidebar's layout are injected.
 
 import type { DatabaseSync } from "node:sqlite";
-import { openItemGroups } from "../core/open-items.js";
+import { openItemGroups, UNMATCHED_DONE } from "../core/open-items.js";
 import { waitsOnYou } from "../core/reply.js";
 import { NOTHING_OPEN, type OpenItemsSnapshot, type OpenItemsView } from "../core/types.js";
 import type { ChannelPlatform } from "./types.js";
@@ -57,7 +57,9 @@ export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E
       left--;
     }
   }
-  return out;
+  const owed = view.snapshot.unmatched ?? [];
+  const pieces = owed.length ? [...layout.heading(`${UNMATCHED_DONE} · ${String(owed.length)}`), ...owed.flatMap((title) => layout.row({ title, tag: "", stage: "", waiting: false, meta: "" }))] : [];
+  return spent + layout.cost(pieces) > layout.max ? out : [...out, ...pieces];
 }
 
 export class StatusMessage<B = string> {

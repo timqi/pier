@@ -518,6 +518,11 @@ describe("toChatTurns", () => {
     ])).toEqual([{ role: "system", text: "seed", origin, at: 1 }]);
   });
 
+  it("rebuilds an open-items note", () => {
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items" }, timestamp: 1 }]))
+      .toEqual([{ role: "system", text: "[Pier: …]", origin: { kind: "open-items" }, at: 1 }]);
+  });
+
   it("rebuilds a chat command's answer, and drops a command it does not know", () => {
     const origin = { kind: "chat-command" as const, command: "status" as const, sessions: { r1: "s1" } };
     const bare = { kind: "chat-command" as const, command: "status" as const };

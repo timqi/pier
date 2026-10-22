@@ -18,6 +18,7 @@ export function originLabel(origin: NoteOrigin): string {
     case "session-seed": return `\u21ba new session \u00b7 ${origin.reason}`;
     case "restart": return "\u21bb restarted \u00b7 continuing";
     case "chat-command": return `/${origin.command}`;
+    case "open-items": return "\u25a4 open items";
     case "task-message":
       return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
   }
@@ -46,9 +47,9 @@ export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
 /** Is a turn coming once this note is posted? On IM the note is the only
  *  message that turn has to carry its receipt; a receipt on any other would hang
  *  until the stale sweep: an error reports a turn that already ended, a chat
- *  command's answer starts none, and the message that made a seed carries its own. */
+ *  command's answer and an open-items note start none, and the message that made a seed carries its own. */
 export const awaitsTurn = (origin: NoteOrigin): boolean =>
-  origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed";
+  origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed" && origin.kind !== "open-items";
 
 /** Is this note progress the home chat's status message already shows? A run
  *  that failed is not: its trace must not depend on the head choosing to speak. */

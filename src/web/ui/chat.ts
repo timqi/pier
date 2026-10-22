@@ -2,7 +2,7 @@
 // chip row carries the turn's causes, steps and runs, and inline user-message
 // edit. Renders into #turns only.
 
-import { ArrowUpRight, CornerDownLeft, History, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, History, ListX, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
@@ -538,6 +538,7 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
   "session-seed": [History, "session seed", "text-cyan-700"],
   "chat-command": [SquareSlash, "command", "text-cyan-700"],
+  "open-items": [ListX, "open items", "text-amber-700"],
   restart: [RefreshCcw, "restarted \u00b7 continuing", "text-cyan-700"],
 };
 
@@ -575,13 +576,13 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const glyphEl = (): HTMLElement | SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
   const labelCls = state ? STATE_STYLE[state].label : cls;
   const name = origin.kind === "session-seed" ? origin.reason
-    : origin.kind === "chat-command" ? undefined
+    : origin.kind === "chat-command" || origin.kind === "open-items" ? undefined
     : origin.source?.taskName ?? meta?.split("\n")[0];
   // Under its chip the card says what the chip does not: the chip names kind and state.
   const head = origin.kind === "session-seed"
     ? runHead({ glyph: glyphEl(), label, labelCls, taskName: name, sessionId: origin.previousSessionId })
-    : origin.kind === "chat-command"
-    ? runHead({ glyph: glyphEl(), label: `/${origin.command}`, labelCls })
+    : origin.kind === "chat-command" || origin.kind === "open-items"
+    ? runHead({ glyph: glyphEl(), label: origin.kind === "chat-command" ? `/${origin.command}` : label, labelCls })
     : runHead({
       labelCls,
       ...(name ? { taskName: name } : {}),
@@ -602,7 +603,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     noteCallbackCwd(origin.cwd);
   }
   card.append(head, content);
-  if (origin.kind === "chat-command") {
+  if (origin.kind === "chat-command" || origin.kind === "open-items") {
     endTurn();
     card.dataset.kind = "system";
     turnsPane.append(card);
@@ -1026,7 +1027,7 @@ export function appendPager(onClick: () => void): HTMLButtonElement {
  *  it, a command card. A floor — chips, cards and stamps open more. */
 function sureRows(turns: ChatTurn[], i: number): number {
   const t = turns[i]!;
-  if (t.role === "system") return t.origin?.kind === "chat-command" && t.text ? 1 : 0;
+  if (t.role === "system") return (t.origin?.kind === "chat-command" || t.origin?.kind === "open-items") && t.text ? 1 : 0;
   if (t.role !== "user" || !t.text) return 0;
   const next = turns[i + 1];
   return next?.role === "assistant" && (next.text || next.steps?.length || next.cut || next.error) ? 2 : 1;
@@ -1104,7 +1105,7 @@ export function renderSnapshot(
       if (t.role === "system" && t.origin && t.text) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
         if (t.origin.kind === "restart") { if (t.origin.runId) placeRuns([t.origin.runId], skip); }
-        else if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]), skip);
+        else if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command" && t.origin.kind !== "open-items") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]), skip);
         if (!skip) appendSystemInput(t.text, t.origin);
         else if (t.origin.kind === "task-callback") noteCallbackCwd(t.origin.cwd);
         continue;
