@@ -33,6 +33,9 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
  *  surface lists of a probe that found nothing. */
 const KEPT_PROBES = 50;
 
+/** What may follow a `<done>` key inside a stored one written with another separator (`key。stage`). */
+const KEY_END = /^\s*\p{P}/u;
+
 /** The error of a run that cannot continue after a restart: not a result, not a cancel. */
 export const INTERRUPTED = "Pier restarted while the run was active";
 
@@ -498,7 +501,16 @@ export class TaskStore {
       ? this.claimRuns(m.problem, m.runIds, now) + Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
           ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
         .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes)
-      : Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes)));
+      : this.closeItem(m.problem)));
+  }
+
+  /** The exact key, else the one item whose key is it and then punctuation — an `<open>` written
+   *  without ` — ` keyed the whole line; two such items close neither. */
+  private closeItem(problem: string): number {
+    const exact = Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(problem).changes);
+    if (exact) return exact;
+    const prefixed = this.openItems().filter((r) => r.problem.startsWith(problem) && KEY_END.test(r.problem.slice(problem.length)));
+    return prefixed.length === 1 ? Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(prefixed[0]!.problem).changes) : 0;
   }
 
   /** A run is behind one item: an `<open>` takes its runs off every other item. One left

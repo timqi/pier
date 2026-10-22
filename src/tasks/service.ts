@@ -106,6 +106,8 @@ export class TaskService {
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
   private readonly goals: TaskGoals;
+  /** The head's `<done>` keys that closed nothing, until a later `<done>` closes an item; in memory only. */
+  private unmatched: string[] = [];
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
@@ -184,7 +186,10 @@ export class TaskService {
       // Only the head's turns write the list.
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
         try {
-          if (recordOpenItems(store, text, Date.now())) hub.emitWorkspace({ type: "open-items-changed" });
+          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now());
+          // A head that keeps missing gets its latest few back.
+          this.unmatched = [...new Set([...(closed ? [] : this.unmatched), ...unmatched])].slice(-5);
+          if (changed) hub.emitWorkspace({ type: "open-items-changed" });
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
         }
@@ -393,6 +398,8 @@ export class TaskService {
       TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.role.localeCompare(b.role) || b.runs - a.runs);
     return { days, rows: sorted };
   }
+
+  unmatchedDone(): readonly string[] { return this.unmatched; }
 
   openItems(): OpenItems {
     return openItems(this.store, this.router, this.instance.continuous.members().map((m) => m.sessionId));

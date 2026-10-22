@@ -104,18 +104,21 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   };
 }
 
-/** The head's reply's markers, written; answers whether a row changed. */
-export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): boolean {
+/** The head's reply's markers, written: whether a row changed, whether a `<done>` closed one,
+ *  and the `<done>` keys that named none, for the next seed to hand back. */
+export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): { changed: boolean; closed: boolean; unmatched: string[] } {
   const { markers, dropped } = openItemMarkers(text);
   for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
-  if (!markers.length) return false;
+  if (!markers.length) return { changed: false, closed: false, unmatched: [] };
   const changed = store.markOpenItems(markers, now);
-  markers.forEach((m, i) => { if (m.op === "done" && !changed[i]) log.warn(`open items: <done> named no open item: ${m.problem}`); });
-  return changed.some((n) => n > 0);
+  const unmatched = markers.flatMap((m, i) => (m.op === "done" && !changed[i] ? [m.problem] : []));
+  for (const problem of unmatched) log.warn(`open items: <done> named no open item: ${problem}`);
+  return { changed: changed.some((n) => n > 0), closed: markers.some((m, i) => m.op === "done" && changed[i]! > 0), unmatched };
 }
 
-/** Complete identities for the model; compact text and Web history share the same presentation. */
-export function openItemsStatus(open: OpenItems, now: number): OpenItemsStatus {
+/** Complete identities for the model; compact text and Web history share the same presentation.
+ *  `unmatched`: `<done>` keys that closed nothing, named in the seed so the head resends the full key. */
+export function openItemsStatus(open: OpenItems, now: number, unmatched: readonly string[] = []): OpenItemsStatus {
   const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted];
   const sessions = Object.fromEntries(runs.flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
   const unlisted = open.unlisted.map((r) => ({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" as const : "running" as const }));
@@ -125,6 +128,8 @@ export function openItemsStatus(open: OpenItems, now: number): OpenItemsStatus {
   ] };
   // The full problem is the key the head's `<done>` names.
   const seed = [...open.items, ...unlisted].map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.length
-    ? ` (${i.runs.map((r) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`).join(", ")})` : ""} · ${i.status}`).join("\n") || NOTHING_OPEN;
+    ? ` (${i.runs.map((r) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`).join(", ")})` : ""} · ${i.status}`)
+    .concat(open.items.length ? unmatched.map((p) => `- unmatched <done>: ${p} (closed nothing: resend <done> with an item's full key above)`) : [])
+    .join("\n") || NOTHING_OPEN;
   return { text: openItemsText(snapshot), seed, snapshot, sessions };
 }

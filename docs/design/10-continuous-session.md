@@ -161,7 +161,11 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`
   listener, when the session is `members()[0]`) and broadcasts
   `open-items-changed` when a row changed; a marker with no problem is logged
-  and dropped, and a `<done>` naming no open item is logged as a warning.
+  and dropped. A `<done>` matching no key exactly closes the one item whose key
+  is it followed by punctuation (`key。stage`, an `<open>` written without ` — `),
+  none when two are; one that still closes nothing is logged as a warning and
+  named in the seed's `## Open` as `unmatched <done>: <key>` until a later
+  `<done>` closes an item (in memory, the last 5).
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
 - A run is behind one item: an `<open>` takes its run tokens off every other

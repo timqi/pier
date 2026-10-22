@@ -55,7 +55,7 @@ ${MODEL_TABLE}
 - \`<note>line</note>\` in your reply, not a tool call, appends to today's note. An overturned line is replaced, not appended; a durable one goes to MEMORY.md.
 
 ## Open items
-- Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes.
+- Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes. Only \` — \` (em dash) ends the key; \`<done>\` repeats it exactly.
 - The problem, in the user's words every time, is the key. The stage says where it stands, \`waiting on you: <question>\` when on the user. One \`(run <id>)\` per run behind it; a run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
 - A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
 - Update a marker when its stage changes or is stale. It names the concrete step, question and standing authorization, never the ledger's run state, time or review rounds.`;

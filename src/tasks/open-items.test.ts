@@ -405,7 +405,21 @@ describe("the open items", () => {
     expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2)).toEqual([2]);
     expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3)).toEqual([2]);
     expect(rows()).toEqual([["before", []], ["VM pairing, logs and retry", ["rt1"]], ["after", ["rt9"]]]);
-    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing" }, { op: "done", problem: "VM pairing, also check logs" }], 4)).toEqual([0, 0]);
+    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing, also check logs" }], 4)).toEqual([0]);
+  });
+
+  // An <open> written with another separator than ` — ` keyed its whole line; the <done> naming its head still closes it.
+  it("closes the one item a <done> key starts, followed by punctuation, and none when two are", () => {
+    const r = rig();
+    const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
+    const done = (problem: string) => ({ op: "done" as const, problem });
+    const keys = () => r.store.openItems().map((i) => i.problem);
+    r.store.markOpenItems([open("顶栏条目关闭匹配。当前进度：排查中"), open("fix parser"), open("fix parser tests"), open("dup: a"), open("dup (b)")], 1);
+    expect(r.store.markOpenItems([done("顶栏条目关闭匹配"), done("fix pars"), done("dup")], 2)).toEqual([1, 0, 0]);
+    expect(keys()).toEqual(["fix parser", "fix parser tests", "dup: a", "dup (b)"]);
+    // A word, not punctuation, after the key is another item; the exact key wins over a prefixed one.
+    expect(r.store.markOpenItems([done("fix parser")], 3)).toEqual([1]);
+    expect(keys()).toEqual(["fix parser tests", "dup: a", "dup (b)"]);
   });
 
   it("collapses every item a run is behind into the one an <open> names, and leaves other runs where they are", () => {
@@ -480,7 +494,7 @@ describe("the open items", () => {
     for (const s of sessions.values()) router.attach({ channelId: "web", conversationId: s.id }, s);
     const members = ["h0"];
     const db = openDb(":memory:");
-    new TaskService(new TaskStore(db), {} as AgentFactory, router, hub, {
+    const service = new TaskService(new TaskStore(db), {} as AgentFactory, router, hub, {
       modelMenu: () => [],
       continuous: { chainOf: () => members, members: () => members.map((sessionId) => ({ sessionId, startedAt: 1, reason: "first" as const })) },
     });
@@ -498,6 +512,10 @@ describe("the open items", () => {
     end("h0", "");
     expect(workspace).toEqual(["open-items-changed"]);
     expect(warn).toHaveBeenCalledWith("open items: <done> named no open item: never open");
+    // The unmatched key goes back to the head in the next seed, until a <done> closes an item.
+    expect(service.unmatchedDone()).toEqual(["never open"]);
+    expect(openItemsStatus(service.openItems(), 1, service.unmatchedDone()).seed.split("\n"))
+      .toEqual(["- open items — worker running (run r1) · stopped", "- unmatched <done>: never open (closed nothing: resend <done> with an item's full key above)"]);
 
     // A member no longer the head writes nothing.
     members.unshift("m1");
@@ -505,6 +523,8 @@ describe("the open items", () => {
     expect(count()).toEqual({ n: 1 });
     end("m1", "Merged.\n<open>open items — merged, restart pending</open>\n<done>open items</done>");
     expect(count()).toEqual({ n: 0 });
+    expect(service.unmatchedDone()).toEqual([]);
+    expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
   });
 });
