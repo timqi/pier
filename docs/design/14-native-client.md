@@ -109,7 +109,8 @@ not a server, so no launchd or systemd unit: quitting the app stops it.
   for it, held as a quit is when its page counts a session busy (a second
   close within 8s goes ahead), then SIGTERM and SIGKILL after 10s; an
   `external` one is left running. An open meanwhile waits for the stop and
-  spawns it again.
+  spawns it again; a tab closed while its Pier starts is not mounted, and
+  the Pier spawned for it stops.
 - **Sign-in**: when the local tab lands on `/login`, the shell runs the
   command with `serve` swapped for `login` (`pier login`'s one-time link,
   the same `PIER_HOME`) and loads the link, at most once per 30s per tab: the

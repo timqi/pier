@@ -326,19 +326,33 @@ fn sign_in(app: &AppHandle, instance: &Instance, tried: &Mutex<Option<Instant>>)
 }
 
 /// A local instance's Pier: one already answering on its port is used as is, else the shell starts its own.
-async fn serve(app: &AppHandle, instance: &Instance) -> Res {
+/// Returns its start's gate, held: a close waits for what the caller does with the Pier.
+async fn serve(app: &AppHandle, instance: &Instance) -> Res<impl Sized> {
     let shell = app.state::<Shell>();
     let gate = shell.lock().starting.entry(instance.id.clone()).or_default().clone();
-    let _starting = gate.lock().await;
+    let starting = gate.lock_owned().await;
     // One that exited since is started again, its entry replaced.
     let running = shell.lock().children.get_mut(&instance.id).is_some_and(|c| matches!(c.try_wait(), Ok(None)));
-    let Some(command) = instance.command.clone().filter(|_| !running) else { return Ok(()) };
+    let Some(command) = instance.command.clone().filter(|_| !running) else { return Ok(starting) };
     let port = local::port(&command)?;
     let log = app.path().home_dir().map_err(text)?.join(".pier/logs").join(format!("serve-{port}.log"));
     let start = move || (!local::listening(port)).then(|| local::start(&command, port, &log)).transpose();
     let child = tauri::async_runtime::spawn_blocking(start).await.map_err(text)??;
     shell.lock().children.extend(child.map(|child| (instance.id.clone(), child)));
-    Ok(())
+    Ok(starting)
+}
+
+/// Mounts `instance` at `first` once its Pier answers, unless its tab was closed or it was removed
+/// meanwhile: then the Pier started for it stops and false is returned.
+async fn serve_tab(app: &AppHandle, shell: &Shell, instance: &Instance, first: Url) -> Res<bool> {
+    let _starting = serve(app, instance).await?;
+    let closed = shell.lock().instances.iter().find(|i| i.id == instance.id).map(|i| i.closed);
+    if closed.is_none_or(|closed| closed && !instance.closed) {
+        let child = shell.lock().children.remove(&instance.id);
+        tauri::async_runtime::spawn_blocking(move || child.map(local::stop)).await.map_err(text)?;
+        return Ok(false);
+    }
+    mount(app, shell, instance, first).map(|()| true)
 }
 
 /// Sessions mid-turn or with a run in flight, read by the page itself: the shell holds no credential.
@@ -527,10 +541,11 @@ async fn open(app: &AppHandle, shell: &Shell, id: &str, hash: Option<&str>) -> R
             .map_or(Ok(()), |hash| webview.eval(format!("location.hash = {}", Value::from(hash))).map_err(text));
     }
     let instance = shell.lock().instances.iter().find(|i| i.id == id).cloned().ok_or(format!("no instance {id}"))?;
-    serve(app, &instance).await?;
     let mut first = instance.app_url()?;
     first.set_fragment(hash);
-    mount(app, shell, &instance, first)?;
+    if !serve_tab(app, shell, &instance, first).await? {
+        return Ok(());
+    }
     let saved = edit(app, shell, |all| {
         let at = position(all, id)?;
         all[at].closed = false;
@@ -944,10 +959,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let (handle, shown) = (app.handle().clone(), first.is_some_and(|f| f.id == instance.id));
         detach(app.handle(), async move {
             let shell = handle.state::<Shell>();
-            let mounted =
-                serve(&handle, &instance).await.and_then(|()| mount(&handle, &shell, &instance, instance.app_url()?));
-            mounted.map_err(|e| format!("{}: {e}", instance.name))?;
-            let shown = shown && shell.lock().active.is_none();
+            let named = |e| format!("{}: {e}", instance.name);
+            let first = instance.app_url().map_err(named)?;
+            let mounted = serve_tab(&handle, &shell, &instance, first).await.map_err(named)?;
+            let shown = mounted && shown && shell.lock().active.is_none();
             shown.then_some(&instance.id).map_or(Ok(()), |id| show_instance(&handle, &shell, id))
         });
     }
