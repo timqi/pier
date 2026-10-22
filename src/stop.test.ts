@@ -175,6 +175,7 @@ function resumeRig(sessions: AgentSession[], over: Partial<ResumeDeps> = {}) {
         const session = sessions.find((s) => s.id === key.conversationId);
         return session ? Promise.resolve(session) : Promise.reject(new Error("session gone"));
       },
+      heard: () => {},
       reportTo: (_id, message) => reports.push(message),
     },
     resumedByRun: () => false,
@@ -346,6 +347,27 @@ describe("resumeTurns through the router", () => {
     expect(created).toEqual([]);
     expect(s1.systemInputs).toHaveLength(1);
     expect(router.conversationOf("s1")).toEqual(KEY);
+  });
+
+  it("answers a turn the web started on the web, not in the session's chat", async () => {
+    const head = fakeSession("head", { scripted: true });
+    const { router, turns, deps } = routedRig({ head });
+    const web = { channelId: "web", conversationId: "head" };
+    turns.record("head", web, null, 1_000);
+    await resumeTurns(deps, 2_000);
+    expect(head.systemInputs).toHaveLength(1);
+    expect(router.conversationOf("head")).toEqual(web);
+  });
+
+  it("leaves a session a user reached first answering where that user spoke", async () => {
+    const head = fakeSession("head", { scripted: true });
+    head.setState("streaming");
+    const { router, turns, deps } = routedRig({ head });
+    turns.record("head", { channelId: "web", conversationId: "head" }, ["later"], 1_000);
+    router.heard(HOME, head);
+    await resumeTurns(deps, 2_000);
+    expect(head.systemInputs.map((input) => input.mode)).toEqual(["followUp"]);
+    expect(router.conversationOf("head")).toEqual(HOME);
   });
 
   it("resumes on the session's own stream while its adapter is down", async () => {

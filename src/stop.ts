@@ -183,6 +183,7 @@ export interface ResumeDeps {
   ledger: RestartLedger;
   router: {
     ensure(key: ConversationKey): Promise<AgentSession>;
+    heard(key: ConversationKey, session: AgentSession): void;
     reportTo(sessionId: string, message: string): void;
   };
   /** The target of a running agent run, which resumes through the run (its queue too). */
@@ -195,7 +196,8 @@ const isAlias = (key: ConversationKey): boolean => key.channelId === "web" || ke
  *  row stays until the resumed turn ends, so a second crash resumes it again.
  *  Opened by the recorded session id, never by the chat key: a chat's lookup
  *  creates a session when it maps to none (the home chat maps to none), and the
- *  router hands an opened session its live chat by itself. */
+ *  router hands an opened session its live chat by itself — so a turn the web
+ *  started is handed back to the web, where its reply is awaited. */
 export async function resumeTurns(deps: ResumeDeps, now = Date.now()): Promise<void> {
   for (const row of deps.turns.list()) {
     if (deps.resumedByRun(row.sessionId)) continue;
@@ -218,6 +220,7 @@ export async function resumeTurns(deps: ResumeDeps, now = Date.now()): Promise<v
       if (row.queued.length) session.systemInput(withLanguage(lang, restartQueued(row.queued)), origin, "followUp").catch(failed);
       continue;
     }
+    if (row.key.channelId === "web") deps.router.heard(row.key, session);
     session.systemInput(withLanguage(lang, restartInput(now, downMs, row.queued)), origin, "prompt").catch(failed);
   }
 }
