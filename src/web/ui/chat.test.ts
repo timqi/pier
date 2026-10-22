@@ -470,6 +470,33 @@ describe("an earlier turn's next steps", () => {
     chat.renderSnapshot([...auth, ...deploy, ...reply(6, "<topic>auth</topic>\nStill."), ...reply(8, "Chat.\n\n---\n[Later]")], "idle", []);
     expect(shown()).toEqual(["Later"]);
   });
+
+  it("keeps a live reply's options about an item closed before it through an untagged reply, until the item's next reply", async () => {
+    (await import("./topics.js")).setOpenTopics([]);
+    const turn = (at: number, text: string) => {
+      chat.appendTurn("user", "go", false, at - 1);
+      chat.completeTurn(text, { completedAt: at, durationMs: 1, tokens: 1 });
+    };
+    turn(2, "Merged.\n<done>auth</done>\n\n---\n[Ship it]");
+    turn(4, "Checked.\n<topic>auth</topic>\n\n---\n[Wait]");
+    turn(6, "Other.\n\n---\n[Next]");
+    expect(labels()).toEqual(["Wait", "Next"]);
+    turn(8, "<topic>auth</topic>\nDone.");
+    expect(labels()).toEqual([]);
+  });
+
+  it("keeps a closed item's options when no marker of it is on screen, and folds them on a later <done> under another topic", async () => {
+    (await import("./topics.js")).setOpenTopics([]);
+    const reply = (at: number, text: string) => [
+      { role: "user" as const, text: "go", at: at - 1 },
+      { role: "assistant" as const, text, meta: { completedAt: at, durationMs: 1, tokens: 1 } },
+    ];
+    const asked = reply(2, "Checked.\n<topic>auth</topic>\n\n---\n[Wait]");
+    chat.renderSnapshot([...asked, ...reply(4, "Other.\n\n---\n[Next]")], "idle", []);
+    expect(labels()).toEqual(["Wait", "Next"]);
+    chat.renderSnapshot([...asked, ...reply(4, "<topic>deploy</topic>\nShipped.\n<done>auth</done>"), ...reply(6, "Other.\n\n---\n[Next]")], "idle", []);
+    expect(labels()).toEqual(["Next"]);
+  });
 });
 
 // A snapshot re-arms tail follow; a page of history above the reader must not

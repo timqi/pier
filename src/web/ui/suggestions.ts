@@ -1,9 +1,10 @@
 // Next-step buttons under an assistant turn. The latest turn offers them in
-// full; an earlier turn's stay, muted, only on its open topic's newest reply —
-// a later reply of the topic has moved the question on.
+// full; an earlier turn's stay, muted, only on its topic's newest reply until a
+// later <done> of it, while the topic is open or was not at that reply.
 
 import { h } from "./dom.js";
 import { topicOpen } from "./topics.js";
+import { openItemMarkers, type OpenItemMarker } from "../../core/reply.js";
 
 let live: HTMLElement | null = null;
 
@@ -26,6 +27,30 @@ function demote(group: HTMLElement): void {
   }
 }
 
+/** The `<open>`/`<done>` markers a row carries naming `topic`. */
+function marks(row: HTMLElement, topic: string): OpenItemMarker[] {
+  const raw = row.dataset.kind === "assistant" ? row.querySelector<HTMLElement>("[data-raw]")?.dataset.raw : undefined;
+  return openItemMarkers(raw ?? "").markers.filter((m) => m.problem === topic);
+}
+
+/** Whether `topic` was not open at `row`: the nearest marker before it, none on `row`
+ *  itself, is a `<done>`, or none is on screen — trimmed or in an earlier session. */
+function closedBefore(row: HTMLElement, topic: string): boolean {
+  for (let el: HTMLElement | null = row; el; el = el.previousElementSibling as HTMLElement | null) {
+    const marker = marks(el, topic).at(-1);
+    if (marker) return el !== row && marker.op === "done";
+  }
+  return true;
+}
+
+/** A `<done>` after `row` closes its question, whichever topic tags the reply carrying it. */
+function closedAfter(row: HTMLElement, topic: string): boolean {
+  for (let el = row.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
+    if (marks(el, topic).some((m) => m.op === "done")) return true;
+  }
+  return false;
+}
+
 /** Shows or hides every earlier group on screen from the rows as they stand:
  *  the topic tag (topics.ts) and the open items. */
 export function refreshSuggestions(): void {
@@ -34,7 +59,7 @@ export function refreshSuggestions(): void {
   for (const row of rows.reverse()) {
     const topic = row.dataset.kind === "assistant" ? row.dataset.topic : undefined;
     const group = row.querySelector<HTMLElement>(".earlier-options");
-    if (group) group.hidden = !topic || newest.has(topic) || !topicOpen(topic);
+    if (group) group.hidden = !topic || newest.has(topic) || closedAfter(row, topic) || (!topicOpen(topic) && !closedBefore(row, topic));
     if (topic) newest.add(topic);
   }
 }

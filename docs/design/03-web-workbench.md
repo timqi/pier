@@ -282,8 +282,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   untouched, and the picked row goes away. The last reply of an idle
   session has the live row (indigo). Any other reply's row is muted
   (neutral, `aria-description` "option from an earlier reply") and shown
-  only while it is its topic's (`replyTopic`) newest reply on screen and
-  that topic is an open item; a reply with no topic shows none. Re-checked
+  only while it is its topic's (`replyTopic`) newest reply on screen, no
+  `<done>` of the topic follows it, and that topic is an open item or was not
+  at that reply — the nearest `<open>`/`<done>` of it before the reply is a
+  `<done>`, or none is on screen; a reply with no topic shows none. Re-checked
   when the items change and on every reply; a running snapshot's last reply
   is an earlier one.
 - **Topics**: a reply whose `<topic>`/`<open>`/`<done>` names an item
