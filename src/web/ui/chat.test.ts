@@ -449,6 +449,27 @@ describe("an earlier turn's next steps", () => {
     chat.completeTurn("Other.", { completedAt: 4, durationMs: 1, tokens: 1 });
     expect(labels()).toEqual([]);
   });
+
+  it("keeps each open item's newest row across other topics; a newer row or a <done> folds it, an untagged one keeps only the last turn's", async () => {
+    const topics = await import("./topics.js");
+    const shown = () => doc.querySelector("#turns")!.querySelectorAll("button")
+      .filter((b) => ["Ship it", "Wait", "Now", "Next", "Push", "Later"].includes(b.textContent) && !b.closest("[hidden]")).map((b) => b.textContent);
+    const reply = (at: number, text: string) => [
+      { role: "user" as const, text: "go", at: at - 1 },
+      { role: "assistant" as const, text, meta: { completedAt: at, durationMs: 1, tokens: 1 } },
+    ];
+    const auth = reply(2, "<open>auth — review</open>\nReview?\n\n---\n[Ship it] | [Wait]");
+    const deploy = reply(4, "<open>deploy — waiting on you: when?</open>\nWhen?\n\n---\n[Now]");
+    const chatter = reply(6, "Other.\n\n---\n[Next]");
+    topics.setOpenTopics([{ problem: "auth", status: "running", runs: [] }, { problem: "deploy", status: "waiting on you", runs: [] }]);
+    chat.renderSnapshot([...auth, ...deploy, ...chatter], "idle", []);
+    expect(shown()).toEqual(["Ship it", "Wait", "Now", "Next"]);
+    topics.setOpenTopics([{ problem: "auth", status: "running", runs: [] }]);
+    chat.renderSnapshot([...auth, ...deploy, ...chatter, ...reply(8, "Shipped.\n<done>deploy</done>\n\n---\n[Push]"), ...reply(10, "Chat.\n\n---\n[Later]")], "idle", []);
+    expect(shown()).toEqual(["Ship it", "Wait", "Later"]);
+    chat.renderSnapshot([...auth, ...deploy, ...reply(6, "<topic>auth</topic>\nStill."), ...reply(8, "Chat.\n\n---\n[Later]")], "idle", []);
+    expect(shown()).toEqual(["Later"]);
+  });
 });
 
 // A snapshot re-arms tail follow; a page of history above the reader must not
