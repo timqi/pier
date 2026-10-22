@@ -374,6 +374,8 @@ export class FakeElement extends EventTarget {
     setTimeout(() => this.dispatchEvent(new Event("close")));
   }
   scrollIntoView(): void {}
+  /** Instant, as if `smooth` had already landed. */
+  scrollTo(to: { top: number }): void { this.scrollTop = to.top; }
   setSelectionRange(): void {}
   getAnimations(): Animation[] { return []; }
   getClientRects(): object[] { return []; }

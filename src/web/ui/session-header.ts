@@ -30,7 +30,7 @@ interface HeaderDeps {
   continuousOpen: () => boolean;
   /** The conversation's rotation threshold (`GET /api/continuous`); null before it answers. */
   rotateAt: () => number | null;
-  /** The `‹`: back to `#/conversation`. */
+  /** The `‹` and the floating home button: back to `#/conversation`. */
   openContinuous: () => void;
 }
 
@@ -39,6 +39,7 @@ let deps: HeaderDeps;
 export function initHeader(d: HeaderDeps): void {
   deps = d;
   back.onclick = () => deps.openContinuous();
+  toMain.onclick = () => deps.openContinuous();
   chatMenu.onclick = () => barMenu(chatMenu);
   // One of the ⋯ menu's actions is frequent enough to earn a chord; it acts on
   // the current session.
@@ -53,6 +54,8 @@ export function initHeader(d: HeaderDeps): void {
 const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken
 
 const back = $("#bar-back");
+/** The same way back, floating within thumb reach above the composer. */
+const toMain = $("#to-main");
 const chatTitle = $<HTMLButtonElement>("#chat-title");
 const phase = $("#chat-phase");
 const chatMenu = $("#chat-menu");
@@ -118,6 +121,7 @@ export function renderHeader(): void {
   chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
   back.classList.toggle("hidden", conversation);
   back.classList.toggle("flex", !conversation);
+  toMain.toggleAttribute("data-show", !conversation);
   // The head's dot only for what a child's reader would go back for.
   const head = conversation ? undefined : headSession();
   back.replaceChildren(icon(ChevronLeft, "h-4.5 w-4.5"), ...(head && (head.state === "streaming" || head.unread) ? stateDot(head) : []));

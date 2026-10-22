@@ -180,6 +180,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   plain text.
 - Auto-scroll sticks to the bottom only when already near it; own sends
   force-scroll.
+- Two floating buttons stack above the dock's right end: ↓ (`滚到底部`) shows
+  once follow is released away from the tail, wears a dot when a message
+  lands after that — a turn's reply once, however its row is redrawn — and its click scrolls smoothly to the end and re-arms follow;
+  ⌂ (`回到主会话`) shows off the conversation and opens `#/conversation`, as ‹ does.
 
 ### Bar and status panel (`session-header.ts`, `drawer.ts`)
 

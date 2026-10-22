@@ -26,7 +26,7 @@ let deps: ViewsDeps;
 const composerForm = $<HTMLFormElement>("#composer");
 
 // Console views hide chat elements but leave session SSE wiring untouched.
-const chatEls = [$("#bar"), turnsPane, composerForm];
+const chatEls = [$("#bar"), turnsPane, composerForm, $("#fabs")];
 
 export const isChatVisible = (): boolean => openName === null;
 
