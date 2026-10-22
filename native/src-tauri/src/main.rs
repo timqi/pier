@@ -34,6 +34,11 @@ const TABS: &str = "tabs";
 /// lights centred on a 16pt line, ~3px above this row's centre; tauri's WindowBuilder cannot move them.
 const TABS_HEIGHT: f64 = 38.0;
 const INSTANCES: &str = "instances";
+/// The platform's default alert: AppKit's name for it, the freedesktop sound theme's otherwise.
+const SOUND: &str =
+    if cfg!(target_os = "macos") { "NSUserNotificationDefaultSoundName" } else { "message-new-instant" };
+/// A replacement within this of its session's last sound arrives silent.
+const SOUND_QUIET: Duration = Duration::from_secs(30);
 
 type Res<T = ()> = Result<T, String>;
 
@@ -61,6 +66,8 @@ struct Live {
     starting: HashMap<String, Arc<tauri::async_runtime::Mutex<()>>>,
     /// When a quit (`""`) or a tab's close (its id) was held for a busy local Pier: the next one within 8s goes ahead.
     warned: HashMap<String, Instant>,
+    /// When each notification id last played the sound, so a session's burst rings once.
+    sounded: HashMap<i32, Instant>,
 }
 
 impl Shell {
@@ -681,25 +688,29 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     }
     // As Web Push's `tag`: a session's later notification replaces its earlier
     // one, where the platform can close it (Linux; macOS stacks regardless).
-    let live = app.state::<Shell>().lock().instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
-    let title = live.map_or(title.clone(), |name| format!("{name} · {title}"));
+    let shell = app.state::<Shell>();
+    let mut live = shell.lock();
+    let name = live.instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
+    let title = name.map_or(title.clone(), |name| format!("{name} · {title}"));
     let mut hasher = DefaultHasher::new();
     (webview.label(), &tag).hash(&mut hasher);
     let id = hasher.finish() as i32;
+    let now = Instant::now();
+    live.sounded.retain(|_, at| now.duration_since(*at) < SOUND_QUIET);
+    let ring = !live.sounded.contains_key(&id);
+    drop(live);
     let notifications = app.notification();
     let shown = notifications
         .remove_active(vec![id])
         .and_then(|()| {
-            notifications
-                .builder()
-                .id(id)
-                .title(title)
-                .body(body)
-                .extra("instance", webview.label())
-                .extra("url", url)
-                .show()
+            let builder = notifications.builder().id(id);
+            let builder = if ring { builder.sound(SOUND) } else { builder };
+            builder.title(title).body(body).extra("instance", webview.label()).extra("url", url).show()
         })
         .map_err(|e| format!("notification: {e}"));
+    if ring && shown.is_ok() {
+        shell.lock().sounded.insert(id, now);
+    }
     surfaced(&app, shown)
 }
 

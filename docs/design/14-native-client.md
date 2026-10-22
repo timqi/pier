@@ -144,7 +144,9 @@ one ~30-line module; in a browser every call is a no-op.
   targets (every one for the "every device" case). The UI in a browser
   ignores the event (push already covers it); in the shell the bridge hands
   it to the native notification, titled `<instance name> · <title>` by the
-  shell so it says which instance spoke. Body is the same
+  shell so it says which instance spoke, with the system's default sound
+  (`NSUserNotificationDefaultSoundName`; the freedesktop `message-new-instant`
+  elsewhere) unless the same session's sounded within 30s. Body is the same
   `preview(reply.text)` the push sends — the topic is in it. Click: the shell focuses the window and
   that instance, reopening its tab if it was closed since, and sets the page's hash from `url` itself; an instance page
   holds no event permission, so no page can hear the tab bar's or another's.
