@@ -345,46 +345,46 @@ describe("the finished-turn trigger", () => {
   };
 
   it("notifies every device once the turn is still unread", async () => {
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     await subscribe(app, cookie);
     finishTurn(hub);
     expect(sent).toHaveLength(0); // not before the settle window
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.url).toBe("https://push.example.net/s/1");
     expect(sent[0]?.body.byteLength).toBeGreaterThan(86);
   });
 
   it("notifies only the browser that spoke into the session", async () => {
-    const { app, hub, sent, auth, cookie, browserOf } = setup(6_000);
+    const { app, hub, sent, auth, cookie, browserOf } = setup(3_000);
     const phone = auth.open("10.0.0.2", "a phone");
     await subscribe(app, cookie);
     await subscribe(app, `pier_session=${phone}`, "https://push.example.net/s/phone");
     browserOf.mockReturnValue(phone.split(".")[0]);
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent.map((s) => s.url)).toEqual(["https://push.example.net/s/phone"]);
   });
 
   it("notifies nobody when the browser that spoke is not subscribed", async () => {
-    const { app, hub, sent, auth, cookie, browserOf } = setup(6_000);
+    const { app, hub, sent, auth, cookie, browserOf } = setup(3_000);
     await subscribe(app, cookie);
     browserOf.mockReturnValue(sessionOf(auth, "10.0.0.3"));
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(0);
     expect(skips()).toEqual(["no push for s1: the browser that spoke is not subscribed"]);
   });
 
   it("emits the notification on the workspace stream even with nothing subscribed", async () => {
     // A shell webview has no push subscription; this event is all it gets.
-    const { hub, auth, browserOf } = setup(6_000);
+    const { hub, auth, browserOf } = setup(3_000);
     const events: WorkspaceEvent[] = [];
     hub.subscribeWorkspace((e) => events.push(e));
     const browser = sessionOf(auth, "10.0.0.3");
     browserOf.mockReturnValue(browser);
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(events.filter((e) => e.type === "notification")).toEqual([{
       type: "notification",
       title: "pier",
@@ -396,20 +396,20 @@ describe("the finished-turn trigger", () => {
   });
 
   it("notifies every device when no browser has spoken", async () => {
-    const { app, hub, sent, auth, cookie } = setup(6_000);
+    const { app, hub, sent, auth, cookie } = setup(3_000);
     await subscribe(app, cookie);
     await subscribe(app, `pier_session=${auth.open("10.0.0.2", "a phone")}`, "https://push.example.net/s/phone");
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent.map((s) => s.url).sort()).toEqual(["https://push.example.net/s/1", "https://push.example.net/s/phone"]);
   });
 
   it("logs no skip at all while no device is subscribed", async () => {
     // No phone is waiting, so there is no silence to explain.
-    const { hub, sent, auth, unread, channelOf, browserOf } = setup(6_000);
+    const { hub, sent, auth, unread, channelOf, browserOf } = setup(3_000);
     const settle = async (text?: string) => {
       finishTurn(hub, text);
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(3_000);
     };
     await settle(); // every device, of which there are none
     browserOf.mockReturnValue(sessionOf(auth, "10.0.0.3"));
@@ -426,35 +426,35 @@ describe("the finished-turn trigger", () => {
   it("stays quiet for a turn that was already delivered to a chat", async () => {
     // Slack and Lark carry the answer themselves; a push would be
     // the same reply a second time, on the same phone.
-    const { app, hub, sent, channelOf, cookie } = setup(6_000);
+    const { app, hub, sent, channelOf, cookie } = setup(3_000);
     await subscribe(app, cookie);
     channelOf.mockReturnValue("slack");
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(0);
     expect(skips()).toEqual(["no push for s1: answering slack, not the workbench"]);
   });
 
   it("stays quiet when a client reported the turn as seen", async () => {
-    const { app, hub, sent, unread, cookie } = setup(6_000);
+    const { app, hub, sent, unread, cookie } = setup(3_000);
     await subscribe(app, cookie);
     unread.mockReturnValue(false);
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(0);
     expect(skips()).toEqual(["no push for s1: a client reported the turn as seen"]);
   });
 
   it("ignores a session that was already idle when it was first seen", async () => {
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     await subscribe(app, cookie);
     hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "idle" });
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(0);
   });
 
   it("stops watching a session once its turn ended", async () => {
-    const { app, hub, cookie } = setup(6_000);
+    const { app, hub, cookie } = setup(3_000);
     await subscribe(app, cookie);
     finishTurn(hub);
     // A watched session's ring buffer is never released (core/hub.ts), so the
@@ -463,25 +463,25 @@ describe("the finished-turn trigger", () => {
   });
 
   it("drops a subscription the push service says is gone, and only then", async () => {
-    const { app, hub, store, status, cookie } = setup(6_000);
+    const { app, hub, store, status, cookie } = setup(3_000);
     await subscribe(app, cookie);
     status.code = 500;
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(store.list()).toHaveLength(1);
     status.code = 410;
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(store.list()).toHaveLength(0);
   });
 
   it("carries a payload the subscribed browser can decrypt", async () => {
     // End to end through the real encryption: what the browser gets is what
     // the trigger built, not a shape only this test believes in.
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     const sub = await subscribe(app, cookie);
     finishTurn(hub, "```js\ncode\n```\n  the   answer  ");
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload).toEqual({
       title: "pier",
@@ -496,32 +496,32 @@ describe("the finished-turn trigger", () => {
     // the phone gets one notification for the run. A silent turn or a failure
     // after the answer would replace it with "Turn finished.", which reads as
     // the answer having gone missing.
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     const sub = await subscribe(app, cookie);
     hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "streaming" });
     hub.emit("s1", { type: "turn-end", text: "the answer" });
     hub.emit("s1", { type: "turn-end", text: "" });
     hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "idle" });
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload.body).toBe("the answer");
   });
 
   it("stays quiet for a turn that stayed silent", async () => {
     // A dispatch or a moved stage: the status line is its trace, not the phone.
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     await subscribe(app, cookie);
     finishTurn(hub, "<silent>dispatched</silent>\n<open>fix the parser</open>");
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(sent).toHaveLength(0);
     expect(skips()).toEqual(["no push for s1: the turn stayed silent (dispatched)"]);
   });
 
   it("previews the spoken text, never Pier's markers", async () => {
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     const sub = await subscribe(app, cookie);
     finishTurn(hub, "<done>fix the parser</done>\n<silent>aside</silent>Merged — restart when you like.");
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload.body).toBe("Merged — restart when you like.");
   });
@@ -530,19 +530,19 @@ describe("the finished-turn trigger", () => {
     // The header is the model's (core/identity.ts). Left on, every session
     // opened from the workbench announces itself on a lock screen as
     // "[operator<web> 12:01]" and the notification says nothing at all.
-    const { app, hub, sent, cookie } = setup(6_000, "[operator<web> 12:01]\nfix the parser");
+    const { app, hub, sent, cookie } = setup(3_000, "[operator<web> 12:01]\nfix the parser");
     const sub = await subscribe(app, cookie);
     finishTurn(hub);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload.title).toBe("fix the parser");
   });
 
   it("still says something when the turn ended with no text", async () => {
-    const { app, hub, sent, cookie } = setup(6_000);
+    const { app, hub, sent, cookie } = setup(3_000);
     const sub = await subscribe(app, cookie);
     finishTurn(hub, "");
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload.body).toBe("Turn finished.");
   });

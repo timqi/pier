@@ -24,8 +24,9 @@ const log = logger("push");
 /** A browser mints a new subscription whenever the old one expires, so the
  *  table grows by itself; the oldest rows are the dead ones. */
 const MAX_SUBSCRIPTIONS = 20;
-/** Long enough to cross a heartbeat and a slow phone. */
-const SETTLE_MS = 6_000;
+/** The client reports a seen turn from its event handler; this wait is unrelated
+ *  to SSE heartbeats and leaves slow devices time to send that receipt. */
+const SETTLE_MS = 3_000;
 const MAX_BODY_CHARS = 160;
 
 interface PushSubscriptionRow extends PushTarget {
