@@ -177,15 +177,35 @@ export class MainChain {
 
   /** `then` may rotate again and return the head it made; the caller's answer is that one. */
   private serial(key: ConversationKey | undefined, then: (head: AgentSession, rotated?: ChainReason) => Promise<Head | undefined | void>): Promise<{ sessionId: string; rotated?: ChainReason }> {
-    const done = this.queue.then(async () => {
+    return this.queued(async () => {
       this.chat = key;
       const found = await this.current();
       this.deps.router.heard(key ?? webKey(found.session.id), found.session);
       const { session, rotated } = (await then(found.session, found.rotated)) ?? found;
       return { sessionId: session.id, ...(rotated ? { rotated } : {}) };
     });
+  }
+
+  /** A read that finds the head gone from Pi starts the next one, as a send
+   *  would; undefined when `sessionId` is not the head or is not gone. */
+  replaceLost(sessionId: string): Promise<string | undefined> {
+    return this.queued(async () => {
+      const head = this.members()[0];
+      if (head?.sessionId !== sessionId || !(await this.gone(head))) return undefined;
+      this.chat = undefined;
+      log.warn(`main session ${head.sessionId} is gone from Pi — starting the next one`);
+      return (await this.rotate("lost", head)).id;
+    });
+  }
+
+  private queued<T>(fn: () => Promise<T>): Promise<T> {
+    const done = this.queue.then(fn);
     this.queue = done.catch(() => undefined);
     return done;
+  }
+
+  private async gone(head: ChainMember): Promise<boolean> {
+    return this.deps.router.stateOf(head.sessionId) === undefined && !(await this.deps.factory.find(head.sessionId));
   }
 
   private now(): number {
@@ -195,8 +215,7 @@ export class MainChain {
   private async current(): Promise<Head> {
     const head = this.members()[0];
     if (!head) return { session: await this.rotate("first"), rotated: "first" };
-    const live = this.deps.router.stateOf(head.sessionId) !== undefined;
-    if (!live && !(await this.deps.factory.find(head.sessionId))) {
+    if (await this.gone(head)) {
       log.warn(`main session ${head.sessionId} is gone from Pi — starting the next one`);
       return { session: await this.rotate("lost", head), rotated: "lost" };
     }
@@ -228,15 +247,16 @@ export class MainChain {
       ...(model ? { model } : {}),
       thinking: defaults.defaultThinkingLevel ?? open?.thinkingLevel ?? "low",
     });
+    this.deps.router.attach(webKey(session.id), session);
+    // The surface the send came from, before the seed: a web send posts no card in the chat.
+    this.deps.router.heard(this.chat ?? webKey(session.id), session);
+    await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
+    // Only a seeded head joins the chain: one whose seed failed is not the conversation.
     transact(this.db, () => {
       this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);
       // A lost head has no transcript to page back to; the new head's reason says it went.
       if (reason === "lost" && previous) this.db.prepare("DELETE FROM main_chain WHERE session_id = ?").run(previous.sessionId);
     });
-    this.deps.router.attach(webKey(session.id), session);
-    // The surface the send came from, before the seed: a web send posts no card in the chat.
-    this.deps.router.heard(this.chat ?? webKey(session.id), session);
-    await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
     log.info(`main session ${session.id} started (${reason})`);
     return session;
   }

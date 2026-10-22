@@ -483,6 +483,22 @@ describe("the continuous conversation", () => {
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
   });
 
+  it("moves to the head the server started when the head it opened was gone from Pi", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    h.history.mockImplementation((url: string) => {
+      if (!url.includes("/h1/")) return Promise.resolve(snapshot("head"));
+      // The server rotates before it answers the failed read.
+      chain = [member("h2", "lost"), member("h0", "first")];
+      return Promise.resolve(Response.json({ error: "Error: unknown session: h1 \u2014 the conversation goes on in session h2" }, { status: 404 }));
+    });
+    latest().reset();
+    for (let i = 0; i < 3; i++) await settled();
+    // The new head, then its earlier session paged in above it, as any rotation followed.
+    expect(historyCalls().slice(-4)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history", "/api/sessions/h0/history", "/api/sessions/h2/history"]);
+    expect(h.header.continuousOpen()).toBe(true);
+    expect(h.content).toContain("head");
+  });
+
   // A child session (a lead's, a task run's) is a route of its own; ‹ goes back.
   it("opens a child session outside the conversation and returns to the head", async () => {
     await boot([member("h1"), member("h0", "first")]);

@@ -2479,6 +2479,21 @@ describe("the continuous conversation's routes", () => {
     expect(rotateAt).toBe(CHAIN_FULL_TOKENS);
   });
 
+  it("starts the next head when a read finds the head gone from Pi, and names it in the read's error", async () => {
+    const { app, db, sessions, workspace } = chainRig();
+    sessions.set("old", sharedFake("old"));
+    db.prepare("INSERT INTO main_chain VALUES ('old', 1, 'first'), ('gone', 2, 'idle')").run();
+    const read = await app.request("/api/sessions/gone/history");
+    expect(read.status).toBe(404);
+    expect(await read.json()).toEqual({ error: "Error: unknown session: gone \u2014 the conversation goes on in session m1" });
+    expect(workspace).toContain("sessions-changed");
+    const { chain } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[] };
+    expect(chain.map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["old", "first"]]);
+    expect((await app.request("/api/sessions/m1/history")).status).toBe(200);
+    // Not the conversation's head: an unknown session stays a plain 404.
+    expect(await (await app.request("/api/sessions/nope/history")).json()).toEqual({ error: "Error: unknown session: nope" });
+  });
+
   it("answers a send whose new session cannot be seeded with the reason, and creates none", async () => {
     const { factory, post } = chainRig(() => {
       throw new Error("database is locked");

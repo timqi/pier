@@ -82,7 +82,7 @@ function rig({
     return s;
   };
   const say = (text: string) => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" });
-  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults };
+  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -210,6 +210,34 @@ describe("the continuous conversation's chain", () => {
     // Nothing on disk to page back to: a member left behind would be an unknown session forever.
     expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
     expect(r.chain.chainOf("gone")).toBeUndefined();
+  });
+
+  it("replaces a head a read found gone, and nothing else", async () => {
+    const r = rig();
+    r.existing("h0", r.clock.now - 2);
+    // Present, or not the head: a failed read of it is that read's error.
+    expect(await r.chain.replaceLost("h0")).toBeUndefined();
+    r.db.prepare("INSERT INTO main_chain VALUES ('gone', ?, 'first')").run(r.clock.now - 1);
+    expect(await r.chain.replaceLost("h0")).toBeUndefined();
+    expect(await r.chain.replaceLost("gone")).toBe("m1");
+    expect(r.sessions.get("m1")!.systemInputs[0]!.origin).toEqual({ kind: "session-seed", reason: "lost", previousSessionId: "gone" });
+    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
+    // Already moved on: a second read of the gone id starts nothing more.
+    expect(await r.chain.replaceLost("gone")).toBeUndefined();
+    expect(r.created).toHaveLength(1);
+  });
+
+  it("keeps a head whose successor's seed did not land", async () => {
+    const r = rig();
+    r.existing("h0", r.clock.now - IDLE_MS - 1);
+    const create = r.factory.create;
+    r.factory.create = async (opts) => {
+      const s = await create(opts);
+      s.systemInput = () => Promise.reject(new Error("disk full"));
+      return s;
+    };
+    await expect(r.say("back")).rejects.toThrow("disk full");
+    expect(r.chain.members().map((m) => m.sessionId)).toEqual(["h0"]);
   });
 
   it("appends the head's <note> lines to today's daily note, on its own line, and nobody else's", async () => {

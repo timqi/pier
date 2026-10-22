@@ -587,6 +587,8 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   if (!got.ok) {
     chatLoading(false);
     appendTurn("error", got.error);
+    // A head the server found gone has been replaced; the re-read chain moves the pane there.
+    if (continuousOpen()) void refreshSessions();
     return;
   }
   snapshotReady = true;

@@ -277,7 +277,13 @@ export function createServer(
   /** One query for a whole list, not one per row. */
   const activeRuns = (): Map<string, number> => activeBackgroundRunCounts?.() ?? new Map();
 
-  const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
+  const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id }).catch(async (err: unknown) => {
+    // A head gone from Pi is replaced here too, not only at the next send: every read of it would fail until then.
+    const next = await continuous.replaceLost(id);
+    if (!next) throw err;
+    hub.emitWorkspace({ type: "sessions-changed" });
+    throw new Error(`${err instanceof Error ? err.message : String(err)} — the conversation goes on in session ${next}`);
+  });
 
   // An earlier member of the continuous conversation is read off disk and
   // never opened, so it can be neither edited nor resumed.
