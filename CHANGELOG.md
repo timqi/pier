@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3 — 2026-10-22
+
+### Changed
+
+- Web: a new turn replaces a head session gone from Pi; input-only sessions are written to disk, and replies keep their options while the item remains open.
+- Web-started turns resume on the web.
+
 ## 0.5.2 — 2026-10-22
 
 ### Changed
