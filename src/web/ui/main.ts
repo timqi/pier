@@ -227,17 +227,22 @@ function openContinuous(user = true): void {
 async function followHead(head: string): Promise<void> {
   earlier = [];
   unstarted = false;
-  const intent = navigation;
-  await select(head, false);
-  if (intent === navigation && isChatVisible() && chain.length > 1) await page();
+  if (chain.length === 1) return select(head, false);
+  // No skeleton: the old pane stays up until page() paints both reads at once. Its stream is
+  // dropped too, so a select() meanwhile draws the head instead of taking it for loaded.
+  setSessionHash(head);
+  choose(head);
+  source?.close();
+  source = null;
+  if (!(await page())) await loadSession(head);
 }
 
 /** One earlier session in above the rest; the head is re-read with it, and the
- *  reader stays where they were. */
-async function page(): Promise<void> {
+ *  reader stays where they were. False when it did not start. */
+async function page(): Promise<boolean> {
   const head = headId();
   const member = chain[earlier.length + 1];
-  if (paging || !head || !member || currentId !== head || !isChatVisible()) return;
+  if (paging || !head || !member || currentId !== head || !isChatVisible()) return false;
   const intent = navigation;
   const generation = loadSeq;
   const current = (): boolean => intent === navigation && generation === loadSeq && currentId === head && headId() === head && isChatVisible();
@@ -245,10 +250,10 @@ async function page(): Promise<void> {
   try {
     const got = await getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
       `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session");
-    if (!current()) return;
+    if (!current()) return true;
     // Both reads belong to this navigation; keep the pane and its stream live until they can commit together.
     const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session");
-    if (!current()) return;
+    if (!current()) return true;
     earlier.unshift(got.ok
       ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
       : { member, turns: [], runs: [], error: got.error });
@@ -257,6 +262,7 @@ async function page(): Promise<void> {
   } finally {
     paging = false;
   }
+  return true;
 }
 
 /** Earlier sessions above the head, read-only, each closed by the divider naming the rotation after it. */
@@ -526,6 +532,12 @@ async function select(id: string, user = true): Promise<void> {
   showChat();
   setSessionHash(id);
   if (id === currentId && (source || loading)) return;
+  choose(id);
+  await loadSession(id);
+}
+
+/** Selection state — draft, drawer, header — moved to `id`; its pane is the caller's to draw. */
+function choose(id: string): void {
   ++loadSeq;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
@@ -536,7 +548,6 @@ async function select(id: string, user = true): Promise<void> {
   renderDrawer();
   renderHeader();
   maybeAckRead(); // selecting an unread session is looking at it
-  await loadSession(id);
 }
 
 function resetPane(): void {

@@ -349,7 +349,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   a newer navigation or session load cancels the page before history changes or redraw.
   Sends take the alias route; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
-  the new head, the session just left paged in above; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
+  the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
   folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
   a `/status` answer uses the same solid card material and shared open-item rows,
   grouped with counts under `Waiting on you`, `In progress` and `Other open`.

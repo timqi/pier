@@ -493,8 +493,8 @@ describe("the continuous conversation", () => {
     });
     latest().reset();
     for (let i = 0; i < 3; i++) await settled();
-    // The new head, then its earlier session paged in above it, as any rotation followed.
-    expect(historyCalls().slice(-4)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history", "/api/sessions/h0/history", "/api/sessions/h2/history"]);
+    // The new head read with its earlier session above it, as any rotation followed.
+    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h2/history"]);
     expect(h.header.continuousOpen()).toBe(true);
     expect(h.content).toContain("head");
   });
@@ -695,8 +695,31 @@ describe("the continuous conversation", () => {
     h.composer.headMoved?.();
     await settled();
     await settled();
-    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
+    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history"]);
     expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true);
+  });
+
+  it("follows a rotation in one paint, the session left live in view until then and its stream ignored", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    const left = latest();
+    const head = deferred();
+    h.history.mockImplementation((url) => url.includes("/h2/") ? head.promise : Promise.resolve(earlier("h1")));
+    const paints = h.resetChat.mock.calls.length;
+    const loadings = vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length;
+    chain = [member("h2", "new", 7), member("h1"), member("h0", "first")];
+    h.composer.headMoved?.();
+    await settled(); await settled();
+    expect(h.header.currentId()).toBe("h2");
+    expect(h.content).toEqual(["head"]);
+    left.message(1, "stale", "h1");
+    head.resolve(snapshot("new head"));
+    await settled();
+    left.message(2, "stale", "h1");
+    expect(h.resetChat).toHaveBeenCalledTimes(paints + 1);
+    expect(vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length).toBe(loadings);
+    expect(h.content).toEqual(["said in h1", "new head"]);
+    expect(h.appendDivider).toHaveBeenLastCalledWith("new", 7);
+    expect(latest().url).toContain("/h2/");
   });
 
   it("leaves Settings open across head rotation and cancels delayed rotation paging after newer navigation", async () => {
@@ -742,19 +765,18 @@ describe("the continuous conversation", () => {
     let headReads = 0;
     h.history.mockImplementation((url) => {
       if (url.includes("/h1/")) return pending === "earlier" ? old.promise : Promise.resolve(earlier("h1"));
-      if (++headReads === 1) return Promise.resolve(snapshot("rotated head"));
-      return pending === "head" ? old.promise : Promise.resolve(Response.json({ error: "temporarily unavailable" }, { status: 503 }));
+      return ++headReads === 1 && pending === "head" ? old.promise : Promise.resolve(snapshot("navigated head"));
     });
     chain = [member("h2"), member("h1")];
     h.composer.headMoved?.();
     await settled(); await settled();
     expect(historyCalls().slice(1)).toEqual(pending === "earlier"
-      ? ["/api/sessions/h2/history", "/api/sessions/h1/history"]
-      : ["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
-    const stream = latest();
+      ? ["/api/sessions/h1/history"]
+      : ["/api/sessions/h1/history", "/api/sessions/h2/history"]);
     const shown = h.drawer.openItem({ problem: "newer topic", runs: [], status: "waiting on you" as const });
     await settled();
     expect(h.revealTopic).toHaveBeenLastCalledWith("newer topic");
+    const stream = latest();
     stream.message(1, "live while paging", "h2");
     const reads = historyCalls();
     const paints = h.resetChat.mock.calls.length;
@@ -762,7 +784,7 @@ describe("the continuous conversation", () => {
       : pending === "earlier" ? earlier("h1") : snapshot("obsolete head"));
     await shown; await settled();
     expect(historyCalls()).toEqual(reads);
-    expect(h.content).toEqual(["rotated head", "live while paging"]);
+    expect(h.content).toEqual(["navigated head", "live while paging"]);
     expect(h.resetChat).toHaveBeenCalledTimes(paints);
     expect(h.keepScroll).not.toHaveBeenCalled();
     expect(stream.closed).toBe(false);
