@@ -245,6 +245,14 @@ export type ChatCommand = keyof typeof CHAT_COMMANDS;
 
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
+/** The command `text` is: only the exact word, the composer is not a shell.
+ *  The chain answers it without a turn, so the composer paints none. */
+export function chatCommand(text: string): ChatCommand | undefined {
+  const draft = text.trim().toLowerCase();
+  const word = draft.slice(1);
+  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
+}
+
 /** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`), a word of two
  *  characters at least. Groups: `skill:`, word, rest. */
 export const COMMAND_SHAPE = /^[/%](skill:)?([^\s/%]{2,})(?:[ \t]+([\s\S]*))?$/i;

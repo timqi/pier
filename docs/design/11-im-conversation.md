@@ -205,7 +205,7 @@ the whole message `<prefix><word>` (args after the word where a command takes
 them), the prefix `/` or `%`, trimmed and case-insensitive. `%` exists because
 Slack's client eats an unregistered `/`; it is accepted everywhere so one
 spelling works on the phone whichever app it is (`parseCommand` in
-`channels/commands.ts` and `chatCommand` in `core/chain.ts` both take `[/%]`;
+`channels/commands.ts` and `chatCommand` in `core/types.ts` both take `[/%]`;
 the web composer's completion keeps `/`). There is no other spelling: no bare
 words, no unprefixed `s <text>`, and a message that is only a mention (or
 empty) is dropped with a log line, never a command.

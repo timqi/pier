@@ -177,7 +177,7 @@ describe("the continuous conversation's chain", () => {
 
     // Only the reasoning set: the model is the previous head's.
     r.defaults.value = { defaultModel: null, defaultThinkingLevel: "minimal" };
-    expect(await r.say("/new")).toMatchObject({ sessionId: "m3", command: "new" });
+    expect(await r.say("/new")).toMatchObject({ sessionId: "m3" });
     expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "minimal" });
   });
 
@@ -389,14 +389,14 @@ describe("the chat commands", () => {
   it("answers exactly `/status` with the list, appended to the head without a turn", async () => {
     const r = rig();
     r.status.text = "Open\n- model menu — merged";
-    expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", rotated: "first", command: "status" });
+    expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", rotated: "first" });
     const m1 = r.sessions.get("m1")!;
     expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Open\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
     expect(m1.prompts).toEqual([]);
     for (const text of ["/tmp is full", "/status please", "status", "/stat", "%", "%unknown"]) await r.say(text);
     expect(m1.prompts).toHaveLength(6);
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
-    expect(await r.say(" %Status ")).toEqual({ sessionId: "m1", command: "status" });
+    expect(await r.say(" %Status ")).toEqual({ sessionId: "m1" });
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(2);
   });
 
@@ -410,7 +410,7 @@ describe("the chat commands", () => {
   it("rotates on `/new` with the seed as the answer, once when the head was due anyway, and refuses a replying head", async () => {
     const r = rig();
     r.existing("h1", r.clock.now, { history: [{ role: "user", text: "earlier", at: r.clock.now }] });
-    expect(await r.say("/new")).toEqual({ sessionId: "m1", rotated: "new", command: "new" });
+    expect(await r.say("/new")).toEqual({ sessionId: "m1", rotated: "new" });
     expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "new"], ["h1", "first"]]);
     const m1 = r.sessions.get("m1")!;
     expect(m1.systemInputs).toHaveLength(1);
@@ -420,7 +420,7 @@ describe("the chat commands", () => {
 
     // Due for its own reason: one rotation, not two.
     r.clock.now += 2 * IDLE_MS;
-    expect(await r.say("/NEW")).toEqual({ sessionId: "m2", rotated: "idle", command: "new" });
+    expect(await r.say("/NEW")).toEqual({ sessionId: "m2", rotated: "idle" });
     expect(r.chain.members()).toHaveLength(3);
 
     r.sessions.get("m2")!.setState("streaming");
@@ -434,7 +434,7 @@ describe("the chat commands", () => {
     const h1 = r.existing("h1", r.clock.now, { hold: true });
     await r.say("go");
     expect(h1.state).toBe("streaming");
-    expect(await r.say("/stop")).toEqual({ sessionId: "h1", command: "stop" });
+    expect(await r.say("/stop")).toEqual({ sessionId: "h1" });
     expect(h1.state).toBe("idle");
     expect(h1.calls.slice(-2)).toEqual(["abort", "systemInput:chat-command:append:stopped"]);
     expect(h1.systemInputs.at(-1)).toEqual({ text: "stopped", origin: { kind: "chat-command", command: "stop" }, mode: "append" });
@@ -448,7 +448,7 @@ describe("the chat commands", () => {
     const h1 = r.existing("h1", r.clock.now, {
       skills: [{ name: "pier-tasks", description: "run a task" }, { name: "pier-web", description: "search the web" }],
     });
-    expect(await r.say("%skills")).toEqual({ sessionId: "h1", command: "skills" });
+    expect(await r.say("%skills")).toEqual({ sessionId: "h1" });
     expect(h1.systemInputs.at(-1)).toEqual({
       text: "pier-tasks — run a task\npier-web — search the web", origin: { kind: "chat-command", command: "skills" }, mode: "append",
     });
@@ -527,7 +527,7 @@ describe("a send under a chat's key", () => {
     const h1 = r.existing("h1", r.clock.now, { hold: true });
     await send(r, "go");
     expect(h1.state).toBe("streaming");
-    expect(await send(r, "/status")).toEqual({ sessionId: "h1", command: "status" });
+    expect(await send(r, "/status")).toEqual({ sessionId: "h1" });
     expect(h1.state).toBe("streaming");
     expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "chat-command", command: "status" })]);
   });

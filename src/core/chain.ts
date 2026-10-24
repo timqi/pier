@@ -12,7 +12,7 @@ import { logger } from "../log.js";
 import { day, userLanguage, withLanguage } from "./identity.js";
 import { cut, openItemMarkers } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand } from "./types.js";
 import type {
   AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItemsStatus,
 } from "./types.js";
@@ -85,13 +85,6 @@ const SEED_RUNS_HIDDEN: ReadonlySet<string> = new Set(["succeeded", "skipped"]);
 export const skillsText = (skills: { name: string; description: string }[]): string =>
   skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
 
-/** Only the exact word is a command: the composer is not a shell. */
-function chatCommand(text: string): ChatCommand | undefined {
-  const draft = text.trim().toLowerCase();
-  const word = draft.slice(1);
-  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
-}
-
 export class MainChain {
   /** Sends pass one at a time, so two cannot both find the head idle and rotate twice. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -141,11 +134,10 @@ export class MainChain {
   }
 
   /** Resolve the head, rotating it first when due, then dispatch to `key` (a
-   *  chat's) or else the head's own; `command` names a chat command, answered
-   *  without a turn. */
-  send(message: Omit<InboundMessage, "key">, key?: ConversationKey): Promise<{ sessionId: string; rotated?: ChainReason; command?: ChatCommand }> {
+   *  chat's) or else the head's own. */
+  send(message: Omit<InboundMessage, "key">, key?: ConversationKey): Promise<{ sessionId: string; rotated?: ChainReason }> {
     const command = chatCommand(message.text);
-    if (command) return this.serial(key, (session, rotated) => this.command(command, session, rotated)).then((head) => ({ ...head, command }));
+    if (command) return this.serial(key, (session, rotated) => this.command(command, session, rotated));
     return this.serial(key, async (session) => {
       await this.deps.router.dispatch({ ...message, key: key ?? webKey(session.id) });
     });

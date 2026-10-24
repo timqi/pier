@@ -561,22 +561,25 @@ describe("the reply quote", () => {
   });
 });
 
-it("ends the optimistic turn a continuous command never starts", async () => {
+it("starts no optimistic turn for a continuous command", async () => {
   const setState = vi.fn();
   composer.initComposer({
     sessionId: () => "m1", sessionState: () => "idle",
     chatVisible: () => true, setState, reload: state.reload, continuous: () => true,
   });
+  state.appendTurn.mockClear();
   state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", command: "status" }, { status: 202 }));
   type("/status");
   await composer.send("auto");
   expect(state.fetch.mock.calls[0]?.[0]).toBe("/api/continuous/messages");
-  expect(setState.mock.calls).toEqual([["streaming"], ["idle"]]);
-  // A message is a turn: its own events end it.
+  expect(setState).not.toHaveBeenCalled();
+  expect(state.appendTurn).not.toHaveBeenCalled();
+  // A command with an argument is a message to the chain, a turn like any other.
   state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1" }, { status: 202 }));
-  type("hello");
+  type("/status please");
   await composer.send("auto");
-  expect(setState.mock.calls).toEqual([["streaming"], ["idle"], ["streaming"]]);
+  expect(setState.mock.calls).toEqual([["streaming"]]);
+  expect(state.appendTurn).toHaveBeenCalledWith("user", "/status please", false, expect.any(Number));
 });
 
 describe("the chat-command completion", () => {

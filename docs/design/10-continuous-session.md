@@ -245,7 +245,7 @@ is the new head's seed card, and a streaming head's refusal is
 the send's 409, shown as the composer's error row.
 
 - The word list is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
-  composer's completion shows; `chatCommand` (`core/chain.ts`), the transcript
+  composer's completion shows; `chatCommand` (`core/types.ts`), the transcript
   rebuild (`agent/events.ts`) and the completion
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)) all read it.
 - Tests: `core/chain.test.ts` (`/new`, `/stop`), `web/server.test.ts` (the
