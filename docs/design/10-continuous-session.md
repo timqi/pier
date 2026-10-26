@@ -93,7 +93,9 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 ## Home and memory
 
 - `$PIER_HOME/home` (`pierPath("home")`) holds memory only: `MEMORY.md`
-  (one-line facts), `memory/YYYY-MM-DD.md` (daily notes, local date), an
+  (the index: one-line facts, decisions and preferences that hold across
+  days, kept under its 4K seed budget by the head — a detail goes to a note or
+  the repo's `AGENTS.md`), `memory/YYYY-MM-DD.md` (daily notes, local date), an
   optional `AGENTS.md` Pi loads as the cwd's own.
 - A head reply's `<note>line</note>` is stripped like the open-item markers
   and appended as `- line` to today's `memory/YYYY-MM-DD.md` on its `turn-end`
@@ -108,19 +110,22 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
   the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
-  is `rg` over `memory/` and `pier search --in main <q>` over what the user
-  and Pier said; `--since` narrows a time such as last week
-  ([08](08-cli-socket.md)); no vector store.
+  is on demand: a message pointing at earlier work (a name, a date, "what we
+  decided") is one fetch before the answer — `rg` over `memory/` for a note,
+  `pier search --in main <q>` over what the user and Pier said (a `<note>`'s
+  words match through the reply that wrote it); `--since` narrows a time such
+  as last week ([08](08-cli-socket.md)); no vector store, and only the newest
+  notes are seeded (`DISPATCHER`).
 
 ## Head lifecycle
 
 | Event | Rule |
 | --- | --- |
 | User message, head ≥ 1h (`CHAIN_IDLE_MS`) since its last user message, or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
-| User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
+| User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the seed with the previous head's last exchanges; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`, at the next send or the next web read of the head; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn), and joins `main_chain` only once that lands |
-| Seed | `MEMORY.md`, `## Open` (§Open items' complete seed projection, `Nothing open.` included), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; each part is cut to its budget: `MEMORY.md` 12K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), each day's notes 6K and the exchanges 4K from the front by whole lines, headed by `… <N> lines omitted, the rest in <memory/<date>.md | session <id>>`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
+| Seed | `MEMORY.md`, `## Open` (§Open items' complete seed projection, `Nothing open.` included), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, the newest notes — the last 2K chars of `memory/*.md` by whole lines, newest day first collected backwards across days until the budget is full, each day's lines under its own `## memory/<date>.md` heading so the head sees how old the latest is (a week away leaves it the week's last state, not an empty day) — and on a `full` rotation only the previous head's last 3 exchanges (the user was mid-subject; an `idle`, `new` or `lost` head starts without the previous subject); older notes are never seeded — recall is on demand (§Home and memory); an unreadable file says so; each part is cut to its budget: `MEMORY.md` 4K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), the notes as above and the exchanges 4K from the front by whole lines, each headed by `… <N> lines omitted, the rest in <memory/<date>.md | session <id>>`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
@@ -245,7 +250,8 @@ error: the composer is not a shell.
 
 The commands, their spelling (`/` or `%`) and what each answers on the head
 and in a thread are [11 §Chat commands](11-im-conversation.md#chat-commands).
-`/new` rotates with reason `new` (the idle seed, the divider names it); a head
+`/new` rotates with reason `new` (the seed without the previous head's
+exchanges, so it is the user's way to change the subject; the divider names it); a head
 the send already rotated for its own reason is not rotated twice; the answer
 is the new head's seed card, and a streaming head's refusal is
 the send's 409, shown as the composer's error row.
@@ -304,6 +310,12 @@ never opened.
 - From the head's transcript usage: it averages ≤ 2 model calls per user
   message; uncached input stays under 2% of input; no head compacts; `full`
   rotations lose nothing the user has to repeat.
+- A head started by `/new` or after an hour answers a question on a new
+  subject with no trace of the previous one: its seed is `MEMORY.md`, the open
+  items, the newest 2K of notes and the ledger, under ~5K tokens; `MEMORY.md`
+  is still under 4K chars after a week; a return after a week's silence still
+  sees the last notes, and a question about anything older is answered after
+  one `rg`/`pier search`, not from the seed.
 - After a day of use, `/status` names every problem in flight or waiting on
   the user, in their words, with a stage matching the transcript and no
   backlog; a stale stage is fixed in `DISPATCHER`, never in the view.
