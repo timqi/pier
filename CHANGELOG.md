@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.4 — 2026-10-23
+
+### Changed
+
+- Tasks: a clean goal is pending release, and stale open items are reported after a run finishes.
+- Sessions: a new head seeded by a full rotation carries memory without repeating the previous subject.
+- Web: follow session rotations without an extra paint, and continuous-chat commands no longer create optimistic turns.
+
 ## 0.5.3 — 2026-10-22
 
 ### Changed
