@@ -125,7 +125,7 @@ describe("the continuous conversation's chain", () => {
     expect(await r2.say("back")).toEqual({ sessionId: "m1", rotated: "idle" });
   });
 
-  it("carries the head's model, effort and last three exchanges into the next session, with the ledger since its start", async () => {
+  it("carries the head's model and effort into the next session with the ledger since its start, not its subject", async () => {
     const runs: LedgerRun[] = [
       { runId: "r1", name: "fix", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: 1, finishedAt: null },
       { runId: "r2", name: "look", state: "queued", targetSessionId: null, cwd: null, queuedAt: 2, finishedAt: null },
@@ -149,13 +149,12 @@ describe("the continuous conversation's chain", () => {
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
     // In flight and failed runs only: a succeeded or skipped one is `pier task runs`' to show.
-    expect(seed.text).toContain("`pier task runs`)\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\nr4 · broke · failed · session c4 · /wt4\nr5 · cut off · interrupted · session c5 · —\n\n");
+    expect(seed.text).toContain("`pier task runs`)\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\nr4 · broke · failed · session c4 · /wt4\nr5 · cut off · interrupted · session c5 · —");
     expect(seed.text).not.toContain("r3 ·");
     expect(seed.text).not.toContain("r6 ·");
-    expect(seed.text).toContain("user: question 2\n\nassistant: answer 2");
-    expect(seed.text).toContain("assistant: answer 4");
-    expect(seed.text).not.toContain("question 1");
-    expect(seed.text).not.toContain("callback");
+    // An idle head starts on a new subject: nothing of the previous one's exchanges.
+    expect(seed.text).not.toContain("last exchanges");
+    expect(seed.text).not.toContain("answer 4");
     expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "idle"], ["h1", "first"]]);
     // The message went to the new head, not the one it was typed against.
     expect(r.sessions.get("m1")!.prompts[0]).toContain("new day");
@@ -277,9 +276,13 @@ describe("the continuous conversation's chain", () => {
     await head.abort();
   });
 
-  it("rotates a head past the size ceiling, named full, carrying its last exchanges", async () => {
+  it("rotates a head past the size ceiling, named full, carrying its last three exchanges", async () => {
     const r = rig();
-    const history = [{ role: "user" as const, text: "the plan", at: r.clock.now - 60_000 }, { role: "assistant" as const, text: "agreed" }];
+    const history = [1, 2, 3, 4].flatMap((i) => [
+      { role: "user" as const, text: i === 4 ? "the plan" : `question ${String(i)}`, at: r.clock.now - 60_000 },
+      { role: "system" as const, text: `callback ${String(i)}`, origin: { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: null } },
+      { role: "assistant" as const, text: i === 4 ? "agreed" : `answer ${String(i)}` },
+    ]);
     r.existing("h1", r.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL, contextWindow: 400_000, compactAt: 100_000 } });
     expect(await r.say("at the ceiling")).toEqual({ sessionId: "h1" });
 
@@ -289,7 +292,10 @@ describe("the continuous conversation's chain", () => {
     const seed = r2.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "full", previousSessionId: "h1" });
     expect(seed.text).toContain("the previous one reached 60K tokens");
-    expect(seed.text).toContain("## The previous session's last exchanges\n\nuser: the plan\n\nassistant: agreed");
+    expect(seed.text).toContain("## The previous session's last exchanges\n\nuser: question 2\n\nassistant: answer 2");
+    expect(seed.text).toContain("user: the plan\n\nassistant: agreed");
+    expect(seed.text).not.toContain("question 1");
+    expect(seed.text).not.toContain("callback");
     expect(r2.sessions.get("m1")!.prompts[0]).toContain("past it");
   });
 
@@ -354,7 +360,7 @@ describe("the continuous conversation's chain", () => {
     await r.say("hi");
     const text = r.sessions.get("m1")!.systemInputs[0]!.text;
     const memory = text.slice(0, text.indexOf("\n\n## Open"));
-    expect(memory.length).toBeLessThan(13_000);
+    expect(memory.length).toBeLessThan(4_200);
     expect(memory.endsWith("…")).toBe(true);
     expect(text).toContain("`pier task runs`)\n\nr300 · n · failed");
     expect(text).not.toContain("r1 · n");
@@ -368,10 +374,33 @@ describe("the continuous conversation's chain", () => {
     await r.say("hi");
     const text = r.sessions.get("m1")!.systemInputs[0]!.text;
     const notes = text.slice(text.indexOf("## memory/"));
-    expect(notes.length).toBeLessThan(6_100);
-    expect(notes).toMatch(/^## memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 219 lines omitted, the rest in memory\/\1\.md\n- entry 220 x/);
+    expect(notes.length).toBeLessThan(2_100);
+    expect(notes).toMatch(/^## memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 340 lines omitted, the rest in memory\/\1\.md\n- entry 341 x/);
     expect(notes).toContain("- entry 400 ");
     expect(notes).not.toContain("- entry 1 ");
+  });
+
+  it("seeds the newest notes across days until the budget is full, oldest first, each under its own day", async () => {
+    const r = rig();
+    mkdirSync(join(r.home, "memory"), { recursive: true });
+    const at = (daysAgo: number) => day(new Date(r.clock.now - daysAgo * 86_400_000));
+    const line = (n: number) => `- ${String(n)} ${"x".repeat(96)}`;
+    // A week's silence: the newest day is 7 days back; 8 days back is cut; 9 is never read.
+    writeFileSync(join(r.home, "memory", `${at(7)}.md`), [line(1), line(2)].join("\n"));
+    writeFileSync(join(r.home, "memory", `${at(8)}.md`), Array.from({ length: 40 }, (_, i) => line(100 + i)).join("\n"));
+    writeFileSync(join(r.home, "memory", `${at(9)}.md`), line(900));
+    writeFileSync(join(r.home, "memory", "notes.txt"), line(999));
+    await r.say("hi");
+    const text = r.sessions.get("m1")!.systemInputs[0]!.text;
+    const notes = text.slice(text.indexOf("## memory/"), text.indexOf("\n\n## The previous") > 0 ? text.indexOf("\n\n## The previous") : undefined);
+    expect(notes.startsWith(`## memory/${at(8)}.md\n\n… `)).toBe(true);
+    expect(notes).toContain(`, the rest in memory/${at(8)}.md\n`);
+    expect(notes).toContain(`\n\n## memory/${at(7)}.md\n\n${line(1)}\n${line(2)}`);
+    expect(notes).toContain(line(139));
+    expect(notes).not.toContain(line(100));
+    expect(notes).not.toContain("900");
+    expect(notes).not.toContain("999");
+    expect(notes.length).toBeLessThan(2_200);
   });
 });
 
