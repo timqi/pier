@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 — 2026-10-26
+
+### Changed
+
+- Native: a notification is titled by its instance, with its accent's dot and icon; its icon cache, sound and preset names follow their sources.
+
 ## 0.5.4 — 2026-10-23
 
 ### Changed
