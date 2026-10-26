@@ -76,8 +76,8 @@ fn other_items_reload_nothing_nor_read_the_active_tab() {
 #[test]
 fn an_accent_in_either_theme_picks_its_preset() {
     let pairs = [
-        ("#0066df", "pier"),
-        ("#499fff", "pier"),
+        ("#0066df", "indigo"),
+        ("#499fff", "indigo"),
         ("#037f75", "teal"),
         ("#03b7a8", "teal"),
         ("#028355", "emerald"),
@@ -89,6 +89,6 @@ fn an_accent_in_either_theme_picks_its_preset() {
     for (hex, preset) in pairs {
         assert_eq!(accent_of(Some(hex)).2, preset, "{hex}");
     }
-    assert_eq!(accent_of(None).2, "pier");
-    assert_eq!(accent_of(Some("#808080")).2, "pier");
+    assert_eq!(accent_of(None).2, "indigo");
+    assert_eq!(accent_of(Some("#808080")).2, "indigo");
 }

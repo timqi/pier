@@ -705,24 +705,32 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     #[cfg(target_os = "macos")]
     let shown = {
         let (mut note, instance, handle) = (notify_rust::Notification::new(), webview.label().to_owned(), app.clone());
-        note.summary(&headline).subtitle(subtitle.as_deref().unwrap_or("")).body(&body);
+        note.summary(&headline).body(&body);
+        if let Some(subtitle) = &subtitle {
+            note.subtitle(subtitle);
+        }
         if let Some(icon) = &icon {
             note.image_path(&icon.to_string_lossy());
         }
         if ring {
             note.sound_name(SOUND);
         }
-        // The plugin hands no contentImage or subtitle on: its own wait, with both.
+        // Sent through notify-rust, as the plugin does, since the plugin drops the subtitle and
+        // contentImage; the click wait is the plugin's own. Only a shown one counts as having rung.
         std::thread::Builder::new()
             .name("notification".into())
             .spawn(move || match note.show() {
-                Ok(shown) => shown
-                    .wait_for_response(|r: &notify_rust::NotificationResponse| {
+                Ok(shown) => {
+                    if ring {
+                        handle.state::<Shell>().lock().sounded.insert(id, now);
+                    }
+                    let tapped = |r: &notify_rust::NotificationResponse| {
                         if matches!(r, notify_rust::NotificationResponse::Default) {
                             on_tap(&handle, &instance, &url);
                         }
-                    })
-                    .unwrap_or_else(|e| report(&handle, format!("notification: {e}"))),
+                    };
+                    shown.wait_for_response(tapped).unwrap_or_else(|e| report(&handle, format!("notification: {e}")))
+                }
                 Err(e) => report(&handle, format!("notification: {e}")),
             })
             .map(drop)
@@ -732,7 +740,7 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     let shown = {
         drop(subtitle); // freedesktop has no subtitle line; the body carries the topic
         let notifications = app.notification();
-        notifications
+        let shown = notifications
             .remove_active(vec![id])
             .and_then(|()| {
                 let builder = notifications.builder().id(id);
@@ -740,18 +748,20 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
                 let builder = icon.map_or(builder, |icon| builder.icon(icon.to_string_lossy()));
                 builder.title(headline).body(body).extra("instance", webview.label()).extra("url", url).show()
             })
-            .map_err(|e| format!("notification: {e}"))
+            .map_err(|e| format!("notification: {e}"));
+        if ring && shown.is_ok() {
+            shell.lock().sounded.insert(id, now);
+        }
+        shown
     };
-    if ring && shown.is_ok() {
-        shell.lock().sounded.insert(id, now);
-    }
     surfaced(&app, shown)
 }
 
-/// Each accent preset's sRGB hue, the coloured dot nearest it and its icon (scripts/render-icons.ts).
+/// Each accent preset's hue, of its hex in src/settings.ts `ACCENTS`, the coloured dot nearest it
+/// and its icon (scripts/render-icons.ts); the first is `DEFAULT_ACCENT`.
 type Accent = (f32, &'static str, &'static str, &'static [u8]);
 const ACCENTS: [Accent; 6] = [
-    (213.0, "🔵", "pier", include_bytes!("../../../src/web/ui/public/icon-192.png")),
+    (213.0, "🔵", "indigo", include_bytes!("../../../src/web/ui/public/icon-192.png")),
     (175.0, "🟢", "teal", include_bytes!("../../../src/web/ui/public/icon-192-teal.png")),
     (159.0, "🟢", "emerald", include_bytes!("../../../src/web/ui/public/icon-192-emerald.png")),
     (38.0, "🟠", "amber", include_bytes!("../../../src/web/ui/public/icon-192-amber.png")),
@@ -773,10 +783,11 @@ fn accent_of(hex: Option<&str>) -> &'static Accent {
     ACCENTS.iter().min_by(|a, b| apart(a).total_cmp(&apart(b))).unwrap_or(&ACCENTS[0])
 }
 
-/// The notification loads its image from a file: the preset's icon, written once to the cache.
+/// The notification loads its image from a file: the preset's icon, rewritten in the cache
+/// whenever it is not this build's bytes, so an older or truncated copy never shows.
 fn accent_icon(app: &AppHandle, accent: &Accent) -> Res<PathBuf> {
     let path = app.path().app_cache_dir().map_err(text)?.join(format!("notify-{}.png", accent.2));
-    if !path.exists() {
+    if fs::read(&path).ok().as_deref() != Some(accent.3) {
         fs::create_dir_all(path.parent().unwrap_or(&path)).and_then(|()| fs::write(&path, accent.3)).map_err(text)?;
     }
     Ok(path)
