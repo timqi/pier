@@ -315,10 +315,10 @@ export interface OpenRun extends LedgerRun {
  *  `running` while a run's goal is live, a run is queued or running, its session
  *  streams or a lead's workers are queued or running; `waiting on you` while a
  *  goal ended `decision` or `cap`, its stage says so
- *  or its session's design is not final and its newest run succeeded; `pending release` when every run succeeded
+ *  or its session's design is not final and its newest run succeeded; `wrapping up` when every run succeeded
  *  and carries no goal but one ended `done`; else `stopped` — a run failed, was cancelled, interrupted,
  *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
-export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
+export type OpenStatus = "running" | "waiting on you" | "wrapping up" | "stopped";
 
 /** `runs`: each named run's session, by its newest run. `waitsIn`: the session
  *  a `waiting on you` item is answered in, derived beside the status; absent

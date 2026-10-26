@@ -51,7 +51,7 @@ export function openStatus(
   if (design?.targetSessionId) return { status: "waiting on you", waitsIn: design.targetSessionId };
   // A done goal has landed whatever its root run's state: the review ran in another session, and the head merges a clean one itself.
   const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" : phaseOf(r.state) === "succeeded");
-  return { status: runs.every(landed) ? "pending release" : "stopped" };
+  return { status: runs.every(landed) ? "wrapping up" : "stopped" };
 }
 
 /** The store reads the list is joined against. */

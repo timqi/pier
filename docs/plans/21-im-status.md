@@ -30,7 +30,7 @@ the item is done:
   `running` → 👀 (Slack `eyes`, Lark `OnIt`); `waiting on you` → ❓ (Slack
   `question`, Lark `WHAT`); the problem gone from the list (its `<done>`, or
   any other removal) → ✅ (Slack `white_check_mark`, Lark `DONE`) and the
-  receipt forgotten; `stopped` and `pending release` → unchanged (the head's
+  receipt forgotten; `stopped` and `wrapping up` → unchanged (the head's
   next marker settles them). A change swaps the reaction (remove the old, add
   the new); no change → no call.
 - **Storage.** A new table `item_receipts(platform, chat_id, message_id,

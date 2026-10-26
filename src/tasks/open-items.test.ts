@@ -145,15 +145,15 @@ describe("the open items", () => {
     r.item("long lead", "merged", ["s0"], 1);
     const [item] = r.list().items;
     expect(item!.runs.map((x) => [x.runId, x.state])).toEqual([["s249", "succeeded"]]);
-    expect(item!.status).toBe("pending release");
+    expect(item!.status).toBe("wrapping up");
   });
 
   // A listing's window is not the work's end: age alone never stops an item.
-  it("reads an item whose run succeeded 3 days ago as pending release", () => {
+  it("reads an item whose run succeeded 3 days ago as wrapping up", () => {
     const r = rig();
     r.save(saved("old", { targetSessionId: "s-old", state: "succeeded", queuedAt: r.now - 3 * DAY, finishedAt: r.now - 3 * DAY }));
     r.item("shipped", "merged, restart pending", ["old"], 1);
-    expect(r.list().items.map((i) => [i.runs[0]!.runId, i.status])).toEqual([["old", "pending release"]]);
+    expect(r.list().items.map((i) => [i.runs[0]!.runId, i.status])).toEqual([["old", "wrapping up"]]);
   });
 
   it("reads a token that names no run as not in the ledger, and so stopped", () => {
@@ -165,11 +165,11 @@ describe("the open items", () => {
   });
 
   // The status is the runs' and sessions', whatever the stage text says.
-  it("reads an item running while its session streams, though its run has finished, and pending release once idle", () => {
+  it("reads an item running while its session streams, though its run has finished, and wrapping up once idle", () => {
     const r = rig();
     r.save(saved("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: r.now - MIN }));
     r.item("fix", "lead building (running)", ["r1"], 1);
-    expect(r.list().items[0]!.status).toBe("pending release");
+    expect(r.list().items[0]!.status).toBe("wrapping up");
     const lead = fakeSession("lead1");
     r.router.attach({ channelId: "task", conversationId: "lead1" }, lead);
     lead.setState("streaming");
@@ -183,10 +183,10 @@ describe("the open items", () => {
     const quiet = { streaming: none, designOpen: none };
     const status = (runs: OpenRun[], stage = "", session = quiet) => openStatus({ problem: "p", stage, runs }, session).status;
     expect(Object.fromEntries([...TASK_RUN_STATES, NOT_IN_LEDGER].map((s) => [s, status([at(s)])]))).toEqual({
-      queued: "running", running: "running", succeeded: "pending release", failed: "stopped",
+      queued: "running", running: "running", succeeded: "wrapping up", failed: "stopped",
       cancelled: "stopped", interrupted: "stopped", skipped: "stopped", [NOT_IN_LEDGER]: "stopped",
     });
-    expect(status([])).toBe("pending release");
+    expect(status([])).toBe("wrapping up");
     expect(status([at("succeeded"), at("failed")])).toBe("stopped");
     // The stage's marker, a design not final: the only two ways an item waits on the user.
     expect(status([at("succeeded")], "waiting on you: 手动重启还是派 worker")).toBe("waiting on you");
@@ -201,7 +201,7 @@ describe("the open items", () => {
     expect(status([at("succeeded", { workers: workers({ running: 3 }) })], "lead 实现中")).toBe("running");
     expect(status([at("succeeded", { workers: workers({ queued: 1 }) })])).toBe("running");
     // A finished worker's outcome is its lead's to read: the lead's run decides.
-    expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("pending release");
+    expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("wrapping up");
   });
 
   // The goal, not the stage or the root run's state, says where a goal's item stands.
@@ -234,10 +234,10 @@ describe("the open items", () => {
       ["goal live", "running", undefined],
       ["goal decision", "waiting on you", undefined],
       ["goal cap", "waiting on you", undefined],
-      ["goal done", "pending release", undefined],
+      ["goal done", "wrapping up", undefined],
       ["goal failed", "stopped", undefined],
-      ["goal merged", "pending release", undefined],
-      ["goal legacy", "pending release", undefined],
+      ["goal merged", "wrapping up", undefined],
+      ["goal legacy", "wrapping up", undefined],
     ]);
     const status = openItemsStatus(open, now);
     // An ended goal's ask is the waiting item's second line, not repeated below it.
@@ -340,7 +340,7 @@ describe("the open items", () => {
     expect(open.items.map((i) => [i.problem, i.status])).toEqual([
       ["回调后回复语言跑偏", "waiting on you"],
       ["重启卡住原因", "running"],
-      ["已合并", "pending release"],
+      ["已合并", "wrapping up"],
     ]);
     const text = openItemsStatus(open, now).text;
     expect(text.indexOf("Waiting on you · 1")).toBeLessThan(text.indexOf("In progress · 1"));

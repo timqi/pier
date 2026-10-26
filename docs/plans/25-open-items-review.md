@@ -48,7 +48,7 @@
 | 等待，goal 结束且 stage 无问题 | `Needs you · merge?`（review clean）/ `Needs you · decision: <reason>` / `Needs you · review cap reached · findings remain`；goal 文案从第三行移到第二行 | 其余元信息 |
 | 等待，答在设计会话（`waitsIn`） | `Needs you in the design session` + ` · <stage>`（有则加） | 时间 |
 | running / queued | stage（running 无标签，queued 为 `Queued`） | `elapsed …`、goal、workers |
-| pending release / stopped | `Pending release · <stage>` / `Stopped · <stage>` | `succeeded 2h ago` / `failed 5h ago` |
+| wrapping up / stopped | `Wrapping up · <stage>` / `Stopped · <stage>` | `succeeded 2h ago` / `failed 5h ago` |
 
 - 删除 `Finalize design` 回退：定稿与否由 lead 在其会话里问，面板只说去哪。
 - 分组卡片与 IM 的 Waiting on you 组内仍省略 `Needs you` 前缀，但保留 `in the design session`。

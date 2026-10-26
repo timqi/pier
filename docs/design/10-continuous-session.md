@@ -203,7 +203,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | --- | --- |
   | `running` | a run's goal live; else a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
   | `waiting on you` | a run's goal ended `decision` or `cap`; else the stage says `waiting on you`, or a run's session is a design lead not reported final whose newest run `succeeded` |
-  | `pending release` | every run `succeeded` or carries a goal ended `done` (clean, the head merging unasked) |
+  | `wrapping up` | every run `succeeded` or carries a goal ended `done` (clean, the head merging unasked) |
   | `stopped` | a goal ended `failed`; else a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
 
 - A `waiting on you` item's `waitsIn` is the child session the answer is given
@@ -224,14 +224,14 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | waiting on an ended goal, stage without `waiting on you` | `Needs you · <wait> · decision: <reason>`, `… · review cap reached · findings remain`; the goal wording leaves the metadata |
   | waiting, answered in the design session (`waitsIn`) | `Needs you in the design session · <wait>`, then ` · <stage>` when there is one |
   | running / queued | the stage; queued as `Queued · <stage>` |
-  | pending release / stopped | `Pending release · <stage>` / `Stopped · <stage>` |
+  | wrapping up / stopped | `Wrapping up · <stage>` / `Stopped · <stage>` |
 
   Grouped cards and IM's `Waiting on you` group omit `Needs you`, keeping `in the design session`.
 - A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, omitted from every overview while its goal is live; a waiting item whose newest run ended reads none, its `<wait>` (`2h`, the age since that run ended) on the second line instead; multiple runs read `N runs · <newest run's time>`.
 - Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker metadata names only running, failed and interrupted workers.
 - `openItemsStatus` returns compact `text`, a `seed` and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
 - The seed is one line per item, the full problem kept as the `<done>` key: `- <problem> — <stage> (run <id> · session <id>, run …) · <status>`; an empty stage drops ` — <stage>`, a run with no session drops `· session`.
-- Compact text and command cards group waiting rows under `Waiting on you`, running/queued under `In progress`, and pending release/stopped under `Other open`, with counts and no empty groups; IM separates title/status, stage and metadata by lines, with no non-clickable run IDs.
+- Compact text and command cards group waiting rows under `Waiting on you`, running/queued under `In progress`, and wrapping up/stopped under `Other open`, with counts and no empty groups; IM separates title/status, stage and metadata by lines, with no non-clickable run IDs.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
   text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, kept out of the model's context (`agent/pi.ts`), its origin

@@ -21,7 +21,7 @@ const STATUS: Record<OpenItemPresentation["status"], { label: string; tone: stri
   "waiting on you": { label: "waiting on you", tone: "text-amber-700", glyph: CircleAlert },
   running: { label: "in progress", tone: "text-sky-700", glyph: null },
   queued: { label: "queued", tone: "text-neutral-500", glyph: Clock },
-  "pending release": { label: "pending release", tone: "text-green-700", glyph: Check },
+  "wrapping up": { label: "wrapping up", tone: "text-green-700", glyph: Check },
   stopped: { label: "failed", tone: "text-red-600", glyph: X },
 };
 

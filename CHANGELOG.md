@@ -137,7 +137,7 @@
 ### Fixed
 
 - An open item's status reads the run store, not `pier task runs`' 24h window: a succeeded-but-unreleased item no longer turns `stopped` by age, and only `waiting on you` counts as needing the user.
-- The status chip opens the panel whenever it has rows; a panel of only `pending release`, `stopped` or queued rows reads `K open`.
+- The status chip opens the panel whenever it has rows; a panel of only `wrapping up`, `stopped` or queued rows reads `K open`.
 - A clipped run result keeps its head and its tail, so the verified final state and `Needs your decision` survive the cut; the omission line names `pier task recover` for the full text.
 - Requests that arrive before the boot's vault unlock wait for it instead of failing with `secrets locked`.
 - A lead's milestone and every restart resume carry the user's `lang=` stamp too.
@@ -174,7 +174,7 @@
 
 - `pier search` cuts each hit's title to 30 characters, and its snippets (the palette's too) from the message with `<open>`, `<done>`, `<silent>` and the next-step buttons taken off, centered on the match.
 - The head's seed cuts each part to its budget: `MEMORY.md` 12K chars, each day's notes 6K, the ledger 4K, the last exchanges 4K; notes and exchanges keep their end, headed by how many lines went and where they still are.
-- Web status panel: one row per session, Waiting on you over In progress, each with a server-derived status tag (`waiting on you`, `pending release`, `running`, `queued`); `/status` groups its lines the same way. `GET /api/continuous/open` answers `{items: [{problem, stage, runs, status}], unlisted}`; design leads awaiting Finalize are items, not a `designs` list.
+- Web status panel: one row per session, Waiting on you over In progress, each with a server-derived status tag (`waiting on you`, `wrapping up`, `running`, `queued`); `/status` groups its lines the same way. `GET /api/continuous/open` answers `{items: [{problem, stage, runs, status}], unlisted}`; design leads awaiting Finalize are items, not a `designs` list.
 
 ### Fixed
 

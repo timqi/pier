@@ -618,7 +618,7 @@ describe("the continuous conversation", () => {
     await h.drawer.openItem({ problem: "running", status: "running", runs: [{ runId: "b", targetSessionId: "newer" }, { runId: "a", targetSessionId: "older" }] });
     expect(h.header.currentId()).toBe("newer");
     vi.mocked(scrollBottom).mockClear();
-    await h.drawer.openItem({ problem: "no run", status: "pending release", runs: [] });
+    await h.drawer.openItem({ problem: "no run", status: "wrapping up", runs: [] });
     expect(h.header.continuousOpen()).toBe(true);
     expect(scrollBottom).toHaveBeenLastCalledWith(true);
     await h.drawer.openItem({ problem: "free", status: "waiting on you", direct: true, runs: [{ runId: "s", targetSessionId: "own" }] });

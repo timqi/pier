@@ -78,7 +78,7 @@ elapsed <1m
 
 - 运行中沿用主题色点和运行指示，不另加 `running` 徽标；辅助技术仍可读到完整状态，关闭动画后也能区分状态。
 - 平列表的等待项在第二行以 amber 文字显示 `Needs you · <问题或阶段>`；有 Waiting on you 组标题的卡片/IM 不逐项重复该前缀。
-- queued、pending release、stopped 同样是第二行的简短状态文字，分别为 `Queued`、`Pending release`、`Stopped`，不占独立徽标列；名称与后端状态映射由共享函数提供。
+- queued、wrapping up、stopped 同样是第二行的简短状态文字，分别为 `Queued`、`Wrapping up`、`Stopped`，不占独立徽标列；名称与后端状态映射由共享函数提供。
 - 主题色只标识事项，不能表达成功或失败；错误原因有明确文字，不只换颜色。
 - 空阶段不保留空行；不补 `working` 或 `not on the list` 这类无增量信息。
 - 较长标题的完整内容放在详情内；原话与短标题相同时只展示一次。
@@ -100,7 +100,7 @@ elapsed <1m
 
 - 所有表面都把 `waitsOnYou` 判定为真的项放在最前；状态面板、popover、sheet、sidebar 沿用 main 的一张平列表和头部总数，不增加组标题。
 - `/status` 卡片与 IM 保留 `Waiting on you`、`In progress` 文本组；In progress 包含 running 及未跟踪的 queued run。
-- 卡片与 IM 存在 pending release 或 stopped 项时显示 `Other open`，不把它们标成正在执行；空组隐藏。
+- 卡片与 IM 存在 wrapping up 或 stopped 项时显示 `Other open`，不把它们标成正在执行；空组隐藏。
 - 卡片与 IM 的组标题带行数；面板等待项之后沿用现有行顺序，各表面不按计时每分钟重排。
 - 状态面板中未被事项持有的独立 session 继续按现有 mark 映射参与列表；头部总数包含这些行，Web 与 IM 的差异来自既有列表范围。
 - 运行状态来自 `openStatus`；stage 中可能滞后的 `waiting on you` 不覆盖仍在运行的 run tree。
@@ -213,7 +213,7 @@ sidebar 已合入 main `fe047e0`；本次按用户反馈调整容器及行内层
 | 第二次 run 结束，stage 为 waiting on you | true | waiting / 无 | showTopic：错误目标 |
 | 第二次 run 正在运行 | true | running / 无 | showTopic：错误目标 |
 | run 已结束，但直接对话正在 streaming | true | running / 无 | showTopic：错误目标 |
-| 设计已定稿 | false | pending release / 无 | showTopic：符合既有规则 |
+| 设计已定稿 | false | wrapping up / 无 | showTopic：符合既有规则 |
 
 六个对当前行为的断言均通过，三种行为违反本设计要求；这不是修复通过的测试，也未核验用户线上那次点击的实时记录。
 
@@ -309,7 +309,7 @@ sidebar 已合入 main `fe047e0`；本次按用户反馈调整容器及行内层
 | 设计未定稿，续跑/直接对话/等待 stage，主会话 topic 已存在 | 点击事项只进设计会话，不先跳主会话；running 与 needs you 计数不变 |
 | 设计在任意后续 run 或直接会话中定稿 | 实时 OpenItems 清除设计导航字段；下次点击恢复常规规则，当前阅读位置不自动改变 |
 | goal 工作、审查、修复、clean、cap、decision、failed | 轮次与现有 goalText 语义一致；根 run 成功不误报事项完成；问题及失败原因可见 |
-| running、queued、waiting、pending release、stopped | 卡片/IM 分组正确；面板保持平列表；短状态文字与 needs you 计数继续由现有状态规则决定 |
+| running、queued、waiting、wrapping up、stopped | 卡片/IM 分组正确；面板保持平列表；短状态文字与 needs you 计数继续由现有状态规则决定 |
 | 新旧 `/status` 历史、重新加载与 SSE 重连 | 快照保持原时刻；旧卡文本可读；run 链接未丢；异常快照有可见降级和日志 |
 | IM 两平台 | 相同输入得到相同语义顺序；转义、长文本与换行正确；去 ID 不损坏标题；状态消息刷新/repost/空列表语义未改 |
 | 窄屏 375px、popover、宽屏 1280px+ | 无横向溢出；17.5rem sidebar 可读；触摸、键盘、导航与展开均可操作 |

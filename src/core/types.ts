@@ -198,7 +198,7 @@ export type SystemInputOrigin = {
 /** A status row's navigation facts; a design entrance is independent of waiting. */
 export interface OpenItemTarget {
   problem: string;
-  status: "running" | "queued" | "waiting on you" | "pending release" | "stopped";
+  status: "running" | "queued" | "waiting on you" | "wrapping up" | "stopped";
   designSessionId?: string;
   waitsIn?: string;
   /** Newest first, by queue time: the first with a session is where the item last happened. */
