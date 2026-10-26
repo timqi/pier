@@ -587,6 +587,9 @@ main {
   padding: 0.5625rem 0.75rem;
   border-radius: 1.375rem;
   overflow-wrap: anywhere;
+  /* WebKit fills a selection running past a positioned bubble down to its
+     border edge, through the bottom padding; a transformed box is never gap-filled. */
+  translate: 0;
 }
 /* Margins collapse: a continuation sums to the tight step, not the turn gap. */
 #turns > [data-grouped] { margin-top: calc(var(--tight-gap) - var(--turn-gap)); }
