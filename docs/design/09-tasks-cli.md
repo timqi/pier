@@ -23,7 +23,7 @@ stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
 `<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
 a resume `resumed: …`, one in a new session `resumed in a new session (<reason>): …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
-argv errors are the usage line, exit 2, before the socket is touched.
+argv errors are one `task:` line too, naming the flag to drop or the value to resend with, exit 2, before the socket is touched; the usage is `--help`'s.
 `--prompt -` reads stdin; nothing else reads it. An empty `--prompt` (stdin
 or typed) or `--name`, and a `--timeout` outside 1–86400, are argv errors.
 

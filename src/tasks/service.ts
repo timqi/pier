@@ -542,7 +542,7 @@ export class TaskService {
     // Re-checked with the run's insert: a concurrent `--run` may have replaced the session while the handoff was planned.
     const run = this.store.transact(() => {
       assertNotReplaced(this.store, prior.targetSessionId);
-      const ended = goal ? this.goalAgain(prior) : undefined;
+      const ended = goal ? this.goalAgain(prior, goal.cap) : undefined;
       const run = this.prepareResume(prior, message, provenance, handoff);
       if (goal) this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended!.reviewModel });
       return run;
@@ -552,14 +552,13 @@ export class TaskService {
   }
 
   /** The user's answer to an ended goal goes back through the loop, never around it. */
-  private goalAgain(prior: TaskRun): Goal {
+  private goalAgain(prior: TaskRun, cap: number): Goal {
     const goal = prior.goalId ? this.store.getGoal(prior.goalId) : undefined;
-    if (goal?.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one${goal ? `; its root is run ${goal.rootRunId}` : ""}`);
+    if (!goal) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is in no goal: drop --rounds to continue it`);
+    if (goal.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one: resend as --run ${goal.rootRunId} --rounds ${cap}`);
     if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
     const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
-    if (latest && latest.id !== goal.id) {
-      throw new Error(`run ${prior.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
-    }
+    if (latest && latest.id !== goal.id) throw new Error(`run ${prior.id}'s session is in a later goal: resend as --run ${latest.rootRunId} --rounds ${cap}`);
     return goal;
   }
 

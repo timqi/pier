@@ -192,7 +192,7 @@ describe("pier task", () => {
     const { run, posted, err, out } = rig();
     const bad: [string[], unknown][] = [
       [[], "usage"],
-      [["frobnicate"], 'task: unknown command "frobnicate"'],
+      [["frobnicate"], 'task: unknown command "frobnicate"; commands: run, save, list, pause, resume, archive, runs, stats, cancel, recover'],
       [["list", "--run", "r1"], "task: --run is not an option of list"],
       [["pause"], "task: pause needs --task-id"],
       [["stats", "--days", "0"], "task: --days must be a positive whole number"],
@@ -217,11 +217,13 @@ describe("pier task", () => {
       [["run", "--bash", "x", "--model", "gpt"], "task: --model/--thinking/--role/--design apply to a prompt, not --bash"],
       [["run", "--session", "s1", "--bash", "x"], "task: --session continues an agent session; --bash is a command, not a turn"],
       [["run", "--task-id", "t1", "--bash", "x"], "task: --bash does not apply to a saved definition (--task-id)"],
-      [["run", "--run", "r1", "--bash", "x"], "task: --bash does not apply to an existing run (--run)"],
+      [["run", "--run", "r1", "--bash", "x"], "task: --bash does not apply to --run r1: drop it and resend"],
       [["run", "--task-id", "t1", "--prompt", "x"], "task: --prompt does not apply to a saved definition (--task-id)"],
-      [["run", "--session", "s1", "--prompt", "x", "--cwd", "/x"], "task: --cwd applies to a fresh session, not --session"],
+      [["run", "--session", "s1", "--prompt", "x", "--cwd", "/x"], "task: --cwd does not apply to --session s1, which keeps its directory: drop it, or drop --session for a fresh run"],
+      [["run", "--session", "s1", "--prompt", "x", "--model", "cheap"], "task: --model does not apply to --session s1, which keeps its model: drop it, or drop --session for a fresh run"],
+      [["run", "--member", "--session", "s1", "--prompt", "x", "--member", "--session", "s2", "--prompt", "y", "--thinking", "high"], "task: --thinking does not apply to --session s2, which keeps its model: drop it, or drop --session for a fresh run"],
       [["run", "--run", "r1"], "task: --run needs --prompt"],
-      [["run", "--run", "r1", "--prompt", "x", "--cwd", "/x"], "task: --cwd does not apply to an existing run (--run)"],
+      [["run", "--run", "r1", "--prompt", "x", "--cwd", "/x"], "task: --cwd does not apply to --run r1, which keeps its directory: drop it and resend"],
       [["run", "--run", "r1", "--prompt", "x", "--member", "--prompt", "y"], "task: --run addresses one existing run; --member starts new ones"],
       [["run", "--prompt", "x", "--after"], "task: --after applies to --run only"],
       [["run", "--prompt", "x", "--name", "n", "--fresh"], "task: --fresh applies to --run only"],
@@ -233,7 +235,8 @@ describe("pier task", () => {
       [["run", "--prompt", "x"], "task: a new run needs --name: the session's title, a few words in the user's language"],
       [["run", "--member", "--prompt", "x", "--name", "a", "--member", "--prompt", "y"], "task: a new run needs --name: the session's title, a few words in the user's language"],
       [["run", "--prompt", "x", "--name", "n", "--review-model", "hardest"], "task: --review-model applies beside --rounds or --worktree"],
-      [["run", "--prompt", "x", "--name", "n", "--rounds", "two"], "task: --rounds must be a whole number"],
+      [["run", "--prompt", "x", "--name", "n", "--rounds", "two"], "task: --rounds must be a whole number from 0 to 9"],
+      [["run", "--prompt", "x", "--name", "n", "--rounds", "10"], "task: --rounds must be a whole number from 0 to 9"],
       [["run", "--bash", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --bash"],
       [["run", "--task-id", "t1", "--rounds", "2"], "task: --rounds applies to a fresh --prompt run, not beside --task-id"],
       [["run", "--session", "s1", "--prompt", "x", "--worktree", "b"], "task: --worktree applies to a fresh --prompt run, not beside --session"],
@@ -241,7 +244,9 @@ describe("pier task", () => {
       [["run", "--prompt", "x", "--name", "n", "--role", "lead", "--worktree", "b", "--review-model", "hardest"], "task: --review-model applies to a worker, not beside --role"],
       [["run", "--run", "r1", "--prompt", "x", "--rounds", "2", "--after"], "task: --rounds resumes an ended goal's root; --after queues behind a running turn"],
       [["run", "--run", "r1", "--prompt", "x", "--review-model", "hardest"], "task: --review-model beside --run applies with --rounds"],
-      [["run", "--run", "r1", "--prompt", "x", "--worktree", "b"], "task: --worktree does not apply to an existing run (--run)"],
+      [["run", "--run", "r1", "--prompt", "x", "--worktree", "b"], "task: --worktree does not apply to --run r1: drop it and resend"],
+      [["run", "--run", "r1", "--prompt", "x", "--name", "n"], "task: --name does not apply to --run r1, which keeps its name: drop it and resend"],
+      [["run", "--run", "r1", "--prompt", "x", "--model", "cheap"], "task: --model does not apply to --run r1, which keeps its model: drop it and resend; another model is a new run, --cwd <its worktree>"],
       [["save", "--name", "n"], "task: save takes exactly one of --prompt or --bash"],
       [["save", "--name", "n", "--prompt", "x", "--bash", "y"], "task: save takes exactly one of --prompt or --bash"],
       [["save", "--name", "n", "--prompt", "x", "--cron", "* * * * *"], "task: --cron and --tz go together"],
@@ -252,10 +257,9 @@ describe("pier task", () => {
     ];
     for (const [argv] of bad) expect(await run(...argv), argv.join(" ")).toBe(2);
     expect(posted).toEqual([]);
-    // Bare `pier task` is the usage on stdout; every other refusal is a task: line plus the command's usage on stderr.
+    // Bare `pier task` is the usage on stdout; every other refusal is one task: line on stderr, so a `tail` keeps it.
     expect(out[0]).toContain("pier task <command>");
-    expect(err.map((line) => line.split("\n")[0])).toEqual(bad.slice(1).map(([, first]) => first));
-    expect(err[1]).toContain("\npier task list");
+    expect(err).toEqual(bad.slice(1).map(([, line]) => line));
     expect(await run("--help")).toBe(0);
     expect(await run("save", "-h")).toBe(0);
     expect(out.at(-1)).toContain("pier task save [--task-id <id>] --name <text> (--prompt <text|-> --model <tier|model> | --bash <script>)");

@@ -353,7 +353,7 @@ export class TaskDefinitions {
       // Validation never mutates: a session is created explicitly and then reused.
       throw new Error('agent session policy required, e.g. {"mode":"fresh","cwd":"/abs/path"} or {"mode":"reuse","sessionId":"..."}');
     }
-    if (session.mode === "reuse" && launch) throw new Error("launch policy only applies to fresh sessions");
+    if (session.mode === "reuse" && launch) throw new Error(`launch policy (--model, --thinking, --role) only applies to a fresh session; session ${session.sessionId} keeps its own: drop it`);
     return { type: "agent", session, prompt, ...(launch ? { launch } : {}) };
   }
 

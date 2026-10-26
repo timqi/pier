@@ -492,9 +492,9 @@ describe("a goal", () => {
     expect(sessions.get("s3")!.systemInputs[0]!.text).toMatch(/\n\nbuild it\n\nSteering from the supervisor, resuming the work:\n\nkeep it\n\nFor each issue/);
     expect(goalOf(root)).toMatchObject({ id: first.goal.id, outcome: "decision" });
     // The earlier root is no longer the session's goal; a run no goal roots, none at all.
-    await expect(answer(root.id)).rejects.toThrow(`run ${root.id}'s session is in a later goal, rooted at run ${resumed.id}; --run that one`);
+    await expect(answer(root.id)).rejects.toThrow(`run ${root.id}'s session is in a later goal: resend as --run ${resumed.id} --rounds 2`);
     const review = first.runs[1]!;
-    await expect(answer(review.id)).rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${review.id} is not one; its root is run ${root.id}`);
+    await expect(answer(review.id)).rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${review.id} is not one: resend as --run ${root.id} --rounds 2`);
     // 0 reviews is no goal: the plain resume `--run` without `--rounds` is.
     const plain = await answer(resumed.id, { rounds: 0 }) as { delivery: string; run: { runId: string } };
     expect(plain.delivery).toBe("resume");
@@ -580,7 +580,7 @@ describe("a goal", () => {
     const { runId } = await service.handle({ operation: "run", prompt: "no goal", name: "no goal", cwd, launch: { model: "test/model" } }, "main") as { runId: string };
     await vi.waitFor(() => expect(store.getRun(runId)!.state).toBe("succeeded"));
     await expect(service.handle({ operation: "message", run_id: runId, message: "go", rounds: 1 }, "main"))
-      .rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${runId} is not one`);
+      .rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${runId} is in no goal: drop --rounds to continue it`);
     const { runId: busy } = await service.handle({ operation: "run", prompt: "slow", name: "slow", cwd, launch: { model: "test/model" } }, "main") as { runId: string };
     await vi.waitFor(() => expect(store.getRun(busy)!.state).toBe("running"));
     await expect(service.handle({ operation: "message", run_id: busy, message: "go", rounds: 1 }, "main"))

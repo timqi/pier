@@ -8,7 +8,7 @@ description: Subagents and schedules with `pier task` beyond your contract — `
 `pier task --help` lists the commands and their flags. `run` prints one
 line, `<state> <runId> · <where the result goes>` (`--json`: the whole
 receipt); the others one line of JSON; exit 0; a refusal is a `task:` line, exit 1; a bad flag is
-`task:` plus the usage, exit 2. `--prompt -` reads stdin.
+one `task:` line naming the fix, exit 2. `--prompt -` reads stdin.
 
 ## Launch, then end your turn
 
@@ -125,8 +125,9 @@ fails the run. The action does not see the script's output. Without
 
 - A worker does not launch runs: `pier task` is refused in a session a run
   created (a lead's aside), in its run and after it, and in any run someone
-  waits on — say what needs another agent; your supervisor runs it. Only
-  `runs` and `stats` stay open there, both over the whole instance.
+  waits on — work to split up or hand off goes in your result;
+  your supervisor launches it. Only `runs` and `stats` stay open there, both
+  over the whole instance.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
   those slots; the rest queue until cancelled. A restart resumes agent runs on
   the same id; a bash run is marked `interrupted` (callbacks still fire).

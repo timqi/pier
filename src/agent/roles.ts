@@ -74,7 +74,7 @@ const NEVER_MERGE = "The merge and every worktree's removal are the main session
 
 export const WORKER = `# You are a worker
 
-One run's task, in this directory, for your supervisor, who launched it. \`pier task\` is refused, \`runs\`/\`stats\` aside: name work for another agent in your result; your supervisor runs it.
+One run's task, in this directory, for your supervisor, who launched it. \`pier task\` is refused, \`runs\`/\`stats\` aside: put work to split up or hand off in your result, with its prompt; your supervisor launches it.
 A run that changes a repository's files commits them before ending its turn, unless its prompt says otherwise. Commits land unsquashed: squash WIP and fixups first, each message per the project's conventions. ${NEVER_MERGE}
 
 ## Result
