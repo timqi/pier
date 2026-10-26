@@ -5,9 +5,9 @@
 // real git repository in a scratch directory, the one the service pins.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
@@ -276,6 +276,26 @@ describe("a goal", () => {
     service.addWorktree = async () => { throw new Error("wt: branch feat-z already exists"); };
     await expect(launch({ worktree: "feat-z" })).rejects.toThrow("wt: branch feat-z already exists");
     service.stop();
+  });
+
+  it("names a --worktree branch that already exists, and where it is checked out, without reusing it", async () => {
+    const { service, cwd } = rig({});
+    // A PATH of git alone: the refusal is git's, before `wt` could switch to the branch's worktree.
+    const real = (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "git")).find((file) => existsSync(file));
+    const bin = mkdtempSync(join(tmpdir(), "pier-git-only-"));
+    symlinkSync(real!, join(bin, "git"));
+    const path = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      await expect(service.addWorktree(cwd, "feature")).rejects.toThrow(
+        `branch feature already exists, checked out at ${realpathSync(cwd)}: name a new --worktree branch, or continue that work with --cwd ${realpathSync(cwd)} and no --worktree`);
+      await expect(service.addWorktree(cwd, "main")).rejects.toThrow(
+        "branch main already exists: name a new --worktree branch, or continue that work with --cwd <a worktree on it> and no --worktree");
+      await expect(service.addWorktree(cwd, "fresh-branch")).rejects.toThrow(/^wt: /);
+    } finally {
+      process.env.PATH = path;
+      service.stop();
+    }
   });
 
   it("reads a stored `until` as a goal of 3 reviews", async () => {

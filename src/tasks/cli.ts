@@ -104,7 +104,7 @@ const roundsOf = (v: Values): number | undefined =>
   v.rounds === undefined ? undefined : /^\d$/.test(String(v.rounds)) ? Number(v.rounds) : refuse("--rounds must be a whole number from 0 to 9");
 
 /** What an existing run or session keeps, named so the refusal says why dropping the flag loses nothing. */
-const KEPT: Partial<Record<Flag, string>> = { name: "its name", cwd: "its directory", model: "its model", thinking: "its model", role: "its role", design: "its role" };
+const KEPT: Partial<Record<Flag, string>> = { name: "its name", cwd: "its directory", model: "its model", thinking: "its thinking level", role: "its role", design: "its role" };
 const kept = (flag: Flag): string => (KEPT[flag] ? `, which keeps ${KEPT[flag]}` : "");
 
 /** Argv is split at each bare `--member`; a value equal to it is unreachable,
@@ -255,8 +255,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     if (values["review-model"] !== undefined && values.rounds === undefined) refuse("--review-model beside --run applies with --rounds");
     if (values.fresh && values.after) refuse("--fresh continues an ended run; --after queues behind a running turn");
     const extra = flagsOf(values).find((flag) => !["run", "after", "rounds", "review-model", "fresh", "prompt", "callback", "callback-session"].includes(flag));
-    const model = extra === "model" || extra === "thinking" ? "; another model is a new run, --cwd <its worktree>" : "";
-    if (extra) refuse(`--${extra} does not apply to --run ${String(values.run)}${kept(extra)}: drop it and resend${model}`);
+    if (extra) refuse(`--${extra} does not apply to --run ${String(values.run)}${kept(extra)}: drop it and resend${extra === "model" || extra === "thinking" ? "; another model or thinking level is a new run, --cwd <its worktree>" : ""}`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");
     return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, rounds: roundsOf(values), review_model: values["review-model"], fresh: values.fresh || undefined, ...delivery });
   }
