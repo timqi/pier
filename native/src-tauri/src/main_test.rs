@@ -72,3 +72,23 @@ fn other_items_reload_nothing_nor_read_the_active_tab() {
         assert_eq!(reloads(item, || panic!("{item} read the active tab")), None, "{item}");
     }
 }
+
+#[test]
+fn an_accent_in_either_theme_picks_its_preset() {
+    let pairs = [
+        ("#0066df", "pier"),
+        ("#499fff", "pier"),
+        ("#037f75", "teal"),
+        ("#03b7a8", "teal"),
+        ("#028355", "emerald"),
+        ("#b17000", "amber"),
+        ("#d98b03", "amber"),
+        ("#c51b53", "rose"),
+        ("#7a49d3", "violet"),
+    ];
+    for (hex, preset) in pairs {
+        assert_eq!(accent_of(Some(hex)).2, preset, "{hex}");
+    }
+    assert_eq!(accent_of(None).2, "pier");
+    assert_eq!(accent_of(Some("#808080")).2, "pier");
+}

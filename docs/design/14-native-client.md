@@ -143,8 +143,13 @@ one ~30-line module; in a browser every call is a no-op.
   stream, and `GET /api/events` forwards it only to the web session the push
   targets (every one for the "every device" case). The UI in a browser
   ignores the event (push already covers it); in the shell the bridge hands
-  it to the native notification, titled `<instance name> · <title>` by the
-  shell so it says which instance spoke, with the system's default sound
+  it to the native notification, titled `<dot> <instance name>` by the shell
+  so it says which instance spoke: the dot is the coloured-circle emoji of the
+  accent preset nearest the instance's accent by hue, and the preset's
+  `icon-192-<accent>.png` is the notification's image (macOS `contentImage`
+  on the right, the left one is the bundle's; the freedesktop app icon
+  elsewhere). The session's title is the macOS subtitle, dropped elsewhere.
+  It plays the system's default sound
   (`NSUserNotificationDefaultSoundName`; the freedesktop `message-new-instant`
   elsewhere) unless the same session's sounded within 30s. Body is the same
   `preview(reply.text)` the push sends — the topic is in it. Click: the shell focuses the window and

@@ -680,7 +680,8 @@ fn set_badge(app: AppHandle, shell: State<'_, Shell>, webview: Webview, count: u
     surfaced(&app, known)
 }
 
-/// Titled `<instance> · <title>`: with several instances, the push's own title does not say which.
+/// Titled `<dot> <instance>`, the session as macOS's subtitle: a session's own title says
+/// neither which instance spoke nor, in a chain's head, anything that lasts.
 #[tauri::command]
 fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String, tag: String) -> Res {
     if !url.starts_with("/app/") {
@@ -690,8 +691,9 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     // one, where the platform can close it (Linux; macOS stacks regardless).
     let shell = app.state::<Shell>();
     let mut live = shell.lock();
+    let accent = accent_of(live.accent.get(webview.label()).map(String::as_str));
     let name = live.instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
-    let title = name.map_or(title.clone(), |name| format!("{name} · {title}"));
+    let (headline, subtitle) = name.map_or((title.clone(), None), |name| (format!("{} {name}", accent.1), Some(title)));
     let mut hasher = DefaultHasher::new();
     (webview.label(), &tag).hash(&mut hasher);
     let id = hasher.finish() as i32;
@@ -699,19 +701,85 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     live.sounded.retain(|_, at| now.duration_since(*at) < SOUND_QUIET);
     let ring = !live.sounded.contains_key(&id);
     drop(live);
-    let notifications = app.notification();
-    let shown = notifications
-        .remove_active(vec![id])
-        .and_then(|()| {
-            let builder = notifications.builder().id(id);
-            let builder = if ring { builder.sound(SOUND) } else { builder };
-            builder.title(title).body(body).extra("instance", webview.label()).extra("url", url).show()
-        })
-        .map_err(|e| format!("notification: {e}"));
+    let icon = accent_icon(&app, accent).map_err(|e| report(&app, format!("notification icon: {e}"))).ok();
+    #[cfg(target_os = "macos")]
+    let shown = {
+        let (mut note, instance, handle) = (notify_rust::Notification::new(), webview.label().to_owned(), app.clone());
+        note.summary(&headline).subtitle(subtitle.as_deref().unwrap_or("")).body(&body);
+        if let Some(icon) = &icon {
+            note.image_path(&icon.to_string_lossy());
+        }
+        if ring {
+            note.sound_name(SOUND);
+        }
+        // The plugin hands no contentImage or subtitle on: its own wait, with both.
+        std::thread::Builder::new()
+            .name("notification".into())
+            .spawn(move || match note.show() {
+                Ok(shown) => shown
+                    .wait_for_response(|r: &notify_rust::NotificationResponse| {
+                        if matches!(r, notify_rust::NotificationResponse::Default) {
+                            on_tap(&handle, &instance, &url);
+                        }
+                    })
+                    .unwrap_or_else(|e| report(&handle, format!("notification: {e}"))),
+                Err(e) => report(&handle, format!("notification: {e}")),
+            })
+            .map(drop)
+            .map_err(|e| format!("notification: {e}"))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let shown = {
+        drop(subtitle); // freedesktop has no subtitle line; the body carries the topic
+        let notifications = app.notification();
+        notifications
+            .remove_active(vec![id])
+            .and_then(|()| {
+                let builder = notifications.builder().id(id);
+                let builder = if ring { builder.sound(SOUND) } else { builder };
+                let builder = icon.map_or(builder, |icon| builder.icon(icon.to_string_lossy()));
+                builder.title(headline).body(body).extra("instance", webview.label()).extra("url", url).show()
+            })
+            .map_err(|e| format!("notification: {e}"))
+    };
     if ring && shown.is_ok() {
         shell.lock().sounded.insert(id, now);
     }
     surfaced(&app, shown)
+}
+
+/// Each accent preset's sRGB hue, the coloured dot nearest it and its icon (scripts/render-icons.ts).
+type Accent = (f32, &'static str, &'static str, &'static [u8]);
+const ACCENTS: [Accent; 6] = [
+    (213.0, "🔵", "pier", include_bytes!("../../../src/web/ui/public/icon-192.png")),
+    (175.0, "🟢", "teal", include_bytes!("../../../src/web/ui/public/icon-192-teal.png")),
+    (159.0, "🟢", "emerald", include_bytes!("../../../src/web/ui/public/icon-192-emerald.png")),
+    (38.0, "🟠", "amber", include_bytes!("../../../src/web/ui/public/icon-192-amber.png")),
+    (340.0, "🔴", "rose", include_bytes!("../../../src/web/ui/public/icon-192-rose.png")),
+    (261.0, "🟣", "violet", include_bytes!("../../../src/web/ui/public/icon-192-violet.png")),
+];
+
+/// The preset nearest `#rrggbb` by hue, which a theme's lighter ramp keeps; Pier's own without one.
+fn accent_of(hex: Option<&str>) -> &'static Accent {
+    let rgb = hex.and_then(|h| u32::from_str_radix(h.strip_prefix('#')?, 16).ok());
+    let Some([r, g, b]) = rgb.map(|n| [16, 8, 0].map(|s| ((n >> s) & 255) as f32)) else { return &ACCENTS[0] };
+    let (max, d) = (r.max(g).max(b), r.max(g).max(b) - r.min(g).min(b));
+    if d == 0.0 {
+        return &ACCENTS[0];
+    }
+    let sector = [r, g].iter().position(|&c| c == max).unwrap_or(2);
+    let hue = 60.0 * [(g - b) / d, (b - r) / d + 2.0, (r - g) / d + 4.0][sector];
+    let apart = |a: &&Accent| ((a.0 - hue).rem_euclid(360.0)).min((hue - a.0).rem_euclid(360.0));
+    ACCENTS.iter().min_by(|a, b| apart(a).total_cmp(&apart(b))).unwrap_or(&ACCENTS[0])
+}
+
+/// The notification loads its image from a file: the preset's icon, written once to the cache.
+fn accent_icon(app: &AppHandle, accent: &Accent) -> Res<PathBuf> {
+    let path = app.path().app_cache_dir().map_err(text)?.join(format!("notify-{}.png", accent.2));
+    if !path.exists() {
+        fs::create_dir_all(path.parent().unwrap_or(&path)).and_then(|()| fs::write(&path, accent.3)).map_err(text)?;
+    }
+    Ok(path)
 }
 
 /// PIER_TITLE names an instance the user has not named; `accent` (`#rrggbb`) paints its dot.
@@ -744,13 +812,7 @@ fn instance_field<'a>(performed: &'a ActionPerformed, key: &str) -> Option<&'a s
 
 /// A click on a notification brings the window, then the instance, opening its tab if
 /// it was closed since, then the page at `url`.
-fn on_tap(app: &AppHandle, performed: &ActionPerformed) {
-    if performed.action_id() != "tap" {
-        return;
-    }
-    let (Some(id), Some(url)) = (instance_field(performed, "instance"), instance_field(performed, "url")) else {
-        return report(app, "a notification click arrived without its instance");
-    };
+fn on_tap(app: &AppHandle, id: &str, url: &str) {
     let (app, id, hash) = (app.clone(), id.to_owned(), url.split_once('#').map_or("", |(_, h)| h).to_owned());
     detach(&app.clone(), async move {
         let opened = async {
@@ -934,7 +996,18 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(shell);
 
     let handle = app.handle().clone();
-    app.notification().on_action(move |performed| on_tap(&handle, performed))?;
+    app.notification().on_action(move |performed| {
+        let (id, url) = (instance_field(performed, "instance"), instance_field(performed, "url"));
+        match (performed.action_id(), id.zip(url)) {
+            ("tap", Some((id, url))) => on_tap(&handle, id, url),
+            ("tap", None) => report(&handle, "a notification click arrived without its instance"),
+            _ => {}
+        }
+    })?;
+    // The app the notifications speak for, once: an unbundled debug build has no identifier of its own.
+    #[cfg(target_os = "macos")]
+    notify_rust::set_application(if tauri::is_dev() { "com.apple.Terminal" } else { &app.config().identifier })
+        .unwrap_or_else(|e| errors.push(format!("notifications: {e}")));
 
     let window = WindowBuilder::new(app, WINDOW).title("Pier").inner_size(1200.0, 800.0).min_inner_size(640.0, 400.0);
     // The tab bar is the title bar: macOS keeps its traffic lights over the bar's left end,
