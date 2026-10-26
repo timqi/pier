@@ -8,8 +8,8 @@ scheduled tasks and live observability.
 
 1. **Less code is the feature.** Every line is a liability. If Pi already does
    it (sessions, steering, follow-up queues, compaction, HTML export), we don't.
-2. **Bloat is a bug.** Over budget → stop and diagnose before writing more.
-   The cause is usually a wrong-layer abstraction or a feature that shouldn't exist.
+2. **Bloat is a bug.** Growth that no feature needs is diagnosed, not written:
+   the cause is usually a wrong-layer abstraction or a feature that shouldn't exist.
 3. **Two seams only.** `Channel` (platform ↔ core) and `AgentSession`
    (core ↔ Pi). Only `agent/` imports the Pi SDK; only
    `channels/` imports platform SDKs; `core/` is blind to both, so Pi stays
@@ -37,11 +37,7 @@ scheduled tasks and live observability.
 - `channels/` one file per platform: normalize inbound, render outbound
 - `agent/` Pi SDK behind `AgentSession`
 - `websearch/` `pier web search|fetch` over the CLI socket: the provider's
-  hosted search and fetch spoken on the wire (Messages/Responses) with the
-  instance's model auth, no SDK import; Pier ships no extension — its tools
-  are CLIs documented by skills, and the Console shows those skills as the
-  built-in `pier` package beside every package in Pi's own registry
-  (settings.json `packages`), which Pier writes and never mirrors
+  hosted search and fetch on the wire with the instance's model auth, no SDK import
 - `web/` chat + observability timeline, an event-stream consumer
 - `tasks/` scheduler; cron + prompt + session config; `pier task` over the CLI
   socket is the entire agent-collaboration surface
@@ -96,8 +92,8 @@ that made them; the history is `git log`.
 
 ## Budgets
 
-The target is disordered growth and duplication; line counts are a proxy, so
-the rules fail on the thing, not on the number.
+The target is disordered growth and duplication. Line counts are only a
+reference: never compress lines or trade readability to stay under a ceiling.
 
 **1. Growth is a claim, and a claim gets a sentence.** A change that adds net
 lines to an area names, in the commit, what the feature could not have been
@@ -112,27 +108,24 @@ deleted; a copy-paste pair longer than ~30 lines is reported at two. Count on
 all surfaces, the Console included.
 
 **4. Never traded for a number.** Tests; the failure paths principle 5
-requires; type and seam declarations.
+requires; type and seam declarations; code written plainly.
 
-**5. Ceilings are a prompt, and a prompt has a deadline.** `just size` prints
-the table below with current numbers; nothing is copied forward by hand.
-Crossing a ceiling asks "what is in there?"; if the answer is "the right
-things", the ceiling is raised with that sentence. A ceiling exceeded for more
-than one release without a raise or a deletion is the failure this section
-exists to catch.
+**5. Crossing a ceiling raises it.** `just size` prints the current numbers.
+A change that crosses a ceiling checks rules 1–3, then raises the ceiling in
+the same change.
 
-| Area | Ceiling | What the size is |
-| --- | --- | --- |
-| `core/` | 1.85k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands; `pier search --around`, the replay's argv and host validation, is the lines past 1.8k |
-| `channels/` | 4.8k | two adapters in one shape plus the shared layer that would otherwise be copied between them; the home chat's status message, laid out as the web sidebar in each platform's rich format, on both adapters, is the lines past 4.6k |
-| `web/` | 12.94k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette; the native shell's bridge, Web Push's copy on the workspace stream with the UI's one module that speaks to the shell, is the lines past 12.7k; an open item's status mark — a glyph and word per status — and its stage's short phrase are the lines past 12.75k; a long transcript replayed as only the tail the trim keeps, and a settled steps log drawn on its first open, are the lines past 12.8k; the transcript's two floating buttons — back to the tail with its new-row dot, back to the conversation — are the lines past 12.86k; an earlier reply's options following its item — kept when the item was closed before it or its closing is off screen, folded by any later `<done>` of it — are the lines past 12.9k; a read of the conversation's head gone from Pi starting the next one, and the pane following it, is the lines past 12.92k; a rotation followed in one paint, the pane just left kept until both reads land, is the lines past 12.93k |
-| `agent/` | 2.97k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts; a session holding only Pier's input written to disk, which Pi defers to its first user or assistant message, with a failed write told on the session and not as a refused input, is the lines past 2.95k |
-| `tasks/` | 3.95k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, and the `--worktree` seam; a `--run` continuation's handoff to a new session, with the context record that decides it, is the lines past 3.75k; a main session's run started in the workspace, not its home, is the lines past 3.9k; a `<done>` that closed nothing told to the head on its next prompt and owed in `/status` and the seed until its item closes is the lines past 3.91k; a head turn answering a run's result told when it left that run's open item at its old stage is the lines past 3.93k |
-| root `src/*.ts` | 3.55k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch; the home chat's status refresh, one debounce on the hub the instance layer wires, is the lines past 3.5k |
-| `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
-| `native/` | 1220 | the Tauri shell, Rust and the tab bar page: the instance store, one hidden-or-shown webview per open instance, badge and notification relay; a notification replacing its session's earlier one, as Web Push's `tag` does, is the lines past 600; the tab bar as the frameless window's title bar — its own window buttons, drag, `⋯` menu, and on Linux the resize edges and hidden menu bar's accelerators GTK and Tauri drop for child webviews — is the lines past 640; the origin guard — `/login` probed before adding, every other origin sent to the browser, IPC granted to the instance's own origin only — is the lines past 730; the follow-ups the user asked for — the instance's name on its notifications, the origin guard waiting for the title WebKit reports after the load, a removed instance's data store retried until WebKit releases it — are the lines past 830; Reload past `Cmd+R` — the tab's own menu, `F5` off macOS, and on Linux a hung page's process replaced from the shell — is the lines past 845; instances opened on demand — a tab opened and closed apart from adding and removing its instance, the `+` menu of saved instances with Remove and Delete Data, and the webviews that menu and a notification click build off the main thread — are the lines past 880; `Cmd+W` closing the active tab — taken from the default menu's Close Window, the last tab's closing the window as Safari's — is the lines past 950; the local instance — finding its command, starting it, signing in, stopping it on quit — is the lines past 965; a local tab's close stopping the Pier the shell spawned for it, held as the quit is while it is busy, is the lines past 1190; a tab closed while its Pier starts left unmounted, that Pier stopped, is the lines past 1205; the system's default sound, once per session within 30s, is the lines past 1215 |
-| one module | 750 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `web/ui/chat.ts` at 830, the transcript pane whose replay skips the rows its trim would drop, and whose tail follow paints the floating back-to-the-tail button, counting a turn's reply once |
-| channel adapter file | 460 | transport, render and panel counted separately, each serving the thread and the home chat's main flow; Lark's quote of the message a main-flow reply answers is the lines past 450 |
+| Area | Ceiling |
+| --- | --- |
+| `core/` | 2k |
+| `channels/` | 5k |
+| `web/` | 13.6k |
+| `agent/` | 3.2k |
+| `tasks/` | 4.2k |
+| root `src/*.ts` | 3.8k |
+| `websearch/` | 1.2k |
+| `native/` | 1.3k |
+| one module | 800; `web/ui/chat.ts` 900 |
+| channel adapter file | 500 |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
 
