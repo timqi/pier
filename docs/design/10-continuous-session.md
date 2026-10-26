@@ -202,13 +202,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | status | when |
   | --- | --- |
   | `running` | a run's goal live; else a run `queued`/`running`, its session streaming, or a lead's worker `queued`/`running` |
-  | `waiting on you` | a run's goal ended `decision`, `cap` or `done` (clean, the head merging unasked); else the stage says `waiting on you`, or a run's session is a design lead not reported final whose newest run `succeeded` |
-  | `pending release` | every run `succeeded`, none a goal's root still carrying its goal, unless a legacy `merge` step ended it `done` |
+  | `waiting on you` | a run's goal ended `decision` or `cap`; else the stage says `waiting on you`, or a run's session is a design lead not reported final whose newest run `succeeded` |
+  | `pending release` | every run `succeeded` or carries a goal ended `done` (clean, the head merging unasked) |
   | `stopped` | a goal ended `failed`; else a run `failed`, `cancelled`, `interrupted` or `skipped`, or a token naming no run (`not in the ledger`) |
 
 - A `waiting on you` item's `waitsIn` is the child session the answer is given
   in, from the same reason: a design lead not reported final → its session; a
-  stage's `waiting on you` or a goal's `decision`/`cap`/`done` → absent, the chat.
+  stage's `waiting on you` or a goal's `decision`/`cap` → absent, the chat.
 - Only `waiting on you` asks anything of the user (`waitsOnYou`,
   `core/reply.ts`): `/status`'s first group, the status panel's first rows; a finished worker's outcome is read from its lead's run, not its own.
 - An item is keyed by `problem` in the user's words; `stage` holds concrete phase, question and valid authorization, omitting ledger-derived run state, time and review rounds; only work in flight or waiting on the user's decision now belongs here, with backlog in MEMORY.md.
@@ -221,7 +221,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   | status | second line |
   | --- | --- |
   | waiting, answered in the chat (the stage says `waiting on you`) | `Needs you · <wait> · <question>`, the prefix dropped |
-  | waiting on an ended goal, stage without `waiting on you` | `Needs you · <wait> · merge?` (clean review), `… · decision: <reason>`, `… · review cap reached · findings remain`; the goal wording leaves the metadata |
+  | waiting on an ended goal, stage without `waiting on you` | `Needs you · <wait> · decision: <reason>`, `… · review cap reached · findings remain`; the goal wording leaves the metadata |
   | waiting, answered in the design session (`waitsIn`) | `Needs you in the design session · <wait>`, then ` · <stage>` when there is one |
   | running / queued | the stage; queued as `Queued · <stage>` |
   | pending release / stopped | `Pending release · <stage>` / `Stopped · <stage>` |

@@ -45,7 +45,7 @@ const time = (r: Run, now: number): string => {
 
 /** What an ended goal asks of the user, as a waiting item's second line. */
 const goalAsk = (g: Goal): string =>
-  g.outcome === "done" && g.step !== "merge" ? "merge?" : g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
+  g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
 
 /** Titles arrive resolved by tasks; neither session lookup nor free-text stage guessing belongs here.
  *  A waiting item's stage answers what the user is needed for: the stage's question, else an ended

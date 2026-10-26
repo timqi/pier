@@ -43,14 +43,14 @@ export function openStatus(
     (!!r.targetSessionId && session.streaming(r.targetSessionId)) ||
     (r.workers?.queued ?? 0) + (r.workers?.running ?? 0) > 0;
   if (runs.some(live)) return { status: "running" };
-  // The head relays a stage's or a goal's question and the user answers it in the chat; a clean goal asks for the merge.
-  const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap" || (r.goal?.outcome === "done" && r.goal.step !== "merge"));
+  // The head relays a stage's or a goal's question and the user answers it in the chat.
+  const asksInChat = WAITING.test(stage) || runs.some((r) => r.goal?.outcome === "decision" || r.goal?.outcome === "cap");
   if (asksInChat) return { status: "waiting on you" };
   // A design waits only while its newest run succeeded: a failed or cancelled one is stopped, the head's to resume or close.
   const design = runs.find((r) => r.targetSessionId && session.designOpen(r.targetSessionId) && r.state === "succeeded");
   if (design?.targetSessionId) return { status: "waiting on you", waitsIn: design.targetSessionId };
-  // An ended goal still on its run has not landed, unless a legacy merge step ended it: its root run succeeded, the review ran in another session.
-  const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" && r.goal.step === "merge" : phaseOf(r.state) === "succeeded");
+  // A done goal has landed whatever its root run's state: the review ran in another session, and the head merges a clean one itself.
+  const landed = (r: OpenRun): boolean => (r.goal ? r.goal.outcome === "done" : phaseOf(r.state) === "succeeded");
   return { status: runs.every(landed) ? "pending release" : "stopped" };
 }
 

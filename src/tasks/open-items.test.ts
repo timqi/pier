@@ -234,7 +234,7 @@ describe("the open items", () => {
       ["goal live", "running", undefined],
       ["goal decision", "waiting on you", undefined],
       ["goal cap", "waiting on you", undefined],
-      ["goal done", "waiting on you", undefined],
+      ["goal done", "pending release", undefined],
       ["goal failed", "stopped", undefined],
       ["goal merged", "pending release", undefined],
       ["goal legacy", "pending release", undefined],
@@ -244,11 +244,11 @@ describe("the open items", () => {
     expect(status.snapshot.items.map((i) => [i.stage, i.metadata])).toEqual([
       // A waiting item reads how long it has waited, never "succeeded … ago".
       ["worker building", ["review 3/3"]], ["1m · decision", []],
-      ["1m · review cap reached · findings remain", []], ["1m · merge?", []],
+      ["1m · review cap reached · findings remain", []], ["worker building", ["succeeded 1m ago", "review clean"]],
       ["worker building", ["succeeded 1m ago", "failed: no verdict"]], ["worker building", ["succeeded 1m ago"]],
       ["worker building", ["succeeded 1m ago", "merged"]],
     ]);
-    expect(status.text).toContain("Waiting on you · 3");
+    expect(status.text).toContain("Waiting on you · 2");
     expect(status.text).not.toContain("run ");
     expect(status.seed).toContain("run live");
     expect(status.seed).toContain("session s-live");
