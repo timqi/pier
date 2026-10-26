@@ -161,8 +161,9 @@ export type SystemInputOrigin = {
   messageKind: "steer" | "follow_up";
   source?: SystemInputSource;
 } | {
-  /** What a new session of the continuous conversation opens with: memory,
-   *  the run ledger and the previous session's last exchanges (core/chain.ts). */
+  /** What a new session of the continuous conversation opens with: memory, the
+   *  open items, the run ledger and, on a full rotation, the previous session's
+   *  last exchanges (core/chain.ts). */
   kind: "session-seed";
   reason: ChainReason;
   previousSessionId: string | null;
@@ -197,7 +198,7 @@ export type SystemInputOrigin = {
 /** A status row's navigation facts; a design entrance is independent of waiting. */
 export interface OpenItemTarget {
   problem: string;
-  status: "running" | "queued" | "waiting on you" | "pending release" | "stopped";
+  status: "running" | "queued" | "waiting on you" | "wrapping up" | "stopped";
   designSessionId?: string;
   waitsIn?: string;
   /** Newest first, by queue time: the first with a session is where the item last happened. */
@@ -244,6 +245,14 @@ export const CHAT_COMMANDS = {
 export type ChatCommand = keyof typeof CHAT_COMMANDS;
 
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
+
+/** The command `text` is: only the exact word, the composer is not a shell.
+ *  The chain answers it without a turn, so the composer paints none. */
+export function chatCommand(text: string): ChatCommand | undefined {
+  const draft = text.trim().toLowerCase();
+  const word = draft.slice(1);
+  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
+}
 
 /** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`), a word of two
  *  characters at least. Groups: `skill:`, word, rest. */

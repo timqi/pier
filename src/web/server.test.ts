@@ -2509,7 +2509,7 @@ describe("the continuous conversation's routes", () => {
     await post("/api/continuous/messages", { text: "one" });
     const fresh = await post("/api/continuous/messages", { text: "/new" });
     expect(fresh.status).toBe(202);
-    expect(await fresh.json()).toEqual({ sessionId: "m2", rotated: "new", command: "new" });
+    expect(await fresh.json()).toEqual({ sessionId: "m2", rotated: "new" });
     expect(workspace).toContain("sessions-changed");
     sessions.get("m2")!.setState("streaming");
     const refused = await post("/api/continuous/messages", { text: "/new" });

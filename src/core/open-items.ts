@@ -23,7 +23,7 @@ interface Item {
 }
 
 const LABELS: Record<Item["status"], string> = {
-  running: "", queued: "Queued", "waiting on you": "Needs you", "pending release": "Pending release", stopped: "Stopped",
+  running: "", queued: "Queued", "waiting on you": "Needs you", "wrapping up": "Wrapping up", stopped: "Stopped",
 };
 
 export function goalText(g: Goal): string {
@@ -45,7 +45,7 @@ const time = (r: Run, now: number): string => {
 
 /** What an ended goal asks of the user, as a waiting item's second line. */
 const goalAsk = (g: Goal): string =>
-  g.outcome === "done" && g.step !== "merge" ? "merge?" : g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
+  g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
 
 /** Titles arrive resolved by tasks; neither session lookup nor free-text stage guessing belongs here.
  *  A waiting item's stage answers what the user is needed for: the stage's question, else an ended
@@ -94,7 +94,7 @@ export function openItemGroups(items: OpenItemPresentation[]): { title: string; 
   return [
     { title: "Waiting on you", items: items.filter((i) => waitsOnYou(i.status)) },
     { title: "In progress", items: items.filter((i) => i.status === "running" || i.status === "queued") },
-    { title: "Other open", items: items.filter((i) => i.status === "pending release" || i.status === "stopped") },
+    { title: "Other open", items: items.filter((i) => i.status === "wrapping up" || i.status === "stopped") },
   ].filter((g) => g.items.length);
 }
 

@@ -171,7 +171,7 @@ mirror them. The seams:
   will retry. `notify` carries a persisted `system-input` (delegation, task
   callback, supervisor message) or a service/error note.
 - Chat commands are parsed by `channels/commands.ts` (`parseCommand`) and, for
-  the head, `core/chain.ts` (`chatCommand`): trim both ends, a leading `/` or
+  the head, `core/types.ts` (`chatCommand`, shared with the composer): trim both ends, a leading `/` or
   `%`, args verbatim ([11 §Chat commands](design/11-im-conversation.md#chat-commands)).
   Control that is not a prompt (`/stop`) goes through `ChannelControl`
   (`channels/control.ts`, built in `main.ts`, handed to each adapter by

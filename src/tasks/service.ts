@@ -18,7 +18,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { openItems, recordOpenItems, unmatchedNote } from "./open-items.js";
+import { openItems, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -86,6 +86,17 @@ async function branchLog(cwd: string): Promise<string> {
 /** A fresh run's own worktree, `branch` off the one `cwd` has checked out: `.path` of `wt`'s JSON line. */
 async function addWorktree(cwd: string, branch: string): Promise<string> {
   const from = await git(cwd, "branch", "--show-current");
+  // Checked before `wt`, which would switch to a branch's existing worktree: whether that work is this run's is the launcher's call.
+  // `rev-parse --verify --quiet` exits 1 only for a missing ref; any other failure is git's own.
+  const existing = await git(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`).catch(
+    (err: Error & { status?: unknown }) => (err.status === 1 ? null : Promise.reject(err)),
+  );
+  if (existing) {
+    const worktrees = (await git(cwd, "worktree", "list", "--porcelain")).split("\n\n");
+    const checkedOut = worktrees.find((entry) => entry.split("\n").includes(`branch refs/heads/${branch}`));
+    const at = checkedOut?.match(/^worktree (.+)$/m)?.[1];
+    throw new Error(`branch ${branch} already exists${at ? `, checked out at ${at}` : ""}: name a new --worktree branch, or continue that work with --cwd ${at ?? "<a worktree on it>"} and no --worktree`);
+  }
   const out = await exec("wt", cwd, ["switch", "-c", branch, "-b", from, "--no-cd", "-y", "--format", "json"]);
   const path = (JSON.parse(out.split("\n")[0] || "null") as { path?: unknown } | null)?.path;
   if (typeof path !== "string" || !path) throw new Error(`wt: no worktree path in ${JSON.stringify(out.slice(0, 200))}`);
@@ -182,7 +193,7 @@ export class TaskService {
       deliver: (run) => this.callbacks.deliver(run),
       worktree: (cwd) => this.worktree(cwd),
     });
-    router.onTurnEnd((sessionId, text) => {
+    router.onTurnEnd((sessionId, text, opened) => {
       // Only the head's turns write the list.
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
         try {
@@ -191,12 +202,14 @@ export class TaskService {
           // A head that keeps missing gets its latest few back; nothing open owes no resend.
           this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(u, k))), ...unmatched])].slice(-5) : [];
           if (changed) hub.emitWorkspace({ type: "open-items-changed" });
-          if (unmatched.length && keys.length) {
+          const stale = opened?.kind === "task-callback" ? staleItems(store, text, opened.runIds ?? [opened.runId]) : [];
+          const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
+          if (notes.length) {
             const at = router.conversationOf(sessionId);
             const head = at && router.sessionOf(at);
-            const failed = (why: string) => router.reportTo(sessionId, `open items: the unmatched <done> note could not reach the head: ${why}`);
+            const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
             if (!head) failed("not attached");
-            else head.systemInput(unmatchedNote(unmatched, keys), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
+            else head.systemInput(notes.join("\n"), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
           }
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
@@ -542,7 +555,7 @@ export class TaskService {
     // Re-checked with the run's insert: a concurrent `--run` may have replaced the session while the handoff was planned.
     const run = this.store.transact(() => {
       assertNotReplaced(this.store, prior.targetSessionId);
-      const ended = goal ? this.goalAgain(prior) : undefined;
+      const ended = goal ? this.goalAgain(prior, goal.cap) : undefined;
       const run = this.prepareResume(prior, message, provenance, handoff);
       if (goal) this.goals.open(run, { cap: goal.cap, reviewModel: goal.reviewModel ?? ended!.reviewModel });
       return run;
@@ -552,13 +565,14 @@ export class TaskService {
   }
 
   /** The user's answer to an ended goal goes back through the loop, never around it. */
-  private goalAgain(prior: TaskRun): Goal {
+  private goalAgain(prior: TaskRun, cap: number): Goal {
     const goal = prior.goalId ? this.store.getGoal(prior.goalId) : undefined;
-    if (goal?.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one${goal ? `; its root is run ${goal.rootRunId}` : ""}`);
+    if (!goal) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is in no goal: drop --rounds to continue it`);
+    if (goal.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one: resend as --run ${goal.rootRunId} --rounds ${cap}`);
     if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
     const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
     if (latest && latest.id !== goal.id) {
-      throw new Error(`run ${prior.id}'s session is in a later goal, rooted at run ${latest.rootRunId}; --run that one`);
+      throw new Error(`run ${prior.id}'s session is in a later goal: resend as --run ${latest.rootRunId} --rounds ${cap}`);
     }
     return goal;
   }

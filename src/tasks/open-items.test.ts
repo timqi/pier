@@ -145,15 +145,15 @@ describe("the open items", () => {
     r.item("long lead", "merged", ["s0"], 1);
     const [item] = r.list().items;
     expect(item!.runs.map((x) => [x.runId, x.state])).toEqual([["s249", "succeeded"]]);
-    expect(item!.status).toBe("pending release");
+    expect(item!.status).toBe("wrapping up");
   });
 
   // A listing's window is not the work's end: age alone never stops an item.
-  it("reads an item whose run succeeded 3 days ago as pending release", () => {
+  it("reads an item whose run succeeded 3 days ago as wrapping up", () => {
     const r = rig();
     r.save(saved("old", { targetSessionId: "s-old", state: "succeeded", queuedAt: r.now - 3 * DAY, finishedAt: r.now - 3 * DAY }));
     r.item("shipped", "merged, restart pending", ["old"], 1);
-    expect(r.list().items.map((i) => [i.runs[0]!.runId, i.status])).toEqual([["old", "pending release"]]);
+    expect(r.list().items.map((i) => [i.runs[0]!.runId, i.status])).toEqual([["old", "wrapping up"]]);
   });
 
   it("reads a token that names no run as not in the ledger, and so stopped", () => {
@@ -165,11 +165,11 @@ describe("the open items", () => {
   });
 
   // The status is the runs' and sessions', whatever the stage text says.
-  it("reads an item running while its session streams, though its run has finished, and pending release once idle", () => {
+  it("reads an item running while its session streams, though its run has finished, and wrapping up once idle", () => {
     const r = rig();
     r.save(saved("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: r.now - MIN }));
     r.item("fix", "lead building (running)", ["r1"], 1);
-    expect(r.list().items[0]!.status).toBe("pending release");
+    expect(r.list().items[0]!.status).toBe("wrapping up");
     const lead = fakeSession("lead1");
     r.router.attach({ channelId: "task", conversationId: "lead1" }, lead);
     lead.setState("streaming");
@@ -183,10 +183,10 @@ describe("the open items", () => {
     const quiet = { streaming: none, designOpen: none };
     const status = (runs: OpenRun[], stage = "", session = quiet) => openStatus({ problem: "p", stage, runs }, session).status;
     expect(Object.fromEntries([...TASK_RUN_STATES, NOT_IN_LEDGER].map((s) => [s, status([at(s)])]))).toEqual({
-      queued: "running", running: "running", succeeded: "pending release", failed: "stopped",
+      queued: "running", running: "running", succeeded: "wrapping up", failed: "stopped",
       cancelled: "stopped", interrupted: "stopped", skipped: "stopped", [NOT_IN_LEDGER]: "stopped",
     });
-    expect(status([])).toBe("pending release");
+    expect(status([])).toBe("wrapping up");
     expect(status([at("succeeded"), at("failed")])).toBe("stopped");
     // The stage's marker, a design not final: the only two ways an item waits on the user.
     expect(status([at("succeeded")], "waiting on you: 手动重启还是派 worker")).toBe("waiting on you");
@@ -201,7 +201,7 @@ describe("the open items", () => {
     expect(status([at("succeeded", { workers: workers({ running: 3 }) })], "lead 实现中")).toBe("running");
     expect(status([at("succeeded", { workers: workers({ queued: 1 }) })])).toBe("running");
     // A finished worker's outcome is its lead's to read: the lead's run decides.
-    expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("pending release");
+    expect(status([at("succeeded", { workers: workers({ succeeded: 2, failed: 1 }) })])).toBe("wrapping up");
   });
 
   // The goal, not the stage or the root run's state, says where a goal's item stands.
@@ -234,21 +234,21 @@ describe("the open items", () => {
       ["goal live", "running", undefined],
       ["goal decision", "waiting on you", undefined],
       ["goal cap", "waiting on you", undefined],
-      ["goal done", "waiting on you", undefined],
+      ["goal done", "wrapping up", undefined],
       ["goal failed", "stopped", undefined],
-      ["goal merged", "pending release", undefined],
-      ["goal legacy", "pending release", undefined],
+      ["goal merged", "wrapping up", undefined],
+      ["goal legacy", "wrapping up", undefined],
     ]);
     const status = openItemsStatus(open, now);
     // An ended goal's ask is the waiting item's second line, not repeated below it.
     expect(status.snapshot.items.map((i) => [i.stage, i.metadata])).toEqual([
       // A waiting item reads how long it has waited, never "succeeded … ago".
       ["worker building", ["review 3/3"]], ["1m · decision", []],
-      ["1m · review cap reached · findings remain", []], ["1m · merge?", []],
+      ["1m · review cap reached · findings remain", []], ["worker building", ["succeeded 1m ago", "review clean"]],
       ["worker building", ["succeeded 1m ago", "failed: no verdict"]], ["worker building", ["succeeded 1m ago"]],
       ["worker building", ["succeeded 1m ago", "merged"]],
     ]);
-    expect(status.text).toContain("Waiting on you · 3");
+    expect(status.text).toContain("Waiting on you · 2");
     expect(status.text).not.toContain("run ");
     expect(status.seed).toContain("run live");
     expect(status.seed).toContain("session s-live");
@@ -340,7 +340,7 @@ describe("the open items", () => {
     expect(open.items.map((i) => [i.problem, i.status])).toEqual([
       ["回调后回复语言跑偏", "waiting on you"],
       ["重启卡住原因", "running"],
-      ["已合并", "pending release"],
+      ["已合并", "wrapping up"],
     ]);
     const text = openItemsStatus(open, now).text;
     expect(text.indexOf("Waiting on you · 1")).toBeLessThan(text.indexOf("In progress · 1"));
@@ -438,6 +438,19 @@ describe("the open items", () => {
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2"]], ["split", ["rt3"]]]);
     r.store.markOpenItems([open("pair, restated", "rt2", "rt3")], 5);
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair, restated", ["rt2", "rt3"]]]);
+  });
+
+  // A session's newest run stands for it, so a lead woken again under a new key stays one item.
+  it("collapses the item a run's session is behind into the one an <open> names with its newer run", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
+    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    r.save(saved("rs1", { targetSessionId: "s1", state: "succeeded" }), saved("rs2", { targetSessionId: "s1" }), saved("rt1", { targetSessionId: "t1" }));
+    r.store.markOpenItems([open("lead", "rs1", "rt1"), open("lost", "gone")], 1);
+    expect(r.store.markOpenItems([open("lead, woken again", "rs2")], 2).changed).toEqual([2]);
+    expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, woken again", ["rs2"]]]);
+    r.store.markOpenItems([open("lead, third time", "rs1")], 3);
+    expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, third time", ["rs1"]]]);
   });
 
   it("says nothing is open when nothing is, and counts no workers when no lead is shown", () => {
@@ -542,5 +555,63 @@ describe("the open items", () => {
     expect(service.unmatchedDone()).toEqual([]);
     expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
+  });
+  it("tells the head when its turn answering a run's result, a steer's included, left that run's item at its old stage", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, {
+      modelMenu: () => [],
+      continuous: { chainOf: () => ["h0"], members: () => [{ sessionId: "h0", startedAt: 1, reason: "first" as const }] },
+    });
+    const end = (text: string) => h0.emit({ type: "turn-end", text });
+    const notes = () => h0.systemInputs.filter((i) => i.mode === "append").map((i) => i.text);
+    // As agent/events.ts reports an input entering the context: a turn-start, then the input.
+    const user = (text: string) => { h0.emit({ type: "turn-start" }); h0.emit({ type: "user-message", text }); };
+    const result = (...runIds: string[]) => {
+      h0.emit({ type: "turn-start" });
+      h0.emit({ type: "system-input", text: "Task finished", origin: { kind: "task-callback", taskId: "t1", runId: runIds[0]!, sourceSessionId: null, runIds } });
+    };
+    const ended = (id: string, targetSessionId: string) => store.saveRun(saved(id, { targetSessionId, state: "succeeded", finishedAt: 1 }));
+    ended("r1", "s1");
+    store.saveRun(saved("live", { targetSessionId: "s2" }));
+    end("<open>fix parser — worker running (run r1)</open><open>pair — two workers (run r3, run live)</open>");
+    const note = (runId: string) => `[Pier: run ${runId} ended; open item "fix parser" still has its old stage. Close it with <done>, or <open> it again with a stage saying waiting on you.]`;
+
+    // A newer run of the item's session stands for it; the reply's marker for another item does not count.
+    ended("r2", "s1");
+    result("r9", "r2");
+    end("Merged.\n<open>other — x</open>");
+    expect(notes()).toEqual([note("r2")]);
+    // A user's turn answered no result: a result sent and never entered, a retry's, owes nothing.
+    user("thanks");
+    end("ok");
+    expect(notes()).toHaveLength(1);
+
+    // A steer sent into a user's turn is answered by the turn it opens on entering, not the one it was sent into.
+    ended("r4", "s1");
+    user("status?");
+    end("checking");
+    expect(notes()).toHaveLength(1);
+    result("r4");
+    end("Done.");
+    expect(notes()).toEqual([note("r2"), note("r4")]);
+    // An `append` shown mid-turn opens nothing.
+    user("again?");
+    h0.emit({ type: "system-input", text: "note", origin: { kind: "task-callback", taskId: "t1", runId: "r4", sourceSessionId: null } });
+    end("yes");
+    expect(notes()).toHaveLength(2);
+
+    // An item updated or closed in the reply, or with a run still live, owes nothing.
+    result("r4");
+    end("<open>fix parser — waiting on you: merge?</open>");
+    ended("r3", "s3");
+    result("r3");
+    end("Half done.");
+    result("r4");
+    end("<done>fix parser</done>");
+    expect(notes()).toHaveLength(2);
   });
 });

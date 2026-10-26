@@ -101,7 +101,11 @@ const launchOf = (v: Values): Params | undefined => {
 };
 
 const roundsOf = (v: Values): number | undefined =>
-  v.rounds === undefined || Number.isInteger(Number(v.rounds)) ? (v.rounds === undefined ? undefined : Number(v.rounds)) : refuse("--rounds must be a whole number");
+  v.rounds === undefined ? undefined : /^\d$/.test(String(v.rounds)) ? Number(v.rounds) : refuse("--rounds must be a whole number from 0 to 9");
+
+/** What an existing run or session keeps, named so the refusal says why dropping the flag loses nothing. */
+const KEPT: Partial<Record<Flag, string>> = { name: "its name", cwd: "its directory", model: "its model", thinking: "its thinking level", role: "its role", design: "its role" };
+const kept = (flag: Flag): string => (KEPT[flag] ? `, which keeps ${KEPT[flag]}` : "");
 
 /** Argv is split at each bare `--member`; a value equal to it is unreachable,
  *  since parseArgs (strict) refuses option-like values anyway. */
@@ -135,11 +139,12 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
     return name ? 0 : 2;
   }
   const cmd = COMMANDS[name];
+  // One line: a shell's `tail` keeps the reason, and the reason names the fix; the usage is --help's.
   const usage = (message: string): number => {
-    io.stderr(`task: ${message}\n${cmd ? `pier task ${cmd.usage}` : USAGE}`);
+    io.stderr(`task: ${message}`);
     return 2;
   };
-  if (!cmd) return usage(`unknown command "${name}"`);
+  if (!cmd) return usage(`unknown command "${name}"; commands: ${Object.keys(COMMANDS).join(", ")}`);
   const allowed = new Set((cmd.usage.match(/--[a-z-]+/g) ?? []).map((flag) => flag.slice(2)));
   let params: Params;
   try {
@@ -237,7 +242,8 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
       if (v.name === undefined || !String(v.name).trim()) refuse("a new run needs --name: the session's title, a few words in the user's language");
       return compact({ prompt, cwd: v.cwd, launch, name: v.name, timeoutSeconds });
     }
-    if (v.cwd !== undefined) refuse("--cwd applies to a fresh session, not --session");
+    const fresh = (["cwd", "model", "thinking", "role", "design"] as const).find((flag) => v[flag] !== undefined);
+    if (fresh) refuse(`--${fresh} does not apply to --session ${String(v.session)}${kept(fresh)}: drop it, or drop --session for a fresh run`);
     return compact({ name: v.name, timeoutSeconds, action: compact({ type: "agent", session: { mode: "reuse", sessionId: v.session }, prompt, launch }) });
   };
   const delivery = compact({ callback: values.callback, callback_session_id: values["callback-session"] });
@@ -249,7 +255,8 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     if (values["review-model"] !== undefined && values.rounds === undefined) refuse("--review-model beside --run applies with --rounds");
     if (values.fresh && values.after) refuse("--fresh continues an ended run; --after queues behind a running turn");
     const extra = flagsOf(values).find((flag) => !["run", "after", "rounds", "review-model", "fresh", "prompt", "callback", "callback-session"].includes(flag));
-    if (extra) refuse(`--${extra} does not apply to an existing run (--run)`);
+    const model = extra === "model" || extra === "thinking" ? "; another model or thinking level is a new run, --cwd <its worktree>" : "";
+    if (extra) refuse(`--${extra} does not apply to --run ${String(values.run)}${kept(extra)}: drop it and resend${model}`);
     const message = text(values.prompt) ?? refuse("--run needs --prompt");
     return compact({ operation: "message", run_id: values.run, message, after: values.after || undefined, rounds: roundsOf(values), review_model: values["review-model"], fresh: values.fresh || undefined, ...delivery });
   }

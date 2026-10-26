@@ -40,8 +40,9 @@ truth.
 - Recall: `rg` over `memory/`; `pier search --in main <words>` over what the
   user and Pier said; `--since` narrows a time such as last week.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
-  session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
-  and the last exchanges.
+  session, seeded with `MEMORY.md`, the open items, its runs and the newest
+  2K of notes; only a session rotated for size carries the last exchanges, so
+  an idle hour or `/new` starts a new subject.
 - It dispatches: real work is a task run — a worker, or a feature lead that
   designs with the user; once the user finalizes, a new build lead builds it
   on the design's branch with workers — each its own session, taking messages

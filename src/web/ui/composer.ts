@@ -12,7 +12,7 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { CHAT_COMMANDS, type ChatCommand, isCommandText, type SessionState } from "../../core/types.js";
+import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
 /** A file picked but not yet sent. The read and upload start on attach, so
@@ -533,12 +533,14 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
     }
     const body = [typed, ...markers].filter(Boolean).join("\n");
     const text = quote ? withQuote(quote, body) : body;
-    const startsTurn = deps.sessionState() === "idle" && mode === "auto";
+    // A chat command is answered without a turn: no bubble, no streaming to take back.
+    const command = continuous && chatCommand(text) !== undefined;
+    const startsTurn = !command && deps.sessionState() === "idle" && mode === "auto";
     if (startsTurn) deps.setState("streaming");
     else updateComposer();
     // Optimistic; only a message sent into an existing run waits for the
     // queue-state snapshot.
-    if (startsTurn || mode === "steer") {
+    if (startsTurn || (!command && mode === "steer")) {
       markOptimisticUser(text);
       appendTurn("user", text, false, Date.now());
       scrollBottom(true);
@@ -551,9 +553,7 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
       if (id) await deps.reload(id);
       appendTurn("error", why);
     } else if (continuous) {
-      const { sessionId, command } = (await res.json()) as { sessionId: string; command?: string };
-      // A command is answered without a turn, so no state event ends the optimistic one.
-      if (command && startsTurn) deps.setState("idle");
+      const { sessionId } = (await res.json()) as { sessionId: string };
       if (sessionId !== id) deps.headMoved?.();
     }
   } finally {

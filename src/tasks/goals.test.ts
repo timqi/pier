@@ -5,9 +5,9 @@
 // real git repository in a scratch directory, the one the service pins.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
@@ -278,6 +278,26 @@ describe("a goal", () => {
     service.stop();
   });
 
+  it("names a --worktree branch that already exists, and where it is checked out, without reusing it", async () => {
+    const { service, cwd } = rig({});
+    // A PATH of git alone: the refusal is git's, before `wt` could switch to the branch's worktree.
+    const real = (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "git")).find((file) => existsSync(file));
+    const bin = mkdtempSync(join(tmpdir(), "pier-git-only-"));
+    symlinkSync(real!, join(bin, "git"));
+    const path = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      await expect(service.addWorktree(cwd, "feature")).rejects.toThrow(
+        `branch feature already exists, checked out at ${realpathSync(cwd)}: name a new --worktree branch, or continue that work with --cwd ${realpathSync(cwd)} and no --worktree`);
+      await expect(service.addWorktree(cwd, "main")).rejects.toThrow(
+        "branch main already exists: name a new --worktree branch, or continue that work with --cwd <a worktree on it> and no --worktree");
+      await expect(service.addWorktree(cwd, "fresh-branch")).rejects.toThrow(/^wt: /);
+    } finally {
+      process.env.PATH = path;
+      service.stop();
+    }
+  });
+
   it("reads a stored `until` as a goal of 3 reviews", async () => {
     const { service, cwd } = rig({});
     const task = await service.create({
@@ -492,9 +512,9 @@ describe("a goal", () => {
     expect(sessions.get("s3")!.systemInputs[0]!.text).toMatch(/\n\nbuild it\n\nSteering from the supervisor, resuming the work:\n\nkeep it\n\nFor each issue/);
     expect(goalOf(root)).toMatchObject({ id: first.goal.id, outcome: "decision" });
     // The earlier root is no longer the session's goal; a run no goal roots, none at all.
-    await expect(answer(root.id)).rejects.toThrow(`run ${root.id}'s session is in a later goal, rooted at run ${resumed.id}; --run that one`);
+    await expect(answer(root.id)).rejects.toThrow(`run ${root.id}'s session is in a later goal: resend as --run ${resumed.id} --rounds 2`);
     const review = first.runs[1]!;
-    await expect(answer(review.id)).rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${review.id} is not one; its root is run ${root.id}`);
+    await expect(answer(review.id)).rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${review.id} is not one: resend as --run ${root.id} --rounds 2`);
     // 0 reviews is no goal: the plain resume `--run` without `--rounds` is.
     const plain = await answer(resumed.id, { rounds: 0 }) as { delivery: string; run: { runId: string } };
     expect(plain.delivery).toBe("resume");
@@ -580,7 +600,7 @@ describe("a goal", () => {
     const { runId } = await service.handle({ operation: "run", prompt: "no goal", name: "no goal", cwd, launch: { model: "test/model" } }, "main") as { runId: string };
     await vi.waitFor(() => expect(store.getRun(runId)!.state).toBe("succeeded"));
     await expect(service.handle({ operation: "message", run_id: runId, message: "go", rounds: 1 }, "main"))
-      .rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${runId} is not one`);
+      .rejects.toThrow(`--rounds beside --run resumes a goal's root run; run ${runId} is in no goal: drop --rounds to continue it`);
     const { runId: busy } = await service.handle({ operation: "run", prompt: "slow", name: "slow", cwd, launch: { model: "test/model" } }, "main") as { runId: string };
     await vi.waitFor(() => expect(store.getRun(busy)!.state).toBe("running"));
     await expect(service.handle({ operation: "message", run_id: busy, message: "go", rounds: 1 }, "main"))

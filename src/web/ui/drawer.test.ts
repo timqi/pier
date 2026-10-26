@@ -127,7 +127,7 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   sessions = [row("s-lead", { state: "streaming" }), row("free", { unread: true }), row("queued", { phase: "build", runLive: true })];
   open = { items: [
     { problem: "原始完整问题", title: "稳定标题", stage: "waiting on you: 是否合并？授权只限本分支。", status: "waiting on you", runs: [run("lead", { state: "succeeded", finishedAt: 0 })] },
-    { problem: "merged", stage: "restart pending", status: "pending release", runs: [] },
+    { problem: "merged", stage: "restart pending", status: "wrapping up", runs: [] },
     { problem: "gone", stage: "", status: "stopped", runs: [run("missing", { state: NOT_IN_LEDGER, targetSessionId: null })] },
     { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })] },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
@@ -142,7 +142,7 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect([status("item:auth").textContent, phrase("item:auth")]).toEqual(["in progress", "实现中"]);
   expect(status("item:auth").className).toContain("text-sky-700");
   expect(status("item:auth").querySelector(".running-dot")).not.toBeNull();
-  expect([status("item:gone").textContent, status("item:merged").textContent, status("run:q").textContent]).toEqual(["failed", "pending release", "queued"]);
+  expect([status("item:gone").textContent, status("item:merged").textContent, status("run:q").textContent]).toEqual(["failed", "wrapping up", "queued"]);
   expect(status("item:gone").className).toContain("text-red-600");
   expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");

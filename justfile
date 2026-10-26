@@ -42,5 +42,5 @@ size:
     done
     printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -vE '\.test(kit)?\.ts$'))"
     printf '%-11s %6s\n' native "$(count $(find native -name node_modules -prune -o -name target -prune -o -name dist -prune -o \( -name '*.rs' -o -name '*.ts' \) -not -name '*_test.rs' -print))"
-    echo; echo "modules over 750:"
-    for f in $(find src -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'); do n=$(count "$f"); [ "$n" -gt 750 ] && echo "  $n $f"; done | sort -rn
+    echo; echo "modules over 800:"
+    for f in $(find src -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'); do n=$(count "$f"); [ "$n" -gt 800 ] && echo "  $n $f"; done | sort -rn

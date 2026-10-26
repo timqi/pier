@@ -3,7 +3,7 @@
 // once idle past an hour or full (docs/design/10-continuous-session.md).
 
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentDefaults } from "../agent/types.js";
@@ -12,7 +12,7 @@ import { logger } from "../log.js";
 import { day, userLanguage, withLanguage } from "./identity.js";
 import { cut, openItemMarkers } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand } from "./types.js";
 import type {
   AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItemsStatus,
 } from "./types.js";
@@ -21,8 +21,9 @@ const log = logger("core");
 
 const EXCHANGES = 3;
 // Seed budgets in chars (10 §Head lifecycle); the ledger is newest first, so its oldest lines go.
-const MEMORY_CHARS = 12_000;
-const NOTES_CHARS = 6_000;
+const MEMORY_CHARS = 4_000;
+// Across every day's notes together: a return after a week still sees the week's last state.
+const NOTES_CHARS = 2_000;
 const EXCHANGES_CHARS = 4_000;
 const LEDGER_CHARS = 4_000;
 /** `cut` from the front, whole lines: notes and exchanges grow at the end,
@@ -34,8 +35,9 @@ function tail(text: string, max: number, rest: string): string {
   let size = 0;
   for (let i = lines.length - 1; i >= 0 && size + lines[i]!.length + 1 <= max; i--, kept++) size += lines[i]!.length + 1;
   const dropped = lines.length - kept;
-  return `… ${String(dropped)} lines omitted, the rest in ${rest}\n${lines.slice(dropped).join("\n")}`;
+  return [`… ${String(dropped)} lines omitted, the rest in ${rest}`, ...lines.slice(dropped)].join("\n");
 }
+
 
 interface ChainDeps {
   factory: AgentFactory;
@@ -84,13 +86,6 @@ const SEED_RUNS_HIDDEN: ReadonlySet<string> = new Set(["succeeded", "skipped"]);
 /** `/skills`' answer on every surface, the head's and a thread's (channels/). */
 export const skillsText = (skills: { name: string; description: string }[]): string =>
   skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
-
-/** Only the exact word is a command: the composer is not a shell. */
-function chatCommand(text: string): ChatCommand | undefined {
-  const draft = text.trim().toLowerCase();
-  const word = draft.slice(1);
-  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
-}
 
 export class MainChain {
   /** Sends pass one at a time, so two cannot both find the head idle and rotate twice. */
@@ -141,11 +136,10 @@ export class MainChain {
   }
 
   /** Resolve the head, rotating it first when due, then dispatch to `key` (a
-   *  chat's) or else the head's own; `command` names a chat command, answered
-   *  without a turn. */
-  send(message: Omit<InboundMessage, "key">, key?: ConversationKey): Promise<{ sessionId: string; rotated?: ChainReason; command?: ChatCommand }> {
+   *  chat's) or else the head's own. */
+  send(message: Omit<InboundMessage, "key">, key?: ConversationKey): Promise<{ sessionId: string; rotated?: ChainReason }> {
     const command = chatCommand(message.text);
-    if (command) return this.serial(key, (session, rotated) => this.command(command, session, rotated)).then((head) => ({ ...head, command }));
+    if (command) return this.serial(key, (session, rotated) => this.command(command, session, rotated));
     return this.serial(key, async (session) => {
       await this.deps.router.dispatch({ ...message, key: key ?? webKey(session.id) });
     });
@@ -263,8 +257,6 @@ export class MainChain {
 
   /** Read fresh at every rotation; a part that cannot be read says so in the seed. */
   private async seed(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
-    const today = new Date(this.now());
-    const days = [new Date(today.getTime() - 86_400_000), today].map(day);
     const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now())
       .filter((r) => !SEED_RUNS_HIDDEN.has(r.state));
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
@@ -275,9 +267,31 @@ export class MainChain {
       section("MEMORY.md", cut(await this.read("MEMORY.md"), MEMORY_CHARS)),
       section("Open", this.deps.status(this.now()).seed),
       section("Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
-      ...(await Promise.all(days.map(async (date) => section(`memory/${date}.md`, tail(await this.read(join("memory", `${date}.md`)), NOTES_CHARS, `memory/${date}.md`))))),
-      section("The previous session's last exchanges", open ? tail(lastExchanges(spoken, EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
+      ...(await this.notes()).map(([name, text]) => section(name, text)),
+      // Only a full rotation carries the subject: the user was mid-sentence. An idle, new or lost head starts without it.
+      section("The previous session's last exchanges", open && reason === "full" ? tail(lastExchanges(spoken, EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
     ].filter(Boolean).join("\n\n"));
+  }
+
+  /** The newest notes under one budget, collected newest day first and listed
+   *  oldest first, each under its own file name so the head sees how old the latest is. */
+  private async notes(): Promise<[name: string, text: string][]> {
+    const files = await readdir(join(this.deps.home, "memory")).catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      log.warn("seed: could not list memory/", err);
+      return `(could not be read: ${String(err)})`;
+    });
+    if (typeof files === "string") return [["memory/", files]];
+    const parts: [string, string][] = [];
+    let left = NOTES_CHARS;
+    for (const file of files.filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort().reverse()) {
+      const name = `memory/${file}`;
+      const text = left > 0 ? await this.read(name) : "";
+      if (!text) continue;
+      parts.unshift([name, tail(text, left, name)]);
+      left -= text.length + 1;
+    }
+    return parts;
   }
 
   private async read(name: string): Promise<string> {

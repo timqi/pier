@@ -518,14 +518,17 @@ export class TaskStore {
     return Number(this.sql("DELETE FROM open_items WHERE problem = ?").run(named[0]!).changes);
   }
 
-  /** A run is behind one item: an `<open>` takes its runs off every other item. One left
+  /** A session is behind one item, its newest run standing for it as in open-items.ts `openItems`:
+   *  an `<open>` takes its runs, and every run of their sessions, off every other item. One left
    *  with no run was this item under an older key — the first becomes it in place, the rest go. */
   private claimRuns(problem: string, runIds: string[], now: number): number {
+    const sessions = new Set(runIds.flatMap((id) => this.getRun(id)?.targetSessionId ?? []));
+    const claimed = (id: string) => runIds.includes(id) || sessions.has(this.getRun(id)?.targetSessionId ?? "");
     let changed = 0;
     let renamed = !!this.sql("SELECT 1 FROM open_items WHERE problem = ?").get(problem);
     for (const row of this.openItems()) {
-      if (row.problem === problem || !row.runIds.some((id) => runIds.includes(id))) continue;
-      const kept = row.runIds.filter((id) => !runIds.includes(id));
+      if (row.problem === problem || !row.runIds.some(claimed)) continue;
+      const kept = row.runIds.filter((id) => !claimed(id));
       if (kept.length) this.sql("UPDATE open_items SET run_ids = ?, updated_at = ? WHERE problem = ?").run(JSON.stringify(kept), now, row.problem);
       else if (!renamed) this.sql("UPDATE open_items SET problem = ? WHERE problem = ?").run(problem, row.problem);
       else this.sql("DELETE FROM open_items WHERE problem = ?").run(row.problem);

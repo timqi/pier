@@ -184,14 +184,8 @@ everything else is the web UI's own keyboard.
 
 - `native/` beside `src/`: `src-tauri/` (Rust) and the tab bar page (TS,
   built by `native/vite.config.ts`); `just native-dev`, `just native`.
-- Budget line: `native/` ≤ 1190 non-blank lines (Rust + TS), the lines past
-  830 the user's follow-ups (the instance's name on notifications, the origin
-  guard's wait for the title, the data store removal's retry), the lines past
-  845 Reload's tab menu, `F5` and Linux's hung-process replacement, the lines
-  past 880 tabs opened and closed on demand, the `+` menu and the webviews
-  built off the main thread, the lines past 950 `Cmd+W` closing a tab, the lines past 965 the local
-  instance (finding its command, starting it, signing in, stopping it on quit); the server-side
-  change is the `notification` workspace event alone (~20 lines in `push.ts`
-  and `server.ts`), the UI change `shell.ts` and two call sites.
+- Budget: the `native/` row of AGENTS.md's Budgets table (Rust + TS); the
+  server-side change is the `notification` workspace event alone (~20 lines in
+  `push.ts` and `server.ts`), the UI change `shell.ts` and two call sites.
 - New toolchain: Rust + cargo lockfile, reviewed on upgrade like
   `package-lock.json`; `@tauri-apps/api` the one new npm dependency, dev-only.

@@ -265,7 +265,7 @@ export const createdPhase = (run: TaskRun): LeadPhase | undefined => {
 /** `merge` only on a goal stored while the loop still resumed the worker to merge: the loop never enters it now. */
 export type GoalStep = "work" | "review" | "merge";
 
-/** How a goal ended: `done` reviewed clean, the merge waiting on the user (merged, after a legacy `merge` step); `decision` a step's result carried `Needs
+/** How a goal ended: `done` reviewed clean, the head merging it (merged, after a legacy `merge` step); `decision` a step's result carried `Needs
  *  your decision` as its status line; `cap` the last allowed review still found issues; `failed`
  *  a step failed, was cancelled, interrupted, timed out, answered `Verdict: blocked` or
  *  several status lines, a review gave no verdict, or its worktree could not be pinned. */
@@ -273,7 +273,7 @@ export type GoalOutcome = "done" | "decision" | "cap" | "failed";
 
 /** A goal (tasks/goals.ts, docs/plans/18-goal-runtime.md): the root run's
  *  work, reviewed by a run Pier launches, fixed by resuming the worker, reviewed
- *  again up to `cap` reviews; it ends before the merge, the user's to confirm. */
+ *  again up to `cap` reviews; it ends before the merge, the head's to do. */
 export interface Goal {
   id: string;
   rootRunId: string;
@@ -314,11 +314,11 @@ export interface OpenRun extends LedgerRun {
 /** Where an open item stands (`openStatus`, tasks/open-items.ts), first match:
  *  `running` while a run's goal is live, a run is queued or running, its session
  *  streams or a lead's workers are queued or running; `waiting on you` while a
- *  goal ended `decision`, `cap` or `done` short of a legacy merge, its stage says so
- *  or its session's design is not final and its newest run succeeded; `pending release` when every run succeeded
- *  and carries no goal but one a legacy merge ended; else `stopped` — a run failed, was cancelled, interrupted,
+ *  goal ended `decision` or `cap`, its stage says so
+ *  or its session's design is not final and its newest run succeeded; `wrapping up` when every run succeeded
+ *  and carries no goal but one ended `done`; else `stopped` — a run failed, was cancelled, interrupted,
  *  skipped or left the ledger. Only `waiting on you` asks anything of the user. */
-export type OpenStatus = "running" | "waiting on you" | "pending release" | "stopped";
+export type OpenStatus = "running" | "waiting on you" | "wrapping up" | "stopped";
 
 /** `runs`: each named run's session, by its newest run. `waitsIn`: the session
  *  a `waiting on you` item is answered in, derived beside the status; absent

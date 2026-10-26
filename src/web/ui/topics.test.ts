@@ -71,7 +71,7 @@ it("names only the problem, dotted while its item waits on the user and they hav
   topics.refreshTopicTags();
   expect(dotted()).toEqual([true, true]);
   // No longer waiting, or done: gone at once.
-  topics.setOpenTopics([{ problem: "auth", status: "pending release", runs: [] }]);
+  topics.setOpenTopics([{ problem: "auth", status: "wrapping up", runs: [] }]);
   expect(dotted()).toEqual([false, false]);
   expect(tag(a).title).toBe("auth");
   topics.setOpenTopics([{ problem: "auth", status: "waiting on you", runs: [] }]);

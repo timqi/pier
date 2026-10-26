@@ -23,7 +23,7 @@ stdout, exit 0; `run`'s is one line instead (`receiptLine`, `tasks/cli.ts`) —
 `<state> <runId> · <next>`, a group's `<state> group <groupId>: <runId>, … · <next>`,
 a resume `resumed: …`, one in a new session `resumed in a new session (<reason>): …`, a steer or follow-up `<delivery> → run <runId> · <message state>` —
 and `--json` prints the answer's object. A refusal is one `task: <reason>` line on stderr, exit 1;
-argv errors are the usage line, exit 2, before the socket is touched.
+argv errors are one `task:` line too, naming the flag to drop or the value to resend with, exit 2, before the socket is touched; the usage is `--help`'s.
 `--prompt -` reads stdin; nothing else reads it. An empty `--prompt` (stdin
 or typed) or `--name`, and a `--timeout` outside 1–86400, are argv errors.
 
@@ -81,8 +81,10 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   `wt switch -c <branch> -b <--cwd's branch> --no-cd -y --format json` in
   `--cwd` (never a shell) and starts the session in the worktree it prints,
   after the server's other checks and before the definition is filed, whose
-  own checks argv makes first; `wt`'s failure is the refusal
-  (`task: wt: …`). Alone on a worker it means `--rounds 3`; on a lead, no
+  own checks argv makes first; a branch that already exists is refused
+  before `wt`, naming the worktree it is checked out at and the two fixes (a
+  new branch, or `--cwd` that worktree), never reused; `wt`'s failure is the
+  refusal (`task: wt: …`). Alone on a worker it means `--rounds 3`; on a lead, no
   goal. Refused beside `--bash`, `--task-id`, `--session`, in a `--member`
   and on `save`.
 - **`--run <root> --prompt … --rounds <n>`**, `n` 1–9: accepted only when

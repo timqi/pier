@@ -66,6 +66,9 @@ export interface GroupSummary {
   next?: string;
 }
 
+/** A refused run-in-a-run's way forward, worded as the worker's role prompt words it (agent/roles.ts `WORKER`). */
+const HAND_UP = "put work to split up or hand off in your result, each piece with its prompt; your supervisor launches it";
+
 /** `pier task runs` answers the newest 20 unless asked: the reader is a model's context. */
 const RUNS_LIMIT = 20;
 const RUNS_MAX = 200;
@@ -223,8 +226,8 @@ export async function handleTask(
   const gate = delegated ?? (role === "worker" ? store.creatorOf(callerSessionId) : undefined);
   // Read-only, so a delegated run reads the whole instance's ledger: it launches nothing of its own.
   if (gate && (input.operation === "runs" || input.operation === "stats")) return readLedger(host, null, input);
-  if (delegated) throw new Error("a run cannot launch a run; ask in your result and let your supervisor run it");
-  if (role === "worker") throw new Error("a worker's session never launches a run, in a run or after it; say what needs another agent and let your supervisor run it");
+  if (delegated) throw new Error(`a run cannot launch a run: ${HAND_UP}`);
+  if (role === "worker") throw new Error(`a worker's session never launches a run, in a run or after it: ${HAND_UP}`);
   // Read off a draft before it is filed; a saved definition has the same shape under `action`.
   const notLead = <T>(draft: T): T => {
     const role = record(record(draft)?.launch)?.role ?? record(record(record(draft)?.action)?.launch)?.role;
