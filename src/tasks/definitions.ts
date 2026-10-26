@@ -73,7 +73,9 @@ function parseTrigger(raw: unknown): TaskTrigger {
   }
   if (value.type === "watch") {
     const intervalSeconds = Number(value.intervalSeconds);
-    if (!Number.isInteger(intervalSeconds) || intervalSeconds < MIN_WATCH_SECONDS) throw new Error(`watch interval must be at least ${MIN_WATCH_SECONDS} seconds`);
+    if (!Number.isInteger(intervalSeconds) || intervalSeconds < MIN_WATCH_SECONDS) {
+      throw new Error(`watch interval must be at least ${MIN_WATCH_SECONDS} seconds`);
+    }
     return {
       type: "watch",
       script: requiredString(value.script, "watch script"),

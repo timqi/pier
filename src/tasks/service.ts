@@ -88,9 +88,12 @@ async function addWorktree(cwd: string, branch: string): Promise<string> {
   const from = await git(cwd, "branch", "--show-current");
   // Checked before `wt`, which would switch to a branch's existing worktree: whether that work is this run's is the launcher's call.
   // `rev-parse --verify --quiet` exits 1 only for a missing ref; any other failure is git's own.
-  const existing = await git(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`).catch((err: Error & { status?: unknown }) => (err.status === 1 ? null : Promise.reject(err)));
+  const existing = await git(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`).catch(
+    (err: Error & { status?: unknown }) => (err.status === 1 ? null : Promise.reject(err)),
+  );
   if (existing) {
-    const checkedOut = (await git(cwd, "worktree", "list", "--porcelain")).split("\n\n").find((entry) => entry.split("\n").includes(`branch refs/heads/${branch}`));
+    const worktrees = (await git(cwd, "worktree", "list", "--porcelain")).split("\n\n");
+    const checkedOut = worktrees.find((entry) => entry.split("\n").includes(`branch refs/heads/${branch}`));
     const at = checkedOut?.match(/^worktree (.+)$/m)?.[1];
     throw new Error(`branch ${branch} already exists${at ? `, checked out at ${at}` : ""}: name a new --worktree branch, or continue that work with --cwd ${at ?? "<a worktree on it>"} and no --worktree`);
   }
@@ -568,7 +571,9 @@ export class TaskService {
     if (goal.rootRunId !== prior.id) throw new Error(`--rounds beside --run resumes a goal's root run; run ${prior.id} is not one: resend as --run ${goal.rootRunId} --rounds ${cap}`);
     if (goal.finishedAt === null) throw new Error(`run ${prior.id}'s goal has not ended; cancel it or wait for its end`);
     const latest = prior.targetSessionId ? this.store.goalOf(prior.targetSessionId) : undefined;
-    if (latest && latest.id !== goal.id) throw new Error(`run ${prior.id}'s session is in a later goal: resend as --run ${latest.rootRunId} --rounds ${cap}`);
+    if (latest && latest.id !== goal.id) {
+      throw new Error(`run ${prior.id}'s session is in a later goal: resend as --run ${latest.rootRunId} --rounds ${cap}`);
+    }
     return goal;
   }
 
@@ -582,7 +587,9 @@ export class TaskService {
     if (prior.handoff && !prior.targetSessionId) {
       throw new Error(`run ${prior.id} ended before its new session opened; --run ${prior.resumedFromRunId ?? "the run it continued"} to continue that work`);
     }
-    if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) throw new Error("only persisted Agent runs can be resumed");
+    if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {
+      throw new Error("only persisted Agent runs can be resumed");
+    }
     const prompt = requiredString(message, "message");
     const common = { ...provenance, sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId, resumedFromRunId: prior.id };
     if (handoff) {
