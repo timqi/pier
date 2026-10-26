@@ -18,7 +18,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { openItems, recordOpenItems, unmatchedNote } from "./open-items.js";
+import { openItems, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -190,7 +190,7 @@ export class TaskService {
       deliver: (run) => this.callbacks.deliver(run),
       worktree: (cwd) => this.worktree(cwd),
     });
-    router.onTurnEnd((sessionId, text) => {
+    router.onTurnEnd((sessionId, text, opened) => {
       // Only the head's turns write the list.
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
         try {
@@ -199,12 +199,14 @@ export class TaskService {
           // A head that keeps missing gets its latest few back; nothing open owes no resend.
           this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(u, k))), ...unmatched])].slice(-5) : [];
           if (changed) hub.emitWorkspace({ type: "open-items-changed" });
-          if (unmatched.length && keys.length) {
+          const stale = opened?.kind === "task-callback" ? staleItems(store, text, opened.runIds ?? [opened.runId]) : [];
+          const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
+          if (notes.length) {
             const at = router.conversationOf(sessionId);
             const head = at && router.sessionOf(at);
-            const failed = (why: string) => router.reportTo(sessionId, `open items: the unmatched <done> note could not reach the head: ${why}`);
+            const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
             if (!head) failed("not attached");
-            else head.systemInput(unmatchedNote(unmatched, keys), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
+            else head.systemInput(notes.join("\n"), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
           }
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);

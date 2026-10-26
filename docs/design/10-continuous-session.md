@@ -169,10 +169,16 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   a `<done>` closes the item it names or nothing is open, in memory: the seed's
   `## Open` lists them as `unmatched <done>: <key>`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
+- A head turn opened by a run's result (the `task-callback` origin of the
+  system input right after its `turn-start`, `Router.onTurnEnd`'s `opened`; a
+  steer's is the turn it opens on entering) that left an item holding a run of
+  that run's session with no live run, its exact key in none of the reply's
+  markers, gets the same `append` input naming the run and the key: close it,
+  or `<open>` it again as waiting on you.
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
-- A run is behind one item: an `<open>` takes its run tokens off every other
-  item (`TaskStore.markOpenItems`); the first one left with no run is renamed to
+- A session is behind one item: an `<open>` takes its run tokens, and every
+  run of their sessions, off every other item (`TaskStore.markOpenItems`); the first one left with no run is renamed to
   the new problem in its place, the rest are deleted, and one that still has
   other runs keeps them.
 - `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session

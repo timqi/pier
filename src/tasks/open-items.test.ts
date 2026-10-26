@@ -440,6 +440,19 @@ describe("the open items", () => {
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair, restated", ["rt2", "rt3"]]]);
   });
 
+  // A session's newest run stands for it, so a lead woken again under a new key stays one item.
+  it("collapses the item a run's session is behind into the one an <open> names with its newer run", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
+    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    r.save(saved("rs1", { targetSessionId: "s1", state: "succeeded" }), saved("rs2", { targetSessionId: "s1" }), saved("rt1", { targetSessionId: "t1" }));
+    r.store.markOpenItems([open("lead", "rs1", "rt1"), open("lost", "gone")], 1);
+    expect(r.store.markOpenItems([open("lead, woken again", "rs2")], 2).changed).toEqual([2]);
+    expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, woken again", ["rs2"]]]);
+    r.store.markOpenItems([open("lead, third time", "rs1")], 3);
+    expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, third time", ["rs1"]]]);
+  });
+
   it("says nothing is open when nothing is, and counts no workers when no lead is shown", () => {
     const r = rig();
     expect(openItemsStatus(r.list([]), r.now).text).toBe("Nothing open.");
@@ -542,5 +555,63 @@ describe("the open items", () => {
     expect(service.unmatchedDone()).toEqual([]);
     expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
+  });
+  it("tells the head when its turn answering a run's result, a steer's included, left that run's item at its old stage", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, {
+      modelMenu: () => [],
+      continuous: { chainOf: () => ["h0"], members: () => [{ sessionId: "h0", startedAt: 1, reason: "first" as const }] },
+    });
+    const end = (text: string) => h0.emit({ type: "turn-end", text });
+    const notes = () => h0.systemInputs.filter((i) => i.mode === "append").map((i) => i.text);
+    // As agent/events.ts reports an input entering the context: a turn-start, then the input.
+    const user = (text: string) => { h0.emit({ type: "turn-start" }); h0.emit({ type: "user-message", text }); };
+    const result = (...runIds: string[]) => {
+      h0.emit({ type: "turn-start" });
+      h0.emit({ type: "system-input", text: "Task finished", origin: { kind: "task-callback", taskId: "t1", runId: runIds[0]!, sourceSessionId: null, runIds } });
+    };
+    const ended = (id: string, targetSessionId: string) => store.saveRun(saved(id, { targetSessionId, state: "succeeded", finishedAt: 1 }));
+    ended("r1", "s1");
+    store.saveRun(saved("live", { targetSessionId: "s2" }));
+    end("<open>fix parser — worker running (run r1)</open><open>pair — two workers (run r3, run live)</open>");
+    const note = (runId: string) => `[Pier: run ${runId} ended; open item "fix parser" still has its old stage. Close it with <done>, or <open> it again with a stage saying waiting on you.]`;
+
+    // A newer run of the item's session stands for it; the reply's marker for another item does not count.
+    ended("r2", "s1");
+    result("r9", "r2");
+    end("Merged.\n<open>other — x</open>");
+    expect(notes()).toEqual([note("r2")]);
+    // A user's turn answered no result: a result sent and never entered, a retry's, owes nothing.
+    user("thanks");
+    end("ok");
+    expect(notes()).toHaveLength(1);
+
+    // A steer sent into a user's turn is answered by the turn it opens on entering, not the one it was sent into.
+    ended("r4", "s1");
+    user("status?");
+    end("checking");
+    expect(notes()).toHaveLength(1);
+    result("r4");
+    end("Done.");
+    expect(notes()).toEqual([note("r2"), note("r4")]);
+    // An `append` shown mid-turn opens nothing.
+    user("again?");
+    h0.emit({ type: "system-input", text: "note", origin: { kind: "task-callback", taskId: "t1", runId: "r4", sourceSessionId: null } });
+    end("yes");
+    expect(notes()).toHaveLength(2);
+
+    // An item updated or closed in the reply, or with a run still live, owes nothing.
+    result("r4");
+    end("<open>fix parser — waiting on you: merge?</open>");
+    ended("r3", "s3");
+    result("r3");
+    end("Half done.");
+    result("r4");
+    end("<done>fix parser</done>");
+    expect(notes()).toHaveLength(2);
   });
 });

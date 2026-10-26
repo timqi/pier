@@ -120,6 +120,22 @@ export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: s
 export const unmatchedNote = (unmatched: readonly string[], keys: readonly string[]): string =>
   `[Pier: ${unmatched.map((p) => `<done>${p}</done>`).join(", ")} closed no open item. Resend <done> with one of these keys exactly:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
 
+/** The items a turn answering `runIds`' results left as they were: one holding a run of a
+ *  result's session, no run of its sessions still live, its exact key in none of the reply's markers. */
+export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[]): { runId: string; problem: string }[] {
+  const named = new Set(openItemMarkers(text).markers.map((m) => m.problem));
+  const sessionOf = (id: string) => store.getRun(id)?.targetSessionId ?? id;
+  const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(id)) ?? store.getRun(id))?.state ?? "") === "live";
+  return store.openItems().flatMap((item) => {
+    const runId = named.has(item.problem) ? undefined : runIds.find((r) => item.runIds.some((id) => sessionOf(id) === sessionOf(r)));
+    return runId && !item.runIds.some(live) ? [{ runId, problem: item.problem }] : [];
+  });
+}
+
+/** The note the head's next prompt carries after it answered a result without updating its item. */
+export const staleNote = (stale: readonly { runId: string; problem: string }[]): string =>
+  `[Pier: ${stale.map((s) => `run ${s.runId} ended; open item "${s.problem}" still has its old stage`).join("; ")}. Close it with <done>, or <open> it again with a stage saying waiting on you.]`;
+
 /** Complete identities for the model; compact text and Web history share the same presentation.
  *  `unmatched`: `<done>` keys that closed nothing, named in the seed so the head resends the full key. */
 export function openItemsStatus(open: OpenItems, now: number, unmatched: readonly string[] = []): OpenItemsStatus {

@@ -14,6 +14,7 @@ import type {
   InboundMessage,
   ModelRef,
   SessionState,
+  SystemInputOrigin,
 } from "./types.js";
 
 const log = logger("core");
@@ -43,6 +44,8 @@ interface Attached {
   touched: number;
   /** So eviction stops listening instead of leaking the closure that holds the session. */
   unsubscribe: () => void;
+  /** The system input that opened the running turn; `null` until its first input enters. */
+  opened?: SystemInputOrigin | null;
 }
 
 export class QueueOperationError extends Error {
@@ -87,7 +90,7 @@ export class Router {
    *  here on — the boot's resume owns every turn that was running. */
   private stopped = false;
   private turnStarted?: (sessionId: string, key: ConversationKey) => void;
-  private readonly turnEnded: ((sessionId: string, text: string) => void)[] = [];
+  private readonly turnEnded: ((sessionId: string, text: string, opened?: SystemInputOrigin) => void)[] = [];
 
   constructor(
     private readonly hub: EventHub,
@@ -144,9 +147,10 @@ export class Router {
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
-   *  turn is not one. Registered by the task service (tasks/service.ts) and the
-   *  chain (core/chain.ts); a listener's throw is reported, never fatal to the others. */
-  onTurnEnd(listener: (sessionId: string, text: string) => void): void {
+   *  turn is not one. `opened`: the system input the turn answers, absent for a
+   *  user's. Registered by the task service (tasks/service.ts) and the chain
+   *  (core/chain.ts); a listener's throw is reported, never fatal to the others. */
+  onTurnEnd(listener: (sessionId: string, text: string, opened?: SystemInputOrigin) => void): void {
     this.turnEnded.push(listener);
   }
 
@@ -310,6 +314,10 @@ export class Router {
           if (payload.state === "streaming") this.turnStarted?.(session.id, key);
         }
         if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
+        // The input right after a turn-start opened it; an `append` shown mid-turn did not.
+        if (payload.type === "turn-start") attached.opened = null;
+        else if (attached.opened === null && payload.type === "system-input") attached.opened = payload.origin;
+        else if (attached.opened === null && payload.type === "user-message") attached.opened = undefined;
         // Without this a session-reported error lands only in the web timeline
         // and the IM side goes quiet for no visible reason.
         if (payload.type === "error") {
@@ -353,7 +361,7 @@ export class Router {
             // One listener's throw may not cost the rest, or the chat its reply.
             for (const ended of this.turnEnded) {
               try {
-                ended(session.id, payload.text);
+                ended(session.id, payload.text, attached.opened ?? undefined);
               } catch (err) {
                 this.report(session.id, key, `turn-end listener failed: ${String(err)}`);
               }
