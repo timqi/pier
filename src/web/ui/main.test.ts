@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   renderSnapshot: vi.fn(),
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
+  matchVersion: vi.fn(async () => {}),
   setSkills: vi.fn(),
   appendDivider: vi.fn(),
   appendPager: vi.fn(),
@@ -25,7 +26,7 @@ const h = vi.hoisted(() => ({
   content: [] as string[],
   isIOS: vi.fn(() => false),
 }));
-vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
+vi.mock("./auth.js", () => ({ bundleVersion: "test", guardFetch: vi.fn(), matchVersion: h.matchVersion, streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
   appendDivider: h.appendDivider, appendPager: h.appendPager,
   turnsPane: Object.assign(h.pane, { addEventListener: h.paneListen }), keepScroll: h.keepScroll,
@@ -99,7 +100,6 @@ beforeEach(async () => {
   h.renderSnapshot.mockImplementation((turns: ChatTurn[]) => { h.content.push(...turns.map((t) => t.text)); });
   h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
   vi.stubGlobal("EventSource", Stream);
-  vi.stubGlobal("__PIER_VERSION__", "test");
   Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
   // Listed oldest first, with `modified` the other way round: the client orders by birth.
   const rows = ["a", "b"].map((id, i) => ({ id, cwd: "/test", createdAt: 1 + i, modified: 9 - i, state: "idle" }));
@@ -394,8 +394,8 @@ describe("acking an unread session", () => {
   });
 });
 
-// A reconnect follows a gap whose events are gone: the session list re-lists.
-it("re-lists the sessions when the workspace stream reconnects", async () => {
+// A reconnect follows a gap whose events are gone, maybe a release: re-list, compare versions.
+it("re-lists the sessions and checks the version when the workspace stream reconnects", async () => {
   const workspace = Stream.all.find((s) => s.url === "/api/events");
   vi.clearAllMocks();
   (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockClear();
@@ -404,6 +404,28 @@ it("re-lists the sessions when the workspace stream reconnects", async () => {
   await settled();
 
   expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
+  expect(h.matchVersion).toHaveBeenCalledOnce();
+});
+
+// A stream the browser gave up on is reopened by auth.ts's probe: the session from a fresh snapshot.
+it("reopens dead streams through the revive it hands streamDied", async () => {
+  h.views.select("a");
+  await settled();
+  const workspace = Stream.all.find((s) => s.url === "/api/events")!;
+  const session = latest();
+  workspace.onerror?.();
+  session.onerror?.();
+  const [reconnectWorkspace, reviveSession] = h.streamDied.mock.calls.map((call) => call[2] as () => void) as [() => void, () => void];
+  const calls = h.history.mock.calls.length;
+
+  reconnectWorkspace();
+  reviveSession();
+  await settled();
+
+  expect(Stream.all.filter((s) => s.url === "/api/events")).toHaveLength(2);
+  expect(h.history).toHaveBeenCalledTimes(calls + 1);
+  expect(latest()).not.toBe(session);
+  expect(latest().url).toContain("/api/sessions/a/events");
 });
 
 // The drawer's run rows re-read on a marker written, without re-listing every session.

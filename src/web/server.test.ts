@@ -858,6 +858,13 @@ describe("workbench server", () => {
     expect(apply).toHaveBeenCalledOnce();
   });
 
+  it("answers the running version alone, for the reconnect probe", async () => {
+    const { app } = setup("/tmp", fakeSecrets(), { latest: "0.9.0" });
+    const res = await app.request("/api/version");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ current: "0.0.1" });
+  });
+
   it("refuses to apply an update it cannot apply, and says which reason it is", async () => {
     // Nothing supervises the process: the button is not offered, and the route
     // behind it says what to type instead.

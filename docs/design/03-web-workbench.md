@@ -70,7 +70,7 @@ token being its guard), `packages.ts` (`/api/packages*`; a file of its
 own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,exists,mkdir}` and the
 containment check; `/api/sessions/:id/files` shares only its size cap and
 headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
-(`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
+(`/api/settings`, `/api/version`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below),
 `channels/routes.ts`, `vault.ts` (`/api/vault*`), `tasks/routes.ts` (`/api/tasks*`).
@@ -165,6 +165,14 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   out over REST.
 - Reconnect: EventSource auto-reconnect + `Last-Event-ID` replay survives a
   server restart without duplicated events (dedupe by seq).
+- A stream EventSource gave up on (a non-2xx, e.g. the proxy's 502 while Pier
+  restarts) shows `… stream disconnected — reconnecting every 10s` with a
+  Reload button; `GET /api/version` (`{current}`, never waiting on the
+  registry) is probed every 10s, and once it answers the workspace stream
+  reopens and the session reloads from a snapshot, or the page reloads when
+  `current` differs from the bundle's version (`web/ui/auth.ts`). A stream that
+  dies again is not reopened sooner than 10s after its last reopening; every
+  workspace stream open compares the version too.
 - Own sends render optimistically and reconcile against the seam's
   `user-message` event by text; a queued message the agent picks up renders as
   a user turn from that same event.

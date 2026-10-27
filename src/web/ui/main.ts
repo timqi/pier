@@ -10,7 +10,7 @@ import { compact as tokens } from "../../core/reply.js";
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
 import { openItemDestination } from "../../core/open-items.js";
 import { coalesce, failure, getJson, mustGetJson } from "./api.js";
-import { guardFetch, streamDied } from "./auth.js";
+import { bundleVersion, guardFetch, matchVersion, streamDied } from "./auth.js";
 import {
   appendDelta,
   appendDivider,
@@ -103,7 +103,6 @@ interface SessionSnapshot {
 
 type SnapshotRead = Awaited<ReturnType<typeof getJson<SessionSnapshot>>>;
 
-declare const __PIER_VERSION__: string; // injected by vite.config.ts
 
 // --- state ---------------------------------------------------------------------
 
@@ -460,8 +459,11 @@ function handleEvent(e: SessionEvent): void {
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
   // Any (re)connect may follow a gap: re-list instead of replaying.
-  src.onopen = () => void refreshSessions();
-  src.onerror = () => streamDied(src, "Workspace");
+  src.onopen = () => {
+    void refreshSessions();
+    void matchVersion();
+  };
+  src.onerror = () => streamDied(src, "Workspace", connectWorkspace);
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
     if (e.type === "sessions-changed") {
@@ -512,7 +514,8 @@ function connect(id: string, cursor: string, generation: number): void {
     if (current()) void loadSession(id);
   });
   stream.onerror = () => {
-    if (current()) streamDied(stream, "Session");
+    // The epoch or the ring may have moved on meanwhile: a fresh snapshot, not a cursor.
+    if (current()) streamDied(stream, "Session", () => { if (current()) void loadSession(id); });
   };
   source = stream;
 }
@@ -698,7 +701,7 @@ initViews({
   maybeAckRead,
 });
 
-initVersion(__PIER_VERSION__);
+initVersion(bundleVersion);
 // Also what makes Pier installable and what answers a navigation with the
 // network gone; the notification permission is asked for in Settings, never here.
 void initPush();

@@ -151,6 +151,9 @@ export function registerInstanceRoutes(
 
   app.get("/api/settings", async (c) => c.json(await instanceSettings()));
 
+  // The workbench's reconnect probe: answers at once, never waiting on the registry.
+  app.get("/api/version", (c) => c.json({ current: updates.current }));
+
   // `statusNow` so a browser opened seconds after a restart is told the truth.
   app.get("/api/update", async (c) =>
     c.json({

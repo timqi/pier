@@ -48,7 +48,7 @@ export class UpdateCheck {
   #inFlight: Promise<void> | undefined;
 
   constructor(
-    private readonly current = currentVersion(),
+    readonly current = currentVersion(),
     private readonly fetchLatest: () => Promise<string> = fetchLatestVersion,
     private readonly now: () => number = Date.now,
   ) {}
