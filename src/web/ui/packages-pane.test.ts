@@ -1,6 +1,7 @@
 // Settings → Agent drawn from one GET /api/packages answer, with a small DOM
-// double: the nav, one switch written and redrawn from the server's row, an
-// install that shows its row before the answer, and a refusal shown as failed.
+// double: the nav, one switch written and redrawn from the server's row, a missing file
+// saved for the first time, an install that shows its row before the answer,
+// and a refusal shown as failed.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CatalogEntry, Package, PackageRegistry } from "../../agent/types.js";
@@ -79,7 +80,12 @@ beforeEach(async () => {
       { name: "SYSTEM.md", exists: true, readonly: false, managed: false },
       { name: "AGENTS.md", exists: true, readonly: false, managed: true },
       { name: "settings.json", exists: true, readonly: true, managed: false },
+      { name: "models.json", exists: false, readonly: false, managed: false },
     ] });
+    if (url === "/api/config/files/models.json" && init?.method === "PUT") {
+      return Response.json({ content: (JSON.parse(String(init.body)) as { content: string }).content });
+    }
+    if (url === "/api/config/files/models.json") return Response.json({ content: "" });
     if (url === "/api/settings") return Response.json({ catalog, customTools: [], toolsTaskId: null });
     if (url === "/api/packages" && init?.method === "POST") return install();
     if (url === "/api/packages") return Response.json(registry);
@@ -107,7 +113,7 @@ describe("Settings → Agent", () => {
     // pier, local and tools open by default, a third-party package closed; each tool once.
     expect(rows().map((el) => el.textContent)).toEqual([
       // Which files take an edit reads in the list itself.
-      "Configuration sync", "SYSTEM.md", "AGENTS.mdsynced", "settings.jsonread-only",
+      "Configuration sync", "SYSTEM.md", "AGENTS.mdsynced", "settings.jsonread-only", "models.json",
       "pieron", "web", "pier-help",
       "localon", "minenot loaded — no default export",
       "demoon",
@@ -171,6 +177,22 @@ describe("Settings → Agent", () => {
     expect(status()?.textContent).toContain("Saved");
     // No second list was fetched: the answer is the state.
     expect(fetcher.mock.calls.filter(([url]) => url === "/api/packages")).toHaveLength(1);
+  });
+
+  it("says what Edit does for a missing file, and a first save undims its row", async () => {
+    expect(row("models.json")!.className).toContain("text-neutral-400");
+    row("models.json")!.onclick!();
+    await settled();
+    expect(walk(root).find((el) => el.className === "empty")?.textContent).toBe("models.json is empty — Edit to write it.");
+    expect(walk(root).some((el) => el.localName === "pre")).toBe(false);
+    button("Edit")!.onclick!();
+    const editor = walk(root).find((el) => el.localName === "textarea")!;
+    editor.value = "{}";
+    button("Save")!.onclick!();
+    await settled();
+    expect(sent("PUT")).toEqual([["/api/config/files/models.json", { content: "{}", expected: "" }]]);
+    expect(row("models.json")!.className).not.toContain("text-neutral-400");
+    expect(status()?.textContent).toBe("saved — sessions take it on their next message");
   });
 
   it("shows a skill's file through /api/fs/file, from wherever its package keeps it", async () => {

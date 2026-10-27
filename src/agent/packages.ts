@@ -252,7 +252,7 @@ export class PiPackageStore implements PackageStore {
     // Pi stores a local path relative to the settings file: the row is named
     // by what landed in settings.json, not by what was typed.
     const stored = await this.#operate(spec, async (manager) => {
-      const sources = (): string[] => manager.listConfiguredPackages().filter((p) => p.scope === "user").map((p) => p.source);
+      const sources = (): string[] => manager.listConfiguredPackages().map((p) => p.source);
       const before = new Set(sources());
       await upstream(`installing ${spec}`, () => manager.installAndPersist(spec));
       const added = sources().find((s) => !before.has(s));
@@ -265,7 +265,7 @@ export class PiPackageStore implements PackageStore {
   async remove(source: string): Promise<void> {
     this.#builtin(source);
     await this.#operate(source, async (manager) => {
-      if (!manager.listConfiguredPackages().some((p) => p.scope === "user" && p.source === source)) {
+      if (!manager.listConfiguredPackages().some((p) => p.source === source)) {
         throw new PackageError("missing", `${source} is not in settings.json`);
       }
       await upstream(`removing ${source}`, () => manager.removeAndPersist(source));
@@ -273,7 +273,7 @@ export class PiPackageStore implements PackageStore {
   }
 
   async update(source?: string): Promise<Package[]> {
-    const configured = this.#open().manager.listConfiguredPackages().filter((p) => p.scope === "user");
+    const configured = this.#open().manager.listConfiguredPackages();
     const movable = (s: string): boolean => kindOf(s) !== "path" && pinnedRef(s) === null;
     if (source !== undefined) {
       this.#builtin(source);
@@ -324,7 +324,7 @@ export class PiPackageStore implements PackageStore {
   async checkUpdates(): Promise<PackageRegistry> {
     const { manager } = this.#open();
     const found = await upstream("update check", () => manager.checkForAvailableUpdates());
-    this.#updates = new Set(found.filter((u) => u.scope === "user").map((u) => u.source));
+    this.#updates = new Set(found.map((u) => u.source));
     this.#checkedAt = new Date().toISOString();
     if (this.#updates.size) log.info(`package updates available: ${[...this.#updates].join(", ")}`);
     return this.list();
