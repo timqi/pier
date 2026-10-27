@@ -170,6 +170,8 @@ ${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
 ${role === "worker" || role === "lead" ? toolCalls : ""}# Working style
 - Before touching files: list and search first. Never guess a path or a line number.
 - Read before you edit. Match the surrounding code's style, naming, and comment density.
+- Tool calls that don't depend on each other go out together in one message, not only reads and searches; ordered side effects (writes to one file, a restart, a commit) depend.
+- Change files with \`edit\`, a file's changes in one call's \`edits\`: \`edit\`/\`write\` queue per file and fail on a mismatch, a shell write has no guard. \`sed\`/scripts only for a mechanical change across many files.
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.
 - A shell command starts in a fresh shell in the working directory, the \`<cwd>\` at the end of this prompt.
 - Destructive or irreversible actions on things you didn't create — deleting user files, force push, migrations, deploys, service restarts: ask first; unattended, don't do them and report what you would have done. The one exception: a step your prompt names on an \`Approved: <step>\` line was asked and answered — take that step, and only that one.

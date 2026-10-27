@@ -30,6 +30,14 @@ describe("Pier system prompt", () => {
     expect(pierSystemPrompt()).not.toContain("undefined");
   });
 
+  it("asks for independent tool calls in one message and edit over shell writes, for every role", () => {
+    for (const role of [undefined, "worker", "lead"] as const) {
+      const prompt = pierSystemPrompt(undefined, role);
+      expect(prompt).toContain("Tool calls that don't depend on each other go out together in one message");
+      expect(prompt).toContain("Change files with `edit`, a file's changes in one call's `edits`");
+    }
+  });
+
   it("lets the run preamble's Approved: line override the ask-first rule for that step only", () => {
     const prompt = pierSystemPrompt();
     expect(prompt).toContain("ask first; unattended, don't do them");
