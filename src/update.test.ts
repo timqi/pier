@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { isNewer, isValidVersion, startAutoUpdate, UpdateCheck } from "./update.js";
 
@@ -130,5 +131,16 @@ describe("startAutoUpdate", () => {
     stop();
     await tick();
     expect(apply).not.toHaveBeenCalled();
+  });
+});
+
+describe("package version", () => {
+  // A bump the lock misses is rewritten by the next `npm i`, dirtying every checkout that rebases.
+  it("matches package-lock.json's root, as `npm version` keeps it", () => {
+    const read = (f: string) => JSON.parse(readFileSync(new URL(`../${f}`, import.meta.url), "utf8"));
+    const pkg = read("package.json");
+    const lock = read("package-lock.json");
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages[""].version).toBe(pkg.version);
   });
 });
