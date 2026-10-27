@@ -182,8 +182,7 @@ Skills: Pier's own (\`pier-*\`, the \`skills/pier-…\` its CLIs cite) are in
 \`${instance.skillsDir}\`; read a skill at the \`<location>\` its list entry gives,
 never a path guessed from another skill's.
 
-Editing: files change through the \`edit\` tool (exact text replacement) or
-\`write\`. There is no \`apply_patch\` here — not as a tool, not as a command —
+Editing: there is no \`apply_patch\` here — not as a tool, not as a command —
 so do not call one or go looking for one in the shell.
 `;
 }

@@ -111,6 +111,8 @@ describe("the surface prompt", () => {
     for (const fact of ["https://test-pier.example.com", "apply_patch"]) {
       expect(prompt).toContain(fact);
     }
+    // How to edit is the baseline's (agent/pi.ts); the surface only rules out apply_patch.
+    expect(prompt).not.toContain("exact text replacement");
   });
 
   it("names where Pier's own skills are, so none is read from a guessed directory", () => {
