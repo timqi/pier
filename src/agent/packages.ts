@@ -111,11 +111,11 @@ export class PiPackageStore implements PackageStore {
 
   /** Per call, never retained: Pi's manager caches nothing Pier wants to keep,
    *  and a fresh SettingsManager reads whatever writeDefaults wrote last. */
-  #open(cwd?: string): { settings: SettingsManager; manager: DefaultPackageManager } {
-    // Untrusted without a cwd: the project scope of the agent dir is nothing.
-    const settings = SettingsManager.create(cwd ?? this.agentDir, this.agentDir, { projectTrusted: cwd !== undefined });
+  #open(): { settings: SettingsManager; manager: DefaultPackageManager } {
+    // Untrusted: the project scope of the agent dir is nothing.
+    const settings = SettingsManager.create(this.agentDir, this.agentDir, { projectTrusted: false });
     this.#raise(settings, "read");
-    const manager = new DefaultPackageManager({ cwd: cwd ?? this.agentDir, agentDir: this.agentDir, settingsManager: settings });
+    const manager = new DefaultPackageManager({ cwd: this.agentDir, agentDir: this.agentDir, settingsManager: settings });
     manager.setProgressCallback((e) => log.info(`${e.action} ${e.source}: ${e.type}${e.message ? ` — ${e.message}` : ""}`));
     return { settings, manager };
   }
@@ -128,59 +128,57 @@ export class PiPackageStore implements PackageStore {
     throw new PackageError("invalid", `settings.json could not be ${what}: ${detail}`);
   }
 
-  async list(cwd?: string): Promise<PackageRegistry> {
-    const { manager } = this.#open(cwd);
+  async list(): Promise<PackageRegistry> {
+    const { manager } = this.#open();
     const rtkPath = join(this.agentDir, RTK_FILE);
     const resolved = await manager.resolve(async () => "skip");
     const rows = new Map<string, Package>();
-    const row = (source: string, kind: PackageKind, scope: Package["scope"], installedPath: string | null): Package => {
-      const key = `${scope}\0${source}`;
-      let found = rows.get(key);
+    const row = (source: string, kind: PackageKind, installedPath: string | null): Package => {
+      let found = rows.get(source);
       if (!found) {
-        found = { source, kind, scope, version: null, installedPath, updateAvailable: false, resources: [] };
-        rows.set(key, found);
+        found = { source, kind, version: null, installedPath, updateAvailable: false, resources: [] };
+        rows.set(source, found);
       }
       return found;
     };
-    row("pier", "pier", "global", null);
-    row("local", "local", "global", this.agentDir);
+    row("pier", "pier", null);
+    row("local", "local", this.agentDir);
     for (const key of Object.keys(KINDS) as ArrayKey[]) {
       for (const r of resolved[key]) {
         if (r.path === rtkPath) continue;
         const own = r.metadata.origin === "top-level";
-        const scope = r.metadata.scope === "project" ? "project" : "global";
-        row(own ? "local" : r.metadata.source, own ? "local" : kindOf(r.metadata.source), scope, r.metadata.baseDir ?? null)
+        row(own ? "local" : r.metadata.source, own ? "local" : kindOf(r.metadata.source), r.metadata.baseDir ?? null)
           .resources.push(resourceRow(KINDS[key], r));
       }
     }
     // Configured but unresolved (not installed, or empty): still a row.
     for (const p of manager.listConfiguredPackages()) {
-      const found = row(p.source, kindOf(p.source), p.scope === "project" ? "project" : "global", p.installedPath ?? null);
+      const found = row(p.source, kindOf(p.source), p.installedPath ?? null);
       found.installedPath ??= p.installedPath ?? null;
       found.updateAvailable = this.#updates.has(p.source);
     }
-    // pier, local, the global packages, then the project's rows; Pi's own order is precedence.
-    const rank = (p: Package): number => p.kind === "pier" ? 0 : p.scope === "project" ? 3 : p.kind === "local" ? 1 : 2;
+    // pier, local, then the packages; Pi's own order is precedence.
+    const rank = (p: Package): number => p.kind === "pier" ? 0 : p.kind === "local" ? 1 : 2;
     const packages = [...rows.values()].sort((a, b) => rank(a) - rank(b));
     for (const pkg of packages) {
       if (pkg.kind === "pier") await this.#fillPier(pkg);
       else if (pkg.kind === "git") pkg.version = pinnedRef(pkg.source);
       else if (pkg.kind !== "local") pkg.version = await versionFile(pkg.installedPath);
     }
-    this.#markUnloadable(packages, cwd);
+    this.#markUnloadable(packages);
     return { packages, checkedAt: this.#checkedAt, busy: this.#busy };
   }
 
   /** Pi drops a skill whose frontmatter will not parse, or whose name another
    *  skill already took, with a diagnostic only its own log sees: a switch that
    *  reads on while no session gets the skill is nothing looking like nothing (§5). */
-  #markUnloadable(packages: readonly Package[], cwd?: string): void {
+  #markUnloadable(packages: readonly Package[]): void {
     // Pi's own order, so the collision loser is the one it would drop: the
     // resolved skills first, Pier's additionalSkillPaths last.
     const rows = [...packages].sort((a, b) => Number(a.kind === "pier") - Number(b.kind === "pier"))
       .flatMap((p) => p.resources).filter((r) => r.kind === "skill" && r.enabled && r.state === null);
     const { skills, diagnostics } = loadSkills({
-      cwd: cwd ?? this.agentDir, agentDir: this.agentDir, skillPaths: rows.map((r) => r.path), includeDefaults: false,
+      cwd: this.agentDir, agentDir: this.agentDir, skillPaths: rows.map((r) => r.path), includeDefaults: false,
     });
     const loaded = new Set(skills.map((s) => s.filePath));
     for (const row of rows) {
@@ -217,9 +215,9 @@ export class PiPackageStore implements PackageStore {
 
   /** Inside ConfigStore's queue, so writeDefaults and a session open never
    *  interleave with Pi's merge-write; flushed and checked before it ends. */
-  #write<T>(run: (manager: DefaultPackageManager, settings: SettingsManager) => Promise<T>, cwd?: string): Promise<T> {
+  #write<T>(run: (manager: DefaultPackageManager, settings: SettingsManager) => Promise<T>): Promise<T> {
     return this.config.withWrite(async () => {
-      const { manager, settings } = this.#open(cwd);
+      const { manager, settings } = this.#open();
       const result = await run(manager, settings);
       await settings.flush();
       this.#raise(settings, "written");
@@ -233,15 +231,11 @@ export class PiPackageStore implements PackageStore {
     return found;
   }
 
-  /** `local` is one row per scope: the resource, not the source, picks the row. */
-  async #find({ source, kind, path, cwd }: PackageSwitch): Promise<{ pkg: Package; resource: PackageResource }> {
-    const owners = (await this.list(cwd)).packages.filter((p) => p.source === source);
-    if (!owners.length) throw new PackageError("missing", `${source} is not a configured package`);
-    for (const pkg of owners) {
-      const resource = pkg.resources.find((r) => r.kind === kind && r.path === path);
-      if (resource) return { pkg, resource };
-    }
-    throw new PackageError("missing", `${source} has no ${kind} at ${path}`);
+  async #find({ source, kind, path }: PackageSwitch): Promise<{ pkg: Package; resource: PackageResource }> {
+    const pkg = await this.#row(source);
+    const resource = pkg.resources.find((r) => r.kind === kind && r.path === path);
+    if (!resource) throw new PackageError("missing", `${source} has no ${kind} at ${path}`);
+    return { pkg, resource };
   }
 
   #builtin(source: string): void {
@@ -290,11 +284,11 @@ export class PiPackageStore implements PackageStore {
     await this.#operate(source ?? "every package", (manager) => upstream(`updating ${source ?? "every package"}`, () => manager.update(source)));
     for (const s of targets) this.#updates.delete(s);
     const { packages } = await this.list();
-    return packages.filter((p) => p.scope === "global" && targets.includes(p.source));
+    return packages.filter((p) => targets.includes(p.source));
   }
 
   async setEnabled(change: PackageSwitch): Promise<PackageResource> {
-    const { source, kind, path, enabled, cwd } = change;
+    const { source, kind, path, enabled } = change;
     const { pkg, resource } = await this.#find(change);
     if (pkg.kind === "pier") {
       this.pier.settings.setSkillsOff(withName(this.pier.settings.get().skillsOff, resource.name, !enabled));
@@ -305,39 +299,24 @@ export class PiPackageStore implements PackageStore {
         // resolved it from, which is the only base its filter will match.
         const r = (await manager.resolve(async () => "skip"))[key].find((it) => it.path === path);
         if (!r) throw new PackageError("missing", `${path} is not loaded from ${source}`);
-        const project = cwd !== undefined;
-        const inherited = project && r.metadata.scope !== "project";
-        const scoped = project ? settings.getProjectSettings() : settings.getGlobalSettings();
-        const projectDir = join(cwd ?? this.agentDir, ".pi");
+        const global = settings.getGlobalSettings();
         if (r.metadata.origin === "top-level") {
-          // A global resource switched for one project is named by its absolute path there.
-          const pattern = inherited ? path : relative(r.metadata.baseDir ?? (project ? projectDir : this.agentDir), path);
-          const next = flip(scoped[key] ?? [], pattern, enabled);
-          if (inherited && !next.includes(path)) next.unshift(path);
-          if (project) settings[key === "extensions" ? "setProjectExtensionPaths" : "setProjectSkillPaths"](next);
-          else settings[key === "extensions" ? "setExtensionPaths" : "setSkillPaths"](next);
+          const next = flip(global[key] ?? [], relative(r.metadata.baseDir ?? this.agentDir, path), enabled);
+          settings[key === "extensions" ? "setExtensionPaths" : "setSkillPaths"](next);
         } else {
           const pattern = relative(r.metadata.baseDir ?? dirname(path), path);
-          const packages = [...(scoped.packages ?? [])];
-          let at = packages.findIndex((p) => (typeof p === "string" ? p : p.source) === source);
-          // A global package overridden for one project: Pi's delta entry, a
-          // local path re-based on .pi/ because that is where Pi resolves it from.
-          if (at === -1 && inherited) {
-            const own = kindOf(source) === "path" ? relative(projectDir, resolve(this.agentDir, source)) || "." : source;
-            at = packages.push({ source: own, autoload: false }) - 1;
-          }
+          const packages = [...(global.packages ?? [])];
+          const at = packages.findIndex((p) => (typeof p === "string" ? p : p.source) === source);
           if (at === -1) throw new PackageError("missing", `${source} is not in settings.json`);
           const entry = packages[at]!;
           const filtered: Exclude<PackageSource, string> = typeof entry === "string" ? { source: entry } : { ...entry };
           filtered[key] = flip(filtered[key] ?? [], pattern, enabled);
           packages[at] = filtered;
-          if (project) settings.setProjectPackages(packages);
-          else settings.setPackages(packages);
+          settings.setPackages(packages);
         }
-      }, cwd);
+      });
     }
-    // By path, not source: an override moves the resource to the project's row.
-    const after = (await this.list(cwd)).packages.flatMap((p) => p.resources).find((r) => r.kind === kind && r.path === path);
+    const after = (await this.list()).packages.flatMap((p) => p.resources).find((r) => r.kind === kind && r.path === path);
     if (!after) throw new PackageError("missing", `${path} is no longer loaded`);
     return after;
   }

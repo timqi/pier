@@ -32,12 +32,12 @@ surface owns its routes and is mounted beside it.
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
-| `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`not loaded — <why>`); `<agentDir>/extensions/rtk.ts` is left out, being the rtk tool's (`PUT` on it is 404); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
-| `POST /api/packages` | body `{source}` → `installAndPersist` into the global scope; answers `{package}` (the new row) when the install finishes; Pi's progress steps go to the log. 400 for an empty source or a local path that does not exist, 409 when the source is already configured or another package operation is running, 502 when the install itself fails. Idle sessions are recycled on success, like an agent-file save |
-| `POST /api/packages/remove` | body `{source}` → `removeAndPersist` (global scope), returns `{ok}`. 404 for a source not in settings.json, 409 for `pier` and `local` (built in, not removable) or while another operation runs, 502 when the remove itself fails |
+| `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null}]}], checkedAt: iso \| null, busy: source \| null}`. `state` is the one line a row shows instead of a plain switch reading (`not loaded — <why>`); `<agentDir>/extensions/rtk.ts` is left out, being the rtk tool's (`PUT` on it is 404); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
+| `POST /api/packages` | body `{source}` → `installAndPersist`; answers `{package}` (the new row) when the install finishes; Pi's progress steps go to the log. 400 for an empty source or a local path that does not exist, 409 when the source is already configured or another package operation is running, 502 when the install itself fails. Idle sessions are recycled on success, like an agent-file save |
+| `POST /api/packages/remove` | body `{source}` → `removeAndPersist`, returns `{ok}`. 404 for a source not in settings.json, 409 for `pier` and `local` (built in, not removable) or while another operation runs, 502 when the remove itself fails |
 | `POST /api/packages/update` | body `{source?}` → `update(source)`; `source` absent updates every unpinned npm/git package (`busy` reads `every package` meanwhile; the Console never sends this form). Answers `{packages}`, the rows it moved, when done. 404 unknown, 409 for a local/path or version-pinned source (nothing to move) or while another operation runs, 502 when the update itself fails. Never called by anything but a Console click |
 | `POST /api/packages/check` | `checkForAvailableUpdates` now, returns the `GET` answer with `checkedAt` fresh. 502 with `{error}` when a registry or remote could not be reached; the previous answer stays shown |
-| `PUT /api/packages/resource` | body `{source, kind, path, enabled, cwd?}` → one switch. `pier` resources flip the pier.db `skillsOff` list; any other resource writes `+path` / `-path` into that package's filter arrays (or the top-level `extensions`/`skills` arrays for `local`) in the global settings.json, or in `.pi/settings.json` when `cwd` is given. Answers the resource row. 400 bad body, 404 unknown resource |
+| `PUT /api/packages/resource` | body `{source, kind, path, enabled}` → one switch. `pier` resources flip the pier.db `skillsOff` list; any other resource writes `+path` / `-path` into that package's filter arrays (or the top-level `extensions`/`skills` arrays for `local`) in the global settings.json. Answers the resource row. 400 bad body, 404 unknown resource |
 | `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
 | `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report; 504 when `vt create` is still waiting on an approval after 15s — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
@@ -463,8 +463,8 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
   time, source, duration) whose log (error, result, probe, a link to the run's
   session) unfolds in place; defining a task stays `pier task`'s. Agent: two panels (what a session is
-  made of / what the selected item affords), Scope in the Console's control
-  skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
+  made of / what the selected item affords), the global agent dir's only
+  (`$PIER_HOME/pi`). An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check
   and reports saved / unsaved / failed. A file the index marks `readonly`
   (settings.json, written by Pier) opens in the viewer alone with one line on
@@ -510,15 +510,14 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
 
   | Section | Rows | Actions |
   | ------- | ---- | ------- |
-  | Instance | Configuration sync | |
-  | Files | the whitelisted agent files; settings.json read-only | |
+  | Sync | Configuration sync | configuration sync pane |
+  | Files | the agent dir's path, then the whitelisted agent files — dim when missing, `read-only` on settings.json, `synced` on a file the subscription manages | the file viewer; an empty file reads `<name> is empty — Edit to write it.` |
   | **Packages** (tree) | one row per source: built-in `pier` (Pier's own skills `pier-help`, `pier-search`, `pier-slack`, `pier-tasks`, `pier-vault`, `pier-web`; version = Pier's), `local` (`<agentDir>/extensions`, `<agentDir>/skills`), then each installed npm/git/path package; `on` when any resource is; `installing…`/`updating…` on the `busy` one; a configured-but-uninstalled source reads dim. A chevron expands the row into its resources grouped `extensions` / `skills`: name, dim when off, the `state` as a second line (never hover-only), a kind badge only when the same name occurs twice in the package; `pier` and `local` start open, the rest closed, and the fold state survives redraws for the session; picking a resource from a pane opens its package | package pane: source, kind, version, install path, the provided resources each with its switch; for an installed npm/git/path package also **Updates** (checked-at, **Check for updates** — a failed check keeps the last answer), **Update** (npm/git), **Remove** (confirms); while `busy` the buttons are disabled; a refused operation shows the server's `error` in the status line; header action **Add package**: spec input, Pi's security note (packages run with full system access; review the source first), **Install** — the row appears as `installing…` at once and the list is refetched on the answer. Resource pane: the same switch, the `state` line, its package, and the file through `GET /api/fs/file` (a bundled extension has none); a flip here redraws the tree row. **Browse files** (package pane beside the install path, resource pane beside the file's path; absent where there is no directory) opens Files on the package directory, a skill's directory (`SKILL.md` selected) or an extension's file |
-  | **Packages** › `tools` (global scope only) | after the packages, open by default: one row per managed binary, `rtk` among them — dim when off, the install error as a second line, `yours` on an operator's block; `on` when any tool is | tools pane, from the source row or a tool (that tool's row marked and scrolled into view): each tool with its switch and binary line, **Remove** on the operator's own, the custom block editor |
+  | **Packages** › `tools` | after the packages, open by default: one row per managed binary, `rtk` among them — dim when off, the install error as a second line, `yours` on an operator's block; `on` when any tool is | tools pane, from the source row or a tool (that tool's row marked and scrolled into view): each tool with its switch and binary line, **Remove** on the operator's own, the custom block editor |
 
   Rules:
-  - Install, remove, update and the check are global scope only; project
-    scope (`.pi/settings.json`) is view plus enable/disable, the project's
-    rows badged `project`.
+  - Every write is the global settings.json's; a project's `.pi/settings.json`
+    is not shown or written here.
   - A daily in-process check (`checkForAvailableUpdates`, at boot and every
     24h, the result cached for `GET`) reports updates; installing one is a
     Console click, never automatic for third-party code. Not a Task: the
@@ -537,7 +536,7 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   - Console-only: no agent tool installs packages; one operation at a time
     (`busy` names the source), 409 for a second.
 
-  Configuration sync (`src/config-sync.ts`; Agent › Instance › Configuration
+  Configuration sync (`src/config-sync.ts`; Agent › Sync › Configuration
   sync): one instance publishes, another follows.
   - The document, `GET /config-sync/:token` (no password; the 64-hex token is
     the capability, rotated by Publish, dropped by Revoke): `{schemaVersion,
@@ -564,8 +563,7 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
     boot); the next hourly sync, or Sync now, re-applies the whole document,
     which is the repair. While `enabled`, the Console shows those
     fields as stored and takes no edit: `PUT /api/settings {modelMenu}`,
-    `PUT /api/config/defaults` and `PUT /api/config/files/<synced>` (global
-    scope) answer 409 `Managed by the configuration subscription…`; the
+    `PUT /api/config/defaults` and `PUT /api/config/files/<synced>` answer 409 `Managed by the configuration subscription…`; the
     `/api/config` index marks such a file `managed`, and the Models cards
     and the file viewer carry the one note. Pause to edit. The title model,
     the public URL and project files are the machine's, never synced.

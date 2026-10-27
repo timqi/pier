@@ -387,7 +387,7 @@ describe("snapshot apply", () => {
     const commit = vi.fn(() => { throw new Error("rollback"); });
     const applying = store.applySnapshot({ ...empty(), files: { "SYSTEM.md": "bad", "AGENTS.md": null } }, commit);
     const rejected = expect(applying).rejects.toThrow("rollback");
-    const editing = store.writeFile({ kind: "global" }, "SYSTEM.md", "after", "old");
+    const editing = store.writeFile("SYSTEM.md", "after", "old");
     const exporting = store.exportSnapshot();
     expect(commit).not.toHaveBeenCalled();
     expect(read("SYSTEM.md")).toBe("old");

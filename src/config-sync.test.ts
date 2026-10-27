@@ -306,7 +306,7 @@ describe("two isolated configuration stores over HTTP", () => {
       await client.sync();
       expect(statuses).toEqual([200, 200, 200]);
       expect(reload).toHaveBeenCalledTimes(1);
-      await sourceConfig.writeFile({ kind: "global" }, "SYSTEM.md", "Updated rules");
+      await sourceConfig.writeFile("SYSTEM.md", "Updated rules");
       await client.sync(); expect(reload).toHaveBeenCalledTimes(2);
       await source.revoke(); await expect(client.sync()).rejects.toThrow("404");
       expect(client.status().error).toContain("404");

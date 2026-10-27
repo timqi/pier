@@ -2,11 +2,9 @@
 // of its own because the registry is not agent-file editing (config.ts).
 
 import type { Context, Hono } from "hono";
-import type { AgentFactory } from "../core/types.js";
 import { PackageError, type PackageErrorReason, type PackageStore, type PackageSwitch } from "../agent/types.js";
 
 interface PackageRouteDeps {
-  factory: Pick<AgentFactory, "list">;
   packages: PackageStore;
   /** Packages are read when a session opens; idle ones are recycled after a write. */
   onConfigWritten?: () => void;
@@ -16,12 +14,7 @@ const STATUS: Record<PackageErrorReason, 400 | 404 | 409 | 502> = {
   invalid: 400, missing: 404, busy: 409, refused: 409, unreachable: 502,
 };
 
-export function registerPackageRoutes(app: Hono, { factory, packages, onConfigWritten }: PackageRouteDeps): void {
-  // Only cwds Pi already knows are accepted — never an arbitrary path.
-  const knownCwd = async (raw: string | undefined): Promise<string | null | undefined> => {
-    if (raw === undefined) return undefined;
-    return (await factory.list()).some((s) => s.cwd === raw) ? raw : null;
-  };
+export function registerPackageRoutes(app: Hono, { packages, onConfigWritten }: PackageRouteDeps): void {
   /** The seam's reasons are the table's status codes; anything else is a 500 (app.onError). */
   const answer = async (c: Context, work: () => Promise<Response>): Promise<Response> => {
     try {
@@ -39,9 +32,7 @@ export function registerPackageRoutes(app: Hono, { factory, packages, onConfigWr
 
   app.get("/api/packages", (c) => answer(c, async () => {
     c.header("cache-control", "no-store");
-    const cwd = await knownCwd(c.req.query("cwd"));
-    if (cwd === null) return c.json({ error: "unknown cwd" }, 400);
-    return c.json(await packages.list(cwd));
+    return c.json(await packages.list());
   }));
 
   app.post("/api/packages", (c) => answer(c, async () => {
@@ -72,8 +63,7 @@ export function registerPackageRoutes(app: Hono, { factory, packages, onConfigWr
 
   app.put("/api/packages/resource", (c) => answer(c, async () => {
     const change = parseSwitch(await body(c));
-    if (!change) return c.json({ error: "expected {source, kind: extension|skill, path, enabled, cwd?}" }, 400);
-    if (change.cwd !== undefined && await knownCwd(change.cwd) === null) return c.json({ error: "unknown cwd" }, 400);
+    if (!change) return c.json({ error: "expected {source, kind: extension|skill, path, enabled}" }, 400);
     const resource = await packages.setEnabled(change);
     written();
     return c.json(resource);
@@ -82,9 +72,8 @@ export function registerPackageRoutes(app: Hono, { factory, packages, onConfigWr
 
 function parseSwitch(given: Record<string, unknown> | null): PackageSwitch | null {
   if (!given) return null;
-  const { source, kind, path, enabled, cwd } = given;
+  const { source, kind, path, enabled } = given;
   if (typeof source !== "string" || !source || typeof path !== "string" || !path) return null;
   if ((kind !== "extension" && kind !== "skill") || typeof enabled !== "boolean") return null;
-  if (cwd !== undefined && typeof cwd !== "string") return null;
-  return { source, kind, path, enabled, ...(cwd !== undefined ? { cwd } : {}) };
+  return { source, kind, path, enabled };
 }

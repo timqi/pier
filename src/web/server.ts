@@ -676,8 +676,8 @@ export function createServer(
     subscribed,
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
-  registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file"), subscribed });
-  registerPackageRoutes(app, { factory, packages, onConfigWritten: () => recycle("the package registry") });
+  registerConfigRoutes(app, { config, onConfigWritten: () => recycle("an agent file"), subscribed });
+  registerPackageRoutes(app, { packages, onConfigWritten: () => recycle("the package registry") });
   registerFsRoutes(app);
   registerExplorerRoutes(app);
 

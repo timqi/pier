@@ -3,17 +3,16 @@
 // source in the package tree, served by ubix rather than Pi — are drawn here;
 // the package registry's panes are packages-pane.ts.
 
-import { ChevronDown, ChevronRight } from "lucide";
+import { ChevronRight } from "lucide";
 import type { CatalogEntry, ConfigFile, Package } from "../../agent/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
-import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, BAND, btn, CONTROL, CONTROL_TRIGGER, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
+import { consoleView, h, type ConsoleView } from "./dom.js";
+import { badge, BAND, btn, CONTROL, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
-import { closeMenu, openMenu } from "./menu.js";
 import { configSyncPane, MANAGED_NOTE } from "./config-sync.js";
 import { createRegistry, isBuiltIn, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
@@ -107,21 +106,15 @@ export function removalStep(
 
 export function createConfigView(
   root: HTMLElement,
-  getCwds: () => string[],
   openFiles: (dir: string, select?: string) => void,
 ): ConsoleView {
-  let scope = "global";
   let selection: Selection | null = null;
   let loadRequest = 0;
   let paneRequest = 0;
-  // Where "Global" lives, from the API — PIER_HOME moves it, so no path is
-  // hardcoded here. Empty until the first load answers.
-  let globalDir = "";
-  const globalLabel = (): string => (globalDir ? `Global (${globalDir})` : "Global");
   /** What the nav is currently drawn from, so a switch can redraw its badge
-   *  without re-reading the scope's files. */
+   *  without re-reading the files. */
   let lastIndex: ConfigIndex | null = null;
-  /** The managed binaries; [] outside global scope. */
+  /** The managed binaries. */
   let catalog: CatalogEntry[] = [];
   /** Why the list is missing, when it is — an empty section would read as
    *  "Pier ships none", which is a different fact. */
@@ -134,45 +127,19 @@ export function createConfigView(
     closeSync();
     ++paneRequest;
     syncPane = configSyncPane();
-    pane.replaceChildren(syncPane.el);
+    pane.replaceChildren(paneBar("Configuration sync"), syncPane.el);
   };
   /** The custom blocks, as stored: what a save has to send back unchanged. */
   let customTools: { name: string; toml: string }[] = [];
   /** A row the operator wrote, and may remove again. */
   const isCustom = (entry: CatalogEntry): boolean => entry.custom === true;
 
-  // --- static skeleton: header + (scope ▸ nav) | pane ------------------------
-
-  // Scope sits at the top of the nav, right above the files it switches — in
-  // the Console's one control skin, and its list is the workbench's anchored
-  // menu (menu.ts): a native popup is the platform's to draw, and these rows
-  // are long absolute paths that want the menu's hover, keys and phone sheet.
-  const scopeLabel = h("span", "min-w-0 flex-1 truncate");
-  const scopeTrigger = h(
-    "button",
-    `${CONTROL_TRIGGER} flex items-center gap-1.5`,
-    scopeLabel,
-    icon(ChevronDown, "h-3.5 w-3.5 text-neutral-500"),
-  );
-  scopeTrigger.setAttribute("aria-haspopup", "true");
-  scopeTrigger.onclick = () => {
-    if (scopeTrigger.getAttribute("aria-expanded") === "true") return closeMenu();
-    openMenu(scopeTrigger, [
-      { label: globalLabel(), checked: scope === "global", onSelect: () => pickScope("global") },
-      ...getCwds().map((cwd) => ({
-        label: cwd,
-        hint: basename(cwd),
-        checked: scope === cwd,
-        onSelect: () => pickScope(cwd),
-      })),
-    ], "Scope");
-  };
-  const scopeBox = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
-  scopeBox.append(h("span", "field-label", "Scope"), scopeTrigger);
+  // --- static skeleton: nav | pane --------------------------------------------
 
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1.5");
-  const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:max-h-48 max-md:w-full`);
-  nav.append(scopeBox, navList);
+  // Stacked on a phone at half the height, as Files' tree is.
+  const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:h-1/2 max-md:w-full`);
+  nav.append(navList);
   const pane = h("div", `${PANE} min-w-0 flex-1`);
   const body = h("div", "flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1 max-md:flex-col");
   body.append(nav, pane);
@@ -192,7 +159,6 @@ export function createConfigView(
     paneBar,
     claim: () => ++paneRequest,
     live: (ticket) => ticket === paneRequest,
-    cwd: () => (scope === "global" ? undefined : scope),
     changed: () => renderNav(lastIndex),
     browse: openFiles,
     select: (sel) => {
@@ -205,15 +171,8 @@ export function createConfigView(
 
   // --- data -------------------------------------------------------------------
 
-  const q = (extra = ""): string => `?scope=${encodeURIComponent(scope)}${extra}`;
-
   /** Instance-wide, and the Console already serves them beside the setting. */
   async function loadCatalog(): Promise<void> {
-    if (scope !== "global") {
-      catalog = [];
-      catalogError = "";
-      return;
-    }
     const got = await getJson<CatalogResponse>("/api/settings", "could not be loaded", {
       cache: "no-store",
     });
@@ -249,7 +208,7 @@ export function createConfigView(
     const request = ++loadRequest;
     paneRequest++;
     const [got] = await Promise.all([
-      getJson<ConfigIndex>(`/api/config${q()}`, "failed to load config", { cache: "no-store" }),
+      getJson<ConfigIndex>("/api/config", "failed to load config", { cache: "no-store" }),
       loadCatalog(),
       registry.load(),
     ]);
@@ -260,10 +219,6 @@ export function createConfigView(
       return;
     }
     const index = got.value;
-    if (scope === "global" && index.dir) {
-      globalDir = index.dir;
-      renderScope();
-    }
     lastIndex = index;
     renderNav(index);
     if (!selection) renderPlaceholder();
@@ -350,12 +305,11 @@ export function createConfigView(
 
   /** A package and, when open, its resources grouped by kind under it. */
   function packageRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
-    const sel: Selection = { type: "package", source: pkg.source, scope: pkg.scope };
+    const sel: Selection = { type: "package", source: pkg.source };
     const tags: HTMLElement[] = [];
     if (registry.registry?.busy === pkg.source) {
       tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
     } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
-    if (pkg.scope === "project") tags.push(navBadge("project"));
     return sourceRows(pkg.source, packageLabel(pkg.source), {
       active: isActive(sel),
       // Dim: configured, and not on disk. The built-ins have no install path to speak of.
@@ -420,28 +374,35 @@ export function createConfigView(
       if (sel.type === "file") void openFile(sel.name, sel.readonly, sel.managed);
       else if (sel.type === "tools" || sel.type === "tool") openTools();
       else if (sel.type === "sync") openSync();
-      else if (sel.type === "package") registry.openPackage(sel.source, sel.scope);
+      else if (sel.type === "package") registry.openPackage(sel.source);
       else if (sel.type === "resource") void registry.openResource(sel.source, sel.kind, sel.path);
       else registry.openAdd();
     };
-    const rows: HTMLElement[] = [];
-    if (scope === "global") {
-      const sel: Selection = { type: "sync" };
-      rows.push(navSection("Instance"), navRow("Configuration sync", isActive(sel), false, () => open(sel)));
+    const syncSel: Selection = { type: "sync" };
+    const rows: HTMLElement[] = [
+      navSection("Sync"),
+      navRow("Configuration sync", isActive(syncSel), false, () => open(syncSel)),
+      navSection("Files"),
+    ];
+    // Where the files live, which moves with PIER_HOME; no path is hardcoded here.
+    if (index.dir) {
+      const dir = h("p", "truncate pb-1 pl-5 pr-3 font-mono text-[11px] text-neutral-400", index.dir);
+      dir.title = index.dir;
+      rows.push(dir);
     }
-    rows.push(navSection("Files"));
     for (const f of index.files) {
       const sel: Selection = { type: "file", name: f.name, readonly: f.readonly, managed: f.managed };
-      rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
+      // Said in the list, so which files take an edit is scannable before opening one.
+      const tags = f.managed ? [navBadge("synced")] : f.readonly ? [navBadge("read-only")] : [];
+      rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel), { tags }));
     }
-    // Install, remove and update write the global settings.json only.
     const addSel: Selection = { type: "add" };
     const add = btn("Add package", `normal-case tracking-normal hover:underline ${isActive(addSel) ? "text-indigo-700" : "text-indigo-600"}`);
     add.onclick = () => open(addSel);
-    rows.push(navSection("Packages", scope === "global" ? add : undefined));
+    rows.push(navSection("Packages", add));
     if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
     for (const pkg of registry.registry?.packages ?? []) rows.push(...packageRows(pkg, isActive, open));
-    if (scope === "global") rows.push(...toolRows(isActive, open));
+    rows.push(...toolRows(isActive, open));
     navList.replaceChildren(...rows);
   }
 
@@ -466,7 +427,7 @@ export function createConfigView(
   async function openFile(name: string, readonly: boolean, managed: boolean): Promise<void> {
     const request = ++paneRequest;
     const got = await getJson<{ content: string }>(
-      `/api/config/files/${encodeURIComponent(name)}${q()}`,
+      `/api/config/files/${encodeURIComponent(name)}`,
       `failed to load ${name}`,
       { cache: "no-store" },
     );
@@ -493,16 +454,22 @@ export function createConfigView(
       setStatus(status, "saving", "saving…");
       try {
         const put = await sendJson(
-          `/api/config/files/${encodeURIComponent(name)}${q()}`,
+          `/api/config/files/${encodeURIComponent(name)}`,
           { content: submitted, expected },
           "PUT",
         );
         if (!put.ok) return setStatus(status, "failed", await failure(put, "save failed"));
         const saved = (await put.json()) as { content: string };
         expected = saved.content;
+        // A first save creates the file: its row is no longer the missing one.
+        const row = lastIndex?.files.find((f) => f.name === name);
+        if (row && !row.exists) {
+          row.exists = true;
+          renderNav(lastIndex);
+        }
         if (editor.value === submitted) {
           editor.value = saved.content;
-          setStatus(status, "saved", "saved — applies to new sessions");
+          setStatus(status, "saved", "saved — sessions take it on their next message");
         } else setStatus(status, "idle", "saved; newer changes are unsaved");
       } catch (err) {
         setStatus(status, "failed", `save failed: ${String(err)}`);
@@ -532,7 +499,10 @@ export function createConfigView(
           ? paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only"))
           : paneBar(name, status, actions(edit)),
         ...(note ? [h("p", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500", note)] : []),
-        h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang)),
+        // An empty or missing file is no numbered blank line: it says what Edit does.
+        editor.value || note
+          ? h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang))
+          : h("div", "flex min-h-0 flex-1 items-center justify-center p-6", empty(`${name} is empty — Edit to write it.`)),
       );
     };
     edit.onclick = showEdit;
@@ -648,23 +618,19 @@ export function createConfigView(
     };
 
     pane.replaceChildren(
-      paneBar(
-        "command-line tools",
-        h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "installed by Pier"),
-      ),
+      paneBar("command-line tools"),
       h(
         "div",
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
         h(
           "p",
           "max-w-2xl text-[12.5px] leading-relaxed text-neutral-500",
-          "Pier writes no downloader: ",
+          "Installed by ",
           ubixLink(),
-          " does the work — a declarative installer that resolves a spec like ",
+          ", which resolves a spec like ",
           h("span", "font-mono text-[11.5px]", "github:owner/repo"),
-          " to the right release asset for this machine, verifies it, and upgrades in place. Pier bootstraps it, "
-            + "generates its config from the switches below, and keeps its files under Pier's own directory — "
-            + "your own ubix setup is untouched.",
+          " to this machine's release asset, verifies it and upgrades in place. Pier writes its config from the "
+            + "switches below and keeps its files under Pier's own directory; your own ubix setup is untouched.",
         ),
         catalogError
           ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
@@ -701,26 +667,5 @@ export function createConfigView(
     ));
   }
 
-  function pickScope(next: string): void {
-    closeMenu();
-    if (next === scope) return;
-    closeSync();
-    scope = next;
-    selection = null;
-    renderScope();
-    void load();
-  }
-
-  /** Only the trigger's own label: the list is built when the menu opens, so a
-   *  directory that appeared since is in it. */
-  function renderScope(): void {
-    if (scope !== "global" && !getCwds().includes(scope)) scope = "global";
-    scopeLabel.textContent = scope === "global" ? globalLabel() : basename(scope);
-    scopeTrigger.title = scope === "global" ? globalDir : scope;
-  }
-
-  return consoleView(root, () => {
-    renderScope();
-    void load();
-  }, closeSync);
+  return consoleView(root, () => void load(), closeSync);
 }

@@ -28,7 +28,7 @@ beforeEach(async () => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
   views = await import("./views.js");
   views.initViews({
-    sessions: () => [], currentId: () => conversation.current, currentSession: () => session, select: conversation.select,
+    currentId: () => conversation.current, currentSession: () => session, select: conversation.select,
     inConversation: (id) => id.startsWith("chain-"), openContinuous: conversation.open,
     maybeAckRead: vi.fn(), cancelNavigation: vi.fn(),
   });

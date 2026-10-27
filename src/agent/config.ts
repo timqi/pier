@@ -1,6 +1,6 @@
 // Pi configuration on disk, behind the ConfigStore seam. Knows Pi's directory
-// conventions (the Pier-managed global dir; <cwd>/AGENTS.md and <cwd>/.pi per
-// project) but not the Pi SDK — pure filesystem, unit-testable in a tmp dir.
+// conventions (the Pier-managed global dir) but not the Pi SDK — pure
+// filesystem, unit-testable in a tmp dir.
 
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -15,7 +15,6 @@ import type {
   AgentConfigSync,
   AgentDefaults,
   ConfigFile,
-  ConfigScope,
   ConfigStore,
   ModelCapability,
   ModelEffort,
@@ -23,8 +22,7 @@ import type {
   ProviderSetup,
 } from "./types.js";
 
-const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
-const PROJECT_FILES = ["AGENTS.md"];
+const FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 // settings.json is Pier's to write: the default model and its reasoning effort
 // go through writeDefaults, and are the only fields a snapshot carries. The
 // Console shows the file and never edits it; the rest of it is machine-local.
@@ -134,37 +132,31 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
   }
 
   /** Whitelist is the security boundary — nothing outside it is reachable. */
-  private fileNames(scope: ConfigScope): string[] {
-    return scope.kind === "global" ? GLOBAL_FILES : PROJECT_FILES;
+  private filePath(name: string): string {
+    if (!FILES.includes(name)) throw new Error(`not an editable config file: ${name}`);
+    return join(this.agentDir, name);
   }
 
-  private filePath(scope: ConfigScope, name: string): string {
-    if (!this.fileNames(scope).includes(name)) {
-      throw new Error(`not an editable config file: ${name}`);
-    }
-    return scope.kind === "global" ? join(this.agentDir, name) : join(scope.cwd, name);
-  }
-
-  async listFiles(scope: ConfigScope): Promise<ConfigFile[]> {
+  async listFiles(): Promise<ConfigFile[]> {
     return Promise.all(
-      this.fileNames(scope).map(async (name) => ({
+      FILES.map(async (name) => ({
         name,
-        exists: await pathExists(this.filePath(scope, name)),
+        exists: await pathExists(this.filePath(name)),
         readonly: READONLY_FILES.includes(name),
       })),
     );
   }
 
-  async readFile(scope: ConfigScope, name: string): Promise<string> {
-    const path = this.filePath(scope, name);
+  async readFile(name: string): Promise<string> {
+    const path = this.filePath(name);
     await this.#writes;
-    if (scope.kind === "global") this.#assertSnapshot();
+    this.#assertSnapshot();
     const raw = await readOptional(path);
     return name === "models.json" ? maskModels(raw) : raw;
   }
 
-  async writeFile(scope: ConfigScope, name: string, content: string, expected?: string): Promise<void> {
-    const path = this.filePath(scope, name);
+  async writeFile(name: string, content: string, expected?: string): Promise<void> {
+    const path = this.filePath(name);
     if (READONLY_FILES.includes(name)) {
       throw new Error(`${name} is written by Pier; edit it on disk, then run pier reload`);
     }
@@ -173,7 +165,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       const visible = name === "models.json" ? maskModels(current) : current;
       if (expected !== undefined && visible !== expected) throw new Error(`${name} changed on disk; reopen it`);
       const data = name === "models.json" ? unmaskModels(content, current) : content;
-      await fs.mkdir(scope.kind === "global" ? this.agentDir : scope.cwd, { recursive: true });
+      await fs.mkdir(this.agentDir, { recursive: true });
       await atomicWrite(path, data, name === "models.json" ? 0o600 : 0o644);
     });
   }

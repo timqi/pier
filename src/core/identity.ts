@@ -284,7 +284,7 @@ const distinctCwds = (list: { cwd: string; createdAt: number }[]): string[] =>
 /** The distinct directories less the worktrees: `wt` puts a checkout beside its
  *  repository as `<repo>.<branch>`, and the next conversation about a project
  *  belongs in the project. A worktree with no such sibling stays. What every
- *  directory picker — web New-session menu, Settings scope, IM panel — offers. */
+ *  directory picker — web New-session menu, IM panel — offers. */
 export function projectCwds(list: { cwd: string; createdAt: number }[]): string[] {
   const all = distinctCwds(list);
   const known = new Set(all);

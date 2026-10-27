@@ -1,15 +1,14 @@
-// The agent files a scope is configured by, through the ConfigStore. Not via
-// web/fs.ts: a scope is "global" or a cwd Pi already knows, never a browser path.
+// The global agent files, through the ConfigStore. Not via web/fs.ts: a file is
+// named from the store's whitelist, never a browser path.
 
 import type { Hono } from "hono";
-import { isThinkingLevel, type AgentFactory } from "../core/types.js";
-import { SNAPSHOT_FILES, type AgentDefaults, type ConfigScope, type ConfigStore } from "../agent/types.js";
+import { isThinkingLevel } from "../core/types.js";
+import { SNAPSHOT_FILES, type AgentDefaults, type ConfigStore } from "../agent/types.js";
 import { normalizeModelRef } from "../settings.js";
 import { managedRefusal } from "./config-sync.js";
 import { guarded } from "./route.js";
 
 interface ConfigRouteDeps {
-  factory: Pick<AgentFactory, "list">;
   config: ConfigStore;
   /** An agent file is read when a session opens; idle ones are recycled after a save. */
   onConfigWritten?: () => void;
@@ -20,48 +19,34 @@ interface ConfigRouteDeps {
 
 export function registerConfigRoutes(
   app: Hono,
-  { factory, config, onConfigWritten, subscribed = () => false }: ConfigRouteDeps,
+  { config, onConfigWritten, subscribed = () => false }: ConfigRouteDeps,
 ): void {
-  const managed = (scope: ConfigScope, name: string): boolean =>
-    scope.kind === "global" && subscribed() && (SNAPSHOT_FILES as readonly string[]).includes(name);
-
-  // Only cwds Pi already knows are accepted — never an arbitrary path.
-  const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
-    if (!raw || raw === "global") return { kind: "global" };
-    const known = await factory.list();
-    return known.some((s) => s.cwd === raw) ? { kind: "project", cwd: raw } : null;
-  };
+  const managed = (name: string): boolean => subscribed() && (SNAPSHOT_FILES as readonly string[]).includes(name);
 
   app.get("/api/config", async (c) => {
     c.header("cache-control", "no-store");
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
     return c.json({
-      // Where this scope's files live on disk — the UI labels "Global" with it.
-      dir: scope.kind === "global" ? config.globalDir : scope.cwd,
-      files: (await config.listFiles(scope)).map((file) => ({ ...file, managed: managed(scope, file.name) })),
+      // Where the files live on disk, which moves with PIER_HOME — the UI names it.
+      dir: config.globalDir,
+      files: (await config.listFiles()).map((file) => ({ ...file, managed: managed(file.name) })),
     });
   });
 
   guarded(app, "GET", "/api/config/files/:name", 400, async (c) => {
     c.header("cache-control", "no-store");
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    return c.json({ content: await config.readFile(scope, c.req.param("name")) });
+    return c.json({ content: await config.readFile(c.req.param("name")) });
   });
 
   guarded(app, "PUT", "/api/config/files/:name", 400, async (c) => {
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
     const body = await c.req.json().catch(() => null);
     if (typeof body?.content !== "string" || typeof body?.expected !== "string") {
       return c.json({ error: "content and expected content required" }, 400);
     }
     const name = c.req.param("name");
-    if (managed(scope, name)) return managedRefusal(c);
-    await config.writeFile(scope, name, body.content, body.expected);
+    if (managed(name)) return managedRefusal(c);
+    await config.writeFile(name, body.content, body.expected);
     onConfigWritten?.();
-    return c.json({ ok: true, content: await config.readFile(scope, name) });
+    return c.json({ ok: true, content: await config.readFile(name) });
   });
 
   // settings.json is read-only as a file; its two deployment keys go through here.

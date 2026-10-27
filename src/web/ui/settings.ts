@@ -65,7 +65,6 @@ function deviceName(agent: string): string {
 
 export function createSettingsView(
   root: HTMLElement,
-  getCwds: () => string[],
   /** Tab clicks route (#/settings/<topic>) so refresh and Back keep the tab. */
   onTopic: (topic: string) => void,
   /** Agent → Packages' Browse files: the Files dialog on a package directory. */
@@ -345,7 +344,7 @@ export function createSettingsView(
   const channelsChild = createChannelsView(channelsHost);
   const vaultPane = createVaultPane();
   const filesHost = h("section", "hidden min-h-0 flex-1 flex-col");
-  const filesChild = createConfigView(filesHost, getCwds, openFiles);
+  const filesChild = createConfigView(filesHost, openFiles);
 
   function loadInstance(): void {
     notifications.load();

@@ -690,7 +690,6 @@ initHeader({
 });
 initViews({
   cancelNavigation,
-  sessions: () => sessions,
   currentId: () => currentId,
   currentSession,
   select: (id) => void select(id),

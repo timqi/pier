@@ -27,7 +27,6 @@ import type {
   LedgerRun,
 } from "../core/types.js";
 import type {
-  ConfigScope,
   ConfigStore,
   PackageStore,
   ProviderManager,
@@ -104,21 +103,20 @@ const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = op
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
   const calls: string[] = [];
-  const at = (s: ConfigScope) => (s.kind === "global" ? "global" : s.cwd);
   return {
     calls,
     globalDir: "/home/t/.pier/pi",
-    listFiles: async (s) => {
-      calls.push(`listFiles:${at(s)}`);
+    listFiles: async () => {
+      calls.push("listFiles");
       return [{ name: "SYSTEM.md", exists: true, readonly: false }];
     },
-    readFile: async (s, name) => {
-      calls.push(`read:${at(s)}/${name}`);
+    readFile: async (name) => {
+      calls.push(`read:${name}`);
       if (name === "nope.md") throw new Error("not an editable config file");
       return "content";
     },
-    writeFile: async (s, name, content) => {
-      calls.push(`write:${at(s)}/${name}=${content}`);
+    writeFile: async (name, content) => {
+      calls.push(`write:${name}=${content}`);
     },
     readDefaults: async () => {
       calls.push("readDefaults");
@@ -1579,7 +1577,7 @@ describe("workbench server", () => {
     expect(secrets.calls).toEqual(["rotate:keep", "unlock", "rotate:keep", "rotate:vt"]);
   });
 
-  it("serves config for the global scope and known project cwds only", async () => {
+  it("serves the agent files with the directory they live in", async () => {
     const { app, config } = setup();
     const globalRes = await app.request("/api/config");
     expect(globalRes.status).toBe(200);
@@ -1588,29 +1586,22 @@ describe("workbench server", () => {
       dir: "/home/t/.pier/pi",
       files: [{ name: "SYSTEM.md", exists: true, readonly: false, managed: false }],
     });
-    // /tmp is a session cwd (factory.list); anything else is rejected — and a
-    // project scope's dir is its own cwd.
-    const projectRes = await app.request("/api/config?scope=/tmp");
-    expect(projectRes.status).toBe(200);
-    expect(((await projectRes.json()) as { dir: string }).dir).toBe("/tmp");
-    expect((await app.request("/api/config?scope=/etc")).status).toBe(400);
-    expect(config.calls).toContain("listFiles:/tmp");
+    expect(config.calls).toEqual(["listFiles"]);
   });
 
   it("reads and writes config files, surfacing store errors as 400", async () => {
     const { app, config } = setup();
-    const read = await app.request("/api/config/files/SYSTEM.md?scope=/tmp");
+    const read = await app.request("/api/config/files/SYSTEM.md");
     expect(read.headers.get("cache-control")).toBe("no-store");
     expect(await read.json()).toEqual({ content: "content" });
-    await app.request("/api/config/files/SYSTEM.md?scope=/tmp");
-    expect(config.calls.filter((call) => call === "read:/tmp/SYSTEM.md")).toHaveLength(2);
+    expect(config.calls).toEqual(["read:SYSTEM.md"]);
     const write = await app.request("/api/config/files/SYSTEM.md", {
       method: "PUT",
       body: JSON.stringify({ content: "new", expected: "content" }),
     });
     expect(write.status).toBe(200);
     expect(await write.json()).toEqual({ ok: true, content: "content" });
-    expect(config.calls).toContain("write:global/SYSTEM.md=new");
+    expect(config.calls).toContain("write:SYSTEM.md=new");
     expect((await app.request("/api/config/files/nope.md")).status).toBe(400);
     const noBody = await app.request("/api/config/files/SYSTEM.md", {
       method: "PUT",
@@ -1619,15 +1610,13 @@ describe("workbench server", () => {
     expect(noBody.status).toBe(400);
   });
 
-  it("marks the synced fields managed while subscribed and refuses to edit them, project files aside", async () => {
+  it("marks the synced fields managed while subscribed and refuses to edit them", async () => {
     const { app, config, settings, subscription } = setup();
     subscription.enabled = true;
     const index = await app.request("/api/config");
     expect(((await index.json()) as { files: { managed: boolean }[] }).files).toEqual([
       { name: "SYSTEM.md", exists: true, readonly: false, managed: true },
     ]);
-    const project = await app.request("/api/config?scope=/tmp");
-    expect(((await project.json()) as { files: { managed: boolean }[] }).files.every((file) => !file.managed)).toBe(true);
     const before = config.calls.length;
     const refused = [
       await app.request("/api/config/files/SYSTEM.md", { method: "PUT", body: JSON.stringify({ content: "new", expected: "content" }) }),
@@ -1643,11 +1632,7 @@ describe("workbench server", () => {
     }
     expect(config.calls.length).toBe(before);
     expect(settings.get().modelMenu).toEqual([]);
-    // A project file is the checkout's, never the source's; the public URL is the machine's.
-    const projectWrite = await app.request("/api/config/files/SYSTEM.md?scope=/tmp", {
-      method: "PUT", body: JSON.stringify({ content: "new", expected: "content" }),
-    });
-    expect(projectWrite.status).toBe(200);
+    // The public URL is the machine's, never the source's.
     const url = await app.request("/api/settings", {
       method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ publicUrl: "https://pier.example.com" }),
     });
@@ -2207,7 +2192,7 @@ describe("configuration reaching live sessions", () => {
     attached(router, session);
     await recycled(
       "agent file",
-      await app.request("/api/config/files/SYSTEM.md?scope=global", {
+      await app.request("/api/config/files/SYSTEM.md", {
         ...json({ content: "new", expected: "content" }),
         method: "PUT",
       }),

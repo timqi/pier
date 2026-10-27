@@ -31,18 +31,18 @@ import { createConfigView } from "./config.js";
 const resource = (kind: "extension" | "skill", name: string, path: string, enabled: boolean, extra: Partial<Package["resources"][number]> = {}) =>
   ({ kind, name, path, enabled, state: null, ...extra });
 const pier: Package = {
-  source: "pier", kind: "pier", scope: "global", version: "0.1.2", installedPath: null, updateAvailable: false,
+  source: "pier", kind: "pier", version: "0.1.2", installedPath: null, updateAvailable: false,
   resources: [
     resource("extension", "web", "<inline:web>", false),
     resource("skill", "pier-help", "/pier/skills/pier-help/SKILL.md", true),
   ],
 };
 const local: Package = {
-  source: "local", kind: "local", scope: "global", version: null, installedPath: "/pi", updateAvailable: false,
+  source: "local", kind: "local", version: null, installedPath: "/pi", updateAvailable: false,
   resources: [resource("extension", "mine", "/pi/extensions/mine.ts", true, { state: "not loaded — no default export" })],
 };
 const demo: Package = {
-  source: "npm:@acme/demo@1.0.0", kind: "npm", scope: "global", version: "1.0.0", installedPath: "/pi/packages/npm/demo",
+  source: "npm:@acme/demo@1.0.0", kind: "npm", version: "1.0.0", installedPath: "/pi/packages/npm/demo",
   updateAvailable: false, resources: [resource("extension", "hello", "/pi/packages/npm/demo/extensions/hello.ts", true)],
 };
 /** The managed binaries: one on, one of the operator's own that failed to install. */
@@ -75,7 +75,11 @@ beforeEach(async () => {
   vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   install = async () => Response.json({ package: { ...demo, source: "npm:new", version: "2.0.0" } });
   fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.startsWith("/api/config?")) return Response.json({ dir: "/pi", files: [{ name: "SYSTEM.md", exists: true, readonly: false }] });
+    if (url === "/api/config") return Response.json({ dir: "/pi", files: [
+      { name: "SYSTEM.md", exists: true, readonly: false, managed: false },
+      { name: "AGENTS.md", exists: true, readonly: false, managed: true },
+      { name: "settings.json", exists: true, readonly: true, managed: false },
+    ] });
     if (url === "/api/settings") return Response.json({ catalog, customTools: [], toolsTaskId: null });
     if (url === "/api/packages" && init?.method === "POST") return install();
     if (url === "/api/packages") return Response.json(registry);
@@ -91,7 +95,7 @@ beforeEach(async () => {
   });
   vi.stubGlobal("fetch", fetcher);
   browsed = [];
-  createConfigView(root as unknown as HTMLElement, () => [], (dir, select) => browsed.push([dir, select])).show();
+  createConfigView(root as unknown as HTMLElement, (dir, select) => browsed.push([dir, select])).show();
   await settled();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -99,10 +103,11 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Settings → Agent", () => {
   it("draws one tree from the registry: a package row, its resources grouped by kind under it", () => {
     const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.localName === "div").map((el) => el.textContent);
-    expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "extensions", "skills", "extensions"]);
+    expect(sections).toEqual(["Sync", "Files", "PackagesAdd package", "extensions", "skills", "extensions"]);
     // pier, local and tools open by default, a third-party package closed; each tool once.
     expect(rows().map((el) => el.textContent)).toEqual([
-      "Configuration sync", "SYSTEM.md",
+      // Which files take an edit reads in the list itself.
+      "Configuration sync", "SYSTEM.md", "AGENTS.mdsynced", "settings.jsonread-only",
       "pieron", "web", "pier-help",
       "localon", "minenot loaded — no default export",
       "demoon",

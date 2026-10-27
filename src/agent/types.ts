@@ -4,9 +4,6 @@
 
 import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
-/** Where agent configuration lives: Pi's global dir or a project checkout. */
-export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
-
 /** The global files the configuration document carries (`web/config-sync.ts`):
  *  the three whole, settings.json only its two defaults. */
 export const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
@@ -59,19 +56,19 @@ export interface CatalogEntry {
  * mid-run.
  */
 export interface ConfigStore {
-  /** The scope's files (fixed whitelist; missing files included). */
-  listFiles(scope: ConfigScope): Promise<ConfigFile[]>;
+  /** The global agent dir's files (fixed whitelist; missing files included). */
+  listFiles(): Promise<ConfigFile[]>;
   /** Whitelisted file content, "" if absent. Secrets arrive masked. */
-  readFile(scope: ConfigScope, name: string): Promise<string>;
+  readFile(name: string): Promise<string>;
   /** Compare-and-write when `expected` is present; unchanged masks restore
    *  stored secrets. Refused for a `readonly` file. */
-  writeFile(scope: ConfigScope, name: string, content: string, expected?: string): Promise<void>;
+  writeFile(name: string, content: string, expected?: string): Promise<void>;
   /** The global settings.json defaults; the model pair is written whole or not
    *  at all, and every other key in the file is left as it is. */
   readDefaults(): Promise<AgentDefaults>;
   writeDefaults(defaults: AgentDefaults): Promise<void>;
-  /** Absolute path of the global scope's directory — the UI shows where
-   *  "Global" actually lives, which moves with PIER_HOME. */
+  /** Absolute path of the agent dir — the UI shows where the files
+   *  actually live, which moves with PIER_HOME. */
   readonly globalDir: string;
 }
 
@@ -79,7 +76,6 @@ export interface ConfigStore {
  *  `local` is the agent dir's own `extensions/` and `skills/`; the rest are
  *  Pi's three source syntaxes. */
 export type PackageKind = "pier" | "local" | "npm" | "git" | "path";
-export type PackageScope = "global" | "project";
 export type PackageResourceKind = "extension" | "skill";
 
 /** One extension or skill a package provides, with its one switch. */
@@ -99,7 +95,6 @@ export interface PackageResource {
 export interface Package {
   source: string;
   kind: PackageKind;
-  scope: PackageScope;
   version: string | null;
   /** null: configured but not on disk (`pier` and `local` always are). */
   installedPath: string | null;
@@ -121,8 +116,6 @@ export interface PackageSwitch {
   kind: PackageResourceKind;
   path: string;
   enabled: boolean;
-  /** Write the override into this project's `.pi/settings.json` instead of the global file. */
-  cwd?: string;
 }
 
 /** `busy`: another operation runs. `refused`: the operation makes no sense for
@@ -140,14 +133,13 @@ export class PackageError extends Error {
 
 /**
  * Console ↔ Pi's package registry: one list of everything a session loads, and
- * the operations that change it. Install, remove and update work the global
- * scope only, one at a time; a project (`cwd`) is a view plus its switches.
+ * the operations that change it, one at a time, on the global settings.json.
  * Changes reach sessions opened afterwards. Must stay implementable over RPC.
  */
 export interface PackageStore {
-  /** Every package with its resources; with `cwd`, the project scope's rows too. */
-  list(cwd?: string): Promise<PackageRegistry>;
-  /** Install into the global scope and record it; resolves with the new row. */
+  /** Every package with its resources. */
+  list(): Promise<PackageRegistry>;
+  /** Install and record it; resolves with the new row. */
   install(source: string): Promise<Package>;
   remove(source: string): Promise<void>;
   /** One source, or every unpinned npm/git package when none is named; the rows touched. */

@@ -2,7 +2,7 @@
 // write against it, and the panes that act on a package, a resource or a new
 // source. config.ts draws the nav from `registry` and hands the pane over.
 
-import type { Package, PackageRegistry, PackageResource, PackageResourceKind, PackageScope } from "../../agent/types.js";
+import type { Package, PackageRegistry, PackageResource, PackageResourceKind } from "../../agent/types.js";
 import { failure, getJson, postJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { agoLabel, basename, h } from "./dom.js";
@@ -10,7 +10,7 @@ import { badge, btn, empty, field, setStatus, textInput, toggle } from "./form.j
 import { langFor } from "./highlight.js";
 
 export type RegistrySelection =
-  | { type: "package"; source: string; scope: PackageScope }
+  | { type: "package"; source: string }
   | { type: "resource"; source: string; kind: PackageResourceKind; path: string }
   | { type: "add" };
 
@@ -20,8 +20,6 @@ interface RegistryDeps {
   /** A pane's ticket: `claim()` when it opens, `live(t)` before every later redraw. */
   claim(): number;
   live(ticket: number): boolean;
-  /** The project scope's cwd; undefined for Global. */
-  cwd(): string | undefined;
   /** The nav redraws itself from `registry` after every write. */
   changed(): void;
   /** Browse files: the Files dialog on `dir`, with `select` (relative) opened. */
@@ -37,7 +35,6 @@ interface Outcome {
 
 const STATUS = "text-[11.5px] text-neutral-400";
 const KIND_BADGE = "bg-neutral-50 text-neutral-500 ring-neutral-200";
-const PIN_BADGE = "bg-amber-50 text-amber-700 ring-amber-100";
 /** Pi's own security note, in front of every install. */
 const SECURITY_NOTE =
   "Pi packages run with full system access: an extension executes arbitrary code, and a skill can instruct "
@@ -61,41 +58,31 @@ const dirOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || 
 export function createRegistry(deps: RegistryDeps) {
   let registry: PackageRegistry | null = null;
   let error = "";
-  const q = (): string => {
-    const cwd = deps.cwd();
-    return cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
-  };
-  /** Add, Update, Remove and Check write the global settings.json only. */
-  const manageable = (pkg: Package): boolean => !isBuiltIn(pkg) && pkg.scope === "global" && deps.cwd() === undefined;
 
   async function load(): Promise<void> {
-    const got = await getJson<PackageRegistry>(`/api/packages${q()}`, "packages could not be loaded", { cache: "no-store" });
-    // Another scope's rows would be a lie; nothing plus the sentence is not.
+    const got = await getJson<PackageRegistry>("/api/packages", "packages could not be loaded", { cache: "no-store" });
+    // A stale list would be a lie; nothing plus the sentence is not.
     registry = got.ok ? got.value : null;
     error = got.ok ? "" : got.error;
   }
 
-  const find = (source: string, scope: PackageScope): Package | undefined =>
-    registry?.packages.find((p) => p.source === source && p.scope === scope);
+  const find = (source: string): Package | undefined => registry?.packages.find((p) => p.source === source);
 
   const findResource = (
     source: string,
     kind: PackageResourceKind,
     path: string,
   ): { pkg: Package; resource: PackageResource } | undefined => {
-    for (const pkg of registry?.packages.filter((p) => p.source === source) ?? []) {
-      const resource = pkg.resources.find((r) => r.kind === kind && r.path === path);
-      if (resource) return { pkg, resource };
-    }
-    return undefined;
+    const pkg = find(source);
+    const resource = pkg?.resources.find((r) => r.kind === kind && r.path === path);
+    return pkg && resource ? { pkg, resource } : undefined;
   };
 
   /** Write the switch, then redraw from the row the server confirmed. */
   async function flip(pkg: Package, resource: PackageResource, enabled: boolean): Promise<Outcome> {
-    const cwd = deps.cwd();
     const got = await postJson<PackageResource>(
       "/api/packages/resource",
-      { source: pkg.source, kind: resource.kind, path: resource.path, enabled, ...(cwd ? { cwd } : {}) },
+      { source: pkg.source, kind: resource.kind, path: resource.path, enabled },
       "could not save",
       "PUT",
     );
@@ -139,16 +126,16 @@ export function createRegistry(deps: RegistryDeps) {
     return h("div", "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0", line, switchFor(pkg, r, "", "", after));
   }
 
-  function openPackage(source: string, scope: PackageScope, note?: Outcome): void {
+  function openPackage(source: string, note?: Outcome): void {
     const ticket = deps.claim();
-    const pkg = find(source, scope);
+    const pkg = find(source);
     if (!pkg) return renderError(`unknown package: ${source}`);
     const status = h("span", STATUS, "");
     if (note) setStatus(status, note.state, note.text);
     const busy = registry?.busy === pkg.source;
     if (busy && !note) setStatus(status, "saving", `${pkg.installedPath ? "updating" : "installing"}…`);
     const redraw = (outcome: Outcome): void => {
-      if (deps.live(ticket)) openPackage(source, scope, outcome);
+      if (deps.live(ticket)) openPackage(source, outcome);
     };
 
     const facts: HTMLElement[] = [
@@ -162,7 +149,7 @@ export function createRegistry(deps: RegistryDeps) {
     ];
     const actions: HTMLElement[] = [];
     // A path package moves when its directory does: nothing to check or update.
-    if (manageable(pkg) && pkg.kind !== "path") {
+    if (!isBuiltIn(pkg) && pkg.kind !== "path") {
       const checked = registry?.checkedAt ? `checked ${agoLabel(Date.parse(registry.checkedAt))}` : "not checked yet";
       const check = btn("Check for updates", "btn text-[12px]");
       check.disabled = busy;
@@ -173,7 +160,7 @@ export function createRegistry(deps: RegistryDeps) {
           // A failed check keeps the last answer; the sentence says why it is stale.
           if (got.ok) registry = got.value;
           deps.changed();
-          const now = find(source, scope);
+          const now = find(source);
           redraw(
             !got.ok
               ? { state: "failed", text: got.error }
@@ -201,7 +188,7 @@ export function createRegistry(deps: RegistryDeps) {
       };
       actions.push(update);
     }
-    if (manageable(pkg)) {
+    if (!isBuiltIn(pkg)) {
       const remove = btn("Remove", "btn text-[12.5px] text-neutral-600 hover:text-red-600");
       remove.disabled = busy;
       remove.onclick = () => {
@@ -226,7 +213,6 @@ export function createRegistry(deps: RegistryDeps) {
       deps.paneBar(
         packageLabel(pkg.source),
         badge(pkg.kind, KIND_BADGE),
-        ...(pkg.scope === "project" ? [badge("project", PIN_BADGE)] : []),
         ...(actions.length ? [h("div", "ml-auto flex flex-none items-center gap-2", ...actions)] : []),
       ),
       body(
@@ -246,8 +232,7 @@ export function createRegistry(deps: RegistryDeps) {
         ? "Pier's own skill. Off, no session is offered it."
         : "Loaded from inside Pier — nothing installed, nothing to update. A session mid-turn keeps the tools it started with.";
     }
-    const file = deps.cwd() ? "this project's .pi/settings.json" : "settings.json";
-    return `Written to ${file} as +path / −path for ${packageLabel(pkg.source)}; sessions pick it up on their next open.`;
+    return `Written to settings.json as +path / −path for ${packageLabel(pkg.source)}.`;
   };
 
   async function openResource(source: string, kind: PackageResourceKind, path: string, note?: Outcome): Promise<void> {
@@ -327,7 +312,7 @@ export function createRegistry(deps: RegistryDeps) {
           ...registry,
           busy: source,
           packages: [...registry.packages, {
-            source, kind: kindOf(source), scope: "global", version: null, installedPath: null, updateAvailable: false, resources: [],
+            source, kind: kindOf(source), version: null, installedPath: null, updateAvailable: false, resources: [],
           }],
         };
         deps.changed();
@@ -338,8 +323,8 @@ export function createRegistry(deps: RegistryDeps) {
         if (!deps.live(ticket)) return;
         if (!got.ok) return openAdd({ state: "failed", text: got.error }, source);
         const { package: pkg } = got.value;
-        deps.select({ type: "package", source: pkg.source, scope: pkg.scope });
-        openPackage(pkg.source, pkg.scope, {
+        deps.select({ type: "package", source: pkg.source });
+        openPackage(pkg.source, {
           state: "saved",
           text: `Installed ${pkg.source} — sessions take it on their next message.`,
         });

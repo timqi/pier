@@ -60,7 +60,7 @@ src/
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
                provider-flows.ts, auth.ts, passkeys.ts (WebAuthn: CBOR/COSE,
-               challenges, store, routes), config.ts (scoped agent-file
+               challenges, store, routes), config.ts (global agent-file
                editing), packages.ts (the package registry routes),
                config-sync.ts (the subscription's routes), route.ts (a throwing
                route answers JSON), fs.ts (confined resolver + ls/file/mkdir), explorer.ts

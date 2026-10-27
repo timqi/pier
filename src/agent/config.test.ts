@@ -2,22 +2,15 @@ import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConfigScope } from "./types.js";
 import { PiConfigStore } from "./config.js";
 import { pierSystemPrompt } from "./pi.js";
 
-const GLOBAL: ConfigScope = { kind: "global" };
-
 let agentDir: string;
-let cwd: string;
 let store: PiConfigStore;
-let project: ConfigScope;
 
 beforeEach(() => {
   agentDir = mkdtempSync(join(tmpdir(), "pier-agent-"));
-  cwd = mkdtempSync(join(tmpdir(), "pier-proj-"));
   store = new PiConfigStore(agentDir);
-  project = { kind: "project", cwd };
 });
 
 afterEach(() => {
@@ -52,58 +45,55 @@ describe("Pier system prompt", () => {
 });
 
 describe("config files", () => {
-  it("lists the whitelist per scope, with existence", async () => {
+  it("lists the whitelist, with existence", async () => {
     writeFileSync(join(agentDir, "SYSTEM.md"), "be nice");
-    expect(await store.listFiles(GLOBAL)).toEqual([
+    expect(await store.listFiles()).toEqual([
       { name: "SYSTEM.md", exists: true, readonly: false },
       { name: "AGENTS.md", exists: false, readonly: false },
       { name: "settings.json", exists: false, readonly: true },
       { name: "models.json", exists: false, readonly: false },
     ]);
-    expect(await store.listFiles(project)).toEqual([{ name: "AGENTS.md", exists: false, readonly: false }]);
   });
 
   it("shows settings.json but refuses to write it as a file", async () => {
     writeFileSync(join(agentDir, "settings.json"), '{"shellPath":"/bin/zsh"}');
-    expect(await store.readFile(GLOBAL, "settings.json")).toBe('{"shellPath":"/bin/zsh"}');
-    await expect(store.writeFile(GLOBAL, "settings.json", "{}", '{"shellPath":"/bin/zsh"}'))
+    expect(await store.readFile("settings.json")).toBe('{"shellPath":"/bin/zsh"}');
+    await expect(store.writeFile("settings.json", "{}", '{"shellPath":"/bin/zsh"}'))
       .rejects.toThrow(/written by Pier.*pier reload/);
     expect(readFileSync(join(agentDir, "settings.json"), "utf8")).toBe('{"shellPath":"/bin/zsh"}');
   });
 
-  it("round-trips global and project files; missing reads as empty", async () => {
-    expect(await store.readFile(GLOBAL, "SYSTEM.md")).toBe("");
-    await store.writeFile(GLOBAL, "SYSTEM.md", "be nice");
-    expect(await store.readFile(GLOBAL, "SYSTEM.md")).toBe("be nice");
-    await store.writeFile(project, "AGENTS.md", "project rules");
-    expect(readFileSync(join(cwd, "AGENTS.md"), "utf8")).toBe("project rules");
+  it("round-trips a file; missing reads as empty", async () => {
+    expect(await store.readFile("SYSTEM.md")).toBe("");
+    await store.writeFile("SYSTEM.md", "be nice");
+    expect(await store.readFile("SYSTEM.md")).toBe("be nice");
+    expect(readFileSync(join(agentDir, "SYSTEM.md"), "utf8")).toBe("be nice");
   });
 
   it("rejects anything outside the whitelist", async () => {
-    await expect(store.readFile(GLOBAL, "auth.json")).rejects.toThrow(/not an editable/);
-    await expect(store.readFile(GLOBAL, "../secret")).rejects.toThrow(/not an editable/);
-    // models.json is global-only; the project whitelist is AGENTS.md alone.
-    await expect(store.writeFile(project, "models.json", "{}")).rejects.toThrow(/not an editable/);
+    await expect(store.readFile("auth.json")).rejects.toThrow(/not an editable/);
+    await expect(store.readFile("../secret")).rejects.toThrow(/not an editable/);
+    await expect(store.writeFile("auth.json", "{}")).rejects.toThrow(/not an editable/);
   });
 
   it("does not mistake filesystem failures for missing files", async () => {
     mkdirSync(join(agentDir, "SYSTEM.md"));
-    await expect(store.readFile(GLOBAL, "SYSTEM.md")).rejects.toMatchObject({ code: "EISDIR" });
+    await expect(store.readFile("SYSTEM.md")).rejects.toMatchObject({ code: "EISDIR" });
 
     mkdirSync(join(agentDir, "models.json"));
     await expect(store.providerStructures()).rejects.toMatchObject({ code: "EISDIR" });
-    await expect(store.writeFile(GLOBAL, "models.json", "{}")).rejects.toMatchObject({ code: "EISDIR" });
+    await expect(store.writeFile("models.json", "{}")).rejects.toMatchObject({ code: "EISDIR" });
   });
 
   it("serializes compare-and-write for ordinary config files", async () => {
-    await store.writeFile(GLOBAL, "SYSTEM.md", "before");
+    await store.writeFile("SYSTEM.md", "before");
     const writes = await Promise.allSettled([
-      store.writeFile(GLOBAL, "SYSTEM.md", "first", "before"),
-      store.writeFile(GLOBAL, "SYSTEM.md", "second", "before"),
+      store.writeFile("SYSTEM.md", "first", "before"),
+      store.writeFile("SYSTEM.md", "second", "before"),
     ]);
     expect(writes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(writes.filter((result) => result.status === "rejected")).toHaveLength(1);
-    expect(["first", "second"]).toContain(await store.readFile(GLOBAL, "SYSTEM.md"));
+    expect(["first", "second"]).toContain(await store.readFile("SYSTEM.md"));
   });
 });
 
@@ -193,16 +183,16 @@ describe("models.json masking", () => {
   });
 
   it("masks api keys on read", async () => {
-    const read = JSON.parse(await store.readFile(GLOBAL, "models.json"));
+    const read = JSON.parse(await store.readFile("models.json"));
     expect(read.providers.anthropic.apiKey).toBe("••••••••");
     expect(read.providers.openai.apiKey).toBe("••••••••");
     expect(read.providers.anthropic.baseUrl).toBe("https://x");
   });
 
   it("keeps stored keys when the mask comes back unchanged", async () => {
-    const edited = JSON.parse(await store.readFile(GLOBAL, "models.json"));
+    const edited = JSON.parse(await store.readFile("models.json"));
     edited.providers.anthropic.baseUrl = "https://y"; // user edit, mask untouched
-    await store.writeFile(GLOBAL, "models.json", JSON.stringify(edited));
+    await store.writeFile("models.json", JSON.stringify(edited));
     const onDisk = JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8"));
     expect(onDisk.providers.anthropic.apiKey).toBe("sk-secret-1234567890abcd");
     expect(onDisk.providers.openai.apiKey).toBe("short");
@@ -210,13 +200,13 @@ describe("models.json masking", () => {
   });
 
   it("rejects new plaintext credentials from the advanced editor", async () => {
-    const edited = JSON.parse(await store.readFile(GLOBAL, "models.json"));
+    const edited = JSON.parse(await store.readFile("models.json"));
     edited.providers.anthropic.apiKey = "sk-brand-new";
-    await expect(store.writeFile(GLOBAL, "models.json", JSON.stringify(edited)))
+    await expect(store.writeFile("models.json", JSON.stringify(edited)))
       .rejects.toThrow(/configured under Providers/);
     edited.providers.anthropic.apiKey = "••••••••";
     edited.providers.anthropic.baseUrl = "https://user:secret@example.com/v1";
-    await expect(store.writeFile(GLOBAL, "models.json", JSON.stringify(edited)))
+    await expect(store.writeFile("models.json", JSON.stringify(edited)))
       .rejects.toThrow(/must not contain credentials/);
     expect(JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8")))
       .toEqual(models);
@@ -238,12 +228,12 @@ describe("models.json masking", () => {
         },
       },
     }));
-    const visible = JSON.parse(await store.readFile(GLOBAL, "models.json"));
+    const visible = JSON.parse(await store.readFile("models.json"));
     expect(JSON.stringify(visible)).not.toContain("provider-secret");
     expect(JSON.stringify(visible)).not.toContain("model-secret");
     expect(JSON.stringify(visible)).not.toContain("override-secret");
     visible.providers.proxy.name = "Proxy";
-    await store.writeFile(GLOBAL, "models.json", JSON.stringify(visible));
+    await store.writeFile("models.json", JSON.stringify(visible));
     const stored = JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8"));
     expect(stored.providers.proxy.headers.Authorization).toBe("Bearer provider-secret");
     expect(stored.providers.proxy.models[0].headers["x-api-key"]).toBe("model-secret");
@@ -251,14 +241,14 @@ describe("models.json masking", () => {
       .toBe("override-secret");
 
     visible.providers.proxy.headers.Authorization = "Bearer replacement";
-    await expect(store.writeFile(GLOBAL, "models.json", JSON.stringify(visible)))
+    await expect(store.writeFile("models.json", JSON.stringify(visible)))
       .rejects.toThrow(/configured on disk/);
-    await expect(store.writeFile(GLOBAL, "models.json", "{oops")).rejects.toThrow(/valid JSON/);
+    await expect(store.writeFile("models.json", "{oops")).rejects.toThrow(/valid JSON/);
     stored.providers.proxy.models[0].baseUrl = "https://user:secret@model.example/v1?key=secret";
     writeFileSync(join(agentDir, "models.json"), JSON.stringify(stored));
-    await expect(store.readFile(GLOBAL, "models.json")).rejects.toThrow(/must not contain credentials/);
+    await expect(store.readFile("models.json")).rejects.toThrow(/must not contain credentials/);
     writeFileSync(join(agentDir, "models.json"), "{broken");
-    await expect(store.readFile(GLOBAL, "models.json")).rejects.toThrow(/repair it on disk/);
+    await expect(store.readFile("models.json")).rejects.toThrow(/repair it on disk/);
   });
 });
 
@@ -290,7 +280,7 @@ describe("provider setup", () => {
       await expect(store.setupProvider({ kind: "builtin", id: "anthropic", endpoint }))
         .rejects.toThrow(/must not contain credentials/);
     }
-    expect(await store.readFile(GLOBAL, "models.json")).toBe("");
+    expect(await store.readFile("models.json")).toBe("");
   });
 
   it("serializes provider updates and rejects a stale full-file edit", async () => {
@@ -301,11 +291,11 @@ describe("provider setup", () => {
       api: "openai-completions",
       models: [{ id: "model", reasoning: false }],
     });
-    const expected = await store.readFile(GLOBAL, "models.json");
+    const expected = await store.readFile("models.json");
     await Promise.all([setup("first"), setup("second")]);
     expect(Object.keys(JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8")).providers).sort())
       .toEqual(["first", "second"]);
-    await expect(store.writeFile(GLOBAL, "models.json", "{}", expected)).rejects.toThrow(/changed on disk/);
+    await expect(store.writeFile("models.json", "{}", expected)).rejects.toThrow(/changed on disk/);
   });
 
   it.each([

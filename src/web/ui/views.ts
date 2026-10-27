@@ -4,13 +4,11 @@
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
-import { projectCwds } from "../../core/identity.js";
 import type { SessionInfo } from "./drawer.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 interface ViewsDeps {
   cancelNavigation: () => void;
-  sessions: () => SessionInfo[];
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
@@ -211,7 +209,6 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
   settings: async (root) =>
     (await import("./settings.js")).createSettingsView(
       root,
-      () => projectCwds(deps.sessions()),
       // Through the router, not a local re-render: the hash is the one
       // copy of "where am I", and Back should walk tabs too.
       (t) => showConsole("settings", t),

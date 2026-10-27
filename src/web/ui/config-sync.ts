@@ -18,11 +18,11 @@ export const subscribed = async (): Promise<boolean> => {
 
 export function configSyncPane(): { el: HTMLElement; dispose(): void } {
   const el = h("div", "min-h-0 min-w-0 flex-1 overflow-y-auto p-4");
-  const body = h("div", "mx-auto flex max-w-3xl min-w-0 flex-col gap-4");
-  const notice = h("p", "text-[12px] break-words");
+  const body = h("div", "flex max-w-2xl min-w-0 flex-col gap-4");
+  const notice = h("p", "text-[12px] break-words empty:hidden");
   const sharing = h("section", "flex min-w-0 flex-col gap-3 border-b border-neutral-200 pb-4");
   const subscribing = h("section", "flex min-w-0 flex-col gap-3");
-  body.append(h("h2", "text-[14px] font-semibold text-neutral-700", "Configuration sync"), notice, sharing, subscribing);
+  body.append(notice, sharing, subscribing);
   el.append(body);
   let state: ConfigSyncStatus | null = null;
   let busy = false;
