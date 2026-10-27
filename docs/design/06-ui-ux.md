@@ -62,8 +62,9 @@ updates this document.
   IDs 0.875rem monospace, wrapping.
 - **Two-pane Console views** (Agent, Files): panes are the panel surface
   clipped to its own radius, inset on the canvas under the page head, each
-  with a title band and its own scroller. Below md they stack — nav or tree
-  first at half the height — and every row, control and download in them is a
+  with a title band and its own scroller. Below md Files stacks, tree first
+  at half the height, and Agent is a list page and a detail page whose title
+  band leads with ‹ — and every row, control and download in them is a
   44px target; a head with no tab row keeps its chips and close on one line,
   and a path too long for a phone wears its last segment instead.
 - **Model picker**: fills its panel; opened from ⋯, its head keeps only back and

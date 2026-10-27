@@ -1,9 +1,9 @@
 // Settings → Agent: one list of everything a session is made of, and one pane
 // to act on the selected item. The agent files and the command-line tools — a
-// source in the package tree, served by ubix rather than Pi — are drawn here;
-// the package registry's panes are packages-pane.ts.
+// section of their own, served by ubix rather than Pi — are drawn here; the
+// package registry's panes are packages-pane.ts.
 
-import { ChevronRight } from "lucide";
+import { ChevronLeft, ChevronRight } from "lucide";
 import type { CatalogEntry, ConfigFile, Package } from "../../agent/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
@@ -26,8 +26,8 @@ interface ConfigIndex {
 type Selection =
   | { type: "file"; name: string; readonly: boolean; managed: boolean }
   /** One pane for every command-line tool: a row and a switch each, because a
-   *  page per binary is four pages saying the same three facts. `tool` is that
-   *  pane with one row marked. */
+   *  page per binary is four pages saying the same three facts. `tools` is that
+   *  pane opened by Add tool, `tool` it with one row marked. */
   | { type: "tools" }
   | { type: "tool"; name: string }
   | { type: "sync" }
@@ -44,6 +44,14 @@ interface CatalogResponse {
    *  none. */
   toolsSync?: ToolsSyncNote;
 }
+
+/** What each agent file is for, under its name in the pane. */
+const FILE_PURPOSE: Record<string, string> = {
+  "SYSTEM.md": "Your system prompt: appended after Pier's baseline in every session.",
+  "AGENTS.md": "Instructions every session loads, before the working directory's own AGENTS.md.",
+  "settings.json": "Pi's settings: default model and reasoning, packages and their switches, compaction.",
+  "models.json": "Custom providers and models, and overrides of built-in ones; keys show masked.",
+};
 
 /** What a save turned out to be, for the status line that redraws with it. */
 interface SaveOutcome {
@@ -137,22 +145,35 @@ export function createConfigView(
   // --- static skeleton: nav | pane --------------------------------------------
 
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1.5");
-  // Stacked on a phone at half the height, as Files' tree is.
-  const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:h-1/2 max-md:w-full`);
+  // On a phone the nav and the pane are a page each, the pane shown exactly
+  // while something is selected (renderNav): every path that clears the
+  // selection lands back on the list.
+  const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:min-h-0 max-md:w-full max-md:flex-1`);
   nav.append(navList);
-  const pane = h("div", `${PANE} min-w-0 flex-1`);
+  const pane = h("div", `${PANE} min-w-0 flex-1 max-md:hidden`);
   const body = h("div", "flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1 max-md:flex-col");
   body.append(nav, pane);
   root.append(body);
 
-  /** The pane's title bar: file name plus whatever the mode adds. */
-  const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement =>
-    h(
+  /** The pane's title bar: file name plus whatever the mode adds, and on a
+   *  phone the way back to the list. */
+  const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement => {
+    const back = h("button", "icon-btn -my-1 -ml-2 md:hidden max-md:h-11 max-md:w-11", icon(ChevronLeft, "h-4.5 w-4.5"));
+    back.setAttribute("aria-label", "Back to the list");
+    back.onclick = () => {
+      closeSync();
+      selection = null;
+      renderNav(lastIndex);
+      renderPlaceholder();
+    };
+    return h(
       "div",
       `${BAND} flex-wrap gap-3 px-4 py-2.5`,
+      back,
       h("span", "font-mono text-[12.5px] text-neutral-500", name),
       ...rest,
     );
+  };
 
   const registry = createRegistry({
     pane,
@@ -214,8 +235,10 @@ export function createConfigView(
     ]);
     if (request !== loadRequest) return;
     if (!got.ok) {
-      renderNav(null);
-      renderError(got.error);
+      // Said on the list page, the one a phone shows with nothing selected.
+      selection = null;
+      renderNav(null, got.error);
+      renderPlaceholder();
       return;
     }
     const index = got.value;
@@ -278,46 +301,33 @@ export function createConfigView(
     return row;
   }
 
-  /** Which source rows are open; a redraw keeps them. Pier's own start open. */
+  /** Which package rows are open; a redraw keeps them. The built-ins start open. */
   const expanded = new Map<string, boolean>();
 
-  /** A source's row with its chevron, and `children()` under it while open. */
-  function sourceRows(
-    key: string,
-    label: string,
-    row: { active: boolean; dim: boolean; tags: HTMLElement[]; onPick: () => void; openByDefault: boolean },
-    children: () => HTMLElement[],
-  ): HTMLElement[] {
-    const isOpen = expanded.get(key) ?? row.openByDefault;
-    const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
-    if (isOpen) chevron.classList.add("chev-open");
-    chevron.title = `${isOpen ? "Collapse" : "Expand"} ${label}`;
-    chevron.setAttribute("aria-label", chevron.title);
-    chevron.setAttribute("aria-expanded", String(isOpen));
-    chevron.onclick = () => {
-      expanded.set(key, !isOpen);
-      renderNav(lastIndex);
-    };
-    const head = navRow(label, row.active, row.dim, row.onPick, { tags: row.tags, flush: true });
-    const rows = [h("div", `flex items-stretch ${row.active ? "bg-indigo-50" : ""}`, chevron, head)];
-    return isOpen ? [...rows, ...children()] : rows;
-  }
-
-  /** A package and, when open, its resources grouped by kind under it. */
+  /** A package's row with its chevron and, when open, its resources grouped by kind under it. */
   function packageRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
     const sel: Selection = { type: "package", source: pkg.source };
     const tags: HTMLElement[] = [];
     if (registry.registry?.busy === pkg.source) {
       tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
     } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
-    return sourceRows(pkg.source, packageLabel(pkg.source), {
-      active: isActive(sel),
-      // Dim: configured, and not on disk. The built-ins have no install path to speak of.
-      dim: pkg.installedPath === null && !isBuiltIn(pkg),
-      tags,
-      onPick: () => open(sel),
-      openByDefault: isBuiltIn(pkg),
-    }, () => resourceRows(pkg, isActive, open));
+    const label = packageLabel(pkg.source);
+    const active = isActive(sel);
+    const isOpen = expanded.get(pkg.source) ?? isBuiltIn(pkg);
+    const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
+    if (isOpen) chevron.classList.add("chev-open");
+    chevron.title = `${isOpen ? "Collapse" : "Expand"} ${label}`;
+    chevron.setAttribute("aria-label", chevron.title);
+    chevron.setAttribute("aria-expanded", String(isOpen));
+    chevron.onclick = () => {
+      expanded.set(pkg.source, !isOpen);
+      renderNav(lastIndex);
+    };
+    // Dim: configured, and not on disk. The built-ins have no install path to speak of.
+    const dim = pkg.installedPath === null && !isBuiltIn(pkg);
+    const head = navRow(label, active, dim, () => open(sel), { tags, flush: true });
+    const rows = [h("div", `flex items-stretch ${active ? "bg-indigo-50" : ""}`, chevron, head)];
+    return isOpen ? [...rows, ...resourceRows(pkg, isActive, open)] : rows;
   }
 
   function resourceRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
@@ -341,36 +351,31 @@ export function createConfigView(
     return rows;
   }
 
-  /** The managed binaries as one more source: each tool once, dim when off,
-   *  its install error as the second line. */
+  /** The managed binaries, a section of their own because ubix installs them,
+   *  not Pi: each tool once, dim when off, its install error as the second line. */
   function toolRows(isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
-    const sel: Selection = { type: "tools" };
-    return sourceRows("tools", "tools", {
-      active: isActive(sel),
-      dim: false,
-      tags: catalog.some((t) => t.enabled) ? [onBadge()] : [],
-      onPick: () => open(sel),
-      openByDefault: true,
-    }, () => catalogError
-      ? [h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError)]
-      : catalog.map((t) => {
-        const tsel: Selection = { type: "tool", name: t.name };
-        return navRow(t.name, isActive(tsel), !t.enabled, () => open(tsel), {
-          depth: 1, note: t.binary.error, tags: isCustom(t) ? [navBadge("yours")] : [],
-        });
-      }));
+    if (catalogError) return [h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError)];
+    return catalog.map((t) => {
+      const sel: Selection = { type: "tool", name: t.name };
+      return navRow(t.name, isActive(sel), !t.enabled, () => open(sel), {
+        note: t.binary.error, tags: isCustom(t) ? [navBadge("yours")] : [],
+      });
+    });
   }
 
-  function renderNav(index: ConfigIndex | null): void {
+  /** `error`: why there is no list, drawn in its place. */
+  function renderNav(index: ConfigIndex | null, error?: string): void {
+    nav.classList.toggle("max-md:hidden", selection !== null);
+    pane.classList.toggle("max-md:hidden", selection === null);
     if (!index) {
-      navList.replaceChildren();
+      navList.replaceChildren(...(error ? [h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", error)] : []));
       return;
     }
     const isActive = (sel: Selection): boolean => JSON.stringify(sel) === JSON.stringify(selection);
     const open = (sel: Selection): void => {
       closeSync();
       selection = sel;
-      renderNav(index); // re-highlight
+      renderNav(index); // re-highlight, and on a phone the pane
       if (sel.type === "file") void openFile(sel.name, sel.readonly, sel.managed);
       else if (sel.type === "tools" || sel.type === "tool") openTools();
       else if (sel.type === "sync") openSync();
@@ -396,13 +401,16 @@ export function createConfigView(
       const tags = f.managed ? [navBadge("synced")] : f.readonly ? [navBadge("read-only")] : [];
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel), { tags }));
     }
-    const addSel: Selection = { type: "add" };
-    const add = btn("Add package", `normal-case tracking-normal hover:underline ${isActive(addSel) ? "text-indigo-700" : "text-indigo-600"}`);
-    add.onclick = () => open(addSel);
-    rows.push(navSection("Packages", add));
+    /** A section's header action, marked while its pane is the open one. */
+    const action = (label: string, sel: Selection): HTMLElement => {
+      const el = btn(label, `normal-case tracking-normal hover:underline ${isActive(sel) ? "text-indigo-700" : "text-indigo-600"}`);
+      el.onclick = () => open(sel);
+      return el;
+    };
+    rows.push(navSection("Tools", action("Add tool", { type: "tools" })), ...toolRows(isActive, open));
+    rows.push(navSection("Packages", action("Add package", { type: "add" })));
     if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
     for (const pkg of registry.registry?.packages ?? []) rows.push(...packageRows(pkg, isActive, open));
-    rows.push(...toolRows(isActive, open));
     navList.replaceChildren(...rows);
   }
 
@@ -418,8 +426,9 @@ export function createConfigView(
     );
   }
 
-  function renderError(message: string): void {
-    pane.replaceChildren(h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
+  /** Under the item's own title band, so a phone has its ‹ back from the failure too. */
+  function renderError(name: string, message: string): void {
+    pane.replaceChildren(paneBar(name), h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
   }
 
   /** A `readonly` file is Pier's to write, a `managed` one the subscription
@@ -432,7 +441,7 @@ export function createConfigView(
       { cache: "no-store" },
     );
     if (!got.ok) {
-      if (request === paneRequest) renderError(got.error);
+      if (request === paneRequest) renderError(name, got.error);
       return;
     }
     if (request !== paneRequest) return;
@@ -484,8 +493,15 @@ export function createConfigView(
     const view = h("button", "btn text-[12.5px]", "View") as HTMLButtonElement;
     const actions = (...rest: HTMLElement[]): HTMLElement =>
       h("div", "ml-auto flex flex-none items-center gap-2", ...rest);
+    /** The file's purpose, and for one the editor does not take, where it is written instead. */
+    const about = (note: string | null): HTMLElement[] => {
+      const lines = [FILE_PURPOSE[name], note].filter((line): line is string => !!line);
+      return lines.length
+        ? [h("div", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500", ...lines.map((line) => h("p", "", line)))]
+        : [];
+    };
     const showEdit = (): void => {
-      pane.replaceChildren(paneBar(name, status, actions(view, save)), editor);
+      pane.replaceChildren(paneBar(name, status, actions(view, save)), ...about(null), editor);
       editor.focus();
     };
     const showRead = async (): Promise<void> => {
@@ -498,7 +514,7 @@ export function createConfigView(
         note
           ? paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only"))
           : paneBar(name, status, actions(edit)),
-        ...(note ? [h("p", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500", note)] : []),
+        ...about(note),
         // An empty or missing file is no numbered blank line: it says what Edit does.
         editor.value || note
           ? h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang))
@@ -654,8 +670,9 @@ export function createConfigView(
         status,
       ),
     );
-    // The row picked in the nav, in view even below a long list.
+    // The row picked in the nav, in view even below a long list; Add tool lands on the form.
     rows[catalog.findIndex((t) => t.name === marked)]?.scrollIntoView({ block: "nearest" });
+    if (selection?.type === "tools" && !note) nameField.focus();
   }
 
   /** One switch, flipped: a delta, never the list this page computed — two

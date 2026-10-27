@@ -92,8 +92,9 @@ export function createRegistry(deps: RegistryDeps) {
     return { state: "saved", text: "Saved — sessions take it on their next message." };
   }
 
-  const renderError = (message: string): void => {
-    deps.pane.replaceChildren(h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
+  /** Under a title band, so a phone has its ‹ back from the failure too. */
+  const renderError = (name: string, message: string): void => {
+    deps.pane.replaceChildren(deps.paneBar(name), h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
   };
   const body = (...children: (HTMLElement | string)[]): HTMLElement =>
     h("div", "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4", ...children);
@@ -129,7 +130,7 @@ export function createRegistry(deps: RegistryDeps) {
   function openPackage(source: string, note?: Outcome): void {
     const ticket = deps.claim();
     const pkg = find(source);
-    if (!pkg) return renderError(`unknown package: ${source}`);
+    if (!pkg) return renderError(packageLabel(source), `unknown package: ${source}`);
     const status = h("span", STATUS, "");
     if (note) setStatus(status, note.state, note.text);
     const busy = registry?.busy === pkg.source;
@@ -238,7 +239,7 @@ export function createRegistry(deps: RegistryDeps) {
   async function openResource(source: string, kind: PackageResourceKind, path: string, note?: Outcome): Promise<void> {
     const ticket = deps.claim();
     const found = findResource(source, kind, path);
-    if (!found) return renderError(`unknown ${kind}: ${path}`);
+    if (!found) return renderError(basename(path), `unknown ${kind}: ${path}`);
     const { pkg, resource } = found;
     const status = h("span", STATUS, "");
     if (note) setStatus(status, note.state, note.text);

@@ -505,15 +505,18 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   The Agent nav, drawn from one `GET /api/packages` answer. The management
   unit is the **package** (a source); its resources are the extensions and
   skills it provides; a resource has one switch wherever it is shown. The
-  managed binaries are one more source, `tools`, drawn from `GET
-  /api/settings` and installed by ubix, not Pi.
+  managed binaries are a section of their own above the packages, drawn from
+  `GET /api/settings` and installed by ubix, not Pi. On a phone the nav and the
+  pane are a page each, the pane shown exactly while an item is selected: a
+  pick opens it; the ‹ in its title band (an error's too), a removed package or
+  an index that failed to load returns to the list, where that failure is said.
 
   | Section | Rows | Actions |
   | ------- | ---- | ------- |
   | Sync | Configuration sync | configuration sync pane |
-  | Files | the agent dir's path, then the whitelisted agent files — dim when missing, `read-only` on settings.json, `synced` on a file the subscription manages | the file viewer; an empty file reads `<name> is empty — Edit to write it.` |
+  | Files | the agent dir's path, then the whitelisted agent files — dim when missing, `read-only` on settings.json, `synced` on a file the subscription manages | the file viewer and editor, under the name one line on what the file is for; an empty file reads `<name> is empty — Edit to write it.` |
+  | Tools | one row per managed binary, `rtk` among them — dim when off, the install error as a second line, `yours` on an operator's block | tools pane, from a tool (that tool's row marked and scrolled into view) or the header action **Add tool** (the name field focused): each tool with its switch and binary line, **Remove** on the operator's own, the custom block editor |
   | **Packages** (tree) | one row per source: built-in `pier` (Pier's own skills `pier-help`, `pier-search`, `pier-slack`, `pier-tasks`, `pier-vault`, `pier-web`; version = Pier's), `local` (`<agentDir>/extensions`, `<agentDir>/skills`), then each installed npm/git/path package; `on` when any resource is; `installing…`/`updating…` on the `busy` one; a configured-but-uninstalled source reads dim. A chevron expands the row into its resources grouped `extensions` / `skills`: name, dim when off, the `state` as a second line (never hover-only), a kind badge only when the same name occurs twice in the package; `pier` and `local` start open, the rest closed, and the fold state survives redraws for the session; picking a resource from a pane opens its package | package pane: source, kind, version, install path, the provided resources each with its switch; for an installed npm/git/path package also **Updates** (checked-at, **Check for updates** — a failed check keeps the last answer), **Update** (npm/git), **Remove** (confirms); while `busy` the buttons are disabled; a refused operation shows the server's `error` in the status line; header action **Add package**: spec input, Pi's security note (packages run with full system access; review the source first), **Install** — the row appears as `installing…` at once and the list is refetched on the answer. Resource pane: the same switch, the `state` line, its package, and the file through `GET /api/fs/file` (a bundled extension has none); a flip here redraws the tree row. **Browse files** (package pane beside the install path, resource pane beside the file's path; absent where there is no directory) opens Files on the package directory, a skill's directory (`SKILL.md` selected) or an extension's file |
-  | **Packages** › `tools` | after the packages, open by default: one row per managed binary, `rtk` among them — dim when off, the install error as a second line, `yours` on an operator's block; `on` when any tool is | tools pane, from the source row or a tool (that tool's row marked and scrolled into view): each tool with its switch and binary line, **Remove** on the operator's own, the custom block editor |
 
   Rules:
   - Every write is the global settings.json's; a project's `.pi/settings.json`

@@ -86,8 +86,14 @@ beforeEach(async () => {
       return Response.json({ content: (JSON.parse(String(init.body)) as { content: string }).content });
     }
     if (url === "/api/config/files/models.json") return Response.json({ content: "" });
+    if (url === "/api/config/files/AGENTS.md") return Response.json({ error: "disk on fire" }, { status: 500 });
+    if (url.startsWith("/api/config/files/")) return Response.json({ content: "{}" });
     if (url === "/api/settings") return Response.json({ catalog, customTools: [], toolsTaskId: null });
     if (url === "/api/packages" && init?.method === "POST") return install();
+    if (url === "/api/packages/remove") {
+      registry.packages = registry.packages.filter((p) => p.source !== (JSON.parse(String(init?.body)) as { source: string }).source);
+      return Response.json({ ok: true });
+    }
     if (url === "/api/packages") return Response.json(registry);
     if (url === "/api/packages/resource" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as { source: string; path: string; enabled: boolean };
@@ -109,15 +115,16 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Settings → Agent", () => {
   it("draws one tree from the registry: a package row, its resources grouped by kind under it", () => {
     const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.localName === "div").map((el) => el.textContent);
-    expect(sections).toEqual(["Sync", "Files", "PackagesAdd package", "extensions", "skills", "extensions"]);
-    // pier, local and tools open by default, a third-party package closed; each tool once.
+    // The tools are a section of their own above the packages, so pier's open tree never pushes them down.
+    expect(sections).toEqual(["Sync", "Files", "ToolsAdd tool", "PackagesAdd package", "extensions", "skills", "extensions"]);
+    // pier and local open by default, a third-party package closed; each tool once.
     expect(rows().map((el) => el.textContent)).toEqual([
       // Which files take an edit reads in the list itself.
       "Configuration sync", "SYSTEM.md", "AGENTS.mdsynced", "settings.jsonread-only", "models.json",
+      "rtk", "mytoolno assetyours",
       "pieron", "web", "pier-help",
       "localon", "minenot loaded — no default export",
       "demoon",
-      "toolson", "rtk", "mytoolno assetyours",
     ]);
     expect(chevron("demo").getAttribute("aria-expanded")).toBe("false");
     // A switched-off resource or tool reads dim; its state is a line in the row, not a tooltip.
@@ -144,8 +151,8 @@ describe("Settings → Agent", () => {
     expect(rowText("demo")).toBe("demo"); // nothing on any more
   });
 
-  it("opens the one tools pane from the source row or a tool, the picked tool marked", async () => {
-    row("tools")!.onclick!();
+  it("opens the one tools pane from Add tool or a tool, the picked tool marked", async () => {
+    button("Add tool")!.onclick!();
     await settled();
     const marked = () => walk(root).filter((el) => el.className.includes("bg-indigo-50") && el.className.includes("max-w-2xl"));
     expect(walk(root).filter((el) => el.type === "checkbox")).toHaveLength(2);
@@ -153,9 +160,66 @@ describe("Settings → Agent", () => {
     row("mytool")!.onclick!();
     await settled();
     expect(marked().map((el) => el.textContent.startsWith("mytool"))).toEqual([true]);
-    // The tools fold like any source.
-    chevron("tools").onclick!();
-    expect(row("rtk")).toBeUndefined();
+  });
+
+  it("says what each agent file is for under its name, and a read-only one where it is set", async () => {
+    const about = () => walk(root).find((el) => el.localName === "div" && el.className.includes("border-b") && el.className.includes("px-4 py-2"));
+    row("SYSTEM.md")!.onclick!();
+    await settled();
+    expect(about()?.textContent).toBe("Your system prompt: appended after Pier's baseline in every session.");
+    button("Edit")!.onclick!();
+    expect(about()?.textContent).toBe("Your system prompt: appended after Pier's baseline in every session.");
+    row("settings.json")!.onclick!();
+    await settled();
+    expect(about()?.textContent).toMatch(/^Pi's settings: .*Pier manages this file/);
+  });
+
+  describe("on a phone, a list page and a detail page", () => {
+    /** Which of the two a phone shows: exactly one of them is hidden below md. */
+    const page = (at = root) => {
+      const [nav, pane] = walk(at).find((el) => el.localName === "nav")!.parentElement!.children as [FakeElement, FakeElement];
+      expect(nav.classList.contains("max-md:hidden")).toBe(!pane.classList.contains("max-md:hidden"));
+      return pane.classList.contains("max-md:hidden") ? "list" : "pane";
+    };
+    const back = () => walk(root).find((el) => el.getAttribute("aria-label") === "Back to the list")!;
+
+    it("a pick opens the pane, its back returns to the list", async () => {
+      expect(page()).toBe("list");
+      row("rtk")!.onclick!();
+      await settled();
+      expect(page()).toBe("pane");
+      back().onclick!();
+      expect(page()).toBe("list");
+    });
+
+    it("a removed package lands back on the list, without it", async () => {
+      row("demo")!.onclick!();
+      await settled();
+      expect(page()).toBe("pane");
+      button("Remove")!.onclick!();
+      await settled();
+      expect(page()).toBe("list");
+      expect(row("demo")).toBeUndefined();
+    });
+
+    it("a file that fails to load says so under its title, with the way back", async () => {
+      row("AGENTS.md")!.onclick!();
+      await settled();
+      expect(page()).toBe("pane");
+      expect(walk(root).some((el) => el.className.includes("text-red-600") && el.textContent.includes("disk on fire"))).toBe(true);
+      back().onclick!();
+      expect(page()).toBe("list");
+    });
+
+    it("an index that fails to load is said on the list page", async () => {
+      fetcher.mockImplementation(async (url: string) =>
+        url === "/api/config" ? Response.json({ error: "no agent dir" }, { status: 500 }) : Response.json({ catalog: [], customTools: [], toolsTaskId: null, packages: [] }));
+      const failed = installDom().createElement("div");
+      createConfigView(failed as unknown as HTMLElement, () => {}).show();
+      await settled();
+      expect(page(failed)).toBe("list");
+      expect(walk(failed.querySelector("nav")!).some((el) => el.textContent.includes("no agent dir"))).toBe(true);
+    });
   });
 
   it("flips one switch: the PUT names the resource, and both views redraw from the answer", async () => {
