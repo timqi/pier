@@ -59,7 +59,7 @@
         class="icon-btn text-[13px]"></button>
     </section>
     <!-- The one bar, at every width: the way back, the title (Session info),
-         the phase tag, then the lead open item and its counter (the status
+         the phase tag, then the open-item counter and the lead item (the status
          panel, drawer.ts), the meta chips and ⋯ (session-header.ts). Flat
          children, so below md the urgent meta row can wrap to a line of its own
          (style.css). -->
@@ -70,6 +70,9 @@
       <span id="chat-phase" class="flex flex-none items-center"></span>
       <!-- Always laid out, empty with no rows: its auto margin keeps the meta and ⋯ right. -->
       <div id="status-lead" class="mr-auto flex min-w-0 items-center gap-0.5 text-[13px]">
+        <!-- The counter first: a fixed place to click again, whatever the lead's length. -->
+        <button type="button" id="status-next" aria-label="Next open item"
+          class="hidden flex-none cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] tabular-nums text-neutral-500 hover:bg-neutral-100 max-md:hidden"></button>
         <button type="button" id="status-item" aria-haspopup="dialog"
           class="hidden min-w-0 max-w-[36rem] cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 hover:bg-neutral-100">
           <span id="status-item-dot" class="h-2 w-2 flex-none rounded-full max-md:hidden"></span>
@@ -78,8 +81,6 @@
           <span id="status-item-stage" class="min-w-0 shrink-[3] truncate text-[12px] text-neutral-600 max-md:hidden"></span>
           <span id="status-item-count" class="text-[12px] tabular-nums text-neutral-600 md:hidden"></span>
         </button>
-        <button type="button" id="status-next" aria-label="Next open item"
-          class="hidden flex-none cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] tabular-nums text-neutral-500 hover:bg-neutral-100 max-md:hidden"></button>
       </div>
       <!-- Inline session meta: model · reasoning · current context size. -->
       <div id="session-meta" class="hidden flex-none items-center gap-1 text-[11px]"></div>
