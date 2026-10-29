@@ -480,6 +480,16 @@ describe("the open items", () => {
     expect(r.store.itemHistory("parser")?.sessions).toEqual(["h1", "h2"]);
   });
 
+  it("records a stamped send's head on the item under its key when the stamp names an alias", () => {
+    const r = rig();
+    // Pier's rename leaves the old key no row of its own: only the alias names it.
+    r.store.markOpenItems([{ op: "open", problem: "sign in", stage: "", runIds: ["rt1"] }], 1, "h1");
+    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 2, "h1");
+    // What WebDeps.itemSent does (src/main.ts) for a send stamped `[item: sign in]`.
+    expect(r.store.markOpenItems([], 3, "h2", { topic: "sign in" })).toEqual({ changed: [], closed: [] });
+    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: ["sign in"], sessions: ["h1", "h2"], runIds: ["rt1"] });
+  });
+
   it("closes an arrow's item into the one the reply leaves open, and nothing when that one is not open", () => {
     const r = rig();
     const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });

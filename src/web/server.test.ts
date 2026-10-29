@@ -2514,6 +2514,21 @@ describe("the continuous conversation's routes", () => {
     expect(body.sessions[0]!.turns[0]!.turn.text).toBe("Session old could not be read: bad JSON at line 3");
   });
 
+  it("shows the head's unreadable transcript as one row saying so, the earlier sessions still read", async () => {
+    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
+    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
+    restarted();
+    factory.readHistory.mockResolvedValue([{ role: "user", text: "fix login" }, { role: "assistant", text: "On it.\n<open>login</open>" }]);
+    const head = sharedFake("head");
+    head.history = () => Promise.reject(new Error("transcript truncated"));
+    sessions.set("head", head);
+    const res = await app.request("/api/continuous/items/login/turns");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
+    expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)])).toEqual([["old", ["user", "assistant"]], ["head", ["system"]]]);
+    expect(body.sessions[1]!.turns[0]!.turn.text).toBe("Session head could not be read: transcript truncated");
+  });
+
   it("carries a message stamped in the item view to a new head's transcript and back as one of the item's rows", async () => {
     const problem = "CI / deploy 修复";
     const store = new TaskStore(openDb(":memory:"));

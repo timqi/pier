@@ -550,13 +550,14 @@ export function createServer(
     };
     const past = await Promise.all(rest.filter((m) => item.sessions.includes(m.sessionId)).reverse()
       .map((m) => read({ sessionId: m.sessionId, startedAt: m.startedAt })));
-    const live = head && item.sessions.includes(head.sessionId) ? await ensure(head.sessionId) : undefined;
+    const live = head && item.sessions.includes(head.sessionId) ? head : undefined;
     const headId = head?.sessionId ?? "";
     for (let attempt = 0; attempt < 3; attempt++) {
       const lastSeq = hub.lastSeq(headId);
-      const turns = live && await live.history();
-      if (hub.lastSeq(headId) !== lastSeq) continue;
-      const sessions = itemTurns([...past, ...(head && turns ? [{ sessionId: head.sessionId, startedAt: head.startedAt, turns }] : [])], [item.problem, ...item.aliases], item.runIds)
+      const own = live && await read({ sessionId: live.sessionId, startedAt: live.startedAt });
+      // A failed read has no snapshot for the cursor to match: nothing to retry.
+      if (own?.unread === undefined && hub.lastSeq(headId) !== lastSeq) continue;
+      const sessions = itemTurns([...past, ...(own ? [own] : [])], [item.problem, ...item.aliases], item.runIds)
         .map(({ unread, ...s }) => ({ ...s, turns: unread === undefined
           ? s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) }))
           : [{ index: 0, turn: { role: "system" as const, text: unread } }] }));
