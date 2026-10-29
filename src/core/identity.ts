@@ -85,7 +85,7 @@ export class SenderPrefix {
     if (!sender?.id) return "";
     const last = this.seen.get(sessionId);
     // The quoted excerpt is someone else's words, in whatever language they wrote.
-    const lang = detectLanguage(splitQuote(text).text) ?? last?.lang;
+    const lang = detectLanguage(splitQuote(splitItem(text).text).text) ?? last?.lang;
     this.seen.set(sessionId, { senderId: sender.id, at, conversation, lang });
 
     const now = new Date(at);
@@ -127,7 +127,7 @@ export function userLanguage(turns: readonly ChatTurn[]): string | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i]!;
     const lang = turn.role === "user"
-      ? detectLanguage(splitQuote(splitSpeaker(turn.text).text).text)
+      ? detectLanguage(splitQuote(splitItem(splitSpeaker(turn.text).text).text).text)
       : turn.role === "system" && turn.origin?.kind === "session-seed" ? LANG_STAMP.exec(turn.text)?.[1] : undefined;
     if (lang) return lang;
   }
@@ -187,7 +187,7 @@ export function splitSpeaker(text: string): Speaker {
   // A name on its own proves nothing: try the shape that requires a time.
   const m = id || when || where || lang ? head : NAMED.exec(text);
   // `[re assistant 12:00]` fits the named shape; it is the quote line below.
-  if (!m?.groups || QUOTE.test(text)) return { text };
+  if (!m?.groups || QUOTE.test(text) || ITEM.test(text)) return { text };
   return {
     ...(m.groups.name ? { name: m.groups.name } : {}),
     ...(m.groups.id ? { id: m.groups.id } : {}),
@@ -196,6 +196,25 @@ export function splitSpeaker(text: string): Speaker {
     ...(m.groups.lang ? { lang: m.groups.lang } : {}),
     text: text.slice(m[0].length),
   };
+}
+
+// --- the item ------------------------------------------------------------------------
+// A message sent from the item view names its item on its first line, under the
+// speaker header and above any quote (docs/design/15-item-view.md §Composer):
+//   [item: CI 修复]
+//   [re assistant 2026-06-01 12:00]
+//   > …
+
+const ITEM = /^\[item: ([^\n]+)\]\n/;
+
+/** `text` about the open item keyed by `problem`. */
+export const withItem = (problem: string, text: string): string =>
+  `[item: ${problem.replace(/\s+/g, " ").trim()}]\n${text}`;
+
+/** Read back an item line this module wrote; anything else is the message as typed. */
+export function splitItem(text: string): { item?: string; text: string } {
+  const m = ITEM.exec(text);
+  return m ? { item: m[1]!, text: text.slice(m[0].length) } : { text };
 }
 
 // --- the quote -----------------------------------------------------------------------
@@ -218,7 +237,8 @@ export interface Quote {
   excerpt: string;
 }
 
-const quoteWhen = (at: number): string => {
+/** `YYYY-MM-DD HH:MM`, local: a quote's minute, and what `pier search --around` takes. */
+export const minute = (at: number): string => {
   const d = new Date(at);
   return `${day(d)} ${hhmm(d)}`;
 };
@@ -228,7 +248,7 @@ export function withQuote(source: { role: Quote["role"]; at: number; text: strin
   const excerpt = source.text.trim().slice(0, QUOTE_CHARS).trimEnd();
   if (!excerpt) return body;
   const lines = excerpt.split("\n").map((line) => (line ? `> ${line}` : ">"));
-  return `[re ${source.role} ${quoteWhen(source.at)}]\n${lines.join("\n")}\n\n${body}`;
+  return `[re ${source.role} ${minute(source.at)}]\n${lines.join("\n")}\n\n${body}`;
 }
 
 const QUOTE = /^\[re (?<role>user|assistant) (?<when>\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\n(?<lines>(?:>[^\n]*\n)+)\n?/;
@@ -261,7 +281,7 @@ export function readableTitle(title: string | undefined): string | undefined {
   const { text } = splitSpeaker(title);
   // No header: reflowing what the person typed would change what search matches.
   if (text === title) return title;
-  const said = splitQuote(text).text
+  const said = splitQuote(splitItem(text).text).text
     .replace(ATTACHMENT_LINES, "")
     .replace(LEADING_CODE_SPAN, "$1")
     .replace(/\s+/g, " ")

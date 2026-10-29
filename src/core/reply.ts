@@ -179,10 +179,11 @@ const MARKER = new RegExp(
 );
 const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
 
-/** `open` adds or replaces the item keyed by `problem`; `done` removes it. */
+/** `open` adds or replaces the item keyed by `problem`; `done` closes it, `to`
+ *  the open item it continues as (`<done>old → new</done>`). */
 export type OpenItemMarker =
   | { op: "open"; problem: string; stage: string; runIds: string[] }
-  | { op: "done"; problem: string };
+  | { op: "done"; problem: string; to?: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 /** An `<open>` line read apart: the `problem` key before the ` — stage`, the
@@ -198,6 +199,16 @@ function openLine(text: string): { problem: string; stage: string; runIds: strin
   return { problem: (dash < 0 ? rest : rest.slice(0, dash)).trim(), stage: dash < 0 ? "" : rest.slice(dash + 1).trim(), runIds };
 }
 
+/** The first ` → ` (or ` -> `) splits a `<done>` body into the key it closes and the one it continues as. */
+const ARROW = / (?:\u2192|->) /;
+function doneLine(text: string): { problem: string; to?: string } {
+  const body = oneLine(text);
+  const arrow = ARROW.exec(body);
+  const to = arrow ? openLine(body.slice(arrow.index + arrow[0].length)).problem : "";
+  if (!arrow || !to) return { problem: openLine(body).problem };
+  return { problem: openLine(body.slice(0, arrow.index)).problem, to };
+}
+
 /** The markers in reply order, `notes` the daily-note lines, `topic` the
  *  `<topic>` body; `dropped` holds the ones with no text, for the caller to log. */
 export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; notes: string[]; topic?: string; dropped: string[] } {
@@ -207,11 +218,12 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
     if (m[1] === undefined) {
-      const body = m[3] !== undefined ? oneLine(m[3]) : openLine(m[2] ?? m[4] ?? "").problem;
+      const done = m[2] !== undefined ? doneLine(m[2]) : undefined;
+      const body = done?.problem ?? (m[3] !== undefined ? oneLine(m[3]) : openLine(m[4] ?? "").problem);
       if (!body) dropped.push(m[0].trim());
       else if (m[4] !== undefined) topic ??= body;
-      else if (m[2] === undefined) notes.push(body);
-      else markers.push({ op: "done", problem: body });
+      else if (!done) notes.push(body);
+      else markers.push({ op: "done", problem: body, ...(done.to ? { to: done.to } : {}) });
       return "";
     }
     const { problem, stage, runIds } = openLine(m[1]);
@@ -223,11 +235,13 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
 }
 
 /** The open item a reply is about, by its `problem` key: the `<topic>` body,
- *  else the first `<open>`/`<done>` it carries; none for a reply about nothing
- *  on the list. Every surface that tags a message by topic reads this. */
+ *  else the first `<open>`/`<done>` it carries — an arrow's `new` for a
+ *  `<done>old → new</done>`; none for a reply about nothing on the list.
+ *  Every surface that tags a message by topic reads this. */
 export function replyTopic(markdown: string): string | undefined {
   const { markers, topic } = openItemMarkers(markdown);
-  return topic ?? markers[0]?.problem;
+  const first = markers[0];
+  return topic ?? (first?.op === "done" ? first.to : undefined) ?? first?.problem;
 }
 
 /** Why the agent stayed quiet; hidden from the chat, shown on the workbench,

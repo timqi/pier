@@ -105,7 +105,7 @@ describe("the continuous conversation's chain", () => {
     expect(seed?.text.indexOf("wrote the contract")).toBeLessThan(seed!.text.indexOf("shipped the doc"));
     expect(seed?.text).toContain("## Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)\n\nnone");
     expect(seed?.text).toContain("pier lives in ~/code/pier\n\n## Open\n\nNothing open.\n\n## Runs");
-    expect(seed?.text).not.toContain("last exchanges");
+    expect(seed?.text).not.toContain("## Previous session");
     // The seed before the message.
     expect(m1.calls.map((c) => c.split(":").slice(0, 2).join(":"))).toEqual([
       "systemInput:session-seed", expect.stringMatching(/^prompt:/),
@@ -152,8 +152,8 @@ describe("the continuous conversation's chain", () => {
     expect(seed.text).toContain("`pier task runs`)\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\nr4 · broke · failed · session c4 · /wt4\nr5 · cut off · interrupted · session c5 · —");
     expect(seed.text).not.toContain("r3 ·");
     expect(seed.text).not.toContain("r6 ·");
-    // An idle head starts on a new subject: nothing of the previous one's exchanges.
-    expect(seed.text).not.toContain("last exchanges");
+    // An idle head starts on a new subject: nothing of where the previous one left off.
+    expect(seed.text).not.toContain("## Previous session");
     expect(seed.text).not.toContain("answer 4");
     expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "idle"], ["h1", "first"]]);
     // The message went to the new head, not the one it was typed against.
@@ -276,12 +276,13 @@ describe("the continuous conversation's chain", () => {
     await head.abort();
   });
 
-  it("rotates a head past the size ceiling, named full, carrying its last three exchanges", async () => {
+  it("rotates a head past the size ceiling, named full, pointing at where the previous one left off", async () => {
     const r = rig();
+    const done = new Date(2024, 5, 1, 12, 5).getTime();
     const history = [1, 2, 3, 4].flatMap((i) => [
       { role: "user" as const, text: i === 4 ? "the plan" : `question ${String(i)}`, at: r.clock.now - 60_000 },
       { role: "system" as const, text: `callback ${String(i)}`, origin: { kind: "task-callback" as const, taskId: "t", runId: "r", sourceSessionId: null } },
-      { role: "assistant" as const, text: i === 4 ? "agreed" : `answer ${String(i)}` },
+      { role: "assistant" as const, text: i === 4 ? "agreed\n<topic>menu</topic>" : `answer ${String(i)}`, meta: { completedAt: done, durationMs: 1, tokens: 1 } },
     ]);
     r.existing("h1", r.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL, contextWindow: 400_000, compactAt: 100_000 } });
     expect(await r.say("at the ceiling")).toEqual({ sessionId: "h1" });
@@ -292,11 +293,15 @@ describe("the continuous conversation's chain", () => {
     const seed = r2.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "full", previousSessionId: "h1" });
     expect(seed.text).toContain("the previous one reached 60K tokens");
-    expect(seed.text).toContain("## The previous session's last exchanges\n\nuser: question 2\n\nassistant: answer 2");
-    expect(seed.text).toContain("user: the plan\n\nassistant: agreed");
-    expect(seed.text).not.toContain("question 1");
-    expect(seed.text).not.toContain("callback");
+    expect(seed.text).toContain("## Previous session\n\nsession h1, last on menu at 2024-06-01 12:05\nreplay: `pier search --in h1 --around \"2024-06-01 12:05\"`");
+    // No transcript: the replay is one fetch away.
+    for (const said of ["question", "the plan", "agreed", "answer", "callback"]) expect(seed.text).not.toContain(said);
     expect(r2.sessions.get("m1")!.prompts[0]).toContain("past it");
+
+    const r3 = rig();
+    r3.existing("h1", r3.clock.now - IDLE_MS / 2, { history: history.slice(0, 3), contextUsage: { tokens: FULL + 1, contextWindow: 400_000, compactAt: 100_000 } });
+    await r3.say("past it");
+    expect(r3.sessions.get("m1")!.systemInputs[0]!.text).toContain("session h1, last on none at 2024-06-01 12:05");
   });
 
   it("never rotates on size when the size is unknown after a compaction, or mid-turn", async () => {

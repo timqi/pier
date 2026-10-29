@@ -9,8 +9,8 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
 import { logger } from "../log.js";
-import { day, userLanguage, withLanguage } from "./identity.js";
-import { cut, openItemMarkers } from "./reply.js";
+import { day, minute, userLanguage, withLanguage } from "./identity.js";
+import { cut, openItemMarkers, replyTopic } from "./reply.js";
 import type { Router } from "./router.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand } from "./types.js";
 import type {
@@ -19,14 +19,12 @@ import type {
 
 const log = logger("core");
 
-const EXCHANGES = 3;
 // Seed budgets in chars (10 §Head lifecycle); the ledger is newest first, so its oldest lines go.
 const MEMORY_CHARS = 4_000;
 // Across every day's notes together: a return after a week still sees the week's last state.
 const NOTES_CHARS = 2_000;
-const EXCHANGES_CHARS = 4_000;
 const LEDGER_CHARS = 4_000;
-/** `cut` from the front, whole lines: notes and exchanges grow at the end,
+/** `cut` from the front, whole lines: notes grow at the end,
  *  so the newest part stays; the marker says how much went and where it is. */
 function tail(text: string, max: number, rest: string): string {
   if (text.length <= max) return text;
@@ -68,13 +66,13 @@ type Head = { session: AgentSession; rotated?: ChainReason };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
 
-/** The last `n` user turns and the replies after them, text only. */
-function lastExchanges(turns: ChatTurn[], n: number): string {
-  const users = turns.flatMap((t, i) => (t.role === "user" ? [i] : []));
-  const from = users[Math.max(0, users.length - n)];
-  if (from === undefined) return "";
-  return turns.slice(from).filter((t) => t.role !== "system" && t.text)
-    .map((t) => `${t.role}: ${t.text}`).join("\n\n");
+/** Where the previous head left off, and the one fetch that replays it (15 §Head context). */
+function previousSession(id: string, turns: ChatTurn[]): string {
+  const last = [...turns].reverse().find((t) => t.role === "assistant");
+  const at = last?.meta?.completedAt;
+  const item = (last && replyTopic(last.text)) ?? "none";
+  if (at === undefined) return `session ${id}, last on ${item}`;
+  return `session ${id}, last on ${item} at ${minute(at)}\nreplay: \`pier search --in ${id} --around "${minute(at)}"\``;
 }
 
 const ledgerLine = (r: LedgerRun): string =>
@@ -268,8 +266,8 @@ export class MainChain {
       section("Open", this.deps.status(this.now()).seed),
       section("Runs — in flight, or ended short of success since the previous session started (succeeded and skipped: `pier task runs`)", cut(runs.map(ledgerLine).join("\n"), LEDGER_CHARS) || "none"),
       ...(await this.notes()).map(([name, text]) => section(name, text)),
-      // Only a full rotation carries the subject: the user was mid-sentence. An idle, new or lost head starts without it.
-      section("The previous session's last exchanges", open && reason === "full" ? tail(lastExchanges(spoken, EXCHANGES), EXCHANGES_CHARS, `session ${open.id}`) : ""),
+      // Only a full rotation points back: the user was mid-sentence. An idle, new or lost head starts without it.
+      section("Previous session", open && reason === "full" ? previousSession(open.id, spoken) : ""),
     ].filter(Boolean).join("\n\n"));
   }
 

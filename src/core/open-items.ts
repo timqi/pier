@@ -1,7 +1,9 @@
-// Open-item presentation shared by live Web rows, command snapshots and IM.
+// Open-item presentation shared by live Web rows, command snapshots and IM,
+// and the one rule that picks an item's rows out of the conversation.
 
-import { agoLabel, relTime, waitsOnYou, workerCounts } from "./reply.js";
-import { NOT_IN_LEDGER, NOTHING_OPEN, type LedgerRun, type OpenItemPresentation, type OpenItemsSnapshot, type OpenItemTarget, type TaskRunState } from "./types.js";
+import { splitItem, splitSpeaker } from "./identity.js";
+import { agoLabel, openItemMarkers, relTime, replyTopic, waitsOnYou, workerCounts } from "./reply.js";
+import { NOT_IN_LEDGER, NOTHING_OPEN, type ChatTurn, type LedgerRun, type OpenItemPresentation, type OpenItemsSnapshot, type OpenItemTarget, type TaskRunState } from "./types.js";
 
 interface Goal {
   step: "work" | "review" | "merge";
@@ -118,4 +120,45 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
     && optional(i, "designSessionId") && optional(i, "waitsIn") && (i.direct === undefined || typeof i.direct === "boolean")
     && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
+}
+
+/** An unmarked reply is its callback's, as the pane tags it (topics.ts `callbackTopic`): the nearest
+ *  callback above it, up to a user turn, another reply or a divider, kept as the item's. */
+function answersKept(turns: ChatTurn[], i: number, kept: Set<number>): boolean {
+  for (let j = i - 1; j >= 0; j--) {
+    const t = turns[j]!;
+    if (t.role !== "system" || t.origin?.kind === "session-seed") return false;
+    if (t.origin?.kind === "task-callback") return kept.has(j);
+  }
+  return false;
+}
+
+/** A row of an item's view, `index` its turn's place in the whole session transcript. */
+export interface ItemTurn { index: number; turn: ChatTurn }
+
+/** Each session, in chain order, reduced to the item's rows (docs/design/15-item-view.md §Rows):
+ *  `keys` its problem and aliases, `runIds` its own; an `<open>` of a key adds its runs for
+ *  the sessions after it. Rotation dividers stay so the reader sees them. */
+export function itemTurns<S extends { turns: ChatTurn[] }>(sessions: S[], keys: readonly string[], runIds: readonly string[]): (Omit<S, "turns"> & { turns: ItemTurn[] })[] {
+  const own = new Set(keys);
+  const runs = new Set(runIds);
+  return sessions.map(({ turns, ...session }) => {
+    const kept = new Set<number>();
+    turns.forEach((turn, i) => {
+      if (turn.role === "assistant") {
+        for (const m of openItemMarkers(turn.text).markers) if (m.op === "open" && own.has(m.problem)) m.runIds.forEach((id) => runs.add(id));
+        const topic = replyTopic(turn.text);
+        if (topic === undefined ? !answersKept(turns, i, kept) : !own.has(topic)) return;
+        kept.add(i);
+        if (topic === undefined) return;
+        // The user turn it answers: the nearest above with no reply between.
+        for (let j = i - 1; j >= 0 && turns[j]!.role !== "assistant"; j--) if (turns[j]!.role === "user") { kept.add(j); break; }
+      } else if (turn.role === "user") {
+        const { item } = splitItem(splitSpeaker(turn.text).text);
+        if (item !== undefined && own.has(item)) kept.add(i);
+      } else if (turn.origin?.kind === "session-seed") kept.add(i);
+      else if (turn.origin?.kind === "task-callback" && [turn.origin.runId, ...(turn.origin.runIds ?? [])].some((id) => runs.has(id))) kept.add(i);
+    });
+    return { ...session, turns: [...kept].sort((a, b) => a - b).map((index) => ({ index, turn: turns[index]! })) };
+  });
 }

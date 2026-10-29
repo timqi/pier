@@ -162,8 +162,8 @@ export type SystemInputOrigin = {
   source?: SystemInputSource;
 } | {
   /** What a new session of the continuous conversation opens with: memory, the
-   *  open items, the run ledger and, on a full rotation, the previous session's
-   *  last exchanges (core/chain.ts). */
+   *  open items, the run ledger and, on a full rotation, where the previous
+   *  session left off (core/chain.ts). */
   kind: "session-seed";
   reason: ChainReason;
   previousSessionId: string | null;

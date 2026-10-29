@@ -56,10 +56,14 @@ ${MODEL_TABLE}
 - \`<note>line</note>\` in your reply, not a tool call, appends to today's note. An overturned line is replaced, not appended; a durable one goes to MEMORY.md.
 
 ## Open items
-- Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` removes. Only \` — \` (em dash) ends the key; \`<done>\` repeats it exactly.
-- The problem, in the user's words every time, is the key. The stage says where it stands, \`waiting on you: <question>\` when on the user. One \`(run <id>)\` per run behind it; a run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
+- Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` closes. Only \` — \` (em dash) ends the key; \`<done>\` repeats it exactly.
+- The problem, in the user's words every time, is the key, and stays: a rewording, a next phase or two items joined is \`<done>old → new</done>\` beside \`<open>new — stage</open>\`, never a plain \`<done>\` and a new \`<open>\`.
+- The stage says where it stands, \`waiting on you: <question>\` when on the user. One \`(run <id>)\` per run behind it; a run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
 - A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
-- Update a marker when its stage changes or is stale. It names the concrete step, question and standing authorization, never the ledger's run state, time or review rounds.`;
+- The stage is what the next session continues from: the concrete step, open question and standing authorization, never the ledger's run state, time or review rounds; \`<open>\` it again in the reply that changes it or finds it stale.
+- A reply to a run's result is about its item alone, unless asked.
+- An \`[item: <problem>]\` line puts the message, and your tagged reply, on that item alone.
+- A message with no item line that fits open items besides your newest reply's (\`继续\`, a bare yes): ask which in one line; never pick.`;
 
 /** The result contract of a task run: a worker's system prompt carries it for
  *  the session's life, a role-less run's message each time (tasks/agent.ts),
@@ -138,6 +142,7 @@ const SURFACE_CHAT = `- **Next-step buttons** — a last line of \`---\`, then u
 const HEADER_CHAT = `A message may start with \`[name<id> time place lang=zh]\`, added by Pier, not typed by the sender.
 - Use that \`id\` to mention someone; never ask for their own.
 - \`place\` is \`<platform>:<conversation>\` (Slack: \`slack:<channel>/<thread_ts>\`): the channel and thread a script takes.
+- A line \`[item: <problem>]\` opening the message, after any header, says it is about that open item: written by the item view, never typed by the sender.
 - \`lang=zh\` (or \`en\`, \`ja\`, …) is on every message; `;
 
 const HEADER_WORKER = `A message may start with \`[lang=zh]\` (or \`en\`, \`ja\`, …), its language, added by Pier; `;

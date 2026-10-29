@@ -347,6 +347,19 @@ describe("open-item markers", () => {
     expect(openItemMarkers("<topic> \u2014 stage</topic>").dropped).toEqual(["<topic> \u2014 stage</topic>"]);
   });
 
+  it("reads `<done>old → new</done>` as the item it continues as, in either arrow", () => {
+    expect(openItemMarkers("<done>CI 修复 \u2192 CI 修复 phase 2</done>").markers).toEqual([{ op: "done", problem: "CI 修复", to: "CI 修复 phase 2" }]);
+    // The first arrow splits; a later one is the new key's own.
+    expect(openItemMarkers("<done>a -> b -> c</done>").markers).toEqual([{ op: "done", problem: "a", to: "b -> c" }]);
+    expect(openItemMarkers("<done>menu</done>").markers).toEqual([{ op: "done", problem: "menu" }]);
+    // Nothing after the arrow is no arrow.
+    expect(openItemMarkers("<done>menu -> </done>").markers).toEqual([{ op: "done", problem: "menu ->" }]);
+    expect(replyTopic("Merged.\n<done>menu \u2192 menu v2</done>\n<open>menu v2 — building</open>")).toBe("menu v2");
+    const fenced = "```\n<done>a \u2192 b</done>\n```\n<done>c</done>";
+    expect(openItemMarkers(fenced).markers).toEqual([{ op: "done", problem: "c" }]);
+    expect(replyTopic(fenced)).toBe("c");
+  });
+
   it("cuts a streaming tail before a hiding tag still open, and leaves a closed one to the stripper", () => {
     expect(streamTail("Done.\n<topic>CI \u4fee")).toBe("Done.\n");
     expect(streamTail("Done.\n<to\u200bpic>CI")).toBe("Done.\n");

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectLanguage, projectCwds, readableTitle, SenderPrefix, sessionLabel, splitSpeaker, userLanguage, withLanguage,
-  withoutHeaderLanguage, withoutLanguage, withPrefix, withQuote, splitQuote, QUOTE_CHARS,
+  withoutHeaderLanguage, withoutLanguage, withPrefix, withQuote, splitQuote, QUOTE_CHARS, withItem, splitItem,
 } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
@@ -374,5 +374,31 @@ describe("a reply to one message", () => {
     expect(p.next("s1", ada, noon, undefined, false, text)).toBe("[Ada<U1> 2024-06-01 12:00 lang=zh]");
     expect(userLanguage([{ role: "user", text: withPrefix("[Ada<U1> 12:00]", text) }])).toBe("zh");
     expect(readableTitle(withPrefix("[Ada<U1> 12:00]", text))).toBe("好的，合并吧");
+  });
+});
+
+describe("a message about one item", () => {
+  it("names the item on its first line, above the quote, read back under the speaker header", () => {
+    const quoted = withQuote({ role: "assistant", at: noon, text: "Merged." }, "继续");
+    const text = withItem("CI 修复", quoted);
+    expect(text).toBe("[item: CI 修复]\n[re assistant 2024-06-01 12:00]\n> Merged.\n\n继续");
+    const stored = withPrefix("[Ada<U1> 12:00 lang=zh]", text);
+    const { item, text: rest } = splitItem(splitSpeaker(stored).text);
+    expect(item).toBe("CI 修复");
+    expect(splitQuote(rest)).toEqual({ quote: { role: "assistant", when: "2024-06-01 12:00", excerpt: "Merged." }, text: "继续" });
+    expect(splitItem(withItem("menu", "ok"))).toEqual({ item: "menu", text: "ok" });
+    expect(withItem("two\nlines ", "ok")).toBe("[item: two lines]\nok");
+  });
+
+  it("leaves a message as typed alone, and an item line with a time in it is no speaker", () => {
+    for (const text of ["[item: x] inline", "item: x\nhi", "plain"]) expect(splitItem(text)).toEqual({ text });
+    expect(splitSpeaker(withItem("deploy 12:00", "ok"))).toEqual({ text: "[item: deploy 12:00]\nok" });
+  });
+
+  it("is the message's language and title, not the item's", () => {
+    const text = withItem("the English item key", "好的");
+    expect(new SenderPrefix().next("s1", ada, noon, undefined, false, text)).toBe("[Ada<U1> 2024-06-01 12:00 lang=zh]");
+    expect(userLanguage([{ role: "user", text: withPrefix("[Ada<U1> 12:00]", text) }])).toBe("zh");
+    expect(readableTitle(withPrefix("[Ada<U1> 12:00]", text))).toBe("好的");
   });
 });

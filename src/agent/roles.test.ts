@@ -25,7 +25,7 @@ describe("the dispatcher contract", () => {
   });
 
   it("names the markers core/reply.ts strips and the lines the callbacks carry", () => {
-    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<topic>problem</topic>", "<note>line</note>", "<silent>"]) {
+    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<done>old → new</done>", "`[item: <problem>]`", "<topic>problem</topic>", "<note>line</note>", "<silent>"]) {
       expect(DISPATCHER).toContain(syntax);
     }
     // tasks/open-items.ts reads an item as waiting on the user by this stage word.
@@ -130,12 +130,12 @@ describe("the surface prompt", () => {
   it("teaches the chat syntax core/reply.ts parses, and a worker only what an agent reader needs", () => {
     for (const role of [undefined, "lead"] as const) {
       const prompt = surfacePrompt(instance, role);
-      for (const syntax of ["`---`", "`[label]`", "file:///abs/path/report.md", "<silent>why</silent>", "[name<id> time place lang=zh]", "[re assistant 2026-06-01 12:00]", "`lang=`"]) {
+      for (const syntax of ["`---`", "`[label]`", "file:///abs/path/report.md", "<silent>why</silent>", "[name<id> time place lang=zh]", "[re assistant 2026-06-01 12:00]", "`[item: <problem>]`", "`lang=`"]) {
         expect(prompt).toContain(syntax);
       }
     }
     const worker = surfacePrompt(instance, "worker");
-    for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>"]) expect(worker).not.toContain(gone);
+    for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>", "[item:"]) expect(worker).not.toContain(gone);
     for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch"]) expect(worker).toContain(kept);
   });
 });
@@ -144,7 +144,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_500],
+    ["DISPATCHER", DISPATCHER, 1_650],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
