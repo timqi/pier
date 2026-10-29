@@ -559,11 +559,10 @@ export class TaskStore {
     const upserted = Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at, aliases, sessions) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
       .run(m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]").changes);
-    // A reopened key is its own item again: no other row names it, so its later close keeps its history reachable.
-    if (prior) {
-      this.sql(`UPDATE open_items SET aliases = (SELECT json_group_array(value) FROM json_each(aliases) WHERE value <> ?)
-        WHERE problem <> ? AND EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).run(m.problem, m.problem, m.problem);
-    }
+    // A key an `<open>` writes is its own item: no row, its own included, holds it as an alias — a reopened
+    // key or a renamed item's old one — so its later close keeps its history reachable.
+    this.sql(`UPDATE open_items SET aliases = (SELECT json_group_array(value) FROM json_each(aliases) WHERE value <> ?)
+      WHERE EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).run(m.problem, m.problem);
     for (const key of absorbed) this.absorb(m.problem, key);
     touched.add(m.problem);
     return changed + upserted;

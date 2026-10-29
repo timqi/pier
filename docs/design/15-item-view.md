@@ -60,8 +60,9 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   `GET /api/continuous/open`, `namesKey`) is `closed_at IS NULL`; a closed
   item's runs count as no item's (`unlisted` unchanged).
 - `<open>` with a closed item's key reopens it: `closed_at` cleared, aliases
-  and sessions kept, its place in the list the reopening's time, and its key
-  taken off every other item's aliases, so it is its own item again.
+  and sessions kept, its place in the list the reopening's time.
+- Any key an `<open>` writes — a reopened one, a renamed item's old key — is
+  taken off every item's aliases, so it is its own item again.
 - `<done>old → new</done>` (` → ` or ` -> `, the first one in the body)
   closes `old` and records `old` and `old`'s aliases on `new`'s aliases and
   `old`'s sessions on `new`'s, when `new` is open once the reply's markers are applied (opened in this
@@ -121,7 +122,8 @@ The conversation pane in one item's company: `#/conversation/item/<encodeURIComp
   The head's own session is included up to the snapshot's `lastSeq`, returned
   as the history route's `{epoch, lastSeq}` so the client subscribes after it.
   A transcript that cannot be read is one system row naming the session; the
-  item's other sessions still show.
+  item's other sessions still show. A session the item names that the chain
+  no longer holds (a lost head) is one such row too, first, `startedAt` 0.
 - **Live**: the view subscribes to the head's stream as the pane does; an
   incoming row is shown when the client's existing tagging
   ([03 §Topics](03-web-workbench.md#chat-pane-chatts-composerts)) tags it with

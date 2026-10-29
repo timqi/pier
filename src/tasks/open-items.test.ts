@@ -530,6 +530,24 @@ describe("the open items", () => {
     expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["login", 4], ["login v2", undefined]]);
   });
 
+  it("gives a renamed item's old key back when an <open> writes it again", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
+    r.store.markOpenItems([open("sign in", "rt1")], 1, "h1");
+    // Pier's rename: the row takes the new key in place, the old one only an alias.
+    r.store.markOpenItems([open("login", "rt1")], 2, "h1");
+    expect(r.store.itemHistory("login")?.aliases).toEqual(["sign in"]);
+    r.store.markOpenItems([open("sign in")], 3, "h2");
+    expect(r.store.itemHistory("login")?.aliases).toEqual([]);
+    expect(r.store.itemHistory("sign in")).toEqual({ problem: "sign in", aliases: [], sessions: ["h2"], runIds: [] });
+    // Renamed back onto a key it once held, the row holds no alias of itself.
+    const back = rig();
+    back.store.markOpenItems([open("sign in", "rt1")], 1, "h1");
+    back.store.markOpenItems([open("login", "rt1")], 2, "h1");
+    back.store.markOpenItems([open("sign in", "rt1")], 3, "h1");
+    expect(back.store.items("").map((i) => [i.problem, i.aliases])).toEqual([["sign in", ["login"]]]);
+  });
+
   it("tells the head an arrow into no open item, and counts the arrow's target as named", () => {
     const r = rig();
     r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 1, "h1");

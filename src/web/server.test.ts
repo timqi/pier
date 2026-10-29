@@ -2486,6 +2486,9 @@ describe("the continuous conversation's routes", () => {
     expect(body).toEqual({
       problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0,
       sessions: [
+        { sessionId: "gone", startedAt: 0, turns: [
+          { index: 0, turn: { role: "system", text: "Session gone is no longer in the conversation's chain; its rows cannot be shown." } },
+        ] },
         { sessionId: "old", startedAt: expect.any(Number), turns: [
           { index: 0, turn: { role: "user", text: "fix sign in" } },
           { index: 1, turn: { role: "assistant", text: "On it.\n<open>sign in</open>", steps: [{ id: "t1", name: "bash" }] } },
@@ -2512,6 +2515,20 @@ describe("the continuous conversation's routes", () => {
     const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
     expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)])).toEqual([["old", ["system"]], ["head", ["user", "assistant"]]]);
     expect(body.sessions[0]!.turns[0]!.turn.text).toBe("Session old could not be read: bad JSON at line 3");
+  });
+
+  it("shows an item's session the chain no longer holds as one row saying so, first", async () => {
+    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "lost", "head"], runIds: [] };
+    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
+    restarted();
+    factory.readHistory.mockResolvedValue([{ role: "user", text: "fix login" }, { role: "assistant", text: "On it.\n<open>login</open>" }]);
+    sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<topic>login</topic>" }] }));
+    const res = await app.request("/api/continuous/items/login/turns");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
+    expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)]))
+      .toEqual([["lost", ["system"]], ["old", ["user", "assistant"]], ["head", ["user", "assistant"]]]);
+    expect(body.sessions[0]!.turns[0]!.turn.text).toBe("Session lost is no longer in the conversation's chain; its rows cannot be shown.");
   });
 
   it("shows the head's unreadable transcript as one row saying so, the earlier sessions still read", async () => {

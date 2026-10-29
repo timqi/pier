@@ -538,29 +538,33 @@ export function createServer(
     const problem = c.req.param("problem");
     const item = itemHistory?.(problem);
     if (!item) return c.json({ error: `No item "${problem}"` }, 404);
-    const [head, ...rest] = continuous.members();
+    const members = continuous.members();
+    const [head, ...rest] = members;
     // An unreadable transcript is one row saying so; the item's other sessions still show.
-    const read = async (m: { sessionId: string; startedAt: number }): Promise<{ sessionId: string; startedAt: number; turns: ChatTurn[]; unread?: string }> => {
+    const read = async (m: { sessionId: string; startedAt: number }): Promise<{ sessionId: string; startedAt: number; turns: ChatTurn[]; missing?: string }> => {
       try {
         return { ...m, turns: await turnsOf(m.sessionId) };
       } catch (err) {
         log.warn(`item view of "${problem}": session ${m.sessionId} could not be read`, err);
-        return { ...m, turns: [], unread: `Session ${m.sessionId} could not be read: ${err instanceof Error ? err.message : String(err)}` };
+        return { ...m, turns: [], missing: `Session ${m.sessionId} could not be read: ${err instanceof Error ? err.message : String(err)}` };
       }
     };
-    const past = await Promise.all(rest.filter((m) => item.sessions.includes(m.sessionId)).reverse()
-      .map((m) => read({ sessionId: m.sessionId, startedAt: m.startedAt })));
+    // A session the chain no longer holds (a lost head) has no place in its order: first, one row each.
+    const gone = item.sessions.filter((id) => !members.some((m) => m.sessionId === id))
+      .map((id) => ({ sessionId: id, startedAt: 0, turns: [], missing: `Session ${id} is no longer in the conversation's chain; its rows cannot be shown.` }));
+    const past = [...gone, ...await Promise.all(rest.filter((m) => item.sessions.includes(m.sessionId)).reverse()
+      .map((m) => read({ sessionId: m.sessionId, startedAt: m.startedAt })))];
     const live = head && item.sessions.includes(head.sessionId) ? head : undefined;
     const headId = head?.sessionId ?? "";
     for (let attempt = 0; attempt < 3; attempt++) {
       const lastSeq = hub.lastSeq(headId);
       const own = live && await read({ sessionId: live.sessionId, startedAt: live.startedAt });
       // A failed read has no snapshot for the cursor to match: nothing to retry.
-      if (own?.unread === undefined && hub.lastSeq(headId) !== lastSeq) continue;
+      if (own?.missing === undefined && hub.lastSeq(headId) !== lastSeq) continue;
       const sessions = itemTurns([...past, ...(own ? [own] : [])], [item.problem, ...item.aliases], item.runIds)
-        .map(({ unread, ...s }) => ({ ...s, turns: unread === undefined
+        .map(({ missing, ...s }) => ({ ...s, turns: missing === undefined
           ? s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) }))
-          : [{ index: 0, turn: { role: "system" as const, text: unread } }] }));
+          : [{ index: 0, turn: { role: "system" as const, text: missing } }] }));
       const { sessions: _ids, runIds: _runs, ...record } = item;
       return c.json({ ...record, sessions, epoch, lastSeq });
     }
