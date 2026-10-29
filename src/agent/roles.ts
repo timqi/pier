@@ -166,7 +166,7 @@ ${role === "worker" ? "" : SURFACE_CHAT}- **Staying silent** — \`<silent>why</
 
 ${role === "worker" ? HEADER_WORKER : HEADER_CHAT}one too short to tell (\`ok\`, an emoji, a link) carries the one before it.
 
-Reply in the language of the most recent \`lang=\`, the request's own when there is none, never the language of the context around it — seeded exchanges, English tool output or files, callbacks.
+Reply in the language of the most recent \`lang=\`, the request's own when there is none, never the language of the context around it — the seed, English tool output or files, callbacks.
 ${role === "worker" ? "" : QUOTE_CHAT}`;
 
 /** Deployment facts an agent cannot discover: a guessed host links nowhere

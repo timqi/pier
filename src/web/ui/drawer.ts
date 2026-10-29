@@ -11,7 +11,7 @@ import { openItemPresentation } from "../../core/open-items.js";
 import { closedItemRow, openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
-import type { OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
+import type { ItemSummary, OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -274,9 +274,6 @@ const toView = (problem: string): void => { closeMenu(); deps.itemView(problem);
 
 // --- search -------------------------------------------------------------------------------
 
-/** `GET /api/continuous/items` row: every item, closed ones too, matched on its key and aliases. */
-interface ItemHit { problem: string; aliases: string[]; closedAt?: number; updatedAt: number }
-
 /** The search's rows while its field holds words; null shows the panel's own. */
 let found: HTMLElement[] | null = null;
 let query = "";
@@ -288,7 +285,7 @@ const note = (text: string, cls = "text-neutral-500"): HTMLElement => h("li", `p
 /** Open matches are their panel rows, their click the row's; closed ones follow under `Closed`. */
 async function search(q: string): Promise<void> {
   query = q;
-  const got = q ? await getJson<{ items: ItemHit[] }>(`/api/continuous/items?q=${encodeURIComponent(q)}`, "Could not search the items") : null;
+  const got = q ? await getJson<{ items: ItemSummary[] }>(`/api/continuous/items?q=${encodeURIComponent(q)}`, "Could not search the items") : null;
   if (q !== query || !list) return; // a later keystroke owns the list
   if (!got) found = null;
   else if (!got.ok) found = [note(got.error, "text-red-600")];

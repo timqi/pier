@@ -48,7 +48,7 @@ const turns: ItemTurns = {
 };
 
 it("draws each session's rows, then shows only the live rows tagged with a key, hiding the rest in place", () => {
-  const filter = view.renderItem(turns, "h1", "idle", []);
+  const filter = view.renderItem(turns, { id: "h1", state: "idle", turns: 5 }, []);
   const drawn = pane().children.length;
   expect(pane().querySelectorAll("[data-kind='user']").map(text)).toEqual(["loginfix login", "authstatus?"]); // tag, then text
   // The stamped turn reads without its item line and carries the item's tag instead.
@@ -86,7 +86,7 @@ it("draws each session's rows, then shows only the live rows tagged with a key, 
 });
 
 it("says when the item has no rows on disk, and names an unknown one with the way back", () => {
-  view.renderItem({ ...turns, sessions: [{ sessionId: "h1", startedAt: 1, turns: [] }] }, "h1", "idle", []);
+  view.renderItem({ ...turns, sessions: [{ sessionId: "h1", startedAt: 1, turns: [] }] }, { id: "h1", state: "idle", turns: 1 }, []);
   expect(text(pane())).toContain('Nothing of "auth" in its sessions\' transcripts.');
   chat.resetChat();
   const back = vi.fn();
@@ -94,4 +94,20 @@ it("says when the item has no rows on disk, and names an unknown one with the wa
   expect(text(pane())).toContain('No item "nope"');
   pane().querySelector("button")!.onclick!(new Event("click") as MouseEvent);
   expect(back).toHaveBeenCalled();
+});
+
+it("draws the item's last reply settled while the head streams another item's turn, and fetches each row's steps from its own session and index", async () => {
+  const fetch = vi.fn(async () => Response.json({ steps: [] }));
+  vi.stubGlobal("fetch", fetch);
+  const steps = [{ kind: "tool" as const, id: "c1", toolName: "bash", done: true }];
+  const meta = { completedAt: 2, durationMs: 1, tokens: 1 };
+  const withSteps: ItemTurns = { ...turns, sessions: [
+    { ...turns.sessions[0]!, turns: [turns.sessions[0]!.turns[0]!, { index: 1, turn: { ...turns.sessions[0]!.turns[1]!.turn, steps, meta } }] },
+    { ...turns.sessions[1]!, turns: [...turns.sessions[1]!.turns.slice(0, 2), { index: 4, turn: { ...turns.sessions[1]!.turns[2]!.turn, steps, meta } }] },
+  ] };
+  view.renderItem(withSteps, { id: "h1", state: "streaming", turns: 7 }, []);
+  expect(pane().querySelectorAll("[data-pending]")).toHaveLength(0);
+  for (const group of pane().querySelectorAll("[data-kind='activity']")) group.onclick?.();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(fetch.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["/api/sessions/h0/turns/1/steps", "/api/sessions/h1/turns/4/steps"]);
 });

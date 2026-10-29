@@ -187,7 +187,7 @@ const chatRoute = (id: string): Route => (deps.inConversation(id) ? CONVERSATION
 
 export const setSessionHash = (id: string): void => setHash(chatRoute(id));
 export const setConversationHash = (): void => setHash(CONVERSATION);
-export const setItemHash = (problem: string): void => setHash({ kind: "item", problem });
+export const setItemHash = (problem: string, replace = false): void => setHash({ kind: "item", problem }, replace);
 
 /** Hash → UI. Session routes may name sessions not listed yet; select
  *  verifies them. A bare or unknown hash is the conversation. */

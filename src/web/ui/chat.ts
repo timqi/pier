@@ -1045,12 +1045,14 @@ function tailStart(turns: ChatTurn[]): { start: number; skipped: number } {
 
 /** Replay a session snapshot into the pane (main.ts fetches, this renders).
  *  `readonly`: an earlier session of the continuous conversation — no edits,
- *  no next-step buttons. */
+ *  no next-step buttons. `from`: the session the turns are read from, and each
+ *  one's index in its transcript when they are a selection of it (item-view.ts). */
 export function renderSnapshot(
   turns: ChatTurn[],
   state: SessionState,
   backgroundRuns: BackgroundRun[],
   readonly = false,
+  from?: { sessionId: string; indices?: readonly number[] },
 ): void {
   chatLoading(false);
   // Run cards are placed where the run entered the conversation, so a reload
@@ -1090,7 +1092,7 @@ export function renderSnapshot(
       const steps = t.steps ?? [];
       // A cut turn with no steps still gets its chip: the cut is the only thing it has to show.
       if (steps.length || t.cut) {
-        if (!skip) replayActivity(steps, t.meta?.durationMs, live, i, t.error ? "failed" : t.cut ? "restarted" : undefined);
+        if (!skip) replayActivity(steps, t.meta?.durationMs, live, from?.indices?.[i] ?? i, t.error ? "failed" : t.cut ? "restarted" : undefined, from?.sessionId);
         // Launched during the turn: chips of the bubble the answer fills.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt), skip);
         // Cut short before it spoke: the steps chip is the bubble's whole content.

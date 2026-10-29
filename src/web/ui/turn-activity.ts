@@ -609,6 +609,8 @@ export function replayActivity(
   /** The turn ended on an error: the group settles as failed, as the live one
    *  did; or Pier's stop cut it (ChatTurn.cut). */
   end?: "failed" | "restarted",
+  /** The session the turn is read from, when not the one on screen: an earlier member of the conversation. */
+  sessionId?: string,
 ): void {
   const start = Date.now() - durationMs; // headline duration is now - startTs
   // Detail still on the server: fetched on the first open.
@@ -632,7 +634,7 @@ export function replayActivity(
         if (s.done) activityToolEnd(id, s.isError ?? false, s.output ?? "");
       }
     }
-    if (lazy) onFirstOpen(group, () => void fillDetail(group, turnIndex!));
+    if (lazy) onFirstOpen(group, () => void fillDetail(group, turnIndex!, sessionId));
     return;
   }
   // A settled group's log is drawn on its first open: most are never opened.
@@ -643,7 +645,7 @@ export function replayActivity(
   a.failedSteps = tools.filter((s) => s.done && s.isError).length;
   if (steps.length) onFirstOpen(group, () => {
     drawSteps(group, a.rowsEl, steps);
-    if (lazy) void fillDetail(group, turnIndex!);
+    if (lazy) void fillDetail(group, turnIndex!, sessionId);
   });
   if (end === "failed") noteTurnError();
   finishActivity(end === "restarted" ? "restarted" : tools.some((s) => !s.done) ? "interrupted" : "done");
@@ -683,8 +685,8 @@ function onFirstOpen(group: HTMLElement, open: () => void): void {
   });
 }
 
-async function fillDetail(group: HTMLElement, turnIndex: number): Promise<void> {
-  const sessionId = deps.sessionId();
+async function fillDetail(group: HTMLElement, turnIndex: number, from?: string): Promise<void> {
+  const sessionId = from ?? deps.sessionId();
   const rows = rowsOf(group);
   // Steps the live stream delivered in full keep their place but are never overwritten.
   const fillable = new Set(rows.filter((row) => !row.argsPre.textContent));

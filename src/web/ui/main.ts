@@ -286,7 +286,7 @@ function renderEarlier(): void {
   if (earlier.length < chain.length - 1) appendPager(() => void page());
   for (const [i, e] of earlier.entries()) {
     if (e.error) appendTurn("error", e.error);
-    renderSnapshot(e.turns, "idle", e.runs, true);
+    renderSnapshot(e.turns, "idle", e.runs, true, { sessionId: e.member.sessionId });
     const next = earlier[i + 1]?.member ?? chain[0]!;
     appendDivider(next.reason, next.startedAt);
   }
@@ -638,7 +638,13 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   snapshotReady = true;
   const snap = got.value;
   const cursor = view?.value ?? snap;
-  if (view) itemFilter = renderItem(view.value, id, snap.state, snap.backgroundRuns);
+  // A hash naming an alias is the item under its key now: the bar and every stamped send say the key.
+  if (view && view.value.problem !== item) {
+    item = paneItem = view.value.problem;
+    setItemHash(item, true);
+    renderHeader();
+  }
+  if (view) itemFilter = renderItem(view.value, { id, state: snap.state, turns: snap.turns.length }, snap.backgroundRuns);
   else {
     if (continuousOpen()) renderEarlier();
     renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);

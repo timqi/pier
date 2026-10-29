@@ -156,7 +156,7 @@ interface WebDeps {
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
   openItems?: () => OpenItems;
   /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's two routes read. */
-  items?: (q: string) => Omit<ItemSummary, "status">[];
+  items?: (q: string) => ItemSummary[];
   itemHistory?: (problem: string) => ItemRecord | undefined;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
@@ -523,12 +523,8 @@ export function createServer(
   // The status panel's rows.
   app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [] }));
 
-  // The item view's search: closed items too, an open one with its status as /open gives it.
-  app.get("/api/continuous/items", (c) => {
-    const status = new Map((openItems?.().items ?? []).map((i) => [i.problem, i.status]));
-    const found: ItemSummary[] = (items?.(c.req.query("q") ?? "") ?? []).map((i) => (status.has(i.problem) ? { ...i, status: status.get(i.problem)! } : i));
-    return c.json({ items: found });
-  });
+  // The status panel's search, closed items too: an open hit is drawn as its panel row.
+  app.get("/api/continuous/items", (c) => c.json({ items: items?.(c.req.query("q") ?? "") ?? [] }));
 
   // One item's rows (docs/design/15-item-view.md \u00a7Rows), its sessions oldest first; the head's
   // up to the snapshot's cursor, read as /history reads it.

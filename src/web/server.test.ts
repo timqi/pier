@@ -16,6 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { MainChain } from "../core/chain.js";
+import { splitItem, splitSpeaker, withItem } from "../core/identity.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
@@ -32,6 +33,7 @@ import type {
   ProviderManager,
 } from "../agent/types.js";
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
+import { recordOpenItems } from "../tasks/open-items.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
@@ -2395,7 +2397,7 @@ describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
   function chainRig(
     ledger: () => LedgerRun[] = () => [], open?: OpenItems,
-    record: { items?: (q: string) => Omit<ItemSummary, "status">[]; itemHistory?: (problem: string) => ItemRecord | undefined } = {},
+    record: { items?: (q: string) => ItemSummary[]; itemHistory?: (problem: string) => ItemRecord | undefined } = {},
   ) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
@@ -2455,16 +2457,13 @@ describe("the continuous conversation's routes", () => {
     expect(await res.json()).toEqual(open);
   });
 
-  it("answers the items a search finds, an open one with its status", async () => {
-    const open: OpenItems = { items: [{ problem: "login", stage: "", runs: [], status: "waiting on you" }], unlisted: [] };
-    const items = vi.fn((_q: string) => [{ problem: "login", aliases: ["sign in"], updatedAt: 5 }, { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 }]);
-    const { app } = chainRig(undefined, open, { items });
+  it("answers the items a search finds, closed ones too", async () => {
+    const found = [{ problem: "login", aliases: ["sign in"], updatedAt: 5 }, { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 }];
+    const items = vi.fn((_q: string) => found);
+    const { app } = chainRig(undefined, undefined, { items });
     const res = await app.request("/api/continuous/items?q=sign%20in");
     expect(items).toHaveBeenCalledWith("sign in");
-    expect(await res.json()).toEqual({ items: [
-      { problem: "login", aliases: ["sign in"], updatedAt: 5, status: "waiting on you" },
-      { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 },
-    ] });
+    expect(await res.json()).toEqual({ items: found });
     await app.request("/api/continuous/items");
     expect(items).toHaveBeenLastCalledWith("");
   });
@@ -2497,6 +2496,25 @@ describe("the continuous conversation's routes", () => {
     const missing = await app.request("/api/continuous/items/nope/turns");
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: "No item \"nope\"" });
+  });
+
+  it("carries a message stamped in the item view to a new head's transcript and back as one of the item's rows", async () => {
+    const problem = "CI / deploy 修复";
+    const store = new TaskStore(openDb(":memory:"));
+    const { app, post, clock } = chainRig(undefined, undefined, { itemHistory: (p) => store.itemHistory(p) });
+    await post("/api/continuous/messages", { text: "one" });
+    store.markOpenItems([{ op: "open", problem, stage: "", runIds: [] }], clock.now, "m1");
+    clock.now += 2 * IDLE_MS;
+    expect((await post("/api/continuous/messages", { text: withItem(problem, "ship it"), mode: "auto" })).status).toBe(202);
+    // The head's answer names the item only by its `<topic>`, as TaskService's turn end records it.
+    recordOpenItems(store, `Shipped.\n<topic>${problem}</topic>`, clock.now, "m2");
+    const res = await app.request(`/api/continuous/items/${encodeURIComponent(problem)}/turns`);
+    expect(res.status).toBe(200);
+    const { sessions } = await res.json() as { sessions: { sessionId: string; turns: { turn: ChatTurn }[] }[] };
+    expect(sessions.map((s) => s.sessionId)).toEqual(["m1", "m2"]);
+    const [user] = sessions.find((s) => s.sessionId === "m2")!.turns.map((t) => t.turn).filter((t) => t.role === "user");
+    // What the bubble reads (chat.ts appendTurn): the item off the first line under any header.
+    expect(splitItem(splitSpeaker(user!.text).text)).toEqual({ item: problem, text: "ship it" });
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

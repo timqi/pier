@@ -336,13 +336,12 @@ export interface OpenItem {
 }
 
 /** One item of `GET /api/continuous/items`, open or closed (docs/design/15-item-view.md):
- *  `aliases` its earlier keys, `closedAt` set once a `<done>` closed it, `status` an open one's. */
+ *  `aliases` its earlier keys, `closedAt` set once a `<done>` closed it. */
 export interface ItemSummary {
   problem: string;
   aliases: string[];
   closedAt?: number;
   updatedAt: number;
-  status?: OpenStatus;
 }
 
 /** An item's record for its view: the head sessions that wrote it and the runs it holds. */

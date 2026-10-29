@@ -24,9 +24,9 @@ hand; what it needs from before is one fetch, never a seeded transcript.
 - A `full` rotation seeds **no exchanges**. In their place one line under
   `## Previous session`: `session <id>, last on <item> at <YYYY-MM-DD HH:MM>`
   — `<item>` the `replyTopic` of the previous head's last reply, `none` when
-  it had none — and the replay command `pier search --in <id> --around "<time>"`.
-  `lastExchanges`, `EXCHANGES` and `EXCHANGES_CHARS` go (`core/chain.ts`);
-  the seed's `[lang=]` stamp stays.
+  it had none — and the replay command `pier search --in <id> --around "<time>"`
+  (`core/chain.ts`); a last reply with no `completedAt` gives neither time nor
+  replay. The seed's `[lang=]` stamp stays.
 - The stage is what the next session continues from: the concrete step, the
   open question, the standing authorization. An item whose stage changed is
   `<open>`ed again in the same reply (`DISPATCHER`); a stale stage is the
@@ -47,8 +47,10 @@ hand; what it needs from before is one fetch, never a seeded transcript.
 
 - `open_items` gains `closed_at INTEGER` (null while open), `aliases TEXT`
   (JSON array of earlier keys, `[]` by default) and `sessions TEXT` (JSON
-  array of head session ids the item was written in: every `<open>`/`<done>`
-  of it appends the writing session once) — one migration, `db.ts`.
+  array of head session ids the item was written in) — one migration, `db.ts`.
+  Every head reply about an item appends the writing session once, marker or
+  none: an `<open>`/`<done>` of it, a `<topic>` naming its key or an alias,
+  an answer to a callback of a run its `run_ids` hold (`recordOpenItems`).
 - `<done>problem</done>` sets `closed_at`; nothing deletes a row. Every read
   of the open list (`TaskStore.openItems`, the seed, `/status`,
   `GET /api/continuous/open`, `namesKey`) is `closed_at IS NULL`; a closed
@@ -56,8 +58,8 @@ hand; what it needs from before is one fetch, never a seeded transcript.
 - `<open>` with a closed item's key reopens it: `closed_at` cleared, aliases
   and sessions kept, its place in the list the reopening's time.
 - `<done>old → new</done>` (` → ` or ` -> `, the first one in the body)
-  closes `old` and records `old` and `old`'s aliases on `new`'s aliases,
-  when `new` is open once the reply's markers are applied (opened in this
+  closes `old` and records `old` and `old`'s aliases on `new`'s aliases and
+  `old`'s sessions on `new`'s, when `new` is open once the reply's markers are applied (opened in this
   reply or already open); otherwise nothing closes and the marker is
   unmatched, told on the head's next prompt with the existing
   `open-items` input, the line naming the arrow (`unmatchedNote`). The seed
@@ -71,33 +73,35 @@ hand; what it needs from before is one fetch, never a seeded transcript.
 - `DISPATCHER`: the key is the user's words and stays; a rewording, a next
   phase of the same problem or two items joined is `<done>old → new</done>`
   beside `<open>new — stage</open>`, never a plain `<done>` and a new
-  `<open>`. Over the last month 40 of 612 `<done>`s were such pairs; without
-  the arrow the item's history breaks at each.
-- `GET /api/continuous/items?q=<words>`: items whose `problem` or any alias
-  holds every term (case-insensitive substring), closed included, newest
-  `updated_at` first, at most 50: `{items: [{problem, aliases, closedAt?,
-  updatedAt, status?}]}`, `status` the open item's as `/open` gives it. An
-  empty `q` is the 50 newest.
+  `<open>`: without the arrow the item's history breaks there.
+- `GET /api/continuous/items?q=<words>`: items with one key — the `problem`
+  or one alias — holding every term (case-insensitive substring), closed
+  included, newest `updated_at` first, at most 50: `{items: [{problem,
+  aliases, closedAt?, updatedAt}]}`; the panel draws an open hit as its own
+  row. An empty `q` is the 50 newest.
 
 ## Item view (web)
 
 The conversation pane in one item's company: `#/conversation/item/<encodeURIComponent(problem)>`.
 
-- **Entry**: a reply's topic tag (the jump between a topic's replies it did
-  until now goes, `topics.ts` `tagRow`); the status panel's row secondary
+- **Entry**: a reply's topic tag (`topics.ts` `tagRow`); the status panel's row secondary
   action, one per row, ≥ 44 px on touch, the row's click itself still the
   navigation [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts)
   gives; and the panel's search field at its top — `GET /api/continuous/items?q=`
   as the user types, debounced, closed rows under a `Closed` group reading
   `closed <age> ago`, a closed row's click the view (it has nowhere else to
   go). An unknown problem in the hash reads `No item "<problem>"` with the
-  way back; a closed item's view is read-only history plus the composer.
+  way back; an alias in it is replaced by the item's key, which the bar and
+  the stamp then carry; with no head yet the conversation opens, its hash
+  replacing the item's; a closed item's view is read-only history plus the composer.
 - **Rows**: `GET /api/continuous/items/:problem/turns` →
   `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns}]}`,
   the item's `sessions` in chain order, each session's transcript read off
   disk as the history route does and reduced to the item's rows by one rule
   (`itemTurns`, `core/open-items.ts`, pure, keys = problem ∪ aliases):
-  - a reply whose `replyTopic` is a key;
+  - a reply whose `replyTopic` is a key; one with none whose nearest
+    callback above, before a user turn, reply or divider, is kept (as
+    `topics.ts` `callbackTopic` tags it);
   - the user turn a kept reply answers: the nearest user turn above it with
     no reply between, or any user turn carrying `[item: <key>]`;
   - a system input of `task-callback` origin whose run an `<open>` of a key
@@ -143,9 +147,9 @@ the item view, never typed by the sender.
 
 - IM: the home DM shows every item's flow as today; no thread per item, no
   item line from an adapter.
-- No second head, no topic chain, no memory per item: the pain was the pane
-  and the seed, and both are answered without them. Revisited only if the
-  head's replies mix items after this lands (§Acceptance).
+- No second head, no topic chain, no memory per item: the pane and the seed
+  are answered without them. Revisited only if the head's replies mix items
+  (§Acceptance).
 - The view across the pane's trim: the view loads its sessions whole; a chain
   of hundreds of sessions is bounded by the item's `sessions` list, not paged.
 
@@ -156,8 +160,8 @@ the item view, never typed by the sender.
   (`core/identity.ts`).
 - `TaskStore.openItems` (open only), `TaskStore.items(q)`, `TaskStore.itemHistory(problem)`,
   `markOpenItems` (closes, aliases, sessions).
-- `WebDeps.itemTurns` reads a member's transcript off disk through the same
-  factory the history route uses.
+- `WebDeps.items` and `WebDeps.itemHistory` (the store's two reads); the
+  turns route reads each member's transcript as the history route does.
 - `DISPATCHER` (`agent/roles.ts`): the stage, the callback reply, the item
   line, the ambiguity question, the arrow.
 
@@ -169,13 +173,18 @@ the item view, never typed by the sender.
   line and no exchanges.
 - `tasks/open-items.test.ts` / `store.test.ts`: `<done>` keeps the row closed,
   reopen, arrow to an open and to a missing `new`, Pier's rename recording
-  aliases, `sessions` appended once per session, `items(q)` over aliases.
+  aliases, `sessions` appended once per session — by a `<topic>` and a
+  callback's answer with no marker too — `items(q)` over aliases.
 - `core/open-items.test.ts`: `itemTurns` on a mixed transcript — two items,
   callbacks of each, a `/status` card, a divider, an `[item:]`-stamped user
-  turn.
-- `web/server.test.ts`: both routes, 404 for an unknown problem.
-- `web/ui/chat.test.ts`: the view's live filtering, exit, hash reload, the
-  stamped send.
+  turn, an unmarked reply to a callback.
+- `web/server.test.ts`: both routes, 404 for an unknown problem, a stamped
+  message's round trip from `POST /api/continuous/messages` to a new head's
+  rows through `TaskStore`.
+- `web/ui/item-view.test.ts`: the view's rows and live filtering;
+  `main.test.ts`: exit and an alias's hash; `views.test.ts`: hash reload, and
+  the conversation's hash when there is no head;
+  `composer.test.ts`: the stamped send.
 
 ## Acceptance
 

@@ -21,13 +21,15 @@ export interface ItemTurns {
 export const itemTurnsUrl = (problem: string): string => `/api/continuous/items/${encodeURIComponent(problem)}/turns`;
 
 /** Each session's rows as the pane replays them: only the head's, of an open item, take
- *  next steps and its runs; returns the filter each later event runs. */
-export function renderItem(view: ItemTurns, head: string, state: SessionState, runs: BackgroundRun[]): () => void {
+ *  next steps and its runs; returns the filter each later event runs. `head.turns` is its
+ *  snapshot's length: a streaming head's turn in flight is its last, maybe another item's. */
+export function renderItem(view: ItemTurns, head: { id: string; state: SessionState; turns: number }, runs: BackgroundRun[]): () => void {
   const keys = new Set([view.problem, ...view.aliases]);
   const held = runs.filter((r) => keys.has(runTopic(r.runId) ?? ""));
   for (const s of view.sessions) {
-    const own = s.sessionId === head && view.closedAt === undefined;
-    renderSnapshot(s.turns.map((t) => t.turn), own ? state : "idle", own ? held : [], !own);
+    const own = s.sessionId === head.id && view.closedAt === undefined;
+    const streaming = own && head.state === "streaming" && s.turns.at(-1)?.index === head.turns - 1;
+    renderSnapshot(s.turns.map((t) => t.turn), streaming ? "streaming" : "idle", own ? held : [], !own, { sessionId: s.sessionId, indices: s.turns.map((t) => t.index) });
   }
   if (!view.sessions.some((s) => s.turns.length)) appendTurn("system", `Nothing of "${view.problem}" in its sessions' transcripts.`);
   for (const row of [...turnsPane.children] as HTMLElement[]) row.dataset.itemRow = "";

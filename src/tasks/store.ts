@@ -500,7 +500,7 @@ export class TaskStore {
 
   /** Items, closed included, whose key or one alias holds every whitespace-separated term of `q`
    *  (case-insensitive), newest first; at most 50. */
-  items(q: string): Omit<ItemSummary, "status">[] {
+  items(q: string): ItemSummary[] {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     const rows = this.sql("SELECT problem, aliases, closed_at, updated_at FROM open_items ORDER BY updated_at DESC, rowid DESC")
       .all() as { problem: string; aliases: string; closed_at: number | null; updated_at: number }[];

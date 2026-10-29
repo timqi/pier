@@ -533,17 +533,19 @@ describe("the continuous conversation", () => {
   // The item view: the head's pane drawn from the item's turns, its stream resumed at their cursor.
   it("opens an item's view at the head, follows its stream from the turns' cursor, and returns to the tail", async () => {
     await boot([member("h1"), member("h0", "first")]);
-    const view = { problem: "auth", aliases: [], sessions: [{ sessionId: "h1", startedAt: 1, turns: [] }], epoch: "ep", lastSeq: 7 };
+    const view = { problem: "auth", aliases: ["auth review"], sessions: [{ sessionId: "h1", startedAt: 1, turns: [] }], epoch: "ep", lastSeq: 7 };
     h.itemTurns.mockResolvedValue(Response.json(view));
     h.renderItem.mockReturnValue(h.itemFilter);
     const views = await import("./views.js");
     h.views.openItemView("auth review");
     await settled();
     expect(h.itemTurns).toHaveBeenCalledWith("/api/continuous/items/auth%20review/turns");
-    expect(views.setItemHash).toHaveBeenLastCalledWith("auth review");
-    expect(h.renderItem).toHaveBeenCalledWith(view, "h1", "idle", []);
-    expect(h.composer.item?.()).toBe("auth review");
-    expect(h.header.item()).toBe("auth review");
+    // Opened by an alias: the item's key replaces it in the hash, the bar and the stamp.
+    expect(views.setItemHash).toHaveBeenCalledWith("auth review");
+    expect(views.setItemHash).toHaveBeenLastCalledWith("auth", true);
+    expect(h.renderItem).toHaveBeenCalledWith(view, { id: "h1", state: "idle", turns: expect.any(Number) }, []);
+    expect(h.composer.item?.()).toBe("auth");
+    expect(h.header.item()).toBe("auth");
     expect(latest().url).toBe("/api/sessions/h1/events?after=ep:7");
     latest().message(8, "elsewhere", "h1");
     expect(h.itemFilter).toHaveBeenCalled();
@@ -589,7 +591,7 @@ describe("the continuous conversation", () => {
     pager();
     await settled();
     expect(historyCalls()).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h1/history"]);
-    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h0" }], "idle", [], true);
+    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h0" }], "idle", [], true, { sessionId: "h0" });
     expect(h.appendDivider).toHaveBeenCalledWith("idle", 5);
     // Everything is paged in: no pager is drawn over the first session.
     expect(h.appendPager).toHaveBeenCalledTimes(1);
@@ -765,7 +767,7 @@ describe("the continuous conversation", () => {
     await settled();
     await settled();
     expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history"]);
-    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true);
+    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true, { sessionId: "h1" });
   });
 
   it("follows a rotation in one paint, the session left live in view until then and its stream ignored", async () => {
