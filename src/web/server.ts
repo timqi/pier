@@ -40,7 +40,8 @@ import type {
 import { CHAIN_FULL_TOKENS, isThinkingLevel } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
-import type { OpenItems, ParkedMessage } from "../tasks/types.js";
+import { itemTurns } from "../core/open-items.js";
+import type { ItemRecord, ItemSummary, OpenItems, ParkedMessage } from "../tasks/types.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
@@ -154,6 +155,9 @@ interface WebDeps {
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
   openItems?: () => OpenItems;
+  /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's two routes read. */
+  items?: (q: string) => Omit<ItemSummary, "status">[];
+  itemHistory?: (problem: string) => ItemRecord | undefined;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -218,6 +222,8 @@ export function createServer(
     taskSessions,
     leads,
     openItems,
+    items,
+    itemHistory,
     channelOf,
     continuous,
   }: WebDeps,
@@ -516,6 +522,38 @@ export function createServer(
 
   // The status panel's rows.
   app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [] }));
+
+  // The item view's search: closed items too, an open one with its status as /open gives it.
+  app.get("/api/continuous/items", (c) => {
+    const status = new Map((openItems?.().items ?? []).map((i) => [i.problem, i.status]));
+    const found: ItemSummary[] = (items?.(c.req.query("q") ?? "") ?? []).map((i) => (status.has(i.problem) ? { ...i, status: status.get(i.problem)! } : i));
+    return c.json({ items: found });
+  });
+
+  // One item's rows (docs/design/15-item-view.md \u00a7Rows), its sessions oldest first; the head's
+  // up to the snapshot's cursor, read as /history reads it.
+  app.use("/api/continuous/items/:problem/turns", compress());
+  guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, async (c) => {
+    const problem = c.req.param("problem");
+    const item = itemHistory?.(problem);
+    if (!item) return c.json({ error: `No item "${problem}"` }, 404);
+    const [head, ...rest] = continuous.members();
+    const past = await Promise.all(rest.filter((m) => item.sessions.includes(m.sessionId)).reverse()
+      .map(async (m) => ({ sessionId: m.sessionId, startedAt: m.startedAt, turns: await turnsOf(m.sessionId) })));
+    const live = head && item.sessions.includes(head.sessionId) ? await ensure(head.sessionId) : undefined;
+    const headId = head?.sessionId ?? "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const lastSeq = hub.lastSeq(headId);
+      const turns = live && await live.history();
+      if (hub.lastSeq(headId) !== lastSeq) continue;
+      const sessions = itemTurns([...past, ...(head && turns ? [{ sessionId: head.sessionId, startedAt: head.startedAt, turns }] : [])], [item.problem, ...item.aliases], item.runIds)
+        .map((s) => ({ ...s, turns: s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) })) }));
+      const { sessions: _ids, runIds: _runs, ...record } = item;
+      return c.json({ ...record, sessions, epoch, lastSeq });
+    }
+    log.warn(`item view of "${problem}": the head changed during all 3 reads`);
+    return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
+  });
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.

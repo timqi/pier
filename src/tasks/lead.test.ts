@@ -313,7 +313,7 @@ describe("a feature lead", () => {
     await leadRan();
     const lead = sessions.get("lead")!;
     router.attach({ channelId: "web", conversationId: "lead" }, lead);
-    store.markOpenItems([{ op: "open", problem: "Keep the original design question", stage: "waiting on you: finalize this scope?", runIds: ["missing-first-run", "lead-run"] }], Date.now());
+    store.markOpenItems([{ op: "open", problem: "Keep the original design question", stage: "waiting on you: finalize this scope?", runIds: ["missing-first-run", "lead-run"] }], Date.now(), "h1");
     const item = () => service.openItems().items.find((i) => i.problem === "Keep the original design question")!;
     expect(item()).toMatchObject({ status: "waiting on you", designSessionId: "lead" });
     lead.setState("streaming");

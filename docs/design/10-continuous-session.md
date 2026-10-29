@@ -151,7 +151,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 ## Open items
 
 - The head keeps the list inside its replies: `<open>problem — stage (run <id>)</open>`
-  adds or replaces the item keyed by `problem`, `<done>problem</done>` removes it;
+  adds, replaces or reopens the item keyed by `problem`, `<done>problem</done>` closes it;
   both are stripped beside `<silent>` and never read inside a fence
   (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
 - A dispatch is a silent reply beside its `<open>` marker, the chat's run tag
@@ -184,8 +184,12 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   replaces an item keeps its place.
 - A session is behind one item: an `<open>` takes its run tokens, and every
   run of their sessions, off every other item (`TaskStore.markOpenItems`); the first one left with no run is renamed to
-  the new problem in its place, the rest are deleted, and one that still has
+  the new problem in its place, the rest are closed into it, and one that still has
   other runs keeps them.
+- A closed item keeps its row (`closed_at`, its `aliases` and the head `sessions`
+  that wrote it, [15](15-item-view.md#items-keep-their-record)); every read of the
+  list — `TaskStore.openItems`, the seed, `/status`, `GET /api/continuous/open`,
+  `namesKey` — is the open ones, and a reopened item takes the list's end.
 - `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session
   (`TaskStore.getRun`) and shows that session's newest run (`latestRunForTarget`),
   however old, so a lead woken again stays the same item; a token naming no run

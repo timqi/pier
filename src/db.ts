@@ -424,6 +424,14 @@ const MIGRATIONS: readonly string[] = [
   "DROP TABLE item_receipts;",
   // 39 — the Pages project rows nothing reads any more.
   "DELETE FROM settings WHERE key IN ('pagesProject', 'pagesUrl');",
+  // 40 — an open item keeps its record after `<done>` (tasks/store.ts `markOpenItems`):
+  // closed_at null while open; aliases its earlier keys, sessions the head sessions
+  // that wrote it, JSON arrays.
+  `
+  ALTER TABLE open_items ADD COLUMN closed_at INTEGER;
+  ALTER TABLE open_items ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE open_items ADD COLUMN sessions TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

@@ -1,6 +1,6 @@
 // Open-item task facts and their compact status and complete continuation projections.
 
-import { openItemMarkers } from "../core/reply.js";
+import { openItemMarkers, replyTopic } from "../core/reply.js";
 import { openItemPresentation, openItemsText } from "../core/open-items.js";
 import type { Router } from "../core/router.js";
 import { NOT_IN_LEDGER, NOTHING_OPEN, TASK_RUN_STATES, type OpenItemsStatus, type TaskRunState } from "../core/types.js";
@@ -104,26 +104,38 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
   };
 }
 
-/** The head's reply's markers, written: whether a row changed, the keys its `<done>`s closed,
- *  and the `<done>` keys that closed none, for the head to be told. */
-export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number): { changed: boolean; closed: string[]; unmatched: string[] } {
+/** An arrow's `<done>` body as `unmatchedNote` and the seed name it; its `old` never holds the arrow. */
+const ARROW = " \u2192 ";
+
+/** The head's reply's markers, written by `sessionId`, which every item the reply is about records
+ *  — a marker's, its topic's, the one holding a run of the results it answers (`runIds`) — so the
+ *  item's view finds its rows after a reload. Answers whether a row changed, the keys its `<done>`s
+ *  closed, and the `<done>` bodies that closed none — an arrow's as `old → new` — for the head to be told. */
+export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number, sessionId: string, runIds: readonly string[] = []): { changed: boolean; closed: string[]; unmatched: string[] } {
   const { markers, dropped } = openItemMarkers(text);
   for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
-  if (!markers.length) return { changed: false, closed: [], unmatched: [] };
-  const { changed, closed } = store.markOpenItems(markers, now);
-  const unmatched = markers.flatMap((m, i) => (m.op === "done" && !changed[i] ? [m.problem] : []));
+  const { changed, closed } = store.markOpenItems(markers, now, sessionId, { topic: replyTopic(text), runIds });
+  const unmatched = markers.flatMap((m, i) => (m.op === "done" && !changed[i] ? [m.to === undefined ? m.problem : `${m.problem}${ARROW}${m.to}`] : []));
   for (const problem of unmatched) log.warn(`open items: <done> named no open item: ${problem}`);
   return { changed: changed.some((n) => n > 0), closed, unmatched };
 }
 
-/** The note the head's next prompt carries after a `<done>` closed nothing. */
-export const unmatchedNote = (unmatched: readonly string[], keys: readonly string[]): string =>
-  `[Pier: ${unmatched.map((p) => `<done>${p}</done>`).join(", ")} closed no open item. Resend <done> with one of these keys exactly:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
+/** The key an unmatched `<done>` body names, an arrow's `old`. */
+export const doneOld = (unmatched: string): string => unmatched.split(ARROW)[0]!;
+
+/** The note the head's next prompt carries after a `<done>` closed nothing; an arrow into no open item says so. */
+export const unmatchedNote = (unmatched: readonly string[], keys: readonly string[]): string => {
+  const named = (p: string) => {
+    const to = p.split(ARROW).slice(1).join(ARROW);
+    return `<done>${p}</done>${to && !keys.includes(to) ? ` ("${to}" is not open)` : ""}`;
+  };
+  return `[Pier: ${unmatched.map(named).join(", ")} closed no open item. Resend <done> with one of these keys exactly:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
+};
 
 /** The items a turn answering `runIds`' results left as they were: one holding a run of a
  *  result's session, no run of its sessions still live, its exact key in none of the reply's markers. */
 export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[]): { runId: string; problem: string }[] {
-  const named = new Set(openItemMarkers(text).markers.map((m) => m.problem));
+  const named = new Set(openItemMarkers(text).markers.flatMap((m) => (m.op === "done" && m.to !== undefined ? [m.problem, m.to] : [m.problem])));
   const sessionOf = (id: string) => store.getRun(id)?.targetSessionId ?? id;
   const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(id)) ?? store.getRun(id))?.state ?? "") === "live";
   return store.openItems().flatMap((item) => {

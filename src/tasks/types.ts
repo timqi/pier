@@ -335,6 +335,25 @@ export interface OpenItem {
   waitsIn?: string;
 }
 
+/** One item of `GET /api/continuous/items`, open or closed (docs/design/15-item-view.md):
+ *  `aliases` its earlier keys, `closedAt` set once a `<done>` closed it, `status` an open one's. */
+export interface ItemSummary {
+  problem: string;
+  aliases: string[];
+  closedAt?: number;
+  updatedAt: number;
+  status?: OpenStatus;
+}
+
+/** An item's record for its view: the head sessions that wrote it and the runs it holds. */
+export interface ItemRecord {
+  problem: string;
+  aliases: string[];
+  closedAt?: number;
+  sessions: string[];
+  runIds: string[];
+}
+
 /** What the continuous conversation is solving, as main last said it
  *  (docs/design/10-continuous-session.md#open-items). Items keep their problem identity
  *  even when several hold the same session. */

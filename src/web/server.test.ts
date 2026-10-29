@@ -34,7 +34,7 @@ import type {
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import type { OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
+import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
 import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -2393,7 +2393,10 @@ describe("the app shell", () => {
 
 describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
-  function chainRig(ledger: () => LedgerRun[] = () => [], open?: OpenItems) {
+  function chainRig(
+    ledger: () => LedgerRun[] = () => [], open?: OpenItems,
+    record: { items?: (q: string) => Omit<ItemSummary, "status">[]; itemHistory?: (problem: string) => ItemRecord | undefined } = {},
+  ) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
     const sessions = new Map<string, FakeSession>();
@@ -2428,7 +2431,7 @@ describe("the continuous conversation's routes", () => {
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
       providers: fakeProviders(), settings, updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
-      secrets: fakeSecrets(), continuous: chain, ...(open ? { openItems: () => open } : {}),
+      secrets: fakeSecrets(), continuous: chain, ...(open ? { openItems: () => open } : {}), ...record,
     });
     const workspace: string[] = [];
     hub.subscribeWorkspace((e) => workspace.push(e.type));
@@ -2450,6 +2453,50 @@ describe("the continuous conversation's routes", () => {
     const res = await chainRig(undefined, open).app.request("/api/continuous/open");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(open);
+  });
+
+  it("answers the items a search finds, an open one with its status", async () => {
+    const open: OpenItems = { items: [{ problem: "login", stage: "", runs: [], status: "waiting on you" }], unlisted: [] };
+    const items = vi.fn((_q: string) => [{ problem: "login", aliases: ["sign in"], updatedAt: 5 }, { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 }]);
+    const { app } = chainRig(undefined, open, { items });
+    const res = await app.request("/api/continuous/items?q=sign%20in");
+    expect(items).toHaveBeenCalledWith("sign in");
+    expect(await res.json()).toEqual({ items: [
+      { problem: "login", aliases: ["sign in"], updatedAt: 5, status: "waiting on you" },
+      { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 },
+    ] });
+    await app.request("/api/continuous/items");
+    expect(items).toHaveBeenLastCalledWith("");
+  });
+
+  it("answers an item's rows across its sessions oldest first, the head's up to its cursor, and 404 for no item", async () => {
+    const record: ItemRecord = { problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: [] };
+    const itemHistory = vi.fn((p: string) => (p === "login" || p === "sign in" ? record : undefined));
+    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory });
+    restarted();
+    factory.readHistory.mockImplementation(async (id: string) => (id === "old"
+      ? [{ role: "user", text: "fix sign in" }, { role: "assistant", text: "On it.\n<open>sign in</open>", steps: [{ id: "t1", name: "bash", args: { cmd: "ls" }, output: "x" }] }, { role: "user", text: "other" }, { role: "assistant", text: "Sure." }]
+      : undefined) as ChatTurn[] | undefined);
+    sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<done>sign in \u2192 login</done>" }] }));
+    const res = await app.request(`/api/continuous/items/${encodeURIComponent("sign in")}/turns`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { epoch: string; lastSeq: number };
+    expect(body).toEqual({
+      problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0,
+      sessions: [
+        { sessionId: "old", startedAt: expect.any(Number), turns: [
+          { index: 0, turn: { role: "user", text: "fix sign in" } },
+          { index: 1, turn: { role: "assistant", text: "On it.\n<open>sign in</open>", steps: [{ id: "t1", name: "bash" }] } },
+        ] },
+        { sessionId: "head", startedAt: expect.any(Number), turns: [
+          { index: 0, turn: { role: "user", text: "go on" } },
+          { index: 1, turn: { role: "assistant", text: "Done.\n<done>sign in \u2192 login</done>" } },
+        ] },
+      ],
+    });
+    const missing = await app.request("/api/continuous/items/nope/turns");
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "No item \"nope\"" });
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

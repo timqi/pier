@@ -18,7 +18,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { openItems, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
+import { doneOld, openItems, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -197,12 +197,13 @@ export class TaskService {
       // Only the head's turns write the list.
       if (instance.continuous.members()[0]?.sessionId === sessionId) {
         try {
-          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now());
+          const answered = opened?.kind === "task-callback" ? opened.runIds ?? [opened.runId] : [];
+          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now(), sessionId, answered);
           const keys = store.openItems().map((i) => i.problem);
           // A head that keeps missing gets its latest few back; nothing open owes no resend.
-          this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(u, k))), ...unmatched])].slice(-5) : [];
+          this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(doneOld(u), k))), ...unmatched])].slice(-5) : [];
           if (changed) hub.emitWorkspace({ type: "open-items-changed" });
-          const stale = opened?.kind === "task-callback" ? staleItems(store, text, opened.runIds ?? [opened.runId]) : [];
+          const stale = answered.length ? staleItems(store, text, answered) : [];
           const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
           if (notes.length) {
             const at = router.conversationOf(sessionId);
