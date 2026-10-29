@@ -78,11 +78,15 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   phase of the same problem or two items joined is `<done>old → new</done>`
   beside `<open>new — stage</open>`, never a plain `<done>` and a new
   `<open>`: without the arrow the item's history breaks there.
+- A key names, in order: the open item keyed by it, the open item holding it
+  as an alias, the closed item keyed by it, the newest closed item holding it
+  as an alias (`TaskStore.itemHistory`) — so an arrow's closed `old` opens `new`.
 - `GET /api/continuous/items?q=<words>`: items with one key — the `problem`
   or one alias — holding every term (case-insensitive substring), closed
   included, newest `updated_at` first, at most 50: `{items: [{problem,
-  aliases, closedAt?, updatedAt}]}`; the panel draws an open hit as its own
-  row. An empty `q` is the 50 newest.
+  aliases, closedAt?, updatedAt}]}`; a closed item another item holds as an
+  alias is not listed, its history being that item's. The panel draws an
+  open hit as its own row. An empty `q` is the 50 newest.
 
 ## Item view (web)
 

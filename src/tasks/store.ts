@@ -499,22 +499,26 @@ export class TaskStore {
   }
 
   /** Items, closed included, whose key or one alias holds every whitespace-separated term of `q`
-   *  (case-insensitive), newest first; at most 50. */
+   *  (case-insensitive), newest first; at most 50. A closed row another item holds as an alias
+   *  is that item's history, listed under it alone. */
   items(q: string): ItemSummary[] {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     const rows = this.sql("SELECT problem, aliases, closed_at, updated_at FROM open_items ORDER BY updated_at DESC, rowid DESC")
       .all() as { problem: string; aliases: string; closed_at: number | null; updated_at: number }[];
-    return rows.map((r) => ({ problem: r.problem, aliases: JSON.parse(r.aliases) as string[], ...(r.closed_at === null ? {} : { closedAt: r.closed_at }), updatedAt: r.updated_at }))
+    const items = rows.map((r) => ({ problem: r.problem, aliases: JSON.parse(r.aliases) as string[], ...(r.closed_at === null ? {} : { closedAt: r.closed_at }), updatedAt: r.updated_at }));
+    const absorbed = new Set(items.flatMap((i) => i.aliases));
+    return items.filter((i) => !(i.closedAt !== undefined && absorbed.has(i.problem)))
       .filter((i) => [i.problem, ...i.aliases].some((key) => terms.every((t) => key.toLowerCase().includes(t))))
       .slice(0, 50);
   }
 
-  /** The item keyed `problem`, else the newest one holding it as an alias. */
+  /** Open before closed — an arrow's closed `old` row loses to the open item that took it as an
+   *  alias — then the item keyed `problem` before one holding it as an alias, then the newest. */
   itemHistory(problem: string): ItemRecord | undefined {
     const row = this.sql(`
       SELECT problem, aliases, closed_at, sessions, run_ids FROM open_items
       WHERE problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)
-      ORDER BY problem = ? DESC, updated_at DESC LIMIT 1
+      ORDER BY closed_at IS NULL DESC, problem = ? DESC, updated_at DESC LIMIT 1
     `).get(problem, problem, problem) as { problem: string; aliases: string; closed_at: number | null; sessions: string; run_ids: string } | undefined;
     return row && {
       problem: row.problem, aliases: JSON.parse(row.aliases) as string[], ...(row.closed_at === null ? {} : { closedAt: row.closed_at }),

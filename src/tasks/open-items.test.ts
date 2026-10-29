@@ -476,8 +476,9 @@ describe("the open items", () => {
     expect(recordOpenItems(r.store, "Still green.\n<topic>parser</topic>", 3, "h2")).toEqual({ changed: false, closed: [], unmatched: [] });
     recordOpenItems(r.store, "Merged.", 4, "h3", ["rt1"]);
     recordOpenItems(r.store, "Hello.", 5, "h4");
-    expect(r.store.itemHistory("login")?.sessions).toEqual(["h1", "h3"]);
-    expect(r.store.itemHistory("parser")?.sessions).toEqual(["h1", "h2"]);
+    // `parser`'s topic is the open item that absorbed it.
+    expect(r.store.itemHistory("login")?.sessions).toEqual(["h1", "h2", "h3"]);
+    expect(r.store.itemHistory("parser")?.problem).toBe("login");
   });
 
   it("records a stamped send's head on the item under its key when the stamp names an alias", () => {
@@ -502,11 +503,16 @@ describe("the open items", () => {
     expect(r.store.openItems().map((i) => i.problem)).toEqual(["parser", "login, also SSO"]);
     r.store.markOpenItems([open("auth"), arrow("login, also SSO", "auth")], 4, "h3");
     expect(r.store.itemHistory("auth")).toEqual({ problem: "auth", aliases: ["login, also SSO", "login"], sessions: ["h1", "h2", "h3"], runIds: [] });
-    // An exact key wins over an alias; a search finds both, closed included, newest first.
-    expect(r.store.itemHistory("login, also SSO")?.problem).toBe("login, also SSO");
-    expect(r.store.items("LOGIN sso").map((i) => [i.problem, i.closedAt])).toEqual([["auth", undefined], ["login, also SSO", 4]]);
-    expect(r.store.items("").map((i) => i.problem)).toEqual(["auth", "login, also SSO", "login", "parser"]);
+    // An arrow's closed `old` row is `new`'s history: its key opens `new`, a search lists `new` once.
+    for (const old of ["login", "login, also SSO"]) expect(r.store.itemHistory(old)).toEqual(r.store.itemHistory("auth"));
+    expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["auth", undefined]]);
+    expect(r.store.items("LOGIN sso").map((i) => i.problem)).toEqual(["auth"]);
     expect(r.store.items("login nothing")).toEqual([]);
+    // A closed item nothing absorbed keeps its own record and row; with `new` closed too, the exact key wins again.
+    r.store.markOpenItems([{ op: "done", problem: "parser" }, { op: "done", problem: "auth" }], 5, "h3");
+    expect(r.store.itemHistory("parser")).toMatchObject({ problem: "parser", closedAt: 5 });
+    expect(r.store.itemHistory("login")?.problem).toBe("login");
+    expect(r.store.items("").map((i) => i.problem)).toEqual(["auth", "parser"]);
   });
 
   it("tells the head an arrow into no open item, and counts the arrow's target as named", () => {
@@ -528,10 +534,10 @@ describe("the open items", () => {
     r.store.markOpenItems([open("pair", "rt1")], 2, "h1");
     expect(r.store.openItems().map((i) => i.problem)).toEqual(["pair"]);
     expect(r.store.itemHistory("pair")).toEqual({ problem: "pair", aliases: ["dup 1", "dup 2"], sessions: ["h1"], runIds: ["rt1"] });
-    // The renamed key is no row of its own: it finds the item by alias.
+    // The renamed key is no row of its own, a closed dup's row is the item's history: both find the item.
     expect(r.store.itemHistory("dup 1")?.problem).toBe("pair");
-    expect(r.store.itemHistory("dup 2")?.problem).toBe("dup 2");
-    expect(r.store.itemHistory("dup 2")?.closedAt).toBe(2);
+    expect(r.store.itemHistory("dup 2")?.problem).toBe("pair");
+    expect(r.store.items("dup").map((i) => i.problem)).toEqual(["pair"]);
   });
 
   it("says nothing is open when nothing is, and counts no workers when no lead is shown", () => {
