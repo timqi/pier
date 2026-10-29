@@ -415,6 +415,7 @@ app.route("/", createServer({
   openItems: () => tasks.openItems(),
   items: (q) => taskStore.items(q),
   itemHistory: (problem) => taskStore.itemHistory(problem),
+  itemSent: (item, sessionId) => { taskStore.markOpenItems([], Date.now(), sessionId, { topic: item }); },
   // The live key is the last surface spoken from; a task's alias says nothing.
   channelOf: (id) => {
     const live = router.conversationOf(id);

@@ -41,6 +41,7 @@ import { CHAIN_FULL_TOKENS, isThinkingLevel } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { itemTurns } from "../core/open-items.js";
+import { splitItem } from "../core/identity.js";
 import type { ItemRecord, ItemSummary, OpenItems, ParkedMessage } from "../tasks/types.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
@@ -158,6 +159,9 @@ interface WebDeps {
   /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's two routes read. */
   items?: (q: string) => ItemSummary[];
   itemHistory?: (problem: string) => ItemRecord | undefined;
+  /** `TaskStore.markOpenItems` with no marker: the head a message stamped `[item: <key>]`
+   *  reached becomes one of the item's sessions, before any reply names it. */
+  itemSent?: (item: string, sessionId: string) => void;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -224,6 +228,7 @@ export function createServer(
     openItems,
     items,
     itemHistory,
+    itemSent,
     channelOf,
     continuous,
   }: WebDeps,
@@ -534,8 +539,17 @@ export function createServer(
     const item = itemHistory?.(problem);
     if (!item) return c.json({ error: `No item "${problem}"` }, 404);
     const [head, ...rest] = continuous.members();
+    // An unreadable transcript is one row saying so; the item's other sessions still show.
+    const read = async (m: { sessionId: string; startedAt: number }): Promise<{ sessionId: string; startedAt: number; turns: ChatTurn[]; unread?: string }> => {
+      try {
+        return { ...m, turns: await turnsOf(m.sessionId) };
+      } catch (err) {
+        log.warn(`item view of "${problem}": session ${m.sessionId} could not be read`, err);
+        return { ...m, turns: [], unread: `Session ${m.sessionId} could not be read: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    };
     const past = await Promise.all(rest.filter((m) => item.sessions.includes(m.sessionId)).reverse()
-      .map(async (m) => ({ sessionId: m.sessionId, startedAt: m.startedAt, turns: await turnsOf(m.sessionId) })));
+      .map((m) => read({ sessionId: m.sessionId, startedAt: m.startedAt })));
     const live = head && item.sessions.includes(head.sessionId) ? await ensure(head.sessionId) : undefined;
     const headId = head?.sessionId ?? "";
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -543,7 +557,9 @@ export function createServer(
       const turns = live && await live.history();
       if (hub.lastSeq(headId) !== lastSeq) continue;
       const sessions = itemTurns([...past, ...(head && turns ? [{ sessionId: head.sessionId, startedAt: head.startedAt, turns }] : [])], [item.problem, ...item.aliases], item.runIds)
-        .map((s) => ({ ...s, turns: s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) })) }));
+        .map(({ unread, ...s }) => ({ ...s, turns: unread === undefined
+          ? s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) }))
+          : [{ index: 0, turn: { role: "system" as const, text: unread } }] }));
       const { sessions: _ids, runIds: _runs, ...record } = item;
       return c.json({ ...record, sessions, epoch, lastSeq });
     }
@@ -560,6 +576,15 @@ export function createServer(
     try {
       const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode });
       state.spokeFrom(head.sessionId, sessionIdOf(c));
+      const { item } = splitItem(body.text);
+      // Before any reply: one that comes back untagged, or a reload mid-turn, still finds the row.
+      if (item !== undefined) {
+        try {
+          itemSent?.(item, head.sessionId);
+        } catch (err) {
+          router.reportTo(head.sessionId, `item view: session ${head.sessionId} could not be recorded on "${item}"; its view may miss this message: ${String(err)}`);
+        }
+      }
       return c.json(reached(head), 202);
     } catch (err) {
       if (err instanceof ChatCommandRefused || err instanceof SkillAmbiguous) return c.json({ error: err.message }, 409);

@@ -43,17 +43,22 @@ function filterRows(keys: Set<string>): void {
   const rows = [...turnsPane.children] as HTMLElement[];
   let prev: HTMLElement | undefined;
   const shown = rows.map((row) => {
-    const { kind, topic } = row.dataset;
-    const show = "itemRow" in row.dataset || kind === "divider" || "seed" in row.dataset ? true
-      : topic ? keys.has(topic)
-      : kind === "user" ? false
-      : kind === "assistant" ? "pending" in row.dataset && prev?.dataset.kind === "user" && !("itemHidden" in prev.dataset)
-      : !prev || !("itemHidden" in prev.dataset);
+    const show = shows(row, prev, keys);
     row.toggleAttribute("data-item-hidden", !show);
-    if (kind !== "time") prev = row;
+    if (row.dataset.kind !== "time") prev = row;
     return show;
   });
   rows.forEach((row, i) => { if (row.dataset.kind === "time" && !("itemRow" in row.dataset)) row.toggleAttribute("data-item-hidden", !shown[i + 1]); });
+}
+
+function shows(row: HTMLElement, prev: HTMLElement | undefined, keys: Set<string>): boolean {
+  const { kind, topic } = row.dataset;
+  if ("itemRow" in row.dataset || kind === "divider" || "seed" in row.dataset) return true;
+  if (topic) return keys.has(topic);
+  if (kind === "user") return false;
+  const prevShown = !!prev && !("itemHidden" in prev.dataset);
+  if (kind === "assistant") return "pending" in row.dataset && prev?.dataset.kind === "user" && prevShown;
+  return !prev || prevShown;
 }
 
 /** A problem the route names that could not be shown: the server's sentence and the way back. */

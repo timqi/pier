@@ -9,7 +9,7 @@ import { $, h } from "./dom.js";
 import { appendTurn, excerptText, followTail, type QuoteSource, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
-import { QUOTE_CHARS, splitItem, withItem, withQuote } from "../../core/identity.js";
+import { QUOTE_CHARS, splitItem, splitSpeaker, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
@@ -197,7 +197,8 @@ export function renderQueue(steering: string[], followUp: string[], parkedNow = 
       } else if (r.mode !== "queued") {
         li.append(h("span", "max-w-[40%] flex-none truncate rounded bg-neutral-100 px-1 py-0.5 text-[10.5px] font-semibold text-neutral-600", r.mode));
       }
-      li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", splitItem(r.text).text));
+      // Pi's queue holds the routed prompt, its sender header above the item line: read as a bubble is.
+      li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", splitItem(splitSpeaker(r.text).text).text));
       return li;
     }),
   );

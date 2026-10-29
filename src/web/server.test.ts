@@ -33,7 +33,6 @@ import type {
   ProviderManager,
 } from "../agent/types.js";
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
-import { recordOpenItems } from "../tasks/open-items.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
@@ -2397,7 +2396,11 @@ describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
   function chainRig(
     ledger: () => LedgerRun[] = () => [], open?: OpenItems,
-    record: { items?: (q: string) => ItemSummary[]; itemHistory?: (problem: string) => ItemRecord | undefined } = {},
+    record: {
+      items?: (q: string) => ItemSummary[];
+      itemHistory?: (problem: string) => ItemRecord | undefined;
+      itemSent?: (item: string, sessionId: string) => void;
+    } = {},
   ) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
@@ -2498,16 +2501,31 @@ describe("the continuous conversation's routes", () => {
     expect(await missing.json()).toEqual({ error: "No item \"nope\"" });
   });
 
+  it("shows an item's unreadable session as one row saying so, its other sessions still read", async () => {
+    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
+    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
+    restarted();
+    factory.readHistory.mockRejectedValue(new Error("bad JSON at line 3"));
+    sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<topic>login</topic>" }] }));
+    const res = await app.request("/api/continuous/items/login/turns");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
+    expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)])).toEqual([["old", ["system"]], ["head", ["user", "assistant"]]]);
+    expect(body.sessions[0]!.turns[0]!.turn.text).toBe("Session old could not be read: bad JSON at line 3");
+  });
+
   it("carries a message stamped in the item view to a new head's transcript and back as one of the item's rows", async () => {
     const problem = "CI / deploy 修复";
     const store = new TaskStore(openDb(":memory:"));
-    const { app, post, clock } = chainRig(undefined, undefined, { itemHistory: (p) => store.itemHistory(p) });
+    const { app, post, clock } = chainRig(undefined, undefined, {
+      itemHistory: (p) => store.itemHistory(p),
+      itemSent: (item, sessionId) => { store.markOpenItems([], clock.now, sessionId, { topic: item }); },
+    });
     await post("/api/continuous/messages", { text: "one" });
     store.markOpenItems([{ op: "open", problem, stage: "", runIds: [] }], clock.now, "m1");
     clock.now += 2 * IDLE_MS;
     expect((await post("/api/continuous/messages", { text: withItem(problem, "ship it"), mode: "auto" })).status).toBe(202);
-    // The head's answer names the item only by its `<topic>`, as TaskService's turn end records it.
-    recordOpenItems(store, `Shipped.\n<topic>${problem}</topic>`, clock.now, "m2");
+    // Read before any reply: an untagged one, or none yet, records nothing at the turn end.
     const res = await app.request(`/api/continuous/items/${encodeURIComponent(problem)}/turns`);
     expect(res.status).toBe(200);
     const { sessions } = await res.json() as { sessions: { sessionId: string; turns: { turn: ChatTurn }[] }[] };

@@ -51,6 +51,10 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   Every head reply about an item appends the writing session once, marker or
   none: an `<open>`/`<done>` of it, a `<topic>` naming its key or an alias,
   an answer to a callback of a run its `run_ids` hold (`recordOpenItems`).
+  A message stamped `[item: <key>]` (§Composer) appends the head it reached
+  when sent, before any reply (`WebDeps.itemSent`).
+- An item written before the migration has no sessions until a head reply
+  or a stamped message touches it again; its view reads `Nothing of …`.
 - `<done>problem</done>` sets `closed_at`; nothing deletes a row. Every read
   of the open list (`TaskStore.openItems`, the seed, `/status`,
   `GET /api/continuous/open`, `namesKey`) is `closed_at IS NULL`; a closed
@@ -110,6 +114,8 @@ The conversation pane in one item's company: `#/conversation/item/<encodeURIComp
   - nothing else: no `/status` cards, no other items' callbacks.
   The head's own session is included up to the snapshot's `lastSeq`, returned
   as the history route's `{epoch, lastSeq}` so the client subscribes after it.
+  A transcript that cannot be read is one system row naming the session; the
+  item's other sessions still show.
 - **Live**: the view subscribes to the head's stream as the pane does; an
   incoming row is shown when the client's existing tagging
   ([03 §Topics](03-web-workbench.md#chat-pane-chatts-composerts)) tags it with
@@ -141,7 +147,9 @@ the item view, never typed by the sender.
   previous-session line is ~40 tokens.
 - An item-stamped message costs its line, ~10–30 tokens; nothing else enters
   the head's context. The view itself costs the model nothing.
-- The head's cache is untouched: the system prompt is the same bytes.
+- The system prompt grows once: `DISPATCHER` by ~150 tokens (the arrow,
+  the stage, the callback reply, the item line, the ambiguity question) and
+  the chat surface's header by ~35 (the item line).
 
 ## Not built
 
@@ -160,8 +168,9 @@ the item view, never typed by the sender.
   (`core/identity.ts`).
 - `TaskStore.openItems` (open only), `TaskStore.items(q)`, `TaskStore.itemHistory(problem)`,
   `markOpenItems` (closes, aliases, sessions).
-- `WebDeps.items` and `WebDeps.itemHistory` (the store's two reads); the
-  turns route reads each member's transcript as the history route does.
+- `WebDeps.items` and `WebDeps.itemHistory` (the store's two reads),
+  `WebDeps.itemSent` (a stamped send's head recorded); the turns route reads
+  each member's transcript as the history route does.
 - `DISPATCHER` (`agent/roles.ts`): the stage, the callback reply, the item
   line, the ambiguity question, the arrow.
 
@@ -178,13 +187,14 @@ the item view, never typed by the sender.
 - `core/open-items.test.ts`: `itemTurns` on a mixed transcript — two items,
   callbacks of each, a `/status` card, a divider, an `[item:]`-stamped user
   turn, an unmarked reply to a callback.
-- `web/server.test.ts`: both routes, 404 for an unknown problem, a stamped
-  message's round trip from `POST /api/continuous/messages` to a new head's
-  rows through `TaskStore`.
+- `web/server.test.ts`: both routes, 404 for an unknown problem, an
+  unreadable session's row, a stamped message's round trip from
+  `POST /api/continuous/messages` to a new head's rows through `TaskStore`
+  before any reply.
 - `web/ui/item-view.test.ts`: the view's rows and live filtering;
   `main.test.ts`: exit and an alias's hash; `views.test.ts`: hash reload, and
   the conversation's hash when there is no head;
-  `composer.test.ts`: the stamped send.
+  `composer.test.ts`: the stamped send, its queue row under a `[lang=]` header.
 
 ## Acceptance
 

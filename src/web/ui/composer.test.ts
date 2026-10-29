@@ -603,9 +603,10 @@ it("stamps a send from the item view with its item, before the quote, and sends 
   type("/status please");
   await composer.send("auto");
   expect(sent(2)).toBe("/status please");
-  // Queued, it reads as typed.
-  composer.renderQueue([sent(0).split("\n\n").at(-1)!, sent(0)], []);
-  expect(onScreen("#queue-rows").map((li) => li.textContent.includes("[item:"))).toEqual([false, false]);
+  // Queued, it reads as typed — Pi's queue holds the routed prompt, its language header first.
+  composer.renderQueue([sent(0).split("\n\n").at(-1)!, sent(0), "[lang=en]\n[item: menu]\nand also deploy it"], []);
+  expect(onScreen("#queue-rows").map((li) => li.textContent.includes("[item:"))).toEqual([false, false, false]);
+  expect(onScreen("#queue-rows")[2]?.lastElementChild?.textContent).toBe("and also deploy it");
   state.fetch.mockReset();
 });
 
