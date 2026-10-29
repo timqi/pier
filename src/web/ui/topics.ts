@@ -21,13 +21,15 @@ export const topicOpen = (problem: string): boolean => open.has(problem);
 /** Each open item's runs, to the item: a callback's reply is about the item holding its run. */
 let runTopics = new Map<string, string>();
 
-/** A tag's click: the row it sits on, to jump back from (chat.ts). */
-type Jump = (row: HTMLElement) => void;
+export const runTopic = (runId: string): string | undefined => runTopics.get(runId);
+
+/** A tag's click: the item view of its problem (docs/design/15-item-view.md). */
+type ToView = (problem: string) => void;
 
 function paintTag(label: HTMLElement, problem: string, waiting: boolean): void {
   label.toggleAttribute("data-waiting", waiting);
   label.title = waiting ? `${problem} \u00b7 waiting on you` : problem;
-  label.setAttribute("aria-label", `${label.title} \u2014 previous message of this topic`);
+  label.setAttribute("aria-label", `${label.title} \u2014 open its item view`);
 }
 
 /** Topics the user has answered since their newest reply on screen: a user row
@@ -67,7 +69,7 @@ export function setOpenTopics(items: { problem: string; status: string; runs: { 
 
 /** The tag is the first chip of a reply's chip row (chat.ts chipSlots), or
  *  the bubble's first line where there is no row. */
-export function tagRow(row: HTMLElement, problem: string, jump: Jump): void {
+export function tagRow(row: HTMLElement, problem: string, toView: ToView): void {
   row.dataset.topic = problem;
   let label = row.querySelector<HTMLElement>(".topic-tag");
   if (!label) {
@@ -81,7 +83,7 @@ export function tagRow(row: HTMLElement, problem: string, jump: Jump): void {
     else (chipRow ?? row).prepend(label);
   }
   label.style.setProperty("--topic", topicColour(problem));
-  label.onclick = () => jump(row);
+  label.onclick = () => toView(problem);
   // The text truncates inside the button, so the button's touch area (style.css) is not clipped with it.
   label.replaceChildren(h("span", "topic-text", problem));
   // The dot waits for `refreshTopicTags`: whether the user answered reads every row.
@@ -109,18 +111,18 @@ function callbackTopic(row: HTMLElement): string | undefined {
 /** A reply names its topic, and the user message it answers inherits; one
  *  naming none is its callback's. `row` is the reply's bubble; `live`, one
  *  that just ended, newer than the items on hand. */
-export function tagReply(row: HTMLElement, raw: string, jump: Jump, live = false): void {
+export function tagReply(row: HTMLElement, raw: string, toView: ToView, live = false): void {
   const marked = replyTopic(raw);
   const topic = marked ?? callbackTopic(row);
   if (!topic) return;
-  tagRow(row, topic, jump);
+  tagRow(row, topic, toView);
   if (live) row.dataset.topicFresh = "";
   if (!marked) return;
   for (let el = row.previousElementSibling as HTMLElement | null; el; el = el.previousElementSibling as HTMLElement | null) {
     const kind = el.dataset.kind;
     if (stops(kind)) break;
     if (kind !== "user") continue;
-    if (!el.dataset.topic) tagRow(el, topic, jump);
+    if (!el.dataset.topic) tagRow(el, topic, toView);
     break;
   }
 }

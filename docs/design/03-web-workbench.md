@@ -209,10 +209,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - Marker items are keyed by problem, unlisted runs by full run ID, and independent live sessions by session ID; these identities occupy separate namespaces, so equal names never merge rows. Items sharing a target remain distinct, while a session held by an item or unlisted run has no extra independent row. A session is live while streaming, while a run targets it or while runs it launched are in flight, or while its last turn is unread.
 - `core/open-items.ts` owns the shared title, status, stage, time, goal and worker wording; `web/ui/open-items.ts` renders it for the panel and command cards. Titles prefer the task layer's creation name, then a valid run name, then problem, and clamp to two lines; IDs never name missing runs.
 - Rows show the topic dot, title, a second line and useful metadata, with no right-hand badge. The second line, like the bar's lead, opens on a status mark — glyph and word in one tone: amber `waiting on you`, sky `in progress` (the still running dot), neutral `queued`, green `wrapping up`, red `failed` (the `stopped` status; the metadata names the run's state) — then the stage's phrase: its first clause, cut at `?` (kept), `。；，` or `. `/`, `, a wait's place and age dropped. The whole second line, `<status> · <stage>`, and the problem when the title differs are the control's `title` tooltip. Grouped command cards keep the glyph and omit the repeated waiting word.
-- A row is one control: dot, title, second line and metadata ([10 §Open items](10-continuous-session.md#open-items)). Independent sessions use their existing mark and title.
+- A row is one control: dot, title, second line and metadata ([10 §Open items](10-continuous-session.md#open-items)). Independent sessions use their existing mark and title. An item's row carries one secondary action beside it, its item view (**Item view** in the chat pane), 44px on a coarse pointer; the row's click is unchanged.
+- A search field tops the panel: typing calls `GET /api/continuous/items?q=<words>` → `{items: [{problem, aliases, closedAt?, updatedAt, status?}]}` (every item, closed ones too, newest first, at most 50), debounced 250ms; the list becomes the matching open items' own rows, then a `Closed` group of rows reading `closed <age> ago` (`agoLabel`), whose click opens the item view; `No item matches.` when none, the error in place when the read fails; an empty field restores the panel's rows. The field takes focus on open with a fine pointer; on a coarse one the first row does, so no keyboard rises over the list.
 - Re-read on `sessions-changed`, `task-run-changed`, `open-items-changed`, and a state change of a session an item holds; reconciliation retains row controls, focus and scroll by identity.
 - Main owns item navigation, to where the item happened (`openItemDestination`, `core/open-items.ts`): `designSessionId`, then `waitsIn`; a `waiting on you` item with neither is answered in the chat, so the head's latest on-screen topic, falling back to the newest run's session; any other item with a run opens its newest run's session; with no run, the head's tail. Topic lookup waits for a successful head snapshot; HTTP or network failure stays visible and stops fallback, and a later item, session, Console or browser navigation cancels the earlier intent. Unlisted runs and independent sessions open their session directly. A row is current when its click lands on a session, not a topic, and that session is shown. The panel closes on navigation; viewing marks a session read. Reload follows the hash, a bare or unknown hash opens the conversation, and a child sends to `POST /api/sessions/:id/messages`.
-- The panel is a 32rem popover under the lead item at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The lead item or ⌘⇧P opens it and a second press or a click outside closes it; ↑↓ walk, ↵ opens, Esc closes and returns focus to the lead item.
+- The panel is a 32rem popover under the lead item at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The lead item or ⌘⇧P opens it and a second press or a click outside closes it; ↑↓ walk the rows' controls from the field or a row, ↵ opens, Esc closes and returns focus to the lead item.
 - The lead and the rows share `drawer.ts` state; session and open-item changes refresh the panel.
 
 ### Menus (`menu.ts`, `model-picker.ts`)
@@ -316,10 +317,38 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   a head's turn end re-reads them). An item waiting on a child session's
   design is answered there, yet a message in the main chat clears its dot.
   Repainted when the items change and on every message. The tag truncates,
-  its title the full text. A click
-  reveals the topic's previous reply on screen; the earliest one lights
-  itself. On a coarse pointer the tag's hit area is 44px tall, like a chip's,
+  its title the full text. A click opens the topic's item view
+  (**Item view** below). On a coarse pointer the tag's hit area is 44px tall, like a chip's,
   without growing the tag.
+- **Item view** (`item-view.ts`, [15](15-item-view.md)):
+  `#/conversation/item/<encodeURIComponent(problem)>` is the conversation's
+  pane at the head in one item's company; the hash is the state, so reload
+  reopens it. Opened from a topic tag, a status panel row's view action, or a
+  closed item found by the panel's search.
+  - Read: `GET /api/continuous/items/:problem/turns` →
+    `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns: [{index, turn}]}], epoch, lastSeq}`,
+    read before the head's `/history`; each session's rows drawn in chain
+    order as the pane draws a session, the seed's divider included; an
+    earlier session's or a closed item's rows are read-only. The head's
+    stream then opens with `?after=<epoch>:<lastSeq>` of the turns read.
+  - Live: a row the tagging (**Topics**) tags with the problem or an alias
+    shows; a user row the view sent shows at once, and the reply in flight
+    under it until it ends untagged; a divider shows; a clock follows the
+    row it stamps; every other row is hidden (`data-item-hidden`), never
+    removed from the pane's transcript. A head rotation re-reads the view.
+  - A 404 reads the server's `No item "<problem>"` with a Back to the
+    conversation button; any other failure reads its error the same way.
+  - Bar: the item's dot (`topicColour`) and problem as the title, `×`
+    beside it, and ‹; `×`, ‹ and Esc (after a running turn's Stop) return to
+    `#/conversation` at its tail.
+  - Composer: a send is `withItem(problem, text)` — `[item: <problem>]` on
+    the first line, above a quote block — to `POST /api/continuous/messages`;
+    a chat command or skill ask goes unstamped. Every user bubble and queue
+    row shows the text without its item line (`splitItem`), the bubble
+    carrying the item's tag instead. A user row in the view has no pencil:
+    a rewind would drop the rows the view hides.
+  - Unread, the dot and next steps follow the pane's rules unchanged; the
+    view never pages earlier sessions in.
 - **Edit**: any user message; sending rewinds the transcript to it and the
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy

@@ -17,18 +17,22 @@ const select = vi.fn();
 const openItem = vi.fn();
 const quote = vi.fn();
 const send = vi.fn();
+const itemView = vi.fn();
+let viewing: string | null = null;
 
 beforeEach(async () => {
   vi.resetModules();
   select.mockClear();
   openItem.mockClear();
+  itemView.mockClear();
+  viewing = null;
   doc = installPage();
   // Only the tail-follow uses them, and the fake DOM has no layout to follow.
   for (const name of ["ResizeObserver", "MutationObserver"]) vi.stubGlobal(name, class { observe(): void {} });
   chat = await import("./chat.js");
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
-    select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+    select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
   });
   quote.mockClear();
   send.mockClear();
@@ -543,7 +547,7 @@ describe("tail follow across the final render", () => {
     chat = await import("./chat.js");
     chat.initChat({
       sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming",
-      select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote,
+      select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
     });
   });
 
@@ -711,7 +715,7 @@ describe("file references", () => {
 
   it("falls back to the cwds earlier callbacks carried, most recent first, when the session's own has nothing", async () => {
     const asked = disk(["/w/main/src/a.ts", "/w/one/src/b.ts", "/w/two/src/b.ts", "/w/one/src/c.ts"]);
-    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote };
+    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing };
     chat.initChat(deps);
     const callback = (cwd: string) => chat.appendSystemInput("Task \"t\" finished with state: succeeded\n\nok", {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s", source: { taskName: "t" }, state: "succeeded", cwd,
@@ -1031,7 +1035,7 @@ describe("the turn's bubble", () => {
     activity = await import("./turn-activity.js");
   });
 
-  it("tags an `<open>` reply and the user message above it; a tag jumps to the topic's reply before", () => {
+  it("tags an `<open>` reply and the user message above it; a tag opens its item view", () => {
     chat.renderSnapshot([
       { role: "user", text: "review auth please", at: 1 },
       { role: "assistant", text: "On it.\n<open>auth review — worker running</open>" },
@@ -1046,15 +1050,9 @@ describe("the turn's bubble", () => {
     expect(a1!.textContent).not.toContain("<open>");
     for (const r of [u3, a3]) expect(r!.dataset.topic).toBeUndefined();
     a2!.querySelector(".topic-tag")!.onclick!();
-    expect("reveal" in a1!.dataset).toBe(true);
-    // The user message's tag jumps past its own reply's exchange, to the reply before it.
-    delete a1!.dataset.reveal;
     u2!.querySelector(".topic-tag")!.onclick!();
-    expect("reveal" in a1!.dataset).toBe(true);
-    // The earliest on screen lights itself: the jump happened, there is nothing above.
-    a1!.querySelector(".topic-tag")!.onclick!();
-    expect("reveal" in a1!.dataset).toBe(true);
-    expect("reveal" in u1!.dataset).toBe(false);
+    expect(itemView.mock.calls).toEqual([["auth review"], ["auth review"]]);
+    expect(pane().querySelectorAll("[data-reveal]")).toHaveLength(0);
     // The status panel's landing: the newest reply of the topic, or false.
     expect(chat.revealTopic("auth review")).toBe(true);
     expect("reveal" in a2!.dataset).toBe(true);
@@ -1422,7 +1420,7 @@ describe("the turn's bubble", () => {
     expect(rows[3]!.hidden && rows[4]!.hidden).toBe(true);
   });
 
-  it("grows a fold live, keeps it closed after the final reply, and opens it for a jump to a folded reply", () => {
+  it("grows a fold live and keeps it closed after the final reply", () => {
     chat.completeTurn("Started.");
     chat.completeTurn("<silent>one</silent>");
     const fold = () => pane().querySelector("[data-kind='fold']")!.querySelector("button")!;
@@ -1436,9 +1434,6 @@ describe("the turn's bubble", () => {
     expect(pane().children.map((r) => r.hidden)).toEqual([false, false, true, true, false]);
     expect(chat.revealTopic("t")).toBe(true); // the newest reply of the topic: the final one, already shown
     expect(fold().getAttribute("aria-expanded")).toBe("false");
-    pane().children[4]!.querySelector(".topic-tag")!.onclick?.(); // back to the silent reply before it
-    expect(fold().getAttribute("aria-expanded")).toBe("true");
-    expect(pane().children[3]!.hidden).toBe(false);
   });
 
   it("leaves a silent reply out of the fold while a cause of it failed or was cut short", () => {

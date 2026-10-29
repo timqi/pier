@@ -37,9 +37,9 @@ it("tags a row once: one label, under the speaker caption, updated in place, its
   const caption = document.createElement("div");
   caption.className = "speaker-line";
   row.append(caption, document.createElement("div"));
-  const jump = vi.fn();
-  topics.tagRow(row, "auth", jump);
-  topics.tagRow(row, "auth review", jump);
+  const toView = vi.fn();
+  topics.tagRow(row, "auth", toView);
+  topics.tagRow(row, "auth review", toView);
   const tags = fake(row).querySelectorAll(".topic-tag");
   expect(tags).toHaveLength(1);
   expect(fake(row).children.indexOf(tags[0]!)).toBe(1);
@@ -49,7 +49,7 @@ it("tags a row once: one label, under the speaker caption, updated in place, its
   expect(tags[0]!.style.getPropertyValue("--topic")).toBe(`oklch(0.62 0.15 ${topics.topicHue("auth review")})`);
   expect(row.style.getPropertyValue("--topic")).toBe("");
   tags[0]!.onclick!();
-  expect(jump).toHaveBeenCalledWith(row);
+  expect(toView).toHaveBeenCalledWith("auth review");
 });
 
 it("names only the problem, dotted while its item waits on the user and they have not answered", () => {
@@ -63,7 +63,7 @@ it("names only the problem, dotted while its item waits on the user and they hav
   topics.setOpenTopics([{ problem: "auth", status: "waiting on you", runs: [] }]);
   expect(tag(a).textContent).toBe("auth");
   expect(tag(a).title).toBe("auth \u00b7 waiting on you");
-  expect(tag(a).getAttribute("aria-label")).toBe("auth \u00b7 waiting on you \u2014 previous message of this topic");
+  expect(tag(a).getAttribute("aria-label")).toBe("auth \u00b7 waiting on you \u2014 open its item view");
   expect(dotted()).toEqual([true]);
   // A row tagged later is dotted by the next refresh, the tag's owner (chat.ts) calling it.
   const b = add("assistant");

@@ -8,7 +8,7 @@ import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, st
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
-import { splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
+import { splitItem, splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, plainText, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { openItemsCard } from "./open-items.js";
@@ -34,7 +34,7 @@ import {
   stateGlyph,
 } from "./turn-activity.js";
 import { dividerLine, foldSeed, foldSilence, unfold } from "./folds.js";
-import { refreshTopicTags, tagReply } from "./topics.js";
+import { refreshTopicTags, tagReply, tagRow } from "./topics.js";
 import { rowGestures } from "./row-gestures.js";
 import type {
   BackgroundRun,
@@ -55,6 +55,10 @@ export interface ChatDeps {
   sessionState: () => SessionState;
   select: (id: string) => void;
   openItem: (target: OpenItemTarget) => void;
+  /** A topic tag's click: that item's view. */
+  itemView: (problem: string) => void;
+  /** The item view's problem while it is open: no edit there, its rewind drops rows the view hides. */
+  item: () => string | null;
   /** `quote`: the reply a next-step label answers, sent as a Reply to it. */
   send: (mode: "auto" | "steer", label?: string, quote?: QuoteSource) => void;
   /** A user turn this client just drew itself: ledger it so the `user-message`
@@ -278,25 +282,12 @@ export function scrollBottom(force = false): void {
  *  too because reduced motion draws the mark without an animation to end. */
 const REVEAL_MS = 1200;
 
-/** A topic's newest reply on screen, or the newest above `from`. */
-function lastOfTopic(problem: string, from?: HTMLElement): HTMLElement | null {
-  const rows = [...turnsPane.children] as HTMLElement[];
-  for (let i = (from ? rows.indexOf(from) : rows.length) - 1; i >= 0; i--) {
-    if (rows[i]!.dataset.kind === "assistant" && rows[i]!.dataset.topic === problem) return rows[i]!;
-  }
-  return null;
-}
-
-/** How a status panel row lands (ui/drawer.ts). `false` when no reply of the topic is on screen. */
+/** How a status panel row lands (ui/drawer.ts): the topic's newest reply on screen. `false` when there is none. */
 export function revealTopic(problem: string): boolean {
-  const row = lastOfTopic(problem);
-  if (!row) return false;
-  reveal(row);
-  return true;
+  const row = ([...turnsPane.children] as HTMLElement[]).reverse().find((r) => r.dataset.kind === "assistant" && r.dataset.topic === problem);
+  if (row) reveal(row);
+  return !!row;
 }
-
-/** A tag's click: the topic's previous reply; the earliest on screen lights itself. */
-const jumpBack = (row: HTMLElement): void => reveal(lastOfTopic(row.dataset.topic ?? "", row) ?? row);
 
 function reveal(row: HTMLElement): void {
   unfold(row);
@@ -408,7 +399,9 @@ export function appendTurn(
   // text it buries the message under a raw platform id.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when || speaker?.where || speaker?.lang ? speaker : null;
-  const quoted = kind === "user" ? splitQuote(named?.text ?? body) : null;
+  // The item view's line names the item; the row's tag says so instead.
+  const item = kind === "user" ? splitItem(named?.text ?? body) : null;
+  const quoted = item ? splitQuote(item.text) : null;
   // Here the operator is the reader; their own name over every message is noise.
   // A platform with opaque ids names the speaker and nothing else, so the
   // caption cannot be gated on the id.
@@ -416,7 +409,7 @@ export function appendTurn(
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, quoted?.text ?? named?.text ?? body);
   // Editing resends the raw text, markers, header and quote included — stripping
   // them from the bubble must not detach the files, or drop who was speaking.
-  if (files?.paths.length || named || quoted?.quote || kind === "assistant") node.dataset.raw = text;
+  if (files?.paths.length || named || item?.item || quoted?.quote || kind === "assistant") node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
   if (at !== undefined) setRowTime(row, at);
   if (caption) row.append(speakerLine(caption));
@@ -427,6 +420,7 @@ export function appendTurn(
     if (answers) row.dataset.answers = answers;
   }
   row.append(node);
+  if (item?.item) tagRow(row, item.item, deps.itemView);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
     const strip = imageRow(row);
@@ -482,7 +476,7 @@ function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElemen
     b.onclick = onclick;
     return b;
   };
-  if (kind === "user" && !readonlyRows) {
+  if (kind === "user" && !readonlyRows && !deps.item()) {
     cancelEdit?.();
     tools.append(tool(Pencil, "Edit", "Edit message", "Edit message — resends it and drops everything after it", () => startEdit(row, node)));
   }
@@ -854,7 +848,7 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
 
 function appendAssistant(raw: string, meta?: TurnMeta, offer = false): void {
   const node = renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
-  tagReply(node.parentElement!, raw, jumpBack, !bulk);
+  tagReply(node.parentElement!, raw, deps.itemView, !bulk);
   if (!bulk) {
     foldSilence(turnsPane);
     refreshSuggestions();

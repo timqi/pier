@@ -33,11 +33,12 @@ beforeEach(async () => {
   vi.resetModules();
   doc = installPage();
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
   drawer = await import("./drawer.js");
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
     sessions: () => sessions, currentId: () => state.current, chain: () => state.chain, openContinuous, open: () => state.items,
-    openItem,
+    openItem, itemView: vi.fn(),
   });
 });
 

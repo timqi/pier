@@ -36,13 +36,15 @@ let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
 const openItem = vi.fn();
+const itemView = vi.fn();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
   doc = installPage();
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
   drawer = await import("./drawer.js");
   sessions = []; chain = []; current = null; open = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
-    openContinuous: vi.fn(), open: () => open, openItem });
+    openContinuous: vi.fn(), open: () => open, openItem, itemView });
 });
 afterEach(() => vi.restoreAllMocks());
 const lead = () => doc.querySelector("#status-item")!;
@@ -152,13 +154,19 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(dot("item:auth").style.background).toBe(topicColour("auth"));
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
-  expect(doc.querySelectorAll(".open-item").every((li) => li.querySelectorAll("button").length === 1)).toBe(true);
+  // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
+  expect(doc.querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }));
   expect(menu.closeMenu).toHaveBeenCalled();
+  drawer.openDrawer();
+  const view = item("item:auth").querySelector(".item-view-open")!;
+  expect(view.getAttribute("aria-label")).toBe("Item view — auth review");
+  view.onclick?.();
+  expect(itemView).toHaveBeenCalledWith("auth");
 });
 
 it("keeps controls and focus on problem identity across title and state refreshes", () => {
@@ -266,4 +274,44 @@ it("trims a stage to its first clause, a question keeping its mark, never inside
   expect(phrase("release v0.4.20 from main.ts. Then tag it")).toBe("release v0.4.20 from main.ts");
   expect(phrase("开发中：待办状态化、间距统一")).toBe("开发中：待办状态化、间距统一");
   expect(phrase("")).toBe("");
+});
+
+// The panel's search: open matches are their panel rows, closed ones a group whose click opens the view.
+it("searches every item as the user types, closed ones under Closed with their age", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  vi.setSystemTime(10 * 60 * 60_000);
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    asked.push(url);
+    return { ok: true, json: async () => ({ items: [
+      { problem: "auth", aliases: [], updatedAt: 1 },
+      { problem: "auth v1", aliases: ["old auth"], closedAt: 7 * 60 * 60_000, updatedAt: 1 },
+    ] }) };
+  }));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [] }, { problem: "deploy", stage: "", status: "running", runs: [] }], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  const field = doc.querySelector("input[type='search']")!;
+  expect(field.getAttribute("aria-label")).toBe("Search items");
+  field.value = "au";
+  field.oninput?.(new Event("input"));
+  field.value = "auth";
+  field.oninput?.(new Event("input"));
+  await vi.advanceTimersByTimeAsync(300);
+  expect(asked).toEqual(["/api/continuous/items?q=auth"]);
+  const list = doc.querySelector("[data-list]")!;
+  expect(list.children.map((li) => li.textContent)).toEqual([expect.stringContaining("auth"), "Closed", "auth v1closed 3h ago"]);
+  expect(list.children[0]).toBe(item("item:auth"));
+  item("closed:auth v1").querySelector(".session-open")!.onclick?.();
+  expect(itemView).toHaveBeenCalledWith("auth v1");
+  expect(menu.closeMenu).toHaveBeenCalled();
+  // An emptied field gives the panel its own rows back.
+  drawer.openDrawer();
+  const again = doc.querySelector("input[type='search']")!;
+  again.value = "zzz";
+  again.oninput?.(new Event("input"));
+  again.value = "";
+  again.oninput?.(new Event("input"));
+  await vi.advanceTimersByTimeAsync(300);
+  expect(labels()).toEqual(["auth", "deploy"]);
+  vi.useRealTimers();
 });

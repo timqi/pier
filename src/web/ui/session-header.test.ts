@@ -16,7 +16,7 @@ vi.mock("./menu.js", () => ({
 vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./chat.js", () => ({ appendTurn: vi.fn() }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
-vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
+vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn(), escapeKey: vi.fn() }));
 const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
 vi.mock("./drawer.js", () => ({
   headSession: () => drawer.head,
@@ -38,6 +38,7 @@ const openContinuous = vi.fn();
 let current: SessionInfo | undefined;
 /** The continuous conversation is on screen. */
 let conversation = false;
+let viewing: string | null = null;
 
 let header: typeof import("./session-header.js");
 let picker: typeof import("./model-picker.js");
@@ -66,6 +67,7 @@ beforeEach(async () => {
   installPage();
   current = undefined;
   conversation = false;
+  viewing = null;
   drawer.head = undefined;
   header = await import("./session-header.js");
   picker = await import("./model-picker.js");
@@ -79,6 +81,7 @@ beforeEach(async () => {
     continuousOpen: () => conversation,
     rotateAt: () => 60_000,
     openContinuous,
+    item: () => viewing,
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
     Promise.resolve(url.endsWith("/models") ? [model] : { level: "high", levels }) as never
@@ -193,6 +196,35 @@ it("shows ‹ with the head's dot on a child, and the child's phase tag", () => 
   header.renderHeader();
   expect(back().classList.contains("hidden")).toBe(true);
   expect(fake(document.querySelector("#chat-phase")).textContent).toBe("");
+});
+
+// The item view's bar: its dot and problem with ×, which Esc shares; ‹ and × go back to the conversation.
+it("names the item view's problem with its dot and ×, each way out opening the conversation", async () => {
+  const { escapeKey } = await import("./shortcut.js");
+  const { topicColour } = await import("./topics.js");
+  const close = fake(document.querySelector("#item-close"));
+  conversation = true;
+  header.renderHeader();
+  expect(close.classList.contains("hidden")).toBe(true);
+  viewing = "auth review";
+  header.renderHeader();
+  expect(title().textContent).toBe("auth review");
+  expect(title().querySelector("span")!.style.background).toBe(topicColour("auth review"));
+  expect(close.classList.contains("hidden")).toBe(false);
+  expect(close.getAttribute("aria-label")).toBe("Close the item view");
+  expect(back().classList.contains("hidden")).toBe(false);
+  close.onclick?.();
+  back().onclick?.();
+  const [el, , run, when] = vi.mocked(escapeKey).mock.calls[0]!;
+  expect(el).toBe(document.querySelector("#item-close"));
+  expect(when()).toBe(true);
+  run();
+  expect(openContinuous).toHaveBeenCalledTimes(3);
+  viewing = null;
+  expect(when()).toBe(false);
+  header.renderHeader();
+  expect(title().textContent).toBe("Pier");
+  expect(close.classList.contains("hidden")).toBe(true);
 });
 
 // The floating home button is the same way back, there only off the conversation.

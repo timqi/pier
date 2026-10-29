@@ -9,7 +9,7 @@ import { $, h } from "./dom.js";
 import { appendTurn, excerptText, followTail, type QuoteSource, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
-import { QUOTE_CHARS, withQuote } from "../../core/identity.js";
+import { QUOTE_CHARS, splitItem, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
@@ -34,6 +34,8 @@ interface ComposerDeps {
   /** The continuous conversation is on screen: sends go to its head, whichever
    *  that is by then; otherwise to the child session on screen. */
   continuous: () => boolean;
+  /** The item view's problem: what its sends are stamped with. */
+  item?: () => string | null;
   /** The head a continuous send landed on is not the one on screen. */
   headMoved?: () => void;
 }
@@ -195,7 +197,7 @@ export function renderQueue(steering: string[], followUp: string[], parkedNow = 
       } else if (r.mode !== "queued") {
         li.append(h("span", "max-w-[40%] flex-none truncate rounded bg-neutral-100 px-1 py-0.5 text-[10.5px] font-semibold text-neutral-600", r.mode));
       }
-      li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", r.text));
+      li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", splitItem(r.text).text));
       return li;
     }),
   );
@@ -507,8 +509,10 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
     pendingFiles = [];
     renderFileStrip();
   }
-  // A command or skill ask is not a reply: the quote stays staged for the next message.
-  const staged = label === undefined && !isCommandText(typed, skills.map((s) => s.name)) ? pendingQuote : null;
+  // A command or skill ask is not a reply, nor about an item: the quote stays staged for the next message.
+  const ask = !isCommandText(typed, skills.map((s) => s.name));
+  const staged = label === undefined && ask ? pendingQuote : null;
+  const item = ask ? deps.item?.() : null;
   if (staged) setQuote(null);
   quote ??= staged ?? undefined;
   try {
@@ -532,7 +536,8 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
       for (const f of files) if (f.preview) URL.revokeObjectURL(f.preview);
     }
     const body = [typed, ...markers].filter(Boolean).join("\n");
-    const text = quote ? withQuote(quote, body) : body;
+    const quoted = quote ? withQuote(quote, body) : body;
+    const text = item ? withItem(item, quoted) : quoted;
     // A chat command is answered without a turn: no bubble, no streaming to take back.
     const command = continuous && chatCommand(text) !== undefined;
     const startsTurn = !command && deps.sessionState() === "idle" && mode === "auto";

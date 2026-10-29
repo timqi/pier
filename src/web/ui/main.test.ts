@@ -11,6 +11,10 @@ const h = vi.hoisted(() => ({
   composer: null as unknown as Parameters<typeof import("./composer.js").initComposer>[0],
   views: null as unknown as Parameters<typeof import("./views.js").initViews>[0],
   history: vi.fn<(url: string) => Promise<Response>>(),
+  itemTurns: vi.fn<(url: string) => Promise<Response>>(),
+  itemFilter: vi.fn(),
+  renderItem: vi.fn(),
+  itemMissing: vi.fn(),
   renderSnapshot: vi.fn(),
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
@@ -47,6 +51,10 @@ vi.mock("./session-header.js", () => ({
   setHeaderState: vi.fn(),
 }));
 vi.mock("./theme.js", () => ({ initTheme: vi.fn() }));
+vi.mock("./item-view.js", () => ({
+  itemMissing: h.itemMissing, renderItem: h.renderItem,
+  itemTurnsUrl: (problem: string) => `/api/continuous/items/${encodeURIComponent(problem)}/turns`,
+}));
 vi.mock("./version.js", () => ({ initVersion: vi.fn() }));
 vi.mock("./drawer.js", () => ({
   initDrawer: (deps: typeof h.drawer) => { h.drawer = deps; }, renderDrawer: vi.fn(),
@@ -59,7 +67,7 @@ vi.mock("./views.js", () => ({
   // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).
   applyRoute: vi.fn(() => { if (typeof location !== "undefined" && !location.hash) h.views.openContinuous(); }),
   initViews: (deps: typeof h.views) => { h.views = deps; }, isChatVisible: vi.fn(() => true),
-  setConversationHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
+  setConversationHash: vi.fn(), setItemHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
   showConsole: vi.fn(), showFiles: vi.fn(),
   toggleFiles: vi.fn(),
 }));
@@ -482,6 +490,7 @@ describe("the continuous conversation", () => {
       if (url === "/api/continuous") return Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
       if (url.endsWith("/history")) return h.history(url);
+      if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);
       return Promise.resolve(Response.json(rows));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -519,6 +528,44 @@ describe("the continuous conversation", () => {
     expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h2/history"]);
     expect(h.header.continuousOpen()).toBe(true);
     expect(h.content).toContain("head");
+  });
+
+  // The item view: the head's pane drawn from the item's turns, its stream resumed at their cursor.
+  it("opens an item's view at the head, follows its stream from the turns' cursor, and returns to the tail", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    const view = { problem: "auth", aliases: [], sessions: [{ sessionId: "h1", startedAt: 1, turns: [] }], epoch: "ep", lastSeq: 7 };
+    h.itemTurns.mockResolvedValue(Response.json(view));
+    h.renderItem.mockReturnValue(h.itemFilter);
+    const views = await import("./views.js");
+    h.views.openItemView("auth review");
+    await settled();
+    expect(h.itemTurns).toHaveBeenCalledWith("/api/continuous/items/auth%20review/turns");
+    expect(views.setItemHash).toHaveBeenLastCalledWith("auth review");
+    expect(h.renderItem).toHaveBeenCalledWith(view, "h1", "idle", []);
+    expect(h.composer.item?.()).toBe("auth review");
+    expect(h.header.item()).toBe("auth review");
+    expect(latest().url).toBe("/api/sessions/h1/events?after=ep:7");
+    latest().message(8, "elsewhere", "h1");
+    expect(h.itemFilter).toHaveBeenCalled();
+    h.header.openContinuous();
+    await settled();
+    expect(h.header.item()).toBeNull();
+    expect(views.setSessionHash).toHaveBeenLastCalledWith("h1"); // a chain member's route is #/conversation (views.ts)
+    expect(h.content.at(-1)).toBe("head");
+  });
+
+  it("reads an unknown item's 404 with the way back", async () => {
+    await boot([member("h1")]);
+    h.itemTurns.mockResolvedValue(Response.json({ error: 'No item "nope"' }, { status: 404 }));
+    h.views.openItemView("nope");
+    await settled();
+    expect(h.itemMissing).toHaveBeenCalledWith('No item "nope"', expect.any(Function));
+    expect(h.renderItem).not.toHaveBeenCalled();
+    expect(latest().closed).toBe(true); // no stream follows a view that is not there
+    (h.itemMissing.mock.calls[0]![1] as () => void)();
+    await settled();
+    expect(h.header.item()).toBeNull();
+    expect(h.content.at(-1)).toBe("head");
   });
 
   // A child session (a lead's, a task run's) is a route of its own; ‹ goes back.

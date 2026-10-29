@@ -58,8 +58,8 @@
       <button type="button" id="theme-toggle" aria-label="Theme"
         class="icon-btn text-[13px]"></button>
     </section>
-    <!-- The one bar, at every width: the way back, the title (Session info),
-         the phase tag, then the open-item counter and the lead item (the status
+    <!-- The one bar, at every width: the way back, the title (Session info) or
+         the item view's problem and its ×, the phase tag, then the open-item counter and the lead item (the status
          panel, drawer.ts), the meta chips and ⋯ (session-header.ts). Flat
          children, so below md the urgent meta row can wrap to a line of its own
          (style.css). -->
@@ -67,6 +67,8 @@
       <button type="button" id="bar-back" aria-label="Back to the conversation" title="Back to the conversation"
         class="icon-btn hidden h-11 w-11 gap-0.5 text-neutral-500"></button>
       <button type="button" id="chat-title" class="min-w-0 truncate text-left font-medium"></button>
+      <button type="button" id="item-close" aria-label="Close the item view" title="Close the item view"
+        class="icon-btn hidden h-11 w-11 flex-none text-neutral-500 md:h-8 md:w-8"><span data-icon="X" class="h-3.5 w-3.5"></span></button>
       <span id="chat-phase" class="flex flex-none items-center"></span>
       <!-- Always laid out, empty with no rows: its auto margin keeps the meta and ⋯ right. -->
       <div id="status-lead" class="mr-auto flex min-w-0 items-center gap-0.5 text-[13px]">

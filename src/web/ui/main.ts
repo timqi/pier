@@ -52,6 +52,7 @@ import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderStat
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
+import { itemMissing, itemTurnsUrl, renderItem, type ItemTurns } from "./item-view.js";
 import { refreshSuggestions } from "./suggestions.js";
 import { setOpenTopics } from "./topics.js";
 import {
@@ -65,6 +66,7 @@ import {
   initViews,
   isChatVisible,
   setConversationHash,
+  setItemHash,
   setSessionHash,
   showChat,
   showConsole,
@@ -136,6 +138,11 @@ let paging = false;
 let pagedAt = 0;
 /** What it is solving, for the drawer's run rows; null before it answers. */
 let openItems: OpenItems | null = null;
+/** The item view's problem (`#/conversation/item/…`), and the one the pane was drawn for. */
+let item: string | null = null;
+let paneItem: string | null = null;
+/** The item view's filter, run after each event (item-view.ts); null off the view. */
+let itemFilter: (() => void) | null = null;
 
 const headId = (): string | null => chain[0]?.sessionId ?? null;
 const inConversation = (id: string): boolean => chain.some((m) => m.sessionId === id);
@@ -197,6 +204,7 @@ async function openItem(target: OpenItemTarget): Promise<void> {
 
 function openContinuous(user = true): void {
   if (user) cancelNavigation();
+  item = null;
   const head = headId();
   if (head) return void select(head, false);
   if (unstarted) {
@@ -222,6 +230,15 @@ function openContinuous(user = true): void {
   focusInput();
 }
 
+/** The conversation's pane in one item's company; the rows wait for the head's snapshot to name it. */
+function openItemView(problem: string): boolean {
+  cancelNavigation();
+  const head = headId();
+  if (!head) openContinuous(false);
+  else void select(head, false, problem);
+  return !!head;
+}
+
 /** The session just left stays in view above the new head. */
 async function followHead(head: string): Promise<void> {
   earlier = [];
@@ -241,7 +258,7 @@ async function followHead(head: string): Promise<void> {
 async function page(): Promise<boolean> {
   const head = headId();
   const member = chain[earlier.length + 1];
-  if (paging || !head || !member || currentId !== head || !isChatVisible()) return false;
+  if (paging || !head || !member || currentId !== head || !isChatVisible() || paneItem) return false;
   const intent = navigation;
   const generation = loadSeq;
   const current = (): boolean => intent === navigation && generation === loadSeq && currentId === head && headId() === head && isChatVisible();
@@ -314,7 +331,7 @@ const refreshSessions = coalesce(async () => {
   commitSessions(rows);
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   const head = headId();
-  if (following && head && head !== was) await followHead(head);
+  if (following && head && head !== was) await (item ? select(head, false, item) : followHead(head));
 });
 
 /** The window's own focus/blur, beside `hasFocus()`: a window behind another
@@ -454,6 +471,7 @@ function handleEvent(e: SessionEvent): void {
       setState(e.state);
       break;
   }
+  if (e.type !== "text-delta") itemFilter?.();
 }
 
 function connectWorkspace(): void {
@@ -522,7 +540,8 @@ function connect(id: string, cursor: string, generation: number): void {
 
 // --- selection --------------------------------------------------------------------
 
-async function select(id: string, user = true): Promise<void> {
+/** `problem`: the item view of the conversation, at its head. */
+async function select(id: string, user = true, problem: string | null = null): Promise<void> {
   if (user) cancelNavigation();
   // Any session of the continuous conversation opens the conversation, at its head.
   if (inConversation(id)) id = headId()!;
@@ -532,9 +551,11 @@ async function select(id: string, user = true): Promise<void> {
   }
   // A session named from a run card is usually not in the list; the
   // snapshot's 404 says whether the id exists and why.
+  item = problem;
   showChat();
-  setSessionHash(id);
-  if (id === currentId && (source || loading)) return;
+  if (problem) setItemHash(problem);
+  else setSessionHash(id);
+  if (id === currentId && (source || loading) && paneItem === item) return;
   choose(id);
   await loadSession(id);
 }
@@ -562,6 +583,7 @@ function resetPane(): void {
   optimistic = false;
   clearOptimistic();
   lastSeq = 0;
+  itemFilter = null;
 }
 
 /** The latest load while one runs: its superseded predecessors return early. */
@@ -590,6 +612,10 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
     resetPane();
     chatLoading(true);
   }
+  const problem = (paneItem = item);
+  // Read first: its `lastSeq` is the cursor, and the head's snapshot read after it is no older.
+  const view = problem ? await getJson<ItemTurns>(itemTurnsUrl(problem), `Could not load the item "${problem}"`) : null;
+  if (currentId !== id || generation !== loadSeq) return;
   const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
@@ -605,15 +631,23 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
     if (continuousOpen()) void refreshSessions();
     return;
   }
+  if (view && !view.ok) {
+    chatLoading(false);
+    return itemMissing(view.error, () => openContinuous());
+  }
   snapshotReady = true;
   const snap = got.value;
-  if (continuousOpen()) renderEarlier();
-  renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
+  const cursor = view?.value ?? snap;
+  if (view) itemFilter = renderItem(view.value, id, snap.state, snap.backgroundRuns);
+  else {
+    if (continuousOpen()) renderEarlier();
+    renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
+  }
   if (keep) {
     keepScroll(fromBottom);
     if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
   }
-  lastSeq = snap.lastSeq;
+  lastSeq = cursor.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
   // run state (composer buttons) and the pending queue panel.
   turnOpen = snap.state === "streaming";
@@ -624,7 +658,7 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   // the last reply — no role test, and none of Array#findLast (web target).
   const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);
   setHeaderState(snap.model, snap.context, snap.thinkingLevel, lastReply);
-  connect(id, `${snap.epoch}:${snap.lastSeq}`, generation);
+  connect(id, `${cursor.epoch}:${cursor.lastSeq}`, generation);
 }
 
 // --- wiring ----------------------------------------------------------------------------
@@ -654,6 +688,8 @@ initChat({
   sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
   openItem: (target) => void openItem(target),
+  itemView: openItemView,
+  item: () => item,
   select: (id) => void select(id),
   send: (mode, label, quote) => void send(mode, label, quote),
   ownTurn: (text) => {
@@ -670,6 +706,7 @@ initComposer({
   setState: ownState,
   reload: reloadIfCurrent,
   continuous: continuousOpen,
+  item: () => item,
   // The re-list sees the rotation and moves the pane to the new head.
   headMoved: () => void refreshSessions(),
 });
@@ -680,6 +717,7 @@ initDrawer({
   openContinuous,
   open: () => openItems,
   openItem,
+  itemView: openItemView,
 });
 initHeader({
   currentId: () => currentId,
@@ -690,6 +728,7 @@ initHeader({
   continuousOpen,
   rotateAt: () => rotateAt,
   openContinuous,
+  item: () => item,
 });
 initViews({
   cancelNavigation,
@@ -698,6 +737,7 @@ initViews({
   select: (id) => void select(id),
   inConversation,
   openContinuous,
+  openItemView,
   maybeAckRead,
 });
 

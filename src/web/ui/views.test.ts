@@ -15,7 +15,7 @@ const el = (selector: string): FakeElement => fake(document.querySelector(select
 const shown = (pane: FakeElement): boolean => !pane.classList.contains("hidden");
 const settled = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 let views: typeof import("./views.js");
-const conversation = { current: null as string | null, select: vi.fn(), open: vi.fn() };
+const conversation = { current: null as string | null, select: vi.fn(), open: vi.fn(), item: vi.fn((_problem: string) => true) };
 const session = { id: "s1", cwd: "/work" } as unknown as import("./drawer.js").SessionInfo;
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks();
@@ -29,7 +29,7 @@ beforeEach(async () => {
   views = await import("./views.js");
   views.initViews({
     currentId: () => conversation.current, currentSession: () => session, select: conversation.select,
-    inConversation: (id) => id.startsWith("chain-"), openContinuous: conversation.open,
+    inConversation: (id) => id.startsWith("chain-"), openContinuous: conversation.open, openItemView: conversation.item,
     maybeAckRead: vi.fn(), cancelNavigation: vi.fn(),
   });
 });
@@ -61,6 +61,21 @@ it("opens Browse files as the Files dialog on the current session, leaving the h
   expect(mocks.toggleFiles).toHaveBeenLastCalledWith(session);
   expect(location.hash).toBe("#/session/s1");
   expect(shown(el("#bar"))).toBe(true);
+});
+// The hash is the item view's state: a reload reopens it, the problem round-tripped whole.
+it("opens an item's view from its hash, and names it there", () => {
+  views.setItemHash("CI 修复 / flaky");
+  expect(location.hash).toBe("#/conversation/item/CI%20%E4%BF%AE%E5%A4%8D%20%2F%20flaky");
+  views.applyRoute();
+  expect(conversation.item).toHaveBeenCalledWith("CI 修复 / flaky");
+  expect(conversation.open).not.toHaveBeenCalled();
+  expect(location.hash).toBe("#/conversation/item/CI%20%E4%BF%AE%E5%A4%8D%20%2F%20flaky");
+  location.hash = "#/conversation/item/%E0%A4%A"; views.applyRoute();
+  expect(conversation.open).toHaveBeenCalledTimes(1);
+  // No head to read the item from: the conversation opened instead, and the hash says so.
+  conversation.item.mockReturnValueOnce(false);
+  views.setItemHash("auth"); views.applyRoute();
+  expect(location.hash).toBe("#/conversation");
 });
 it("ignores malformed encoded routes without crashing", () => {
   location.hash = "#/session/%E0%A4%A"; expect(() => views.applyRoute()).not.toThrow();

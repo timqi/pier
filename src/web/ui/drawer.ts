@@ -2,12 +2,13 @@
 // most urgent row and listed in the panel that row opens — the open items and
 // the live sessions no item holds, one row each.
 
+import { getJson } from "./api.js";
 import { $, agoLabel, h } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { openItemPresentation } from "../../core/open-items.js";
-import { openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
+import { closedItemRow, openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
 import type { OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
@@ -45,6 +46,8 @@ interface DrawerDeps {
   /** `GET /api/continuous/open`; null before it answers. */
   open: () => OpenItems | null;
   openItem: (target: OpenItemTarget) => void;
+  /** An item row's secondary action, and a closed item's click: its view. */
+  itemView: (problem: string) => void;
 }
 
 let deps: DrawerDeps;
@@ -187,6 +190,7 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
     const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target); },
+      panelView: toView,
     }, rowNodes.get(p.key));
     rowNodes.set(p.key, node);
     return node;
@@ -259,19 +263,69 @@ function cycleLead(): void {
 function fill(into: HTMLElement): void {
   const focused = into.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   const top = into.scrollTop;
-  rows.forEach((row, index) => { if (into.children[index] !== row) into.insertBefore(row, into.children[index] ?? null); });
+  const shown = found ?? rows;
+  shown.forEach((row, index) => { if (into.children[index] !== row) into.insertBefore(row, into.children[index] ?? null); });
+  while (into.children.length > shown.length) into.lastElementChild!.remove();
   if (focused?.isConnected) focused.focus({ preventScroll: true });
   into.scrollTop = top;
+}
+
+const toView = (problem: string): void => { closeMenu(); deps.itemView(problem); };
+
+// --- search -------------------------------------------------------------------------------
+
+/** `GET /api/continuous/items` row: every item, closed ones too, matched on its key and aliases. */
+interface ItemHit { problem: string; aliases: string[]; closedAt?: number; updatedAt: number }
+
+/** The search's rows while its field holds words; null shows the panel's own. */
+let found: HTMLElement[] | null = null;
+let query = "";
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+const SEARCH_MS = 250;
+
+const note = (text: string, cls = "text-neutral-500"): HTMLElement => h("li", `px-1.5 py-2 text-xs ${cls}`, text);
+
+/** Open matches are their panel rows, their click the row's; closed ones follow under `Closed`. */
+async function search(q: string): Promise<void> {
+  query = q;
+  const got = q ? await getJson<{ items: ItemHit[] }>(`/api/continuous/items?q=${encodeURIComponent(q)}`, "Could not search the items") : null;
+  if (q !== query || !list) return; // a later keystroke owns the list
+  if (!got) found = null;
+  else if (!got.ok) found = [note(got.error, "text-red-600")];
+  else {
+    const open = new Set(got.value.items.filter((i) => i.closedAt === undefined).map((i) => `item:${i.problem}`));
+    const closed = got.value.items.filter((i) => i.closedAt !== undefined);
+    found = [...rows.filter((r) => open.has(r.dataset.rowKey ?? "")),
+      ...(closed.length ? [note("Closed"), ...closed.map((i) => closedItemRow(i.problem, i.closedAt!, toView))] : [])];
+    if (!found.length) found = [note("No item matches.")];
+  }
+  fill(list);
+}
+
+function searchField(): HTMLInputElement {
+  const field = h("input", "mb-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900") as HTMLInputElement;
+  field.type = "search";
+  field.placeholder = "Search items, closed ones too";
+  field.setAttribute("aria-label", "Search items");
+  field.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void search(field.value.trim()), SEARCH_MS);
+  };
+  return field;
 }
 
 /** Nothing to show is the lead's absence, not an empty panel. */
 export function openDrawer(): void {
   if (lead.getAttribute("aria-expanded") === "true") return closeMenu();
   if (!rows.length) return;
+  found = null;
+  query = "";
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fill(list);
-  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", list)).setAttribute("aria-label", "Status");
+  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list)).setAttribute("aria-label", "Status");
+  // A finger opening the panel is reading it: the field would raise the keyboard over the rows.
+  if (matchMedia("(pointer: coarse)").matches) list.querySelector("button")?.focus({ preventScroll: true });
 }
 
 export function initDrawer(d: DrawerDeps): void {

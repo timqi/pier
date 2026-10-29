@@ -11,7 +11,8 @@ import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { openSystemPrompt } from "./system-prompt.js";
-import { chord, chordLabel, modalOpen } from "./shortcut.js";
+import { chord, chordLabel, escapeKey, modalOpen } from "./shortcut.js";
+import { topicColour } from "./topics.js";
 import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -30,8 +31,10 @@ interface HeaderDeps {
   continuousOpen: () => boolean;
   /** The conversation's rotation threshold (`GET /api/continuous`); null before it answers. */
   rotateAt: () => number | null;
-  /** The `‹` and the floating home button: back to `#/conversation`. */
+  /** The `‹`, the item view's `×` and the floating home button: back to `#/conversation`. */
   openContinuous: () => void;
+  /** The item view's problem, null off it. */
+  item: () => string | null;
 }
 
 let deps: HeaderDeps;
@@ -40,6 +43,9 @@ export function initHeader(d: HeaderDeps): void {
   deps = d;
   back.onclick = () => deps.openContinuous();
   toMain.onclick = () => deps.openContinuous();
+  itemClose.onclick = () => deps.openContinuous();
+  // After the composer's Stop: a running turn takes Esc first. The bar hides under Settings.
+  escapeKey(itemClose, "Close the item view", () => deps.openContinuous(), () => deps.item() !== null && !bar.classList.contains("hidden"));
   chatMenu.onclick = () => barMenu(chatMenu);
   // One of the ⋯ menu's actions is frequent enough to earn a chord; it acts on
   // the current session.
@@ -57,6 +63,8 @@ const back = $("#bar-back");
 /** The same way back, floating within thumb reach above the composer. */
 const toMain = $("#to-main");
 const chatTitle = $<HTMLButtonElement>("#chat-title");
+const itemClose = $("#item-close");
+const bar = $("#bar");
 const phase = $("#chat-phase");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
@@ -108,20 +116,27 @@ export function noteTurnMeta(meta: TurnMeta): void {
 export function renderHeader(): void {
   const s = deps.currentSession();
   const conversation = deps.continuousOpen();
+  const item = deps.item();
   // The conversation rotates sessions and spans topics: its name is its own,
   // not the head's title. A detached session not listed yet — a task run's
   // own, opened from its run card — is named by its id.
-  chatTitle.textContent = conversation
+  chatTitle.textContent = item ?? (conversation
     ? "Pier"
-    : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session");
+    : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session"));
+  if (item) {
+    const dot = h("span", "mr-1.5 inline-block h-2 w-2 rounded-full align-middle");
+    dot.style.background = topicColour(item);
+    chatTitle.prepend(dot);
+  }
+  itemClose.classList.toggle("hidden", !item);
   // The title is what the panel is *about*, so it is also the way in.
   chatTitle.disabled = !s;
   chatTitle.classList.toggle("cursor-pointer", !!s);
   chatTitle.title = s ? "Session info" : "";
   chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
-  back.classList.toggle("hidden", conversation);
-  back.classList.toggle("flex", !conversation);
-  toMain.toggleAttribute("data-show", !conversation);
+  back.classList.toggle("hidden", conversation && !item);
+  back.classList.toggle("flex", !conversation || !!item);
+  toMain.toggleAttribute("data-show", !conversation || !!item);
   // The head's dot only for what a child's reader would go back for.
   const head = conversation ? undefined : headSession();
   back.replaceChildren(icon(ChevronLeft, "h-4.5 w-4.5"), ...(head && (head.state === "streaming" || head.unread) ? stateDot(head) : []));

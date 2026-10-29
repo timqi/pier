@@ -582,6 +582,33 @@ it("starts no optimistic turn for a continuous command", async () => {
   expect(state.appendTurn).toHaveBeenCalledWith("user", "/status please", false, expect.any(Number));
 });
 
+// The item view's sends name the item on their first line, above a quote; a command names nothing.
+it("stamps a send from the item view with its item, before the quote, and sends a command unstamped", async () => {
+  composer.initComposer({
+    sessionId: () => "m1", sessionState: () => "idle",
+    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => true, item: () => "auth review",
+  });
+  state.appendTurn.mockClear();
+  state.fetch.mockImplementation(async () => Response.json({ sessionId: "m1" }, { status: 202 }));
+  composer.setQuote({ role: "assistant", at: Date.UTC(2024, 5, 1, 12), text: "Merged." });
+  type("ship it");
+  await composer.send("auto");
+  const sent = (n: number) => JSON.parse(state.fetch.mock.calls[n]?.[1]?.body as string).text as string;
+  expect(state.fetch.mock.calls[0]?.[0]).toBe("/api/continuous/messages");
+  expect(sent(0)).toMatch(/^\[item: auth review\]\n\[re assistant .+\]\n> Merged\.\n\nship it$/);
+  expect(state.appendTurn).toHaveBeenCalledWith("user", sent(0), false, expect.any(Number));
+  type("/status");
+  await composer.send("auto");
+  expect(sent(1)).toBe("/status");
+  type("/status please");
+  await composer.send("auto");
+  expect(sent(2)).toBe("/status please");
+  // Queued, it reads as typed.
+  composer.renderQueue([sent(0).split("\n\n").at(-1)!, sent(0)], []);
+  expect(onScreen("#queue-rows").map((li) => li.textContent.includes("[item:"))).toEqual([false, false]);
+  state.fetch.mockReset();
+});
+
 describe("the chat-command completion", () => {
   const menu = () => node("#command-menu");
   const rows = () => onScreen("#command-menu").map((li) => li.textContent);

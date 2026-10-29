@@ -15,6 +15,9 @@ interface ViewsDeps {
   /** One of the continuous conversation's sessions, which its route names instead. */
   inConversation: (id: string) => boolean;
   openContinuous: () => void;
+  /** The conversation in one item's company (docs/design/15-item-view.md); false when there
+   *  is no head to read it from and the conversation opened instead. */
+  openItemView: (problem: string) => boolean;
   /** The selected session's turns just came (back) on screen. */
   maybeAckRead: () => void;
 }
@@ -131,6 +134,7 @@ export function showChat(): void {
 type Route =
   | { kind: "session"; id: string }
   | { kind: "conversation" }
+  | { kind: "item"; problem: string }
   | { kind: "console"; name: ConsoleName; arg?: string; query?: string };
 
 const CONVERSATION: Route = { kind: "conversation" };
@@ -140,6 +144,8 @@ const hashOf = (r: Route): string =>
     ? `#/session/${encodeURIComponent(r.id)}`
     : r.kind === "conversation"
     ? "#/conversation"
+    : r.kind === "item"
+    ? `#/conversation/item/${encodeURIComponent(r.problem)}`
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}${r.query ? `?${r.query}` : ""}`;
 
 /** Bookmarks to `#/config`, `#/channels`, `#/providers` land on the Settings tab that holds them. */
@@ -148,11 +154,14 @@ const FOLDED: Record<string, string> = { config: "files", channels: "channels", 
 function parseHash(): Route | null {
   const tail = location.hash.replace(/^#\/?/, "");
   const mark = tail.indexOf("?");
-  const [head = "", encoded] = (mark < 0 ? tail : tail.slice(0, mark)).split("/");
+  const [head = "", encoded, problem] = (mark < 0 ? tail : tail.slice(0, mark)).split("/");
   const query = mark < 0 ? undefined : tail.slice(mark + 1) || undefined;
   let arg: string | undefined;
   // A hand-typed hash may not decode; that is the unknown-route fallback, not a crash.
   try { arg = encoded ? decodeURIComponent(encoded) : undefined; } catch { return null; }
+  if (head === "conversation" && arg === "item" && problem) {
+    try { return { kind: "item", problem: decodeURIComponent(problem) }; } catch { return null; }
+  }
   if (FOLDED[head]) return { kind: "console", name: "settings", arg: FOLDED[head] };
   // The labels are the name list too — a route may not wait for a view to be
   // built. hasOwn, not `in`: `#/toString` is a hash anyone can type.
@@ -178,15 +187,19 @@ const chatRoute = (id: string): Route => (deps.inConversation(id) ? CONVERSATION
 
 export const setSessionHash = (id: string): void => setHash(chatRoute(id));
 export const setConversationHash = (): void => setHash(CONVERSATION);
+export const setItemHash = (problem: string): void => setHash({ kind: "item", problem });
 
 /** Hash → UI. Session routes may name sessions not listed yet; select
  *  verifies them. A bare or unknown hash is the conversation. */
 export function applyRoute(): void {
   deps.cancelNavigation();
-  const route = parseHash() ?? CONVERSATION;
+  let route = parseHash() ?? CONVERSATION;
   applyingRoute = true;
   try {
     if (route.kind === "conversation") deps.openContinuous();
+    else if (route.kind === "item") {
+      if (!deps.openItemView(route.problem)) route = CONVERSATION;
+    }
     else if (route.kind === "session") {
       if (route.id !== deps.currentId()) deps.select(route.id);
       else showChat();
