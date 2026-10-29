@@ -508,11 +508,26 @@ describe("the open items", () => {
     expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["auth", undefined]]);
     expect(r.store.items("LOGIN sso").map((i) => i.problem)).toEqual(["auth"]);
     expect(r.store.items("login nothing")).toEqual([]);
-    // A closed item nothing absorbed keeps its own record and row; with `new` closed too, the exact key wins again.
+    // A closed item nothing absorbed keeps its own record and row; with `new` closed too, `old` is still `new`'s,
+    // and so is a stamped send naming it.
     r.store.markOpenItems([{ op: "done", problem: "parser" }, { op: "done", problem: "auth" }], 5, "h3");
     expect(r.store.itemHistory("parser")).toMatchObject({ problem: "parser", closedAt: 5 });
-    expect(r.store.itemHistory("login")?.problem).toBe("login");
+    expect(r.store.itemHistory("login")).toEqual(r.store.itemHistory("auth"));
     expect(r.store.items("").map((i) => i.problem)).toEqual(["auth", "parser"]);
+    r.store.markOpenItems([], 6, "h4", { topic: "login" });
+    expect(r.store.itemHistory("auth")?.sessions).toEqual(["h1", "h2", "h3", "h4"]);
+  });
+
+  it("gives a reopened key back its own history: no other item holds it as an alias", () => {
+    const r = rig();
+    const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
+    r.store.markOpenItems([open("login")], 1, "h1");
+    r.store.markOpenItems([open("login v2"), { op: "done", problem: "login", to: "login v2" }], 2, "h2");
+    r.store.markOpenItems([open("login")], 3, "h3");
+    expect(r.store.itemHistory("login v2")?.aliases).toEqual([]);
+    r.store.markOpenItems([{ op: "done", problem: "login" }], 4, "h3");
+    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: [], closedAt: 4, sessions: ["h1", "h2", "h3"], runIds: [] });
+    expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["login", 4], ["login v2", undefined]]);
   });
 
   it("tells the head an arrow into no open item, and counts the arrow's target as named", () => {

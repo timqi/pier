@@ -60,7 +60,8 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   `GET /api/continuous/open`, `namesKey`) is `closed_at IS NULL`; a closed
   item's runs count as no item's (`unlisted` unchanged).
 - `<open>` with a closed item's key reopens it: `closed_at` cleared, aliases
-  and sessions kept, its place in the list the reopening's time.
+  and sessions kept, its place in the list the reopening's time, and its key
+  taken off every other item's aliases, so it is its own item again.
 - `<done>old → new</done>` (` → ` or ` -> `, the first one in the body)
   closes `old` and records `old` and `old`'s aliases on `new`'s aliases and
   `old`'s sessions on `new`'s, when `new` is open once the reply's markers are applied (opened in this
@@ -79,8 +80,9 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   beside `<open>new — stage</open>`, never a plain `<done>` and a new
   `<open>`: without the arrow the item's history breaks there.
 - A key names, in order: the open item keyed by it, the open item holding it
-  as an alias, the closed item keyed by it, the newest closed item holding it
-  as an alias (`TaskStore.itemHistory`) — so an arrow's closed `old` opens `new`.
+  as an alias, the newest closed item holding it as an alias, the closed item
+  keyed by it (`TaskStore.itemHistory`) — so an arrow's closed `old` opens
+  `new`, open or closed.
 - `GET /api/continuous/items?q=<words>`: items with one key — the `problem`
   or one alias — holding every term (case-insensitive substring), closed
   included, newest `updated_at` first, at most 50: `{items: [{problem,

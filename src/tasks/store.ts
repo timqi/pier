@@ -512,14 +512,15 @@ export class TaskStore {
       .slice(0, 50);
   }
 
-  /** Open before closed — an arrow's closed `old` row loses to the open item that took it as an
-   *  alias — then the item keyed `problem` before one holding it as an alias, then the newest. */
+  /** Open before closed; among open rows the one keyed `problem` first, among closed ones a row
+   *  holding it as an alias — an arrow's closed `old` is the history of the item that absorbed it,
+   *  as `items` lists it; then the newest. */
   itemHistory(problem: string): ItemRecord | undefined {
     const row = this.sql(`
       SELECT problem, aliases, closed_at, sessions, run_ids FROM open_items
       WHERE problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)
-      ORDER BY closed_at IS NULL DESC, problem = ? DESC, updated_at DESC LIMIT 1
-    `).get(problem, problem, problem) as { problem: string; aliases: string; closed_at: number | null; sessions: string; run_ids: string } | undefined;
+      ORDER BY closed_at IS NULL DESC, CASE WHEN closed_at IS NULL THEN problem = ? ELSE problem <> ? END DESC, updated_at DESC LIMIT 1
+    `).get(problem, problem, problem, problem) as { problem: string; aliases: string; closed_at: number | null; sessions: string; run_ids: string } | undefined;
     return row && {
       problem: row.problem, aliases: JSON.parse(row.aliases) as string[], ...(row.closed_at === null ? {} : { closedAt: row.closed_at }),
       sessions: JSON.parse(row.sessions) as string[], runIds: JSON.parse(row.run_ids) as string[],
@@ -558,6 +559,11 @@ export class TaskStore {
     const upserted = Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at, aliases, sessions) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
       .run(m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]").changes);
+    // A reopened key is its own item again: no other row names it, so its later close keeps its history reachable.
+    if (prior) {
+      this.sql(`UPDATE open_items SET aliases = (SELECT json_group_array(value) FROM json_each(aliases) WHERE value <> ?)
+        WHERE problem <> ? AND EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).run(m.problem, m.problem, m.problem);
+    }
     for (const key of absorbed) this.absorb(m.problem, key);
     touched.add(m.problem);
     return changed + upserted;
