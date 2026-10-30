@@ -843,11 +843,9 @@ describe("the continuous conversation", () => {
     }
   });
 
-  it("retries a failed chain read, and follows the head it then finds", async () => {
-    await boot([member("h1"), member("h0", "first")]);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    // The failed refresh still rejects, for report.ts; here it is caught to be asserted.
-    // Node's process, typed here: the web tsconfig has no Node types.
+  /** A failed refresh still rejects, for report.ts; here it is caught to be asserted.
+   *  Node's process, typed here: the web tsconfig has no Node types. */
+  async function catchingRejections(body: (rejected: unknown[]) => Promise<void>): Promise<void> {
     type Listener = (reason: unknown) => void;
     const node = (globalThis as unknown as { process: {
       listeners(event: string): Listener[]; removeAllListeners(event: string): void; on(event: string, fn: Listener): void;
@@ -856,14 +854,30 @@ describe("the continuous conversation", () => {
     const rejected: unknown[] = [];
     node.removeAllListeners("unhandledRejection");
     node.on("unhandledRejection", (reason) => rejected.push(reason));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const read = chainRead;
-      let failing = true;
-      chainRead = () => {
-        if (!failing) return read();
-        failing = false;
-        return Promise.reject(new TypeError("Load failed"));
-      };
+      await body(rejected);
+    } finally {
+      node.removeAllListeners("unhandledRejection");
+      for (const l of listeners) node.on("unhandledRejection", l);
+      vi.useRealTimers();
+    }
+  }
+  /** The next chain read fails as a dropped request does; the ones after it answer. */
+  function failChainReadOnce(): void {
+    const read = chainRead;
+    let failing = true;
+    chainRead = () => {
+      if (!failing) return read();
+      failing = false;
+      return Promise.reject(new TypeError("Load failed"));
+    };
+  }
+
+  it("retries a failed chain read, and follows the head it then finds", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    await catchingRejections(async (rejected) => {
+      failChainReadOnce();
       chain = [member("h2"), member("h1"), member("h0", "first")];
       h.composer.headMoved?.();
       await vi.advanceTimersByTimeAsync(0);
@@ -872,11 +886,27 @@ describe("the continuous conversation", () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(h.header.currentId()).toBe("h2");
       expect(h.content).toEqual(["said in h1", "head"]);
-    } finally {
-      node.removeAllListeners("unhandledRejection");
-      for (const l of listeners) node.on("unhandledRejection", l);
-      vi.useRealTimers();
-    }
+    });
+  });
+
+  it("says so when a head answered read-only cannot be followed yet, and follows on the retry", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    const chat = vi.mocked(await import("./chat.js"));
+    await catchingRejections(async (rejected) => {
+      // The server rotated before answering h1's reload, and the re-list that would name h2 is dropped.
+      chain = [member("h2"), member("h1"), member("h0", "first")];
+      failChainReadOnce();
+      latest().reset();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rejected).toHaveLength(1);
+      expect(h.header.currentId()).toBe("h1");
+      expect(chat.chatLoading).toHaveBeenLastCalledWith(false);
+      expect(h.content).toEqual(["This session is no longer the conversation's head, and the new head could not be read yet."]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.header.currentId()).toBe("h2");
+      expect(latest().url).toContain("/h2/");
+      expect(h.content).toEqual(["said in h1", "head"]);
+    });
   });
 
   it("follows a head rotated past while its snapshot was read, instead of drawing it", async () => {

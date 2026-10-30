@@ -644,8 +644,13 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   // The server answers a session rotated past since the chain's read as an earlier member: no cursor to follow.
   if ("readonly" in got.value) {
     if (keep) chatLoading(true);
-    void refreshSessions().then(() => {
-      if (currentId === id && generation === loadSeq && headId() !== id) void select(id, false);
+    void refreshSessions().finally(() => {
+      // A follow or a newer navigation took the pane meanwhile.
+      if (currentId !== id || generation !== loadSeq) return;
+      if (headId() !== id) return void select(id, false);
+      // The chain is unread or still names it: said, not left loading; the retried re-list follows.
+      chatLoading(false);
+      appendTurn("error", "This session is no longer the conversation's head, and the new head could not be read yet.");
     });
     return;
   }

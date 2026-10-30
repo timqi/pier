@@ -5,13 +5,16 @@
 const RETRY_MAX_MS = 30_000;
 
 /** A burst of workspace events costs two fetches, not twenty. A failed load
- *  still rejects, and is retried with backoff: the event that asked for it
- *  will not come again, so the view would otherwise stay stale. */
+ *  is retried with backoff until one succeeds: the event that asked for it
+ *  will not come again, so the view would otherwise stay stale. It rejects
+ *  once per failure until then, for report.ts, not once per retry. */
 export function coalesce(load: () => Promise<void>, retryMs = 1000): () => Promise<void> {
   let inflight: Promise<void> | undefined;
   let dirty = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let backoff = retryMs;
+  /** The failure already rejected with since the last success. */
+  let told: string | undefined;
   const run = (): Promise<void> => {
     dirty = true;
     clearTimeout(retry);
@@ -29,10 +32,14 @@ export function coalesce(load: () => Promise<void>, retryMs = 1000): () => Promi
       }
       if (!failed) {
         backoff = retryMs;
+        told = undefined;
         return;
       }
       retry = setTimeout(() => void run(), backoff);
       backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+      // Already reported and still being retried: a repeat would only be noise.
+      if (String(failed.err) === told) return;
+      told = String(failed.err);
       throw failed.err;
     })().finally(() => {
       inflight = undefined;

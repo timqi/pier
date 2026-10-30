@@ -104,9 +104,10 @@ describe("coalesce", () => {
       // The first load fails while a second is asked for: that one runs, and succeeds.
       await Promise.all([load(), load()]);
       expect(loads).toBe(2);
-      // Nothing else will ask: a failure retries itself, later after each failure in a row.
+      // Nothing else will ask: a failure retries itself, later after each failure in a row,
+      // and rejects once for it — its repeat is the same failure, still being retried.
       await expect(load()).rejects.toThrow("Load failed");
-      await expect(load()).rejects.toThrow("Load failed");
+      await expect(load()).resolves.toBeUndefined();
       expect(loads).toBe(4);
       await vi.advanceTimersByTimeAsync(1999);
       expect(loads).toBe(4);
@@ -114,6 +115,24 @@ describe("coalesce", () => {
       expect(loads).toBe(5);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(loads).toBe(5); // succeeded: no more retries
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects again for a different failure, and for the same one after a success", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcomes = ["Load failed", "Load failed", "HTTP 503", "ok", "Load failed"];
+      const load = coalesce(async () => {
+        const next = outcomes.shift();
+        if (next !== "ok") throw new Error(next);
+      });
+      await expect(load()).rejects.toThrow("Load failed");
+      await expect(load()).resolves.toBeUndefined();
+      await expect(load()).rejects.toThrow("HTTP 503");
+      await expect(load()).resolves.toBeUndefined();
+      await expect(load()).rejects.toThrow("Load failed");
     } finally {
       vi.useRealTimers();
     }
