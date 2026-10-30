@@ -2,21 +2,43 @@
 // write, the sentence a failure shows, the scheduling of a re-read. Nine
 // modules had grown their own copy of the method/headers/body triple.
 
-/** A burst of workspace events costs two fetches, not twenty. */
-export function coalesce(load: () => Promise<void>): () => Promise<void> {
+const RETRY_MAX_MS = 30_000;
+
+/** A burst of workspace events costs two fetches, not twenty. A failed load
+ *  still rejects, and is retried with backoff: the event that asked for it
+ *  will not come again, so the view would otherwise stay stale. */
+export function coalesce(load: () => Promise<void>, retryMs = 1000): () => Promise<void> {
   let inflight: Promise<void> | undefined;
   let dirty = false;
-  return () => {
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let backoff = retryMs;
+  const run = (): Promise<void> => {
     dirty = true;
+    clearTimeout(retry);
     return inflight ??= (async () => {
+      let failed: { err: unknown } | undefined;
+      // A request asked for during a failed load still runs.
       while (dirty) {
         dirty = false;
-        await load();
+        try {
+          await load();
+          failed = undefined;
+        } catch (err) {
+          failed = { err };
+        }
       }
+      if (!failed) {
+        backoff = retryMs;
+        return;
+      }
+      retry = setTimeout(() => void run(), backoff);
+      backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+      throw failed.err;
     })().finally(() => {
       inflight = undefined;
     });
   };
+  return run;
 }
 
 const jsonInit = (body: unknown, method: "POST" | "PUT" | "PATCH"): RequestInit => ({

@@ -90,6 +90,34 @@ describe("coalesce", () => {
     await Promise.all([load(), load(), load(), load()]);
     expect(loads).toBe(2); // the one in flight, then one for everything asked during it
   });
+
+  it("still runs a request asked for during a failed load, and retries a failure with backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcomes = ["fail", "ok", "fail", "fail", "ok"];
+      let loads = 0;
+      const load = coalesce(async () => {
+        loads++;
+        await Promise.resolve();
+        if (outcomes.shift() === "fail") throw new TypeError("Load failed");
+      });
+      // The first load fails while a second is asked for: that one runs, and succeeds.
+      await Promise.all([load(), load()]);
+      expect(loads).toBe(2);
+      // Nothing else will ask: a failure retries itself, later after each failure in a row.
+      await expect(load()).rejects.toThrow("Load failed");
+      await expect(load()).rejects.toThrow("Load failed");
+      expect(loads).toBe(4);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(loads).toBe(4);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(loads).toBe(5);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(loads).toBe(5); // succeeded: no more retries
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("refused", () => {

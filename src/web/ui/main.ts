@@ -253,6 +253,9 @@ async function followHead(head: string): Promise<void> {
   if (!(await page())) await loadSession(head);
 }
 
+/** A page keeps the old pane up with no stream while it reads: a read that never answers must not hold it there. */
+const PAGE_READ_MS = 10_000;
+
 /** One earlier session in above the rest; the head is re-read with it, and the
  *  reader stays where they were. False when it did not start. */
 async function page(): Promise<boolean> {
@@ -265,15 +268,16 @@ async function page(): Promise<boolean> {
   paging = true;
   try {
     const got = await getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
-      `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session");
+      `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session", { signal: AbortSignal.timeout(PAGE_READ_MS) });
     if (!current()) return true;
     // Both reads belong to this navigation; keep the pane and its stream live until they can commit together.
-    const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session");
+    const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session", { signal: AbortSignal.timeout(PAGE_READ_MS) });
     if (!current()) return true;
     earlier.unshift(got.ok
       ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
       : { member, turns: [], runs: [], error: got.error });
-    await loadSession(head, snapshot);
+    // A head read that failed is read again as a plain load, its loading state on screen instead of the old pane.
+    await loadSession(head, snapshot.ok ? snapshot : undefined);
     if (intent === navigation) pagedAt = Date.now();
   } finally {
     paging = false;
@@ -317,6 +321,7 @@ function commitSessions(rows: SessionInfo[]): void {
 // Thrown, not swallowed: this runs as `void refreshSessions()` from event
 // handlers, and report.ts is listening for exactly that rejection — a drawer
 // that quietly stopped updating is the shape of bug principle 5 is about.
+// coalesce retries it, so one dropped read does not strand the pane on an old head.
 const refreshSessions = coalesce(async () => {
   const [rows, next, open] = await Promise.all([
     mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"),
@@ -330,8 +335,9 @@ const refreshSessions = coalesce(async () => {
   commitOpenItems(open);
   commitSessions(rows);
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
+  // Not awaited: the move's reads, guarded by their own generation, must not hold every later refresh behind them.
   const head = headId();
-  if (following && head && head !== was) await (item ? select(head, false, item) : followHead(head));
+  if (following && head && head !== was) void (item ? select(head, false, item) : followHead(head));
 });
 
 /** The window's own focus/blur, beside `hasFocus()`: a window behind another
@@ -634,6 +640,14 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   if (view && !view.ok) {
     chatLoading(false);
     return itemMissing(view.error, () => openContinuous());
+  }
+  // The server answers a session rotated past since the chain's read as an earlier member: no cursor to follow.
+  if ("readonly" in got.value) {
+    if (keep) chatLoading(true);
+    void refreshSessions().then(() => {
+      if (currentId === id && generation === loadSeq && headId() !== id) void select(id, false);
+    });
+    return;
   }
   snapshotReady = true;
   const snap = got.value;

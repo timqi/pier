@@ -389,9 +389,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   the head's snapshot is back, and keyboard focus on the pager; the trim cap
   stands down meanwhile. Paging keeps the current event stream active until both reads complete;
   a newer navigation or session load cancels the page before history changes or redraw.
+  Each of a page's two reads gives up after 10s; a head read that failed or gave up is redone as a plain load with its loading state.
   Sends take the alias route; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
-  the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
+  the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a move in progress never holds a later re-list, a failed re-list retries itself (1s doubling to 30s), and a head snapshot answered `readonly` — rotated past since the chain was read — re-lists and follows instead of drawing; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
   folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
   a `/status` answer uses the same solid card material and shared open-item rows,
   grouped with counts under `Waiting on you`, `In progress` and `Other open`.

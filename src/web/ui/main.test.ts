@@ -10,7 +10,7 @@ const h = vi.hoisted(() => ({
   header: null as unknown as Parameters<typeof import("./session-header.js").initHeader>[0],
   composer: null as unknown as Parameters<typeof import("./composer.js").initComposer>[0],
   views: null as unknown as Parameters<typeof import("./views.js").initViews>[0],
-  history: vi.fn<(url: string) => Promise<Response>>(),
+  history: vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(),
   itemTurns: vi.fn<(url: string) => Promise<Response>>(),
   itemFilter: vi.fn(),
   renderItem: vi.fn(),
@@ -480,16 +480,18 @@ describe("the continuous conversation", () => {
   let chain: ReturnType<typeof member>[] = [];
   const earlier = (id: string) => Response.json({ turns: [{ role: "user", text: `said in ${id}` }], backgroundRuns: [], readonly: true });
 
+  let chainRead = () => Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
   async function boot(members: ReturnType<typeof member>[]) {
     chain = members;
+    chainRead = () => Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
     vi.resetModules();
     Stream.all = [];
     Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
-    const fetcher = vi.fn((url: string) => {
-      if (url === "/api/continuous") return Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
+    const fetcher = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/continuous") return chainRead();
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
-      if (url.endsWith("/history")) return h.history(url);
+      if (url.endsWith("/history")) return h.history(url, init);
       if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);
       return Promise.resolve(Response.json(rows));
     });
@@ -791,6 +793,105 @@ describe("the continuous conversation", () => {
     expect(h.content).toEqual(["said in h1", "new head"]);
     expect(h.appendDivider).toHaveBeenLastCalledWith("new", 7);
     expect(latest().url).toContain("/h2/");
+  });
+
+  /** A read that never answers, until its signal gives up on it. */
+  const hung = (init?: RequestInit) => new Promise<Response>((_, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+  });
+
+  it("follows a second rotation while the first one's head read hangs", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    h.history.mockImplementation((url, init) => url.includes("/h2/") ? hung(init)
+      : Promise.resolve(url.includes("/h3/") ? snapshot("newest head") : earlier(url.split("/")[3]!)));
+    chain = [member("h2"), member("h1"), member("h0", "first")];
+    h.composer.headMoved?.();
+    await settled(); await settled();
+    expect(h.header.currentId()).toBe("h2");
+    chain = [member("h3"), ...chain];
+    h.composer.headMoved?.();
+    await settled(); await settled();
+    expect(h.header.currentId()).toBe("h3");
+    expect(h.content).toEqual(["newest head"]);
+    expect(latest().url).toContain("/h3/");
+  });
+
+  it("reads the head again as a plain load when a rotation's read never answers", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    vi.useFakeTimers();
+    // AbortSignal.timeout runs on Node's own clock; this one is on the faked one.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const c = new AbortController();
+      setTimeout(() => c.abort(new DOMException("signal timed out", "TimeoutError")), ms);
+      return c.signal;
+    });
+    try {
+      let headReads = 0;
+      h.history.mockImplementation((url, init) => !url.includes("/h2/") ? Promise.resolve(earlier("h1"))
+        : ++headReads === 1 ? hung(init) : Promise.resolve(snapshot("new head")));
+      chain = [member("h2"), member("h1"), member("h0", "first")];
+      h.composer.headMoved?.();
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(h.content).toEqual(["head"]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history", "/api/sessions/h2/history"]);
+      expect(h.content).toEqual(["said in h1", "new head"]);
+      expect(latest().url).toContain("/h2/");
+    } finally {
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a failed chain read, and follows the head it then finds", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // The failed refresh still rejects, for report.ts; here it is caught to be asserted.
+    // Node's process, typed here: the web tsconfig has no Node types.
+    type Listener = (reason: unknown) => void;
+    const node = (globalThis as unknown as { process: {
+      listeners(event: string): Listener[]; removeAllListeners(event: string): void; on(event: string, fn: Listener): void;
+    } }).process;
+    const listeners = node.listeners("unhandledRejection");
+    const rejected: unknown[] = [];
+    node.removeAllListeners("unhandledRejection");
+    node.on("unhandledRejection", (reason) => rejected.push(reason));
+    try {
+      const read = chainRead;
+      let failing = true;
+      chainRead = () => {
+        if (!failing) return read();
+        failing = false;
+        return Promise.reject(new TypeError("Load failed"));
+      };
+      chain = [member("h2"), member("h1"), member("h0", "first")];
+      h.composer.headMoved?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rejected).toEqual([new TypeError("Load failed")]);
+      expect(h.header.currentId()).toBe("h1");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(h.header.currentId()).toBe("h2");
+      expect(h.content).toEqual(["said in h1", "head"]);
+    } finally {
+      node.removeAllListeners("unhandledRejection");
+      for (const l of listeners) node.on("unhandledRejection", l);
+      vi.useRealTimers();
+    }
+  });
+
+  it("follows a head rotated past while its snapshot was read, instead of drawing it", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    h.history.mockImplementation((url) => {
+      // The server rotates again before it answers: h2 is an earlier member now, read-only.
+      if (url.includes("/h2/")) chain = [member("h3"), member("h2"), member("h1"), member("h0", "first")];
+      return Promise.resolve(url.includes("/h3/") ? snapshot("newest head") : earlier(url.split("/")[3]!));
+    });
+    chain = [member("h2"), member("h1"), member("h0", "first")];
+    h.composer.headMoved?.();
+    for (let i = 0; i < 3; i++) await settled();
+    expect(h.header.currentId()).toBe("h3");
+    expect(latest().url).toContain("/h3/");
+    expect(h.content).toEqual(["said in h2", "newest head"]);
   });
 
   it("leaves Settings open across head rotation and cancels delayed rotation paging after newer navigation", async () => {
