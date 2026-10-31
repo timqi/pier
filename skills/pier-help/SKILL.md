@@ -91,16 +91,14 @@ truth.
     session.
   - `/skills` — one `<name> — <description>` line per skill of the session
     asked, head or thread.
-  - `/chain` — the chains, the current marked; prose in a thread.
-  - `/chain <name>` · `new <name>` · `rename <name>` · `archive` — switch,
-    create and switch, rename or archive the current chain; the home chat
-    answers `↔ chain · <name>` on a switch; prose in a thread.
   - `/settings` — the panel on a thread; prose in the home chat.
   - `/s <text>` — on a thread root, the draft with `<text>` as its question;
     prose inside a thread and in the home chat.
   - `/bind <code>` — in a DM, binds the sender.
-  - `/chain` — the chains, `✓` on the current; prose in a thread.
-  - `/chain <name>` — switch to it by a unique prefix of its name.
+  - `/chain` — the chains, `✓` on the current; prose in a thread, as are
+    the four below.
+  - `/chain <name>` — switch to it by a unique prefix of its name; the home
+    chat answers `↔ chain · <name>`.
   - `/chain new <name>` — create one and switch to it; turns chain mode on.
   - `/chain rename <name>` — rename the current chain.
   - `/chain archive` — archive the current chain, refused while it has open
