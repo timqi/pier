@@ -237,7 +237,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   key exactly, answering `{closed}` for a key the head's `<done>` closed first.
   The chain's head, when attached, is told with an `open-items`
   system input, mode `append`, no turn: `[Pier: the user closed <key>]`; its
-  `<done>` of one of the last 20 keys the user closed is no miss (in memory).
+  `<done>` of one of the last 20 keys the user closed is no miss (in memory),
+  and the reply it was writing when the user closed one does not reopen it.
 - A head turn opened by a run's result (the `task-callback` origin of the
   system input right after its `turn-start`, `Router.onTurnEnd`'s `opened`; a
   steer's is the turn it opens on entering) that left an item holding a run of

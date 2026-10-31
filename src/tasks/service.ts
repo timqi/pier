@@ -123,6 +123,9 @@ export class TaskService {
   /** Per chain, the newest keys the user closed (`closeItem`): a head's `<done>` of one, written before it
    *  read the note, agrees with the user and is no miss; in memory only. */
   private readonly userClosed = new Map<string, string[]>();
+  /** Per chain, the keys the user closed while its head was mid-turn: that reply, written before the
+   *  note, does not reopen them. Until its turn ends; in memory only. */
+  private readonly closedMidTurn = new Map<string, string[]>();
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
@@ -207,7 +210,15 @@ export class TaskService {
       if (chainId !== undefined && instance.continuous.isHead(sessionId)) {
         try {
           const answered = opened?.kind === "task-callback" ? opened.runIds ?? [opened.runId] : [];
-          const { changed, closed, unmatched: missed } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered);
+          const { changed: marked, closed, unmatched: missed } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered);
+          const midTurn = this.closedMidTurn.get(chainId) ?? [];
+          this.closedMidTurn.delete(chainId);
+          const reopened = store.openItems(chainId).filter((i) => midTurn.includes(i.problem)).map((i) => i.problem);
+          for (const key of reopened) {
+            log.info(`open items: ${sessionId}'s reply reopened ${key}, which the user closed while it was written; closed again`);
+            store.closeOpenItem(chainId, key, Date.now());
+          }
+          const changed = marked || reopened.length > 0;
           const mine = this.userClosed.get(chainId) ?? [];
           const unmatched = missed.filter((u) => !mine.some((k) => namesKey(doneOld(u), k)));
           const keys = store.openItems(chainId).map((i) => i.problem);
@@ -457,6 +468,7 @@ export class TaskService {
     this.hub.emitWorkspace({ type: "open-items-changed" });
     const headId = this.instance.continuous.members(chainId)[0]?.sessionId;
     const head = this.router.attachedSessions().find((a) => a.session.id === headId)?.session;
+    if (head?.state === "streaming") this.closedMidTurn.set(chainId, [...(this.closedMidTurn.get(chainId) ?? []), key]);
     head?.systemInput(`[Pier: the user closed ${key}]`, { kind: "open-items" }, "append").catch((err: unknown) =>
       this.router.reportTo(head.id, `open items: the note that the user closed "${key}" could not reach the head: ${String(err)}`));
     return key;

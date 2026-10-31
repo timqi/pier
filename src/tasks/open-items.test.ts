@@ -722,6 +722,15 @@ describe("the open items", () => {
     expect(service.unmatchedDone("main")).toEqual(["dup"]);
     service.closeItem("main", "dup: a", 5);
     expect(service.unmatchedDone("main")).toEqual([]);
+
+    // A reply written while the user closed its item does not reopen it; one after the note may.
+    h0.setState("streaming");
+    service.closeItem("main", "logout", 6);
+    h0.emit({ type: "turn-end", text: "<open>logout — still on it</open>" });
+    expect(open()).toEqual(["login v2", "dup: b"]);
+    h0.setState("idle");
+    h0.emit({ type: "turn-end", text: "<open>logout — reopened</open>" });
+    expect(open()).toEqual(["login v2", "dup: b", "logout"]);
   });
 
   it("writes each chain's head into its own chain: a key matches only there, and the list names each item's chain", () => {
