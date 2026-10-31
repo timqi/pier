@@ -389,3 +389,34 @@ it("tags a found closed item with its chain", async () => {
   expect(itemView).toHaveBeenLastCalledWith("deploy", "b");
   vi.useRealTimers();
 });
+
+// The panel's Close: the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
+it("closes an item row at once from its Close, keeps focus in the list, and restores it with the error on a refusal", async () => {
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  let answer: { ok: boolean; status: number; json: () => Promise<unknown> } = { ok: true, status: 200, json: async () => ({ closed: "auth" }) };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; }));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "sign in", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const close = (key: string) => item(key).querySelector(".item-close")!;
+  expect(close("item:a/auth").getAttribute("aria-label")).toBe("Close — auth");
+  expect(close("session:solo")).toBeNull();
+  close("item:a/auth").focus();
+  close("item:a/auth").onclick?.();
+  expect(labels()).toEqual(["sign in", "solo"]);
+  expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
+  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  open = { items: [open.items[1]!], unlisted: [] };
+  drawer.renderDrawer();
+  expect(labels()).toEqual(["sign in", "solo"]);
+
+  answer = { ok: false, status: 404, json: async () => ({ error: "no open item \"sign in\"" }) };
+  close("item:a/sign in").onclick?.();
+  expect(labels()).toEqual(["solo"]);
+  await vi.waitFor(() => expect(labels()).toEqual(["sign in", "solo"]));
+  const list = doc.querySelector("[data-list]")!;
+  expect(list.children[0]!.textContent).toBe("no open item \"sign in\"");
+  expect(list.children[0]!.className).toContain("text-red-600");
+});

@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { MODEL_TIERS, type AgentFactory, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
-import type { MainChain } from "../core/chain.js";
+import { ChatCommandRefused, ItemNotFound, type MainChain } from "../core/chain.js";
 import type { Chains } from "../core/chains.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -429,6 +429,26 @@ export class TaskService {
   }
 
   unmatchedDone(chainId: string): readonly string[] { return this.unmatched.get(chainId) ?? []; }
+
+  /** The user's close, `/done` and the status panel's Close: the open item of `chainId` that `query` names —
+   *  exactly in any case, else as the start of one key; with `exact`, only that key — closed as a `<done>`
+   *  closes it. Its head, attached, is told, or its later `<done>` of it would read as unmatched. */
+  closeItem(chainId: string, query: string, now: number, exact = false): string {
+    const q = query.trim();
+    const keys = this.store.openItems(chainId).map((i) => i.problem);
+    const same = keys.filter((k) => (exact ? k === query : k.toLowerCase() === q.toLowerCase()));
+    const named = same.length || exact ? same : keys.filter((k) => k.toLowerCase().startsWith(q.toLowerCase()));
+    if (!q || !named.length) throw new ItemNotFound(`no open item "${q}"`);
+    if (named.length > 1) throw new ChatCommandRefused(`/done ${q} matches ${named.join(", ")} — say more`);
+    const key = named[0]!;
+    this.store.closeOpenItem(chainId, key, now);
+    this.hub.emitWorkspace({ type: "open-items-changed" });
+    const headId = this.instance.continuous.members(chainId)[0]?.sessionId;
+    const head = this.router.attachedSessions().find((a) => a.session.id === headId)?.session;
+    head?.systemInput(`[Pier: the user closed ${key}]`, { kind: "open-items" }, "append").catch((err: unknown) =>
+      this.router.reportTo(head.id, `open items: the note that the user closed "${key}" could not reach the head: ${String(err)}`));
+    return key;
+  }
 
   /** `chainId`'s items, or every chain's in the chain list's order; each row names its chain. */
   openItems(chainId?: string): OpenItems {

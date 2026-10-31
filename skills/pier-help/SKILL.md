@@ -92,6 +92,8 @@ truth.
     its runs still run; or the thread's session.
   - `/skills` — one `<name> — <description>` line per skill of the session
     asked, head or thread.
+  - `/done <item>` — closes the open item it names (a unique prefix), answers
+    `✓ closed · <key>`; prose in a thread.
   - `/settings` — the panel on a thread; prose in the home chat.
   - `/s <text>` — on a thread root, the draft with `<text>` as its question;
     prose inside a thread and in the home chat.

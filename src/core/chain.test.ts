@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentDefaults } from "../agent/types.js";
 import { openDb } from "../db.js";
-import { MainChain } from "./chain.js";
+import { ChatCommandRefused, MainChain } from "./chain.js";
 import { ChainArchived, ChainHasOpen, Chains } from "./chains.js";
 import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
 import { EventHub } from "./hub.js";
@@ -79,6 +79,11 @@ function rig({
       return { text: status.text, seed: status.seed ?? status.text, snapshot: { version: 1 as const, items }, sessions: status.sessions };
     },
     defaults: async () => (typeof defaults.value === "function" ? defaults.value() : defaults.value),
+    // The resolution is TaskService.closeItem's; the chain only answers with its key.
+    close: vi.fn((_chainId: string, query: string): string => {
+      if (query === "log") throw new ChatCommandRefused("/done log matches login, logout \u2014 say more");
+      return `${query} fix`;
+    }),
     now: () => clock.now,
   };
   const chain = new MainChain(db, deps);
@@ -93,7 +98,7 @@ function rig({
     return s;
   };
   const say = (text: string, chainId = "main") => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" }, chainId);
-  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory, restart };
+  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory, restart };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -577,6 +582,19 @@ describe("the chat commands", () => {
     const r = rig({ runs });
     expect(r.chain.launched("h1", 40)).toEqual([runs[0]]);
     expect(r.ledger).toEqual([{ ids: ["h1"], since: 40 }]);
+  });
+
+  it("closes an item on `/done <item>`, answers its key, and refuses a bare or ambiguous one without a note", async () => {
+    const r = rig({ head: "h1" });
+    const h1 = r.existing("h1", r.clock.now);
+    expect(await r.say("/done auth")).toEqual({ sessionId: "h1", chainId: "main" });
+    expect(r.close).toHaveBeenCalledWith("main", "auth");
+    expect(h1.systemInputs.at(-1)).toEqual({ text: "\u2713 closed \u00b7 auth fix", origin: { kind: "chat-command", command: "done" }, mode: "append" });
+    await expect(r.say("/done log")).rejects.toThrow(ChatCommandRefused);
+    await expect(r.say("%done")).rejects.toThrow("/done <item> \u2014 which one?");
+    expect(r.close).toHaveBeenCalledTimes(2);
+    expect(h1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
+    expect(h1.prompts).toEqual([]);
   });
 
   it("lists the head's skills on `/skills`, one line each, or says there are none", async () => {

@@ -395,7 +395,7 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 }
 @media (pointer: coarse) { .fab { width: 44px; height: 44px; } }
 .open-item { margin-block: 8px; padding: 4px 6px; border-radius: 10px; overflow-wrap: anywhere; }
-.open-item:has(.item-view-open) { display: flex; align-items: flex-start; gap: 4px; }
+.open-item:has(.item-view-open, .item-close) { display: flex; align-items: flex-start; gap: 4px; }
 .open-item:has(.session-open:hover), .open-item:focus-within, .open-item:has([aria-current]) { background: var(--color-neutral-100); }
 .open-item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .open-item-dot { margin-top: 6px; }
@@ -407,7 +407,7 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
-  :is(.open-item .session-open, .open-item .item-view-open, .open-item .open-item-reopen, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
+  :is(.open-item .session-open, .open-item .item-view-open, .open-item .item-close, .open-item .open-item-reopen, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
 }
 /* The chain list (chains.ts): the same rows floated and docked. A row's ⋯ waits for the hover a finger has not got. */
 .chain-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }

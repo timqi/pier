@@ -4,6 +4,7 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { toChatTurns } from "../agent/events.js";
 import { openDb } from "../db.js";
+import { ItemNotFound } from "../core/chain.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
@@ -677,6 +678,38 @@ describe("the open items", () => {
     expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
   });
+
+  it("closes the item the user names \u2014 exactly, else by a unique prefix \u2014 says so on the list and tells the head", () => {
+    const hub = new EventHub();
+    const workspace: string[] = [];
+    hub.subscribeWorkspace((e) => { if (e.type === "open-items-changed") workspace.push(e.type); });
+    const h0 = fakeSession("h0");
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    const service = new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    store.markOpenItems(["Login", "login v2", "logout", "deploy"].map((problem) => ({ op: "open" as const, problem, stage: "", runIds: [] })), 1, "h0", "main");
+    const open = () => store.openItems("main").map((i) => i.problem);
+
+    expect(service.closeItem("main", " LOGIN ", 2)).toBe("Login");
+    expect(service.closeItem("main", "dep", 3)).toBe("deploy");
+    expect(open()).toEqual(["login v2", "logout"]);
+    expect(store.itemHistory("main", "deploy")?.closedAt).toBe(3);
+    expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
+    expect(h0.systemInputs).toEqual(["Login", "deploy"].map((key) => ({ text: `[Pier: the user closed ${key}]`, origin: { kind: "open-items" }, mode: "append" })));
+    expect(h0.prompts).toEqual([]);
+
+    expect(() => service.closeItem("main", "log", 4)).toThrow("/done log matches login v2, logout \u2014 say more");
+    expect(() => service.closeItem("main", "deploy", 4)).toThrow(ItemNotFound);
+    expect(() => service.closeItem("main", "deploy", 4)).toThrow('no open item "deploy"');
+    // The panel's Close names one key exactly: never a prefix of another.
+    expect(() => service.closeItem("main", "login", 4, true)).toThrow(ItemNotFound);
+    expect(() => service.closeItem("other", "logout", 4)).toThrow(ItemNotFound);
+    expect(open()).toEqual(["login v2", "logout"]);
+    expect(workspace).toHaveLength(2);
+    expect(h0.systemInputs).toHaveLength(2);
+  });
+
   it("writes each chain's head into its own chain: a key matches only there, and the list names each item's chain", () => {
     const hub = new EventHub();
     const sessions = new Map(["h0", "d0"].map((id) => [id, fakeSession(id)]));

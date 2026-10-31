@@ -243,6 +243,7 @@ empty) is dropped with a log line, never a command.
 | `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
 | `/chain` | the chains, the current marked `✓`, archived last (`MainChain.send`) | prose |
 | `/chain <name>` · `new <name>` · `rename <name>` · `archive` | switch (unique prefix) · create and switch · rename the current · archive the current, refused with open items; a switch answers `↔ chain · <name>` (§Chains) | prose |
+| `/done <item>` | closes the item (unique prefix), answers `✓ closed · <key>`; a bare `/done`, no item or several are refused ([10 §Open items](10-continuous-session.md#open-items)) | prose |
 | `/settings` | prose | the panel on the thread ([04 §The in-chat panel](04-im-channels.md#the-in-chat-panel)) |
 | `/s <text>` | prose | on a thread root, the draft with `<text>` as its question; inside a thread, prose |
 | `/bind <code>` (a DM) | bind | bind |

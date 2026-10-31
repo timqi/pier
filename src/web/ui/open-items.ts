@@ -1,6 +1,6 @@
 // The open-item row used by the status panel, its lead in the bar and fixed command cards.
 
-import { Check, CircleAlert, Clock, MessagesSquare, X, type IconNode } from "lucide";
+import { Check, CircleAlert, CircleCheck, Clock, MessagesSquare, X, type IconNode } from "lucide";
 import { openItemDestination, openItemGroups, UNMATCHED_DONE } from "../../core/open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
@@ -15,6 +15,8 @@ interface Actions {
   grouped?: boolean;
   /** The status panel's alone: an item row's secondary action, the item view. */
   panelView?: (problem: string) => void;
+  /** The status panel's alone: an item row's second secondary action, closing it. */
+  panelClose?: (problem: string) => void;
   /** The status panel's: the chain a row of another chain belongs to. */
   tag?: string;
   /** An archived chain's row: unarchive it and open the item there. */
@@ -86,6 +88,8 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   // A row's key is its identity, so whether it is an item never changes under the row.
   const view = actions.panelView && p.key.startsWith("item:") ? viewButton() : null;
   if (view) li.append(view);
+  const close = actions.panelClose && p.key.startsWith("item:") ? closeButton() : null;
+  if (close) li.append(close);
   updates.set(li, (item, a) => {
     li.dataset.rowKey = item.key;
     title.textContent = item.title;
@@ -114,6 +118,10 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
       view.setAttribute("aria-label", `Item view — ${item.title}`);
       view.onclick = () => a.panelView?.(item.problem);
     }
+    if (close) {
+      close.setAttribute("aria-label", `Close — ${item.title}`);
+      close.onclick = () => a.panelClose?.(item.problem);
+    }
   });
   updates.get(li)!(p, actions);
   return li;
@@ -123,6 +131,13 @@ function viewButton(): HTMLElement {
   const b = h("button", "item-view-open flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(MessagesSquare));
   b.setAttribute("type", "button");
   b.title = "Item view — this item's conversation alone";
+  return b;
+}
+
+function closeButton(): HTMLElement {
+  const b = h("button", "item-close flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(CircleCheck));
+  b.setAttribute("type", "button");
+  b.title = "Close — done with this item";
   return b;
 }
 

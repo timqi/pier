@@ -563,6 +563,11 @@ export class TaskStore {
     return { changed, closed };
   }
 
+  /** The user's close of `key`, one of `chainId`'s open keys, as a `<done>` of it closes it. */
+  closeOpenItem(chainId: string, key: string, now: number): void {
+    this.transact(() => this.closeItem(chainId, key, now, [], new Set()));
+  }
+
   /** An upsert keeps its row's place; a closed key reopens as if new — its row inserted again, so it
    *  takes the end of the rowid order, with its aliases and sessions. */
   private openItem(chainId: string, m: { problem: string; stage: string; runIds: string[] }, now: number, touched: Set<string>): number {

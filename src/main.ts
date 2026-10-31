@@ -139,6 +139,7 @@ const chain = new MainChain(db, {
   factory, router, home: pierPath("home"), chains,
   ledger: (ids, since) => tasks.ledger(ids, since),
   status: (now, chainId) => openItemsStatus(tasks.openItems(chainId), now, tasks.unmatchedDone(chainId)),
+  close: (chainId, query) => tasks.closeItem(chainId, query, Date.now()),
   mode: { get: () => settings.get().chainMode, set: async (on) => { settings.setChainMode(on); } },
   changed: () => hub.emitWorkspace({ type: "chains-changed" }),
   defaults: () => piConfig.readDefaults(),
@@ -391,6 +392,7 @@ app.route("/", createServer({
   openItems: () => tasks.openItems(),
   items: (q, chainId) => taskStore.items(q, chainId),
   itemHistory: (problem, chainId) => (chainId === undefined ? taskStore.itemHistoryByProblem(problem) : taskStore.itemHistory(chainId, problem)),
+  closeItem: (chainId, problem) => tasks.closeItem(chainId, problem, Date.now(), true),
   invokedBy: (id) => taskStore.creatorOf(id)?.invokedBySessionId ?? undefined,
   itemSent: (item, sessionId) => {
     taskStore.markOpenItems([], Date.now(), sessionId, chain.chainOf(sessionId)?.chainId ?? chains.first().id, { topic: item });

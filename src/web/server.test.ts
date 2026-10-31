@@ -15,7 +15,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { MainChain } from "../core/chain.js";
+import { ChatCommandRefused, ItemNotFound, MainChain } from "../core/chain.js";
 import { Chains } from "../core/chains.js";
 import type { ChainList } from "./types.js";
 import { splitItem, splitSpeaker, withItem } from "../core/identity.js";
@@ -100,9 +100,9 @@ const SETTINGS_JSON = {
   toolsTaskId: null,
 };
 
-/** Session mode's register and switch, as main.ts wires them over `db`. */
+/** Session mode's register and switch, as main.ts wires them over `db`; `/done` is the route's test's. */
 const chainsOf = (db: DatabaseSync, openCount: (chainId: string) => number = () => 0) =>
-  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {} });
+  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {}, close: (): string => { throw new Error("unused"); } });
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
@@ -2416,6 +2416,7 @@ describe("the continuous conversation's routes", () => {
     { openCount, ...record }: {
       items?: (q: string, chainId?: string) => ItemSummary[];
       itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
+      closeItem?: (chainId: string, problem: string) => string;
       itemSent?: (item: string, sessionId: string) => void;
       invokedBy?: (sessionId: string) => string | undefined;
       openCount?: (chainId: string) => number;
@@ -2480,6 +2481,21 @@ describe("the continuous conversation's routes", () => {
     const res = await chainRig(undefined, open).app.request("/api/continuous/open");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(open);
+  });
+
+  it("closes exactly the item the panel names: its key, 404 for none, 409 for a refusal", async () => {
+    const closeItem = vi.fn((_chain: string, problem: string): string => {
+      if (problem === "gone") throw new ItemNotFound('no open item "gone"');
+      if (problem === "Login") throw new ChatCommandRefused("/done Login matches Login, login — say more");
+      return problem;
+    });
+    const { app } = chainRig(undefined, undefined, { closeItem });
+    const res = await app.request(`/api/continuous/items/c2/${encodeURIComponent("sign in")}/close`, { method: "POST" });
+    expect([res.status, await res.json()]).toEqual([200, { closed: "sign in" }]);
+    expect(closeItem).toHaveBeenCalledWith("c2", "sign in");
+    const gone = await app.request("/api/continuous/items/c2/gone/close", { method: "POST" });
+    expect([gone.status, await gone.json()]).toEqual([404, { error: 'no open item "gone"' }]);
+    expect((await app.request("/api/continuous/items/c2/Login/close", { method: "POST" })).status).toBe(409);
   });
 
   it("answers the items a search finds, closed ones too", async () => {

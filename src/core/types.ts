@@ -228,7 +228,7 @@ export interface OpenItemsStatus {
 
 /** The chat commands, each with the one line the composer's completion shows:
  *  a message to the continuous conversation that is exactly `/<word>` or `%<word>`,
- *  or `/chain <args>`, is a command, never a message (core/chain.ts). Browser-safe:
+ *  or `/chain <args>` or `/done <args>`, is a command, never a message (core/chain.ts). Browser-safe:
  *  the composer lists this table. */
 export const CHAT_COMMANDS = {
   status: "what is open — in flight, or waiting on you",
@@ -236,6 +236,7 @@ export const CHAT_COMMANDS = {
   stop: "stop the reply in progress",
   skills: "the skills this session can run, by name",
   chain: "the chains — or /chain <name>, new <name>, rename <name>, archive",
+  done: "close an open item — /done <its name or a unique prefix>",
 } as const;
 
 export type ChatCommand = keyof typeof CHAT_COMMANDS;
@@ -243,13 +244,13 @@ export type ChatCommand = keyof typeof CHAT_COMMANDS;
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
 /** The command `text` is: only the exact word, the composer is not a shell —
- *  `chain` and `new` take `args`, the rest of the line. The chain answers it
+ *  `chain`, `new` and `done` take `args`, the rest of the line. The chain answers it
  *  without a turn, so the composer paints none. */
 export function chatCommand(text: string): { command: ChatCommand; args: string } | undefined {
   const [, spelled, rest] = /^[/%](\S+)(?:\s+([\s\S]*))?$/.exec(text.trim()) ?? [];
   const command = spelled?.toLowerCase();
   const args = rest?.trim() ?? "";
-  if (!isChatCommand(command) || (args && command !== "chain" && command !== "new")) return undefined;
+  if (!isChatCommand(command) || (args && command !== "chain" && command !== "new" && command !== "done")) return undefined;
   return { command, args };
 }
 

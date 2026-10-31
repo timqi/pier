@@ -50,6 +50,9 @@ interface ChainDeps {
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
   /** One chain's items: a single read supplies the complete seed, compact answer and fixed command snapshot. */
   status: (now: number, chainId: string) => OpenItemsStatus;
+  /** `/done <query>`: closes the one open item of the chain `query` names, answering its key;
+   *  refuses with a `ChatCommandRefused`. */
+  close: (chainId: string, query: string) => string;
   /** Settings' chainMode: `/chain new` in Session mode turns it on. */
   mode: { get(): boolean; set(on: boolean): Promise<void> };
   /** A `/chain` command switched to, created, renamed or archived a chain, from any surface:
@@ -67,6 +70,12 @@ const WHY: Record<ChainReason, string> = {
   full: `the previous one reached ${String(CHAIN_FULL_TOKENS / 1000)}K tokens`,
   new: "you asked for one with /new",
 };
+
+/** A chat command the chain will not take as asked (`/done` naming no one item): the
+ *  composer's 409, the chat's error note, never a card on the head. */
+export class ChatCommandRefused extends Error {}
+/** A `/done` or the panel's Close naming no open item: the panel's 404. */
+export class ItemNotFound extends ChatCommandRefused {}
 
 type Head = { session: AgentSession; rotated?: ChainReason };
 
@@ -285,7 +294,7 @@ export class MainChain {
     return found;
   }
 
-  /** `status`, `stop`, `skills` and `chain` answer with a card on the head; `new` answers with the
+  /** `status`, `stop`, `skills`, `chain` and `done` answer with a card on the head; `new` answers with the
    *  next head's seed card — a head just rotated for its own reason is that answer. */
   private async command(
     { command, args }: { command: ChatCommand; args: string }, { id: chainId, name: chain }: ChainRow, key: ConversationKey | undefined, session: AgentSession, rotated?: ChainReason,
@@ -299,6 +308,11 @@ export class MainChain {
     }
     if (command === "chain") {
       await session.systemInput(this.chainCommand(args, chainId), origin, "append");
+      return undefined;
+    }
+    if (command === "done") {
+      if (!args) throw new ChatCommandRefused("/done <item> — which one?");
+      await session.systemInput(`✓ closed · ${this.deps.close(chainId, args)}`, origin, "append");
       return undefined;
     }
     if (command === "skills") {

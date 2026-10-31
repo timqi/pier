@@ -228,6 +228,14 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   a `<done>` closes the item it names or nothing is open, in memory: the seed's
   `## Open` lists them as `unmatched <done>: <key>`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
+- The user closes an item too: `/done <item>` (§Chat commands) and the status
+  panel's **Close** both call `TaskService.closeItem`, which closes it as a
+  `<done>` does (`TaskStore.closeOpenItem`) and broadcasts `open-items-changed`.
+  `/done` resolves its words among the chain's open keys — exact in any case,
+  else the one key they start; several are refused `/done <q> matches <a>, <b> —
+  say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Close** names its
+  key exactly. The chain's head, when attached, is told with an `open-items`
+  system input, mode `append`, no turn: `[Pier: the user closed <key>]`.
 - A head turn opened by a run's result (the `task-callback` origin of the
   system input right after its `turn-start`, `Router.onTurnEnd`'s `opened`; a
   steer's is the turn it opens on entering) that left an item holding a run of
@@ -303,7 +311,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
 input, mode `append`, no turn, shown at once even while the head replies and
-recorded after that turn; only `/chain` and `/new` take words after it, §Chains); an unknown `/word` is a message, never an
+recorded after that turn; only `/chain` (§Chains), `/new` and `/done` (§Open items) take words after it); an unknown `/word` is a message, never an
 error: the composer is not a shell.
 
 The commands, their spelling (`/` or `%`) and what each answers on the head
@@ -320,8 +328,9 @@ and orders the chain list (`commandStartsTurn`, `core/types.ts`).
   composer's completion shows; `chatCommand` (`core/types.ts`), the transcript
   rebuild (`agent/events.ts`) and the completion
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)) all read it.
-- Tests: `core/chain.test.ts` (`/new`, `/new <text>`, `/stop`), `web/server.test.ts` (the
-  route), `web/ui/composer.test.ts` (the completion).
+- Tests: `core/chain.test.ts` (`/new`, `/new <text>`, `/stop`, `/done`), `web/server.test.ts` (the
+  route, the 409), `web/ui/composer.test.ts` (the completion), `tasks/open-items.test.ts`
+  (`closeItem`).
 
 ## Run ledger
 

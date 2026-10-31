@@ -2,7 +2,7 @@
 // most urgent row and listed in the panel that row opens — the open items and
 // the live sessions no item holds, one row each.
 
-import { getJson } from "./api.js";
+import { getJson, refused } from "./api.js";
 import { $, agoLabel, h } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
@@ -189,6 +189,8 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
 }
 
 const rowNodes = new Map<string, HTMLElement>();
+/** Items the panel's Close took off the list, until the stream's re-read drops them too. */
+const closing = new Set<string>();
 
 /** Items keep their own identity even when they hold the same session; only independent sessions deduplicate.
  *  Waiting on you first, every chain's; then the current chain's rest, then the other chains' (§状态面板). */
@@ -197,8 +199,9 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain(), deps.chains());
   const chainOf = new Map(open.items.map((i) => [itemKey(i.problem, i.chain?.id), i.chain]));
+  for (const key of closing) if (!chainOf.has(key)) closing.delete(key);
   const all = [
-    ...open.items.map((i) => itemRow(i, now)),
+    ...open.items.map((i) => itemRow(i, now)).filter((p) => !closing.has(p.key)),
     ...open.unlisted.map((r) => unlistedRow(r, now)),
     ...sessions.flatMap((s) => {
       const mark = markOf(s);
@@ -217,6 +220,7 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
       panelView: (problem) => toView(problem, chain?.id),
+      ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id) } : {}),
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
     }, rowNodes.get(p.key));
@@ -240,7 +244,7 @@ let topKey: string | null = null;
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
+  `${[...closing].join("\0")}\n${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
 let drawn = "";
 
@@ -292,7 +296,7 @@ function cycleLead(): void {
 function fill(into: HTMLElement): void {
   const focused = into.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   const top = into.scrollTop;
-  const shown = found ?? rows;
+  const shown = [...(closeError ? [closeError] : []), ...(found ?? rows)];
   shown.forEach((row, index) => { if (into.children[index] !== row) into.insertBefore(row, into.children[index] ?? null); });
   while (into.children.length > shown.length) into.lastElementChild!.remove();
   if (focused?.isConnected) focused.focus({ preventScroll: true });
@@ -300,6 +304,30 @@ function fill(into: HTMLElement): void {
 }
 
 const toView = (problem: string, chain?: string): void => { closeMenu(); deps.itemView(problem, chain); };
+
+/** The last Close's refusal, atop the list until the next Close or opening. */
+let closeError: HTMLElement | null = null;
+
+/** Optimistic: the row leaves at once and `open-items-changed` reconciles; a refusal puts it back
+ *  under its sentence, the panel reopened if its last row's leaving closed it. */
+async function closeItem(problem: string, chain: string): Promise<void> {
+  const key = itemKey(problem, chain);
+  const row = list ? [...list.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
+  const focused = row >= 0 && list!.children[row]!.contains(document.activeElement);
+  closing.add(key);
+  closeError = null;
+  found = found?.filter((r) => r.dataset.rowKey !== key) ?? null;
+  renderDrawer();
+  // Focus stays in the list for the keys' walk: on the row that took the closed one's place.
+  if (focused && list?.isConnected) (list.children[row] ?? list.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
+  const error = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
+  if (error === undefined) return;
+  closing.delete(key);
+  renderDrawer();
+  if (!list?.isConnected) openDrawer();
+  closeError = note(error, "text-red-600");
+  if (list) fill(list);
+}
 
 // --- search -------------------------------------------------------------------------------
 
@@ -348,6 +376,7 @@ export function openDrawer(): void {
   if (!rows.length) return;
   found = null;
   query = "";
+  closeError = null;
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fill(list);

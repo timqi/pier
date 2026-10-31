@@ -10,7 +10,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
-import type { MainChain } from "../core/chain.js";
+import { ChatCommandRefused, ItemNotFound, type MainChain } from "../core/chain.js";
 import { ChainAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainInvalid, type ChainRow } from "../core/chains.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
@@ -161,6 +161,8 @@ interface WebDeps {
    *  with no chain an item is found by its problem alone, when only one chain has it. */
   items?: (q: string, chainId?: string) => ItemSummary[];
   itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
+  /** `TaskService.closeItem` of exactly `problem`: the status panel's Close. */
+  closeItem?: (chainId: string, problem: string) => string;
   /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
   invokedBy?: (sessionId: string) => string | undefined;
   /** `TaskStore.markOpenItems` with no marker: the head a message stamped `[item: <key>]`
@@ -232,6 +234,7 @@ export function createServer(
     openItems,
     items,
     itemHistory,
+    closeItem,
     itemSent,
     invokedBy,
     channelOf,
@@ -701,6 +704,18 @@ export function createServer(
     itemTurnsOf(c, c.req.param("problem"), c.req.param("chain")));
   guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, (c) => itemTurnsOf(c, c.req.param("problem")));
 
+  // The status panel's Close: the item as the head's `<done>` closes it, the head told.
+  app.post("/api/continuous/items/:chain/:problem/close", (c) => {
+    try {
+      const closed = closeItem?.(c.req.param("chain"), c.req.param("problem"));
+      return closed === undefined ? c.json({ error: `no open item "${c.req.param("problem")}"` }, 404) : c.json({ closed });
+    } catch (err) {
+      if (err instanceof ItemNotFound) return c.json({ error: err.message }, 404);
+      if (err instanceof ChatCommandRefused) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.
   guarded(app, "POST", "/api/continuous/messages", 400, async (c) => {
@@ -727,7 +742,7 @@ export function createServer(
     } catch (err) {
       // A refused `/chain` is the user's to fix, said as the command line would say it.
       if (err instanceof ChainInvalid) return c.json({ error: err.message }, 400);
-      if ([SkillAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainAmbiguous].some((E) => err instanceof E)) {
+      if ([ChatCommandRefused, SkillAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainAmbiguous].some((E) => err instanceof E)) {
         return c.json({ error: (err as Error).message }, 409);
       }
       throw err;
