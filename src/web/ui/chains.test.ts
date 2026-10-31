@@ -95,6 +95,8 @@ it("creates a chain inline, its refusal said under the field, and navigates to i
   chords.get("shift+o")!();
   expect(menu.panel).toBeNull();
   input = rail.querySelector("input")!;
+  // The field holds the focus when Esc arrives, as in a browser.
+  input.focus();
   key(input, "Escape");
   expect(rail.querySelector("input")).toBeNull();
   expect(button(rail, "New chain…")).toBeDefined();

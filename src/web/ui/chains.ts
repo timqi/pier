@@ -79,7 +79,8 @@ function row(c: ChainInfo): HTMLElement {
   if (renaming?.id === c.id) {
     const r = renaming;
     li.append(h("div", "min-w-0 flex-1 px-1 py-1",
-      field(r.value, `Rename ${c.name}`, (name) => void rename(c, name), (v) => { r.value = v; }, () => { renaming = null; draw(); }),
+      // Forced: the focus is still in the field, which an unforced draw leaves alone.
+      field(r.value, `Rename ${c.name}`, (name) => void rename(c, name), (v) => { r.value = v; }, () => { renaming = null; draw(true); }),
       ...(r.error ? [error(r.error)] : [])));
     return li;
   }
@@ -119,7 +120,7 @@ function fill(root: HTMLElement): void {
   if (pending) rows.prepend(h("li", `${ROW} opacity-60`, h("span", PICK, h("span", "h-2 w-2 flex-none"), h("span", "chain-name text-sm", pending))));
   const create = creating
     ? h("div", "px-1 py-1", field(creating.value, "New chain name", (name) => void make(name),
-      (v) => { if (creating) creating.value = v; }, () => { creating = null; draw(); }), ...(creating.error ? [error(creating.error)] : []))
+      (v) => { if (creating) creating.value = v; }, () => { creating = null; draw(true); }), ...(creating.error ? [error(creating.error)] : []))
     : h("button", `${SMALL} w-full px-2.5 py-2 text-left text-sm`, "New chain…");
   if (!creating) create.onclick = () => startCreate();
   const parts: HTMLElement[] = [rows, ...(notice ? [error(notice)] : []), create];
@@ -136,7 +137,7 @@ function fill(root: HTMLElement): void {
 /** Laid out and not fading: the rail is display:none below 80rem and off in session mode. */
 const shown = (root: HTMLElement | null): root is HTMLElement =>
   !!root?.isConnected && !root.closest("[inert]") && root.getClientRects().length > 0;
-const typing = (root: HTMLElement): boolean => root.contains(document.activeElement) && document.activeElement?.tagName === "INPUT";
+const typing = (root: HTMLElement): boolean => root.contains(document.activeElement) && document.activeElement?.localName === "input";
 
 /** Both surfaces; `force` redraws one holding a field too, keeping the focus where it was by row. */
 function draw(force = false): void {
