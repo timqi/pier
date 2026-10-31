@@ -564,8 +564,10 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
       if (id) await deps.reload(id);
       appendTurn("error", why);
     } else if (continuous) {
-      const sent = (await res.json()) as { sessionId?: string; chainId?: string; switched?: unknown };
+      const sent = (await res.json()) as { sessionId?: string; chainId?: string; switched?: unknown; answer?: string };
       if (sent.switched && sent.chainId) deps.switched?.(sent.chainId);
+      // A chain with no head yet answers `/chain` here, not on a transcript.
+      else if (sent.answer !== undefined) appendTurn("system", sent.answer);
       else if (sent.sessionId !== id) deps.headMoved?.();
     }
   } finally {

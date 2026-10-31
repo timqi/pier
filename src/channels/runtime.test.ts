@@ -122,6 +122,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       sentTo.push(chainId);
       if (headFails) return Promise.reject(headFails);
       const switched = switches.get(msg.text);
+      if (msg.text === "/chain") return Promise.resolve({ chainId, answer: "✓ Main · 0 open · 0 waiting on you" });
       return Promise.resolve(switched ? { chainId: switched.id, switched } : { sessionId: heads[chainId] ?? "head", chainId });
     },
     chains: {
@@ -266,6 +267,10 @@ describe("ChannelRuntime", () => {
       await vi.waitFor(() => expect(sentTo).toEqual(["main", "main", "d"]));
       expect(pointer).toBe("d");
       expect(events.filter((e) => e.startsWith("notify"))).toEqual(["notify D1: ↔ chain · Design"]);
+      // A list no head could say is the chat's note, as a switch's is.
+      deliver(say("D1", "/chain"));
+      await vi.waitFor(() => expect(events.filter((e) => e.startsWith("notify"))).toHaveLength(2));
+      expect(events.at(-1)).toBe("notify D1: ✓ Main · 0 open · 0 waiting on you");
       await rt.stop();
     });
 

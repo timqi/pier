@@ -135,14 +135,16 @@ product behaviour is [plans/30](../plans/30-multi-chain.md).
 - Session mode (`settings.json` `chainMode: false`, the default) is exactly one
   active chain, the list hidden; chain mode shows the list. Turning it off
   archives every active chain but the current one.
-- A name is 1–40 characters, trimmed, unique among the active chains in any
-  case; the id names the memory directory and survives a rename. The
-  migration's chain is `main`, named `Main`.
+- A name is 1–40 characters, trimmed, not a `/chain` verb (`new`, `rename`,
+  `archive`), unique among the active chains in any case; the id names the
+  memory directory and survives a rename. The migration's chain is `main`,
+  named `Main`.
 - The first chain is the active one created first; whatever no chain claims
   lands there.
 - An archived chain takes no user message (`chain: <name> is archived —
-  unarchive first`); its runs finish, its callbacks reach its head, its items
-  show marked archived, its memory stays searchable.
+  unarchive first`), only `/chain` and `/chain rename`; its runs finish, its
+  callbacks reach its head, its items show marked archived, its memory stays
+  searchable.
 - An item belongs to the chain of the head that wrote it, a run to its
   launcher's chain; a `conversation` callback reaches
   `headOf(run.invokedBySessionId)`, a scheduled task's
@@ -159,10 +161,10 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 | Command | Answer |
 | --- | --- |
-| `/chain` | one line per chain, `<name> · N open · M waiting on you`, `✓ ` before the current, archived last with `(archived)` (`MainChain.chainsText`) |
+| `/chain` | one line per chain, `<name> · N open · M waiting on you`, `✓ ` before the current, archived last with `(archived)` (`MainChain.chainsText`); on a chain with no head yet, or archived, the surface shows it (`ChainSent.answer`) and no head starts |
 | `/chain <name>` | switch by unique prefix, archived refused; ambiguity answers `/chain <q> matches A, B — say more`; never rotates |
 | `/chain new <name>` | create and switch; in Session mode turns chain mode on first |
-| `/chain rename <name>` | rename the current chain |
+| `/chain rename <name>` | rename the current chain, answered as `/chain` is |
 | `/chain archive` | archive the current chain and switch to the first; refused while it has open items (`chain: <name> has N open — /status first`) |
 
 ## Head lifecycle

@@ -140,6 +140,7 @@ export class ChannelRuntime {
     this.homeQueue = this.homeQueue.then(async () => {
       const chainId = tapped ?? (await this.pointed(channel, conversationId)).id;
       const sent = await this.chain.send(msg, chainId, { channelId: msg.key.channelId, conversationId });
+      if (sent.answer !== undefined) return this.tell(channel, conversationId, sent.answer);
       if (!sent.switched) return;
       this.store.setHomeChain(sent.switched.id);
       await this.tell(channel, conversationId, `↔ chain · ${sent.switched.name}`);

@@ -26,6 +26,8 @@ describe("Chains", () => {
     expect(() => chains.create("design")).toThrow('chain: "design" exists');
     expect(() => chains.create("   ")).toThrow(ChainInvalid);
     expect(() => chains.create("x".repeat(41))).toThrow("chain: name must be 1–40 characters");
+    // A `/chain` verb as a name could never be switched to.
+    for (const verb of ["new", "Rename", "ARCHIVE"]) expect(() => chains.create(verb)).toThrow(ChainInvalid);
     // Characters, not UTF-16 units.
     expect(chains.create("链".repeat(40)).name).toHaveLength(40);
     expect(chains.list().map((c) => c.name)).toEqual(["Main", "Design", "链".repeat(40)]);

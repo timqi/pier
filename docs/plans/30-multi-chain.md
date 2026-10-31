@@ -403,7 +403,7 @@ get chains(): Chains                                    // 构造时传入的登
 ### tasks
 
 - `TaskChain = Pick<MainChain, "chainOf" | "members" | "headOf" | "firstHead" | "heads" | "isHead">`。
-- `TaskStore.openItems(chainId)`、`markOpenItems(…, chainId)`、`items(q, chainId?)`（行带 `chain`）、`itemHistory(chainId, problem)`、`itemHistoryByProblem(problem)`（唯一才返回，旧路由用）。
+- `TaskStore.openItems(chainId)`、`markOpenItems(…, chainId)`、`items(q, chainId?)`（行带 `chain`）、`itemHistory(chainId, problem)`、`itemHistoryByProblem(problem)`（旧路由用：唯一持有它的活跃 chain，否则首条——与 `chainHolding` 同一规则）。
 - `TaskService.openItems(chainId?)`：缺省全部，每行 `chain: ItemChain`（`{ id, name, archived }`，`tasks/types.ts`）；`openItemsStatus(open, now, unmatched)` 不变。
 - `TaskService` 的 instance deps 多 `chains: Pick<Chains, "list">`；`unmatchedDone(chainId)` 按 chain。
 - `ItemSummary.chain`、`ItemRecord.chain` 是 chain id（字符串）；`main_chain.chain_id` 与 `open_items.chain_id` 都 `DEFAULT 'main'`（迁移外的 INSERT 也能写；降级本身是恢复备份，旧版拒绝打开更新的 schema）。

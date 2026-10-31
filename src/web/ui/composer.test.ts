@@ -600,6 +600,13 @@ it("sends the conversation's chain and follows a /chain switch", async () => {
   expect(JSON.parse(state.fetch.mock.calls[1]?.[1]?.body as string).chain).toBe("c2");
   expect(switched).toHaveBeenCalledWith("c3");
   expect(headMoved).not.toHaveBeenCalled();
+  // A chain with no head answers `/chain` to the pane itself.
+  state.appendTurn.mockClear();
+  state.fetch.mockResolvedValueOnce(Response.json({ chainId: "c2", answer: "✓ ops · 0 open · 0 waiting on you" }, { status: 202 }));
+  type("/chain");
+  await composer.send("auto");
+  expect(state.appendTurn).toHaveBeenCalledWith("system", "✓ ops · 0 open · 0 waiting on you");
+  expect(headMoved).not.toHaveBeenCalled();
 });
 
 // The item view's sends name the item on their first line, above a quote; a command names nothing.

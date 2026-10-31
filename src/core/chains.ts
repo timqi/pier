@@ -4,6 +4,7 @@
 
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { transact } from "../db.js";
 
 export interface ChainRow { id: string; name: string; createdAt: number; archivedAt: number | null }
 
@@ -22,6 +23,8 @@ export class ChainHasOpen extends Error {
 export class ChainAmbiguous extends Error {}
 
 const NAME_MAX = 40;
+/** `/chain <word>`'s verbs: a chain so named could never be switched to. */
+const RESERVED = new Set(["new", "rename", "archive"]);
 
 type Row = { id: string; name: string; created_at: number; archived_at: number | null };
 const row = (r: Row): ChainRow => ({ id: r.id, name: r.name, createdAt: r.created_at, archivedAt: r.archived_at });
@@ -57,6 +60,11 @@ export class Chains {
     const id = randomBytes(4).toString("hex");
     this.db.prepare("INSERT INTO chains(id, name, created_at, archived_at) VALUES (?, ?, ?, NULL)").run(id, valid, this.now());
     return this.get(id)!;
+  }
+
+  /** Several writes as one: a refused one leaves the others unwritten. */
+  transact<T>(work: () => T): T {
+    return transact(this.db, work);
   }
 
   rename(id: string, name: string): ChainRow {
@@ -105,11 +113,12 @@ export class Chains {
     return chain;
   }
 
-  /** Trimmed, 1–40 characters, and no other active chain's name in any case. */
+  /** Trimmed, 1–40 characters, not a `/chain` verb, and no other active chain's name in any case. */
   private valid(name: string, self?: string): string {
     const trimmed = name.trim();
     const length = [...trimmed].length;
     if (length < 1 || length > NAME_MAX) throw new ChainInvalid(`chain: name must be 1–${String(NAME_MAX)} characters`);
+    if (RESERVED.has(trimmed.toLowerCase())) throw new ChainInvalid(`chain: "${trimmed}" is a /chain verb — pick another name`);
     const taken = this.list().some((c) => c.archivedAt === null && c.id !== self && c.name.toLowerCase() === trimmed.toLowerCase());
     if (taken) throw new ChainExists(`chain: "${trimmed}" exists`);
     return trimmed;

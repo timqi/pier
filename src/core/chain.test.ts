@@ -698,14 +698,19 @@ describe("/chain", () => {
     const old = r.chains.create("Old");
     r.chains.archive(old.id);
     r.status.items = { [design.id]: ["waiting on you", "running"] };
-    expect(await r.say("/chain", design.id)).toEqual({ sessionId: "m1", chainId: design.id, rotated: "first" });
-    expect(r.sessions.get("m1")!.systemInputs.at(-1)).toMatchObject({
-      text: "Main · 0 open · 0 waiting on you\n✓ Design · 2 open · 1 waiting on you\nOld · 0 open · 0 waiting on you (archived)",
-      origin: { kind: "chat-command", command: "chain" },
-    });
-    expect(r.sessions.get("m1")!.prompts).toEqual([]);
+    const text = "Main · 0 open · 0 waiting on you\n✓ Design · 2 open · 1 waiting on you\nOld · 0 open · 0 waiting on you (archived)";
+    // Before the chain's first message there is no head to say it on: the surface shows it, and no head starts for it.
+    expect(await r.say("/chain", design.id)).toEqual({ chainId: design.id, answer: text });
+    expect(r.created).toHaveLength(0);
+    await r.say("hi", design.id);
+    expect(await r.say("/chain", design.id)).toEqual({ sessionId: "m1", chainId: design.id });
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)).toMatchObject({ text, origin: { kind: "chat-command", command: "chain" } });
+    expect(r.sessions.get("m1")!.prompts).toHaveLength(1);
     // A list changes nothing: no surface re-reads for it.
     expect(r.changed).not.toHaveBeenCalled();
+    // An archived chain lists too, its head untouched.
+    expect(await r.say("/chain", old.id)).toEqual({ chainId: old.id, answer: text.replace("✓ Design", "Design").replace("Old", "✓ Old") });
+    expect(r.created).toHaveLength(1);
   });
 
   it("switches by unique prefix without touching either head, and refuses an archived or ambiguous one", async () => {
@@ -746,12 +751,16 @@ describe("/chain", () => {
     await expect(r.say("/chain new")).rejects.toThrow("chain: name must be 1–40 characters");
   });
 
-  it("renames the current chain and answers with the list", async () => {
+  it("renames the current chain and answers with the list, on the head when it has one", async () => {
     const r = rig();
-    expect(await r.say("/chain rename  Home ")).toMatchObject({ sessionId: "m1", chainId: "main" });
+    expect(await r.say("/chain rename  Home ")).toEqual({ chainId: "main", answer: "✓ Home · 0 open · 0 waiting on you" });
     expect(r.chains.get("main")?.name).toBe("Home");
     expect(r.changed).toHaveBeenCalledTimes(1);
-    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.text).toBe("✓ Home · 0 open · 0 waiting on you");
+    expect(r.created).toHaveLength(0);
+    await r.say("hi");
+    expect(await r.say("/chain rename Main")).toMatchObject({ sessionId: "m1", chainId: "main" });
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.text).toBe("✓ Main · 0 open · 0 waiting on you");
+    await expect(r.say("/chain rename archive")).rejects.toThrow('chain: "archive" is a /chain verb — pick another name');
   });
 
   it("archives the current chain onto the first, refusing one with open items and the last active one", async () => {

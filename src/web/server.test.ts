@@ -2698,9 +2698,11 @@ describe("the continuous conversation's routes", () => {
       expect((await send(`/api/chains/${id}`, { name: "main" }, "PATCH")).status).toBe(409);
       expect((await send("/api/chains/nope", { name: "x" }, "PATCH")).status).toBe(404);
       expect((await send(`/api/chains/${id}`, {}, "PATCH")).status).toBe(400);
-      const asked = await send("/api/chains/main", { archived: true }, "PATCH");
+      const asked = await send("/api/chains/main", { name: "Home", archived: true }, "PATCH");
       expect(asked.status).toBe(409);
       expect(await asked.json()).toEqual({ error: "chain: Main has 2 open — /status first", open: 2 });
+      // One write: the refused archive took the rename with it.
+      expect(await idOf(app, "Main")).toBe("main");
       workspace.length = 0;
       const archived = await send("/api/chains/main", { archived: true, force: true }, "PATCH");
       expect(await archived.json()).toMatchObject({ id: "main", archivedAt: expect.any(Number) });
@@ -2753,6 +2755,10 @@ describe("the continuous conversation's routes", () => {
       expect(refused.status).toBe(409);
       expect(await refused.json()).toEqual({ error: "chain: Design is archived — unarchive first" });
       expect((await post("/api/continuous/messages", { text: "/chain new main", chain: "main" })).status).toBe(409);
+      // The list an archived chain, or one with no head, cannot say on a head comes back to show.
+      const listed = await post("/api/continuous/messages", { text: "/chain", chain: id });
+      expect(listed.status).toBe(202);
+      expect(await listed.json()).toEqual({ chainId: id, answer: "Main · 0 open · 0 waiting on you\n✓ Design · 0 open · 0 waiting on you (archived)" });
     });
 
     it("finds an item in the chain its route names, and searches one chain", async () => {

@@ -95,12 +95,14 @@ const SEED_RUNS_HIDDEN: ReadonlySet<string> = new Set(["succeeded", "skipped"]);
 export const skillsText = (skills: { name: string; description: string }[]): string =>
   skills.map((s) => `${s.name} — ${s.description}`).join("\n") || "no skills";
 
-/** What `send` did: the head that took the message, or, for `/chain <name>`,
+/** What `send` did: the head that took the message; for `/chain <name>`,
  *  `/chain new` and `/chain archive`, the chain the surface switches to, its
- *  head when it has one yet — no head is touched or rotated by a switch. */
+ *  head when it has one yet — no head is touched or rotated by a switch; or
+ *  `/chain`'s list, answered to the surface when the chain has no head to say it on. */
 export type ChainSent =
-  | { sessionId: string; chainId: string; rotated?: ChainReason; switched?: undefined }
-  | { sessionId?: string; chainId: string; switched: ChainRow };
+  | { sessionId: string; chainId: string; rotated?: ChainReason; switched?: undefined; answer?: undefined }
+  | { sessionId?: string; chainId: string; switched: ChainRow; answer?: undefined }
+  | { sessionId?: undefined; chainId: string; switched?: undefined; answer: string };
 
 export class MainChain {
   /** Per chain, sends pass one at a time, so two cannot both find its head idle and rotate twice. */
@@ -225,6 +227,10 @@ export class MainChain {
     }
     const chain = this.deps.chains.get(chainId);
     if (!chain) throw new Error(`chain: no chain ${chainId}`);
+    // The list and a rename need no head: a chain without one yet, or archived, answers on the surface.
+    if (command?.command === "chain" && (chain.archivedAt !== null || !this.members(chainId).length)) {
+      return { chainId, answer: this.chainCommand(command.args, chainId) };
+    }
     if (chain.archivedAt !== null) throw new ChainArchived(chain.name);
     if (command) return this.serial(chainId, key, (session, rotated) => this.command(command, chainId, key, session, rotated));
     this.lastUser.set(chainId, this.now());
@@ -275,11 +281,7 @@ export class MainChain {
       return { session: await this.rotate(chainId, "new", key, this.members(chainId)[0], session), rotated: "new" };
     }
     if (command === "chain") {
-      if (args) {
-        this.deps.chains.rename(chainId, args.replace(/^rename\s*/i, ""));
-        this.deps.changed();
-      }
-      await session.systemInput(this.chainsText(chainId), origin, "append");
+      await session.systemInput(this.chainCommand(args, chainId), origin, "append");
       return undefined;
     }
     if (command === "skills") {
@@ -295,6 +297,15 @@ export class MainChain {
     const { text, sessions, snapshot } = this.status(chainId);
     await session.systemInput(text, { ...origin, sessions, statusSnapshot: snapshot }, "append");
     return undefined;
+  }
+
+  /** `/chain` and `/chain rename <name>`: the rename, then the list. */
+  private chainCommand(args: string, chainId: string): string {
+    if (args) {
+      this.deps.chains.rename(chainId, args.replace(/^rename\s*/i, ""));
+      this.deps.changed();
+    }
+    return this.chainsText(chainId);
   }
 
   /** `then` may rotate again and return the head it made; the caller's answer is that one. */

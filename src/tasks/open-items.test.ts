@@ -697,10 +697,14 @@ describe("the open items", () => {
     expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 1 }]);
     end("h0", "<done>login</done>");
     expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 0 }]);
-    // A link naming no chain finds an item only one chain has.
-    expect(store.itemHistoryByProblem("login")).toBeUndefined();
+    // A link naming no chain: the one active chain holding the item, else the first active chain's.
+    expect(store.itemHistoryByProblem("login")?.chain).toBe("design");
+    db.exec("UPDATE chains SET archived_at = 2 WHERE id = 'design'");
+    expect(store.itemHistoryByProblem("login")?.chain).toBe("main");
+    db.exec("UPDATE chains SET archived_at = NULL WHERE id = 'design'");
     end("d0", "<open>signup</open>");
     expect(store.itemHistoryByProblem("signup")?.chain).toBe("design");
+    expect(store.itemHistoryByProblem("nowhere")).toBeUndefined();
 
     end("d0", "<done>never open</done>");
     expect([service.unmatchedDone("design"), service.unmatchedDone("main")]).toEqual([["never open"], []]);

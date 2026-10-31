@@ -595,12 +595,16 @@ export function createServer(
     if (!chains.get(id)) return c.json({ error: `chain: no chain ${id}` }, 404);
     if (typeof body?.name !== "string" && typeof body?.archived !== "boolean") return c.json({ error: "name or archived required" }, 400);
     try {
-      let row = typeof body.name === "string" ? chains.rename(id, body.name) : chains.get(id)!;
-      if (body.archived === true) row = chains.archive(id, body.force === true);
-      if (body.archived === false) {
-        chainModeOn();
-        row = chains.unarchive(id);
-      }
+      // One write, the archive judged first: a refused one leaves the rename unwritten and names the chain as it is.
+      const row = chains.transact(() => {
+        let row = chains.get(id)!;
+        if (body.archived === true) row = chains.archive(id, body.force === true);
+        if (body.archived === false) {
+          chainModeOn();
+          row = chains.unarchive(id);
+        }
+        return typeof body.name === "string" ? chains.rename(id, body.name) : row;
+      });
       chainsChanged();
       return c.json(chainInfo(row, openRows()));
     } catch (err) {
@@ -703,8 +707,8 @@ export function createServer(
     if (!chains.get(chainId)) return c.json({ error: `chain: no chain ${chainId}` }, 404);
     try {
       const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode }, chainId);
-      // The client navigates to the chain named; nothing was sent to a head.
-      if (head.switched) return c.json(head, 202);
+      // The client navigates to the chain named, or shows the answer; nothing was sent to a head.
+      if (head.switched || head.answer !== undefined) return c.json(head, 202);
       state.spokeFrom(head.sessionId, sessionIdOf(c));
       const { item } = splitItem(body.text);
       // Before any reply: one that comes back untagged, or a reload mid-turn, still finds the row.
