@@ -10,7 +10,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Session per conversation | One chat (or thread) is one persisted Pi session, stable across restarts | shared (`conversations.ts`) | ✅ | ✅ |
 | Thread-per-request | A message in the parent chat opens a native thread and its own session; replies and commands stay put | shared policy, adapter creates the thread | ✅ | ✅ |
 | Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | ✅ |
-| Progress receipts | Every message that entered a turn wears 👀 until it settles, except in the home chat, which wears no reaction in its main flow or threads ([11 §Status](11-im-conversation.md#status)); no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ |
+| Progress receipts | Every message that entered a turn wears 👀 until it settles, except in the home chat, main flow and threads, which wears it only while the head is busy or the answer is past 20 s ([11 §Status](11-im-conversation.md#status)); no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ |
 | Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ |
 | Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as a reply to the message that offered it, in the web's quote (`withQuote`) | shared parse, adapter renders + feeds back | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ |
@@ -332,7 +332,10 @@ and `sweep`:
   most once a minute, receipts past 10 minutes whose conversation is not working.
 - A `quiet` chat — the home, main flow and threads — is booked and settled
   with no reaction call: the books still tell a silent turn whether it settled
-  a message ([11 §Status](11-im-conversation.md#status)). The `start()` sweep
+  a message ([11 §Status](11-im-conversation.md#status)). Two exceptions wear
+  the 👀 as a loud chat does: a message marked while its conversation is
+  `working`, and one still on the books `lateMs` (20 s) after it was marked;
+  the clear takes off only a reaction that went up. The `start()` sweep
   clears a quiet chat's receipts too: a 👀 booked before the chat was quiet.
 
 ## Console surface

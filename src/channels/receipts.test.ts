@@ -26,7 +26,11 @@ const receipt = (conversationId: string, messageId: string) => ({
  *  messages it cleared — which receipt came off is what settling is about. */
 const REACTION = "eyes";
 
-const recording = (quiet?: (chatId: string) => boolean) => {
+const recording = (
+  quiet?: (chatId: string) => boolean,
+  working?: (conversationId: string) => boolean,
+  lateMs?: number,
+) => {
   const ledger = new ReceiptLedger("slack", db);
   const cleared: string[] = [];
   /** Every platform call, `+name:id` or `-name:id`. */
@@ -48,8 +52,9 @@ const recording = (quiet?: (chatId: string) => boolean) => {
     (m) => logged.push(m),
     REACTION,
     60_000,
-    undefined,
+    working,
     quiet,
+    lateMs,
   );
   return { receipts, cleared, calls, ledger, logged };
 };
@@ -218,6 +223,30 @@ describe("receipt ledger", () => {
     // chat was quiet is on the platform with nobody else to clear it.
     await receipts.sweep(true);
     expect(calls).toEqual(["+eyes:3", "-eyes:3", "-eyes:2"]);
+  });
+
+  it("a quiet chat wears 👀 for a message that reaches a busy head, cleared on settle", async () => {
+    const busy = new Set<string>(["D1"]);
+    const { receipts, calls } = recording((chatId) => chatId === "D1", (id) => busy.has(id));
+    receipts.mark("D1", "D1", "busy");
+    busy.clear();
+    receipts.mark("D1", "D1", "idle");
+    await receipts.settle("D1");
+    // The idle one settled before it was late: no reaction to take off.
+    expect(calls).toEqual(["+eyes:busy", "-eyes:busy"]);
+  });
+
+  it("a quiet chat's answer that is late wears 👀 from lateMs, and one settled before it never does", async () => {
+    const { receipts, calls } = recording((chatId) => chatId === "D1", () => false, 20);
+    receipts.mark("D1", "D1", "slow");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(calls).toEqual(["+eyes:slow"]);
+    await receipts.settle("D1");
+    expect(calls).toEqual(["+eyes:slow", "-eyes:slow"]);
+    receipts.mark("D1", "D1", "quick");
+    await receipts.settle("D1");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(calls).toEqual(["+eyes:slow", "-eyes:slow"]);
   });
 
   it("survives a restart and keeps platforms apart", () => {

@@ -1,5 +1,6 @@
 // Reaction receipts: an inbound message is booked when it arrives and settled
-// when its turn ends, wearing a 👀 meanwhile except in a quiet chat (the home).
+// when its turn ends, wearing a 👀 meanwhile — in a quiet chat (the home) only
+// while the head is busy or the answer is late.
 // Durable, because the emoji lives on the platform: a process ending between
 // the two halves would leave it with nobody to clear it.
 
@@ -103,6 +104,8 @@ interface ReactionApi {
  *  that call to land or the reaction stays up forever. */
 export class Receipts {
   private readonly applying = new Map<string, Promise<unknown>>();
+  /** A quiet chat's pending 👀, keyed as `applying`. */
+  private readonly late = new Map<string, NodeJS.Timeout>();
   private sweptAt = 0;
 
   constructor(
@@ -114,8 +117,10 @@ export class Receipts {
      *  settle. A turn still running keeps its 👀 however long it takes. */
     private readonly staleMs: number,
     private readonly working?: (conversationId: string) => boolean,
-    /** A quiet chat is booked and settled without a reaction call. */
+    /** A quiet chat is booked and settled without a reaction call, unless the
+     *  conversation is working at `mark` or the receipt outlives `lateMs`. */
     private readonly quiet: (chatId: string) => boolean = () => false,
+    private readonly lateMs = 20_000,
   ) {}
 
   /** `at` is when the turn this receipt belongs to began; it defaults to now,
@@ -124,12 +129,26 @@ export class Receipts {
    *  the turn started — would put it outside that turn's scope and leave the
    *  reaction up until the stale sweep. */
   mark(conversationId: string, chatId: string, messageId: string, at?: number): void {
-    if (!this.quiet(chatId)) this.applying.set(
-      `${chatId}:${messageId}`,
-      this.api.addReaction(chatId, messageId, this.emoji)
-        .catch((err) => this.log(`reaction failed: ${String(err)}`)),
-    );
+    const key = `${chatId}:${messageId}`;
+    clearTimeout(this.late.get(key));
+    this.late.delete(key);
+    if (!this.quiet(chatId) || this.working?.(conversationId)) this.react(key, chatId, messageId);
+    else {
+      const timer = setTimeout(() => {
+        this.late.delete(key);
+        const booked = this.ledger.booked(conversationId)
+          .some((r) => r.chatId === chatId && r.messageId === messageId);
+        if (booked) this.react(key, chatId, messageId);
+      }, this.lateMs);
+      timer.unref();
+      this.late.set(key, timer);
+    }
     this.ledger.add({ conversationId, chatId, messageId }, at);
+  }
+
+  private react(key: string, chatId: string, messageId: string): void {
+    this.applying.set(key, this.api.addReaction(chatId, messageId, this.emoji)
+      .catch((err) => this.log(`reaction failed: ${String(err)}`)));
   }
 
   /** Only the messages *this* turn was working on: a message queued mid-turn
@@ -173,8 +192,16 @@ export class Receipts {
   }
 
   private async clear(receipts: Receipt[], everywhere = false): Promise<void> {
+    // Read before `landed` forgets it: in a quiet chat only these wear a 👀.
+    const reacted = new Set(receipts.map((r) => `${r.chatId}:${r.messageId}`)
+      .filter((key) => this.applying.has(key)));
+    for (const { chatId, messageId } of receipts) {
+      clearTimeout(this.late.get(`${chatId}:${messageId}`));
+      this.late.delete(`${chatId}:${messageId}`);
+    }
     await this.landed(receipts);
-    await Promise.all(receipts.filter((r) => everywhere || !this.quiet(r.chatId)).map((r) =>
+    await Promise.all(receipts.filter((r) =>
+      everywhere || !this.quiet(r.chatId) || reacted.has(`${r.chatId}:${r.messageId}`)).map((r) =>
       this.api.removeReaction(r.chatId, r.messageId, this.emoji)
         .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`))));
   }
