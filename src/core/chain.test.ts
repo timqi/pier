@@ -483,8 +483,11 @@ describe("the chat commands", () => {
     for (const text of ["/tmp is full", "/status please", "status", "/stat", "%", "%unknown"]) await r.say(text);
     expect(m1.prompts).toHaveLength(6);
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
+    r.clock.now += 1000;
     expect(await r.say(" %Status ")).toEqual({ sessionId: "m1", chainId: "main" });
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(2);
+    // A command is the user writing here: the home chat's card gate and the chain list's order read it.
+    expect(r.chain.lastUserAt("main")).toBe(r.clock.now);
   });
 
   it("carries each named run's session with `/status`, for the card to link", async () => {

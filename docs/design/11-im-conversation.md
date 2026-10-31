@@ -195,7 +195,7 @@ The home chat's main flow shows the open items in one status card
   chains` from the `viewOf` main.ts hands it (`tasks.openItems(chain)`,
   `openItemsStatus`) and calls `Channel.status` on the home platform's live
   adapter while the head of the chain the user last wrote to
-  (`MainChain.lastUserAt`) answers in the home chat (`Router.answersOn`,
+  (`MainChain.lastUserAt`, a chat command counted as writing) answers in the home chat (`Router.answersOn`,
   §Notifications; a `task:` key or none is the durable rule). After a message
   from the web nothing in the chat is posted, edited or deleted until the user
   speaks there again, or a restart returns the head to the chat

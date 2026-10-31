@@ -248,8 +248,9 @@ export class MainChain {
       return { chainId, answer: this.chainCommand(command.args, chainId) };
     }
     if (chain.archivedAt !== null) throw new ChainArchived(chain.name);
-    if (command && !commandStartsTurn(command)) return this.serial(chainId, key, (session, rotated) => this.command(command, chain, key, session, rotated));
+    // A command counts as the user writing here: the chat's card follows the chain they last wrote to.
     this.lastUser.set(chainId, this.now());
+    if (command && !commandStartsTurn(command)) return this.serial(chainId, key, (session, rotated) => this.command(command, chain, key, session, rotated));
     return this.serial(chainId, key, async (session, rotated) => {
       // `/new <text>`: the next head, then `text` as its first message.
       const head = command ? await this.command(command, chain, key, session, rotated) : undefined;
