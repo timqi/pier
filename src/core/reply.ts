@@ -165,16 +165,17 @@ const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
 const tag = (literal: string): string => literal.split("").join(ZW);
 const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");
 /** A tag that hides what it wraps: a streaming renderer never cuts inside one. */
-const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done", "note", "topic"].map(tag).join("|")})${ZW}>`, "gi");
+const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done", "note", "topic"].map(tag).join("|")})(?: global)?${ZW}>`, "gi");
 const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 
 /** Main's markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back on the head's turn end. Code is content, so a
  *  marker inside a fence or a code span is neither. Group 1 is an `<open>`
  *  body, group 2 a `<done>` body, group 3 a `<note>` body, group 4 a
- *  `<topic>` body. */
+ *  `<topic>` body, group 5 a `<note global>` body. */
 const MARKER = new RegExp(
-  ["open", "done", "note", "topic"].map((t) => `${tag(`<${t}>`)}([\\s\\S]*?)${tag(`</${t}>`)}[ \\t]*\\n?`).join("|"),
+  ["open", "done", "note", "topic", "note global"]
+    .map((t) => `${tag(`<${t}>`)}([\\s\\S]*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`).join("|"),
   "gi",
 );
 const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
@@ -209,14 +210,22 @@ function doneLine(text: string): { problem: string; to?: string } {
   return { problem: openLine(body.slice(0, arrow.index)).problem, to };
 }
 
-/** The markers in reply order, `notes` the daily-note lines, `topic` the
- *  `<topic>` body; `dropped` holds the ones with no text, for the caller to log. */
-export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; notes: string[]; topic?: string; dropped: string[] } {
+/** The markers in reply order, `notes` the chain's daily-note lines and `globalNotes`
+ *  the `<note global>` ones, `topic` the `<topic>` body; `dropped` holds the ones with
+ *  no text, for the caller to log. */
+export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; notes: string[]; globalNotes: string[]; topic?: string; dropped: string[] } {
   const markers: OpenItemMarker[] = [];
   const notes: string[] = [];
+  const globalNotes: string[] = [];
   const dropped: string[] = [];
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
+    if (m[5] !== undefined) {
+      const body = oneLine(m[5]);
+      if (body) globalNotes.push(body);
+      else dropped.push(m[0].trim());
+      return "";
+    }
     if (m[1] === undefined) {
       const done = m[2] !== undefined ? doneLine(m[2]) : undefined;
       const body = done?.problem ?? (m[3] !== undefined ? oneLine(m[3]) : openLine(m[4] ?? "").problem);
@@ -231,7 +240,7 @@ export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; 
     else dropped.push(m[0].trim());
     return "";
   });
-  return { markers, notes, ...(topic ? { topic } : {}), dropped };
+  return { markers, notes, globalNotes, ...(topic ? { topic } : {}), dropped };
 }
 
 /** The open item a reply is about, by its `problem` key: the `<topic>` body,

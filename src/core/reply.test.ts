@@ -280,6 +280,7 @@ describe("open-item markers", () => {
         { op: "open", problem: "open items 视图", stage: "worker running", runIds: [] },
       ],
       notes: [],
+      globalNotes: [],
       dropped: [],
     });
   });
@@ -292,8 +293,18 @@ describe("open-item markers", () => {
 
   it("reads a note as one line beside the items, stripped like them", () => {
     const raw = "Merged.\n<note>决定：审查默认用 balanced\n 不用 cheap</note>\n<done>CI 修复</done>";
-    expect(openItemMarkers(raw)).toEqual({ markers: [{ op: "done", problem: "CI 修复" }], notes: ["决定：审查默认用 balanced 不用 cheap"], dropped: [] });
+    expect(openItemMarkers(raw)).toEqual({ markers: [{ op: "done", problem: "CI 修复" }], notes: ["决定：审查默认用 balanced 不用 cheap"], globalNotes: [], dropped: [] });
     expect(streamBody(raw)).toBe("Merged.");
+  });
+
+  it("reads a global note apart from the chain's, stripped the same, never inside code", () => {
+    const raw = "Ok.\n<note global>prefers\n terse replies</note>\n<note>chain fact</note>\n<note global> </note>\n`<note global>x</note>`";
+    expect(openItemMarkers(raw)).toEqual({
+      markers: [], notes: ["chain fact"], globalNotes: ["prefers terse replies"], dropped: ["<note global> </note>"],
+    });
+    expect(streamBody(raw)).toBe("Ok.\n`<note global>x</note>`");
+    expect(streamTail("Ok.\n<note global>half")).toBe("Ok.\n");
+    expect(streamTail("Ok.\n<note global>whole</note> more")).toBe("Ok.\n<note global>whole</note> more");
   });
 
   // A `<done>` keys like the `<open>` it closes: the problem before the dash.
@@ -311,7 +322,7 @@ describe("open-item markers", () => {
 
   it("drops a marker with no problem text and leaves the reply otherwise untouched", () => {
     const raw = "Hi.\n<open> — stage (run r1)</open><done> </done><note> </note>";
-    expect(openItemMarkers(raw)).toEqual({ markers: [], notes: [], dropped: ["<open> — stage (run r1)</open>", "<done> </done>", "<note> </note>"] });
+    expect(openItemMarkers(raw)).toEqual({ markers: [], notes: [], globalNotes: [], dropped: ["<open> — stage (run r1)</open>", "<done> </done>", "<note> </note>"] });
     expect(streamBody(raw)).toBe("Hi.");
   });
 
@@ -332,13 +343,13 @@ describe("open-item markers", () => {
   it("reads a reply's topic: the `<topic>` body, else the first item marker's problem", () => {
     const tagged = "Still running.\n<topic>CI 修复</topic>";
     expect(replyTopic(tagged)).toBe("CI 修复");
-    expect(openItemMarkers(tagged)).toEqual({ markers: [], notes: [], topic: "CI 修复", dropped: [] });
+    expect(openItemMarkers(tagged)).toEqual({ markers: [], notes: [], globalNotes: [], topic: "CI 修复", dropped: [] });
     expect(streamBody(tagged)).toBe("Still running.");
     expect(saidText(tagged)).toBe("Still running.");
     expect(replyTopic("<done>60K rotation</done><open>menu — running</open>")).toBe("60K rotation");
     expect(replyTopic("<open>menu — running</open><topic>60K rotation</topic>")).toBe("60K rotation");
     expect(replyTopic("Hi.")).toBeUndefined();
-    expect(openItemMarkers("<topic> </topic>")).toEqual({ markers: [], notes: [], dropped: ["<topic> </topic>"] });
+    expect(openItemMarkers("<topic> </topic>")).toEqual({ markers: [], notes: [], globalNotes: [], dropped: ["<topic> </topic>"] });
     expect(replyTopic("Write `<topic>x</topic>` on it.")).toBeUndefined();
     // Written like an `<open>`, it still keys on the problem; a stage alone is nothing.
     expect(replyTopic("<topic>CI \u4fee\u590d \u2014 worker running (run r1)</topic>")).toBe("CI \u4fee\u590d");
