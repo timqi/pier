@@ -56,7 +56,7 @@ scheduled tasks and live observability.
 - **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
   `core/identity.ts` and `core/inbound-file.ts`, so those four import no
   `node:*`, directly or transitively; `core/` modules that need Node
-  (`router.ts`, `inbox.ts`, `chain.ts`) are never imported from `web/ui/`.
+  (`router.ts`, `inbox.ts`, `chain.ts`, `chains.ts`) are never imported from `web/ui/`.
 
 ## UI/UX
 

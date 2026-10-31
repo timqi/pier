@@ -579,8 +579,9 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
     try {
-      const row = chains.create(body.name);
+      // Mode first, as `/chain new` does: a failed settings write leaves one chain, not two.
       chainModeOn();
+      const row = chains.create(body.name);
       chainsChanged();
       return c.json(chainInfo(row, openRows()), 201);
     } catch (err) {
@@ -597,8 +598,8 @@ export function createServer(
       let row = typeof body.name === "string" ? chains.rename(id, body.name) : chains.get(id)!;
       if (body.archived === true) row = chains.archive(id, body.force === true);
       if (body.archived === false) {
-        row = chains.unarchive(id);
         chainModeOn();
+        row = chains.unarchive(id);
       }
       chainsChanged();
       return c.json(chainInfo(row, openRows()));

@@ -406,7 +406,7 @@ get chains(): Chains                                    // 构造时传入的登
 - `TaskStore.openItems(chainId)`、`markOpenItems(…, chainId)`、`items(q, chainId?)`（行带 `chain`）、`itemHistory(chainId, problem)`、`itemHistoryByProblem(problem)`（唯一才返回，旧路由用）。
 - `TaskService.openItems(chainId?)`：缺省全部，每行 `chain: ItemChain`（`{ id, name, archived }`，`tasks/types.ts`）；`openItemsStatus(open, now, unmatched)` 不变。
 - `TaskService` 的 instance deps 多 `chains: Pick<Chains, "list">`；`unmatchedDone(chainId)` 按 chain。
-- `ItemSummary.chain`、`ItemRecord.chain` 是 chain id（字符串）；`main_chain.chain_id` 与 `open_items.chain_id` 都 `DEFAULT 'main'`（降级后的旧代码仍能写）。
+- `ItemSummary.chain`、`ItemRecord.chain` 是 chain id（字符串）；`main_chain.chain_id` 与 `open_items.chain_id` 都 `DEFAULT 'main'`（迁移外的 INSERT 也能写；降级本身是恢复备份，旧版拒绝打开更新的 schema）。
 - `open-items.ts`：`openItems(reads, router, members, chainId)`、`recordOpenItems(store, text, now, sessionId, chainId, runIds?)`、`staleItems(store, text, runIds, chainId)`。
 - callback 解析：`conversation` → `headOf(run.invokedBySessionId)`，定时任务 → `headOf(createdBySessionId)`，都无 → `firstHead()`。
 

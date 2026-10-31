@@ -444,7 +444,6 @@ const MIGRATIONS: readonly string[] = [
     archived_at INTEGER
   );
   INSERT INTO chains VALUES ('main', 'Main', CAST(unixepoch('subsec') * 1000 AS INTEGER), NULL);
-  -- DEFAULT 'main': a release before chains inserts without the column and must still run.
   CREATE TABLE main_chain_v2 (
     session_id TEXT PRIMARY KEY,
     chain_id TEXT NOT NULL DEFAULT 'main' REFERENCES chains(id),

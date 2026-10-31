@@ -10,7 +10,7 @@
 ### Upgrade
 
 - The migration puts every existing session and open item in one chain, `Main`; memory stays where it is and becomes the global layer, and nothing changes until chain mode is turned on.
-- Downgrading is not migrated back: the older code still runs (`chain_id` defaults to `main`, the `chains` table is ignored), but open items of other chains with the same problem collide on its single-column key and their rows read as one conversation.
+- Downgrading means restoring the pre-update backup from `db/backups/`: an older Pier refuses a database at this schema.
 
 ## 0.6.0 — 2026-10-26
 
