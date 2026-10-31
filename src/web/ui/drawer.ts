@@ -282,6 +282,9 @@ export function renderDrawer(): void {
   // A refusal stands while its row does: an item closed another way takes its sentence with it.
   closeError = standing(closeError);
   railError = standing(railError);
+  // A search's open match whose row left — closed here or in the stream — leaves the results with it.
+  found &&= found.filter((r) => rows.includes(r) || !r.dataset.rowKey || r.dataset.rowKey.startsWith("closed:"));
+  if (found?.length === 0) found = [note("No item matches.")];
   // The app icon counts a turn to look at — an unread one —
   // plus each chain's unread head reply, which the bar and the chain list stand for instead of a row.
   const heads = deps.chains().length ? deps.chains().filter((c) => c.unread).length : headSession()?.unread ? 1 : 0;
@@ -359,7 +362,6 @@ async function closeItem(problem: string, chain: string, from: Surface): Promise
   const at = error && error.parentElement === root ? row - 1 : row;
   closing.add(key);
   closeError = railError = null;
-  found = found?.filter((r) => r.dataset.rowKey !== key) ?? null;
   renderDrawer();
   // Focus stays in the list for the keys' walk: on the row that took the closed one's place. The rail's
   // last row leaves its list for `Nothing open`, so the current chain's row above takes it.

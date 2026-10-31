@@ -517,3 +517,22 @@ it("moves the focus to the current chain's row when the rail's last item row clo
   expect(rail().textContent).toContain("Nothing open");
   expect(doc.activeElement).toBe(chainRow);
 });
+
+// A search's open match is its panel row: a row the stream drops leaves the results too, not left behind as a detached node.
+it("drops a search's open match whose row the stream took away", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [{ problem: "auth", aliases: [], updatedAt: 1 }] }) })));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [] }, { problem: "deploy", stage: "", status: "running", runs: [] }], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  const field = doc.querySelector("input[type='search']")!;
+  field.value = "auth";
+  field.oninput?.(new Event("input"));
+  await vi.advanceTimersByTimeAsync(300);
+  expect(labels()).toEqual(["auth"]);
+  open = { items: [open.items[1]!], unlisted: [] };
+  drawer.renderDrawer();
+  expect(labels()).toEqual([]);
+  // Its last match gone, the search says so rather than leaving the panel blank.
+  expect(panel().querySelector("[data-list]")!.textContent).toBe("No item matches.");
+  vi.useRealTimers();
+});
