@@ -137,6 +137,10 @@ describe("the status card", () => {
     await Promise.resolve();
     await Promise.all([first, status.show("D1", view("e")), status.show("D1", view("f"))]);
     expect(calls).toEqual(["post D1 > c", "edit m1 > d", "edit m1 > f"]);
+    // An adapter's stop waits on it, so its replacement never races the edit in flight.
+    void status.show("D1", view("g"));
+    await status.settled();
+    expect(calls.at(-1)).toBe("edit m1 > g");
   });
 
   it("survives a restart: the row is on disk", async () => {

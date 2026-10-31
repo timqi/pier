@@ -164,6 +164,7 @@ export class LarkChannel implements Channel {
       this.log(`lark socket did not close cleanly: ${String(err)}`));
     this.socket = undefined;
     await this.chains.drain(DRAIN_TIMEOUT_MS);
+    await this.statusLine.settled();
   }
 
   // --- inbound ---------------------------------------------------------------

@@ -140,6 +140,11 @@ export class StatusMessage<B = string> {
     return this.tail;
   }
 
+  /** The refresh running and the one waiting done: a replacement adapter's card must not race them. */
+  settled(): Promise<void> {
+    return this.tail;
+  }
+
   private async apply(chatId: string, view: StatusView, repost: boolean): Promise<void> {
     // The home moved within the platform: the old chat's card is left as it was, no longer ours.
     this.db.prepare("DELETE FROM status_messages WHERE platform = ? AND chat_id <> ?").run(this.platform, chatId);

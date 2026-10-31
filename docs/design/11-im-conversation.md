@@ -198,7 +198,8 @@ The home chat's main flow shows the open items in one status card
   (`MainChain.lastUserAt`) answers in the home chat (`Router.answersOn`,
   §Notifications; a `task:` key or none is the durable rule). After a message
   from the web nothing in the chat is posted, edited or deleted until the user
-  speaks there again; the first refresh then reconciles the card.
+  speaks there again, or a restart returns the head to the chat
+  (§Notifications); the first refresh then reconciles the card.
 - The card is `▤ open items · <chain>` — the current chain's name —
   in the platform's emphasis over the view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
@@ -222,7 +223,8 @@ The home chat's main flow shows the open items in one status card
   posted → nothing; otherwise edited in place (posted when there is none). `Nothing open.`
   with no other chain listed edits it to say so (never posted for nothing); a later
   item edits it back. A failed edit posts a new card, the old one left as it was.
-  One refresh runs at a time; the newest waiting view replaces the older. A home
+  One refresh runs at a time; the newest waiting view replaces the older, and
+  an adapter's stop waits for both. A home
   moved within the platform forgets the old chat's card, left as it was.
 - `/status` in the main flow posts a new card at the bottom with the answer's
   text and snapshot and `Other chains` from `HomeChains.others()`, the
