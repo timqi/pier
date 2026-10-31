@@ -27,10 +27,11 @@ Slack / Lark                     Web workbench (browser)       Tasks
 ```
 src/
   core/        types.ts (the conversation seams), router.ts, hub.ts, queue.ts,
-               reply.ts, identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
-               Pier head: the `main_chain` table, rotation, seed), search.ts
-               (`pier search`, message recall across the conversation and
-               sessions)
+               reply.ts, identity.ts, inbox.ts, inbound-file.ts, chains.ts
+               (the chain register: names, archive, prefix resolve), chain.ts
+               (each chain's Pier head: the `main_chain` table, rotation,
+               seed, `/chain`), search.ts (`pier search`, message recall
+               across chains and sessions, the caller's chain first)
   agent/       types.ts (the Pi-config seams the Console asks for: config
                files, packages, providers, config sync, `pier web`'s auth),
                pi.ts (sessions) and packages.ts (the package registry: Pi's
@@ -138,6 +139,9 @@ Dependency rules:
 - Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`,
   `vault.ts`: every area may import them; they import nothing outside the root
   layer (`settings.ts` imports `core/types.ts`, the browser-safe vocabulary).
+- `tasks/`, `web/` and `channels/` reach the chain register through
+  `MainChain.chains` or a `Pick<Chains, …>` built in `main.ts`; `core/chains.ts`
+  imports `node:crypto`, so it is never imported from `web/ui/`.
 - Logging goes to stdout/stderr only (docs/deploy.md). `PIER_LOG=debug` adds
   per-message tracing; `PIER_LOG=silent` is what test runs use.
 - `tools.ts` is reached only by `main.ts`, `cli.ts`, `tools-task.ts` and
@@ -231,7 +235,8 @@ mirror them. The seams:
   `channels/conversations.ts`. A mapping whose session Pi no longer has is
   dropped and re-created, never retried forever
   ([04](design/04-im-channels.md#conversation-identity)). The continuous
-  conversation (`core/chain.ts`) resolves its head, rotating first when due,
+  conversation (`core/chain.ts`) resolves the head of the chain a surface
+  names ([10 §Chains](design/10-continuous-session.md#chains)), rotating first when due,
   and dispatches to the head's own `web:` key, or the home chat's key for a
   message from it ([11](design/11-im-conversation.md)); the router knows nothing of it.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text

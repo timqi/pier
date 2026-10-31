@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Chains: Pier's conversation can be split by hand into named chains, each with its own head, open items and memory (`chains/<id>/`) beside the global `MEMORY.md` and `memory/`; the "Chain mode" switch (off by default) shows the list, and `/chain` lists, switches, creates, renames and archives on the web and in the home chat. `<note global>` writes the global notes, `<note>` the chain's.
+- `pier search --in chain:<name>` searches one chain; without `--in`, the caller's chain comes first and each hit is placed by its chain's name.
+
+### Upgrade
+
+- The migration puts every existing session and open item in one chain, `Main`; memory stays where it is and becomes the global layer, and nothing changes until chain mode is turned on.
+- Downgrading to an earlier version is not migrated back and not supported: `main_chain.chain_id` and `open_items.chain_id` have no default, so the older code can read the conversation but fails to start a new head or record an open item.
+
 ## 0.6.0 — 2026-10-26
 
 ### Changed

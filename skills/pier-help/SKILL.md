@@ -36,12 +36,16 @@ truth.
 - Pier is one conversation, on the web and in the home chat (below): the
   bar's lead item opens the status panel — what is running over the open items;
   the ⋯ menu holds the rest. Its current session, the head, runs in `$PIER_HOME/home`,
-  which holds memory only: `MEMORY.md` and daily notes in `memory/`.
-- Recall: `rg` over `memory/`; `pier search --in main <words>` over what the
-  user and Pier said; `--since` narrows a time such as last week.
+  which holds memory only: global `MEMORY.md` and daily notes in `memory/`.
+- Chain mode (the ⋯ menu's switch, off by default) splits it by hand into
+  named chains, each with its own head, open items and memory in
+  `chains/<id>/` beside the global one; with it off there is one chain.
+- Recall: `rg <words> memory chains/*/memory`; `pier search --in main <words>`
+  over what the user and Pier said, `--in chain:<name>` in one chain;
+  `--since` narrows a time such as last week.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
-  session, seeded with `MEMORY.md`, the open items, its runs and the newest
-  2K of notes; only a session rotated for size names where the previous one
+  session of that chain, seeded with the global and the chain's `MEMORY.md`,
+  the chain's open items, its runs and the newest notes of both layers; only a session rotated for size names where the previous one
   left off and the `pier search --around` that replays it, so an idle hour or
   `/new` starts a new subject.
 - It dispatches: real work is a task run — a worker, or a feature lead that
@@ -91,6 +95,12 @@ truth.
   - `/s <text>` — on a thread root, the draft with `<text>` as its question;
     prose inside a thread and in the home chat.
   - `/bind <code>` — in a DM, binds the sender.
+  - `/chain` — the chains, `✓` on the current; prose in a thread.
+  - `/chain <name>` — switch to it by a unique prefix of its name.
+  - `/chain new <name>` — create one and switch to it; turns chain mode on.
+  - `/chain rename <name>` — rename the current chain.
+  - `/chain archive` — archive the current chain, refused while it has open
+    items; back to the first chain.
 - `/<word> <text>` (or `%`) runs a skill when `word` is a prefix of its name or
   of the part after any `-` (`/tasks`, `/ta` → `pier-tasks`); several matches
   are refused with their names, nothing sent; a one-letter word never matches.

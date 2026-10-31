@@ -2,8 +2,9 @@
 
 One problem followed on its own while several run at once: the head's context
 carries only what it needs, every item keeps its record after it closes, and
-the web shows one item's conversation alone. The head stays one session chain;
-nothing here splits it. Behaviour not named here is
+the web shows one item's conversation alone. An item belongs to one chain
+([10 §Chains](10-continuous-session.md#chains)) and only that chain's head
+reads and writes it. Behaviour not named here is
 [10](10-continuous-session.md)'s and [03](03-web-workbench.md)'s.
 
 ## Vocabulary
@@ -39,12 +40,16 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   `可以`, a bare yes) is answered by asking which, in one line, when the
   newest reply on screen is not the only candidate; the head never picks
   (`DISPATCHER`).
-- Recall stays on demand (`pier search --in main`, `rg` over `memory/`,
+- Recall stays on demand (`pier search --in main`, `rg <q> memory chains/*/memory`,
   [10 §Home and memory](10-continuous-session.md#home-and-memory)); the
   `## Open` seed is unchanged.
 
 ## Items keep their record
 
+- `open_items` is keyed `(chain_id, problem)`: an item is the chain's of the
+  head that wrote it; its key, aliases, `namesKey` and `<done>` resolve within
+  that chain, so two chains may hold the same problem. An item never moves
+  chain: it is closed in one and opened in the other.
 - `open_items` gains `closed_at INTEGER` (null while open), `aliases TEXT`
   (JSON array of earlier keys, `[]` by default) and `sessions TEXT` (JSON
   array of head session ids the item was written in) — one migration, `db.ts`.
@@ -84,7 +89,8 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   as an alias, the newest closed item holding it as an alias, the closed item
   keyed by it (`TaskStore.itemHistory`) — so an arrow's closed `old` opens
   `new`, open or closed.
-- `GET /api/continuous/items?q=<words>`: items with one key — the `problem`
+- `GET /api/continuous/items?q=<words>&chain=<id>`, `chain` omitted for every
+  chain, each row carrying its `chain`: items with one key — the `problem`
   or one alias — holding every term (case-insensitive substring), closed
   included, newest `updated_at` first, at most 50: `{items: [{problem,
   aliases, closedAt?, updatedAt}]}`; a closed item another item holds as an
@@ -93,7 +99,9 @@ hand; what it needs from before is one fetch, never a seeded transcript.
 
 ## Item view (web)
 
-The conversation pane in one item's company: `#/conversation/item/<encodeURIComponent(problem)>`.
+The conversation pane in one item's company: `#/chain/<id>/item/<encodeURIComponent(problem)>`.
+An older `#/conversation/item/<problem>` opens the item when one active chain
+holds it, else the first chain's.
 
 - **Entry**: a reply's topic tag (`topics.ts` `tagRow`); the status panel's row secondary
   action, one per row, ≥ 44 px on touch, the row's click itself still the
@@ -105,7 +113,8 @@ The conversation pane in one item's company: `#/conversation/item/<encodeURIComp
   way back; an alias in it is replaced by the item's key, which the bar and
   the stamp then carry; with no head yet the conversation opens, its hash
   replacing the item's; a closed item's view is read-only history plus the composer.
-- **Rows**: `GET /api/continuous/items/:problem/turns` →
+- **Rows**: `GET /api/continuous/items/:chain/:problem/turns` (the older
+  `/items/:problem/turns` resolves a problem one chain holds) →
   `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns}]}`,
   the item's `sessions` in chain order, each session's transcript read off
   disk as the history route does and reduced to the item's rows by one rule
@@ -130,7 +139,7 @@ The conversation pane in one item's company: `#/conversation/item/<encodeURIComp
   a key — a user row the view sent is shown at once — and hidden otherwise,
   never removed from the pane's own transcript. A rotation's divider shows.
 - **Exit**: the bar carries the item's dot and problem with `×`; `×`,
-  Escape and ‹ return to `#/conversation` at its tail. The hash is the state:
+  Escape and ‹ return to `#/chain/<id>` at its tail. The hash is the state:
   reload reopens the view.
 - **Composer**: a message sent from the view is stamped by the client,
   `withItem(problem, text)` (`core/identity.ts`, beside `withQuote`): the
@@ -163,9 +172,8 @@ the item view, never typed by the sender.
 
 - IM: the home DM shows every item's flow as today; no thread per item, no
   item line from an adapter.
-- No second head, no topic chain, no memory per item: the pane and the seed
-  are answered without them. Revisited only if the head's replies mix items
-  (§Acceptance).
+- No head or memory per item: the pane and the seed are answered without
+  them; topics are split by hand into chains (10 §Chains), never per item.
 - The view across the pane's trim: the view loads its sessions whole; a chain
   of hundreds of sessions is bounded by the item's `sessions` list, not paged.
 
@@ -174,8 +182,9 @@ the item view, never typed by the sender.
 - `OpenItemMarker.to`, `openItemMarkers` (`core/reply.ts`); `itemTurns`
   (`core/open-items.ts`, browser-safe); `withItem`/`splitItem`
   (`core/identity.ts`).
-- `TaskStore.openItems` (open only), `TaskStore.items(q)`, `TaskStore.itemHistory(problem)`,
-  `markOpenItems` (closes, aliases, sessions).
+- `TaskStore.openItems(chainId)` (open only), `TaskStore.items(q, chainId?)`,
+  `TaskStore.itemHistory(chainId, problem)`, `itemHistoryByProblem(problem)`
+  (unique only, the older route's), `markOpenItems` (closes, aliases, sessions).
 - `WebDeps.items` and `WebDeps.itemHistory` (the store's two reads),
   `WebDeps.itemSent` (a stamped send's head recorded); the turns route reads
   each member's transcript as the history route does.

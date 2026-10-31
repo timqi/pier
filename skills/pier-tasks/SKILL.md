@@ -24,7 +24,9 @@ yours (from the main session, `~/.pier/workspace`, never your home); `--timeout`
 arrives as a system message once your turn ends, so **end your turn after
 launching** — never poll. Keep the receipt's `runId`; the callback names
 `Run:`. `--callback steer` interrupts your running turn instead; `none`
-drops the result; `--callback-session <id>` delivers elsewhere.
+drops the result; `--callback-session <id>` delivers elsewhere. From a main
+session, the result reaches the current head of your own chain, never
+another chain's; only your chain's sessions own its runs.
 
 | Flags | Run |
 | --- | --- |
@@ -100,7 +102,8 @@ pier task save --name nightly --bash "make check" --cwd /repo --cron "0 3 * * *"
 ```
 
 Only for schedules or roles run more than once; `--task-id` updates, restating
-every flag. Results reach Pier;
+every flag. Results reach the head of the chain whose session saved the
+definition, or the first chain's when none did (one saved from outside Pier);
 `--callback-session <id>` pins a session, `--callback-session none` silences.
 `pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
 

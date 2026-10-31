@@ -1,7 +1,7 @@
 # Continuous session
 
 The contract for the instance's Pier head, which routes work to task-run
-children; every instance has one. Behaviour not named here is
+children; every chain (§Chains) has one. Behaviour not named here is
 [03](03-web-workbench.md)'s, [04](04-im-channels.md)'s and
 [09](09-tasks-cli.md)'s; what is not built is §Not built.
 
@@ -93,15 +93,22 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
 ## Home and memory
 
-- `$PIER_HOME/home` (`pierPath("home")`) holds memory only: `MEMORY.md`
-  (the index: one-line facts, decisions and preferences that hold across
-  days, kept under its 4K seed budget by the head — a detail goes to a note or
-  the repo's `AGENTS.md`), `memory/YYYY-MM-DD.md` (daily notes, local date), an
-  optional `AGENTS.md` Pi loads as the cwd's own.
+- `$PIER_HOME/home` (`pierPath("home")`) holds memory only, in two layers,
+  each an index `MEMORY.md` (one-line facts that hold across days, kept under
+  its 4K seed budget by the head — a detail goes to a note or the repo's
+  `AGENTS.md`) and daily notes `memory/YYYY-MM-DD.md` (local date):
+  - global, `MEMORY.md` and `memory/`: the user's preferences, facts true
+    across topics, ways of working, asks of Pier; every chain seeds it;
+  - chain, `chains/<id>/MEMORY.md` and `chains/<id>/memory/`: that chain's
+    decisions and why, backlog, external facts in use; only its own heads
+    seed it, the others reach it by `rg` or `pier search`.
+  An optional `AGENTS.md` is Pi's, loaded as the cwd's own; every head's cwd
+  is `home`, so the system prompt is the same bytes in every chain.
 - A head reply's `<note>line</note>` is stripped like the open-item markers
-  and appended as `- line` to today's `memory/YYYY-MM-DD.md` on its `turn-end`
-  (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a failed write
-  is reported to the head's conversation with the lost lines.
+  and appended as `- line` to today's `chains/<id>/memory/YYYY-MM-DD.md` of its
+  chain, `<note global>line</note>` to today's `memory/YYYY-MM-DD.md`, on its
+  `turn-end` (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a
+  failed write is reported to the head's conversation with the lost lines.
 - A note keeps a decision and its why, a user preference, an external fact or
   live check, a step the user owes; research is its conclusion and run id. It
   never records merge, push or restart state or a run's tool counts (git, run
@@ -112,11 +119,51 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
   is on demand: a message pointing at earlier work (a name, a date, "what we
-  decided") is one fetch before the answer — `rg` over `memory/` for a note,
-  `pier search --in main <q>` over what the user and Pier said (a `<note>`'s
+  decided") is one fetch before the answer — `rg <q> memory chains/*/memory`
+  for a note (indexes `chains/*/MEMORY.md`), `pier search --in main <q>` over
+  what the user and Pier said in every chain (a `<note>`'s
   words match through the reply that wrote it); `--since` narrows a time such
   as last week ([08](08-cli-socket.md)); no vector store, and only the newest
   notes are seeded (`DISPATCHER`).
+
+## Chains
+
+`core/chains.ts` is the register (names, archive, `resolve`); `MainChain`
+(`core/chain.ts`) runs one head, queue, seed and chain memory per chain. The
+product behaviour is [plans/30](../plans/30-multi-chain.md).
+
+- Session mode (`settings.json` `chainMode: false`, the default) is exactly one
+  active chain, the list hidden; chain mode shows the list. Turning it off
+  archives every active chain but the current one.
+- A name is 1–40 characters, trimmed, unique among the active chains in any
+  case; the id names the memory directory and survives a rename. The
+  migration's chain is `main`, named `Main`.
+- The first chain is the active one created first; whatever no chain claims
+  lands there.
+- An archived chain takes no user message (`chain: <name> is archived —
+  unarchive first`); its runs finish, its callbacks reach its head, its items
+  show marked archived, its memory stays searchable.
+- An item belongs to the chain of the head that wrote it, a run to its
+  launcher's chain; a `conversation` callback reaches
+  `headOf(run.invokedBySessionId)`, a scheduled task's
+  `headOf(createdBySessionId)`, else the first chain's head.
+- Another chain's matter gets one line pointing at `/chain <name>`, or an
+  answer after `pier search --in chain:<name>`; its item is never opened here
+  (`DISPATCHER`).
+- `pier search` without `--in` answers the caller's chain first, then the
+  other chains, then every other session; a chain member's hit is placed by
+  its chain's name (`core/search.ts`, `skills/pier-search`).
+
+`/chain` is a chat command in both modes, on a head (home DM, web); in any
+other thread it is prose. `chatCommand` returns `{ command, args }`.
+
+| Command | Answer |
+| --- | --- |
+| `/chain` | one line per chain, `<name> · N open · M waiting on you`, `✓ ` before the current, archived last with `(archived)` (`MainChain.chainsText`) |
+| `/chain <name>` | switch by unique prefix, archived refused; ambiguity answers `/chain <q> matches A, B — say more`; never rotates |
+| `/chain new <name>` | create and switch; in Session mode turns chain mode on first |
+| `/chain rename <name>` | rename the current chain |
+| `/chain archive` | archive the current chain and switch to the first; refused while it has open items (`chain: <name> has N open — /status first`) |
 
 ## Head lifecycle
 
@@ -126,11 +173,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the seed pointing at where the previous head left off; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`, at the next send or the next web read of the head; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn), and joins `main_chain` only once that lands |
-| Seed | `MEMORY.md`, `## Open` (§Open items' complete seed projection, `Nothing open.` included), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, the newest notes — the last 2K chars of `memory/*.md` by whole lines, newest day first collected backwards across days until the budget is full, each day's lines under its own `## memory/<date>.md` heading so the head sees how old the latest is (a week away leaves it the week's last state, not an empty day) — and on a `full` rotation only `## Previous session`: `session <id>, last on <item> at <YYYY-MM-DD HH:MM>` — `<item>` the `replyTopic` of the previous head's last reply, `none` when it had none, the time its `completedAt` in local time — and the replay command `pier search --in <id> --around "<time>"`, never its exchanges (the user was mid-subject; an `idle`, `new` or `lost` head starts without the previous subject); older notes are never seeded — recall is on demand (§Home and memory); an unreadable file says so; each part is cut to its budget: `MEMORY.md` 4K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), the notes as above, headed by `… <N> lines omitted, the rest in memory/<date>.md`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
+| Seed | a first line naming the chain and its memory paths, `MEMORY.md`, `## chains/<id>/MEMORY.md`, `## Open` (§Open items' complete seed projection over this chain's items, `Nothing open.` included), `## Chains` (chain mode only: one line per active chain, `<name> · <N> open · <M> waiting on you`, this one marked `(this one)`), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, the newest notes — the last 1K chars of global `memory/*.md` and 2K of `chains/<id>/memory/*.md`, each by whole lines, newest day first collected backwards across days until the budget is full, each day's lines under its own `## memory/<date>.md` heading so the head sees how old the latest is (a week away leaves it the week's last state, not an empty day) — and on a `full` rotation only `## Previous session`: `session <id>, last on <item> at <YYYY-MM-DD HH:MM>` — `<item>` the `replyTopic` of the previous head's last reply, `none` when it had none, the time its `completedAt` in local time — and the replay command `pier search --in <id> --around "<time>"`, never its exchanges (the user was mid-subject; an `idle`, `new` or `lost` head starts without the previous subject); older notes are never seeded — recall is on demand (§Home and memory); an unreadable file says so; each part is cut to its budget: each `MEMORY.md` 4K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), the notes as above, headed by `… <N> lines omitted, the rest in memory/<date>.md`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
-  one at a time, so a race rotates once.
+  one at a time per chain, so a race rotates once and chains never wait on
+  each other; idle counts from the chain's own last user message, `/new`
+  rotates the current chain.
 - Compaction, decided at open (`agent/pi.ts`): a
   session in the home at 100K, a worker's at 180K, a lead's at 200K (the
   price tier; a lead's state is its doc), any other at the instance's
@@ -250,7 +299,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 
 The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
 input, mode `append`, no turn, shown at once even while the head replies and
-recorded after that turn); an unknown `/word` is a message, never an
+recorded after that turn; only `/chain` takes words after it, §Chains); an unknown `/word` is a message, never an
 error: the composer is not a shell.
 
 The commands, their spelling (`/` or `%`) and what each answers on the head
@@ -280,9 +329,12 @@ the send's 409, shown as the composer's error row.
 
 ## Storage
 
-The tables are `main_chain` and `open_items` in `db.ts`.
+The tables are `chains`, `main_chain` and `open_items` in `db.ts`.
 
-- The head is the newest `main_chain` row; the transcripts are the record.
+- `chains(id, name, created_at, archived_at)`; `main_chain.chain_id` and
+  `open_items(chain_id, problem)` key rows to their chain, so a problem is
+  unique within its chain only.
+- A chain's head is its newest `main_chain` row; the transcripts are the record.
 - `open_items` is Pier's store of the open items, never MEMORY.md.
 - Surfaces reach the conversation through `MainChain`, which dispatches to the
   head's own `web:<id>` key, or the home chat's key
