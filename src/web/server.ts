@@ -341,7 +341,11 @@ export function createServer(
     const flags = state.flags();
     const active = activeRuns();
     const lead = leads?.() ?? new Map();
-    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active, lead)));
+    const member = continuous.memberships();
+    return c.json((await allSessions()).map((s) => {
+      const chain = member.get(s.id);
+      return { ...present(s, flags.get(s.id), active, lead), ...(chain ? { member: chain } : {}) };
+    }));
   });
 
   // One session by id, the listing's filters aside: a task run's own session is

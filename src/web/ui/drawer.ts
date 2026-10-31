@@ -31,6 +31,8 @@ export interface SessionInfo {
   activeRuns: number;
   /** The chain whose member launched it, which its `‹` returns to (`GET /api/sessions/:id` only). */
   chain?: string;
+  /** The chain it is a member of (`GET /api/sessions` only): that chain's row stands for it. */
+  member?: string;
   /** A feature lead's session (`pier task run --role lead`): its phase,
    *  designing with the user or building per a doc. */
   phase?: LeadPhase;
@@ -132,11 +134,11 @@ const tag = (text: string, title: string): HTMLElement[] => {
   return [el];
 };
 
-/** The live sessions, less the conversation's own, which the bar and the chain list stand for;
+/** The live sessions, less every chain's members, which the bar and the chain list stand for;
  *  a finished lead stays while unread and leaves once viewed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[], chains: ChainInfo[] = []): SessionInfo[] {
   const members = new Set([...chain.map((m) => m.sessionId), ...chains.flatMap((c) => (c.head ? [c.head.sessionId] : []))]);
-  return list.filter((s) => isLive(s) && !members.has(s.id));
+  return list.filter((s) => isLive(s) && s.member === undefined && !members.has(s.id));
 }
 
 /** The conversation's head row, whose dot the `‹` wears. */

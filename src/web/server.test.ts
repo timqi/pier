@@ -487,6 +487,16 @@ describe("workbench server", () => {
     ]);
   });
 
+  // Every chain's earlier members too: another chain's pane holds only its own, so the row has to say.
+  it("names the chain each listed member belongs to", async () => {
+    const { app, db, factory } = setup();
+    db.exec("INSERT INTO chains VALUES ('sec', 'security', 2, NULL); INSERT INTO main_chain VALUES ('old', 'main', 1, 'first'), ('s', 'sec', 2, 'first')");
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "old", cwd: "/tmp", createdAt: 1 }, { id: "s", cwd: "/tmp", createdAt: 2 }, { id: "free", cwd: "/tmp", createdAt: 3 },
+    ]);
+    expect((await listed(app)).map((r) => [r.id, (r as { member?: string }).member])).toEqual([["old", "main"], ["s", "sec"], ["free", undefined]]);
+  });
+
   it("coalesces concurrent full session listings", async () => {
     const { app, factory } = setup();
     let resolve!: (rows: { id: string; cwd: string; createdAt: number }[]) => void;

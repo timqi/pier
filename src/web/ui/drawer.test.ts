@@ -359,6 +359,16 @@ it("counts each chain's unread head on the badge and leaves every head off the l
   expect(drawer.inProgress(sessions, chain, chains).map((s) => s.id)).toEqual(["x"]);
 });
 
+// Shown from another chain, the first chain's earlier members are still that chain's, never In progress rows.
+it("leaves every chain's earlier members off the list and the badge", () => {
+  chain = [member("s1")];
+  sessions = [row("old", { unread: true, member: "main" }), row("s1", { member: "sec" }), row("x", { unread: true })];
+  drawer.renderDrawer();
+  expect(shown("#status-item-count")).toBe("1");
+  expect(badge).toHaveBeenLastCalledWith(1);
+  expect(drawer.inProgress(sessions, chain).map((s) => s.id)).toEqual(["x"]);
+});
+
 // A closed item the search found in another chain carries that chain's tag, and opens there.
 it("tags a found closed item with its chain", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });

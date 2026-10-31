@@ -172,6 +172,12 @@ export class MainChain {
     return row && { chainId: row.chain_id, members: this.members(row.chain_id).map((m) => m.sessionId) };
   }
 
+  /** Every chain's members, each to its chain, in one read: the session list marks them all. */
+  memberships(): Map<string, string> {
+    const rows = this.db.prepare("SELECT session_id, chain_id FROM main_chain").all() as { session_id: string; chain_id: string }[];
+    return new Map(rows.map((r) => [r.session_id, r.chain_id]));
+  }
+
   /** An archived chain's head too: a run it launched still reports there. */
   headOf(sessionId: string): string {
     return this.chainOf(sessionId)?.members[0] ?? sessionId;
