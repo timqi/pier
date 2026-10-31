@@ -185,9 +185,12 @@ export const sidebarDocked = (): boolean => rail.hasAttribute("data-on") && wind
 export function toggleSidebar(): void {
   if (deps.list()?.mode !== "chain") return;
   if (!window.matchMedia(DOCKED).matches) return openChains();
+  // Focus on the surface this takes away goes to the list's other way in: the title, or the rail's current row.
+  const held = rail.contains(document.activeElement) || deps.anchor() === document.activeElement;
   if (localStorage.getItem(RAIL) === "off") localStorage.removeItem(RAIL);
   else localStorage.setItem(RAIL, "off");
   renderChains();
+  if (held) (sidebarDocked() ? rail.querySelector<HTMLElement>("[aria-current]") : deps.anchor())?.focus();
 }
 
 const focusField = (): void => (shown(floated) ? floated : rail).querySelector<HTMLInputElement>("input")?.focus();

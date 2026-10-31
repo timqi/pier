@@ -206,17 +206,22 @@ it("⌘B hides and shows the docked rail, remembered, and opens the floated list
   expect(retitle).toHaveBeenCalledTimes(1);
   chains.renderChains();
   expect(retitle).toHaveBeenCalledTimes(1);
+  // Hidden with the focus in it: the focus goes to the bar's title, the list's way in again.
+  rail.querySelector('[data-chain="ops"]')!.querySelector(".chain-open")!.focus();
   chords.get("b")!();
   expect(rail.hasAttribute("data-on")).toBe(false);
   expect(stored.get("pier.rail")).toBe("off");
   expect(menu.openPanel).not.toHaveBeenCalled();
   // The bar's title turns back into the list's way in (session-header.ts).
   expect(retitle).toHaveBeenCalledTimes(2);
+  expect(document.activeElement).toBe(document.querySelector("#chat-title"));
   expect(chains.sidebarDocked()).toBe(false);
+  // Shown from the title, which becomes a heading: the focus goes to the rail's current row.
   chords.get("b")!();
   expect(rail.hasAttribute("data-on")).toBe(true);
   expect(stored.has("pier.rail")).toBe(false);
   expect(retitle).toHaveBeenCalledTimes(3);
+  expect(document.activeElement).toBe(rail.querySelector('[data-chain="main"]')!.querySelector(".chain-open"));
   docked = false;
   expect(chains.sidebarDocked()).toBe(false);
   chords.get("b")!();
