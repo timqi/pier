@@ -705,10 +705,13 @@ export function createServer(
   guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, (c) => itemTurnsOf(c, c.req.param("problem")));
 
   // The status panel's Close: the item as the head's `<done>` closes it, the head told.
-  app.post("/api/continuous/items/:chain/:problem/close", (c) => {
+  guarded(app, "POST", "/api/continuous/items/:chain/:problem/close", 400, async (c) => {
+    const chainId = c.req.param("chain");
+    const problem = c.req.param("problem");
+    if (!chains.get(chainId)) return c.json({ error: `chain: no chain ${chainId}` }, 404);
     try {
-      const closed = closeItem?.(c.req.param("chain"), c.req.param("problem"));
-      return closed === undefined ? c.json({ error: `no open item "${c.req.param("problem")}"` }, 404) : c.json({ closed });
+      const closed = closeItem?.(chainId, problem);
+      return closed === undefined ? c.json({ error: `no open item "${problem}"` }, 404) : c.json({ closed });
     } catch (err) {
       if (err instanceof ItemNotFound) return c.json({ error: err.message }, 404);
       if (err instanceof ChatCommandRefused) return c.json({ error: err.message }, 409);

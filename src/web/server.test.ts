@@ -2490,12 +2490,18 @@ describe("the continuous conversation's routes", () => {
       return problem;
     });
     const { app } = chainRig(undefined, undefined, { closeItem });
-    const res = await app.request(`/api/continuous/items/c2/${encodeURIComponent("sign in")}/close`, { method: "POST" });
+    const res = await app.request(`/api/continuous/items/main/${encodeURIComponent("sign in")}/close`, { method: "POST" });
     expect([res.status, await res.json()]).toEqual([200, { closed: "sign in" }]);
-    expect(closeItem).toHaveBeenCalledWith("c2", "sign in");
-    const gone = await app.request("/api/continuous/items/c2/gone/close", { method: "POST" });
+    expect(closeItem).toHaveBeenCalledWith("main", "sign in");
+    const gone = await app.request("/api/continuous/items/main/gone/close", { method: "POST" });
     expect([gone.status, await gone.json()]).toEqual([404, { error: 'no open item "gone"' }]);
-    expect((await app.request("/api/continuous/items/c2/Login/close", { method: "POST" })).status).toBe(409);
+    expect((await app.request("/api/continuous/items/main/Login/close", { method: "POST" })).status).toBe(409);
+    const nowhere = await app.request("/api/continuous/items/c9/x/close", { method: "POST" });
+    expect([nowhere.status, await nowhere.json()]).toEqual([404, { error: "chain: no chain c9" }]);
+    closeItem.mockImplementationOnce(() => { throw new Error("database is locked"); });
+    const broken = await app.request("/api/continuous/items/main/x/close", { method: "POST" });
+    expect([broken.status, await broken.json()]).toEqual([400, { error: "Error: database is locked" }]);
+    expect(closeItem).toHaveBeenCalledTimes(4);
   });
 
   it("answers the items a search finds, closed ones too", async () => {
