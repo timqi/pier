@@ -679,7 +679,7 @@ describe("the open items", () => {
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
   });
 
-  it("closes the item the user names \u2014 exactly, else by a unique prefix \u2014 says so on the list and tells the head", () => {
+  it("closes the item the user names \u2014 exactly, else by the words it contains \u2014 says so on the list and tells the head", () => {
     const hub = new EventHub();
     const workspace: string[] = [];
     hub.subscribeWorkspace((e) => { if (e.type === "open-items-changed") workspace.push(e.type); });
@@ -700,6 +700,8 @@ describe("the open items", () => {
     expect(h0.prompts).toEqual([]);
 
     expect(() => service.closeItem("main", "log", 4)).toThrow("/done log matches login v2, logout \u2014 say more");
+    expect(() => service.closeItem("main", "o", 4)).toThrow("/done o matches login v2, logout \u2014 say more");
+    expect(() => service.closeItem("main", "v2 out", 4)).toThrow('no open item "v2 out"');
     expect(() => service.closeItem("main", "deploy", 4)).toThrow(ItemNotFound);
     expect(() => service.closeItem("main", "deploy", 4)).toThrow('no open item "deploy"');
     // The panel's Close names one key exactly: never a prefix of another.
@@ -731,6 +733,21 @@ describe("the open items", () => {
     h0.setState("idle");
     h0.emit({ type: "turn-end", text: "<open>logout — reopened</open>" });
     expect(open()).toEqual(["login v2", "dup: b", "logout"]);
+  });
+
+  it("closes by words anywhere in a key, in any order and case, and refuses several or none", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0");
+    const router = new Router(hub, () => Promise.resolve(h0));
+    const store = new TaskStore(openDb(":memory:"));
+    const service = new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    store.markOpenItems(["Lending: aave v3 on Base", "Lending: Aave v3 on Arbitrum", "Swap on base"].map((problem) => ({ op: "open" as const, problem, stage: "", runIds: [] })), 1, "h0", "main");
+
+    expect(() => service.closeItem("main", "aave", 2)).toThrow("/done aave matches Lending: aave v3 on Base, Lending: Aave v3 on Arbitrum \u2014 say more");
+    expect(() => service.closeItem("main", "aave polygon", 2)).toThrow('no open item "aave polygon"');
+    expect(service.closeItem("main", "Base  AAVE", 2)).toBe("Lending: aave v3 on Base");
+    expect(service.closeItem("main", "arb", 3)).toBe("Lending: Aave v3 on Arbitrum");
+    expect(store.openItems("main").map((i) => i.problem)).toEqual(["Swap on base"]);
   });
 
   it("writes each chain's head into its own chain: a key matches only there, and the list names each item's chain", () => {

@@ -67,7 +67,7 @@ describe("Chains", () => {
     expect(chains.unarchive(d.id).archivedAt).toBeNull();
   });
 
-  it("resolves a unique prefix in any case, an exact name first, across archived chains too", () => {
+  it("resolves the one name holding every word in any case, an exact name first, across archived chains too", () => {
     const { chains } = rig();
     const design = chains.create("Design");
     const desktop = chains.create("Desktop");
@@ -75,6 +75,12 @@ describe("Chains", () => {
     expect(() => chains.resolve("des")).toThrow(ChainAmbiguous);
     expect(() => chains.resolve("des")).toThrow("/chain des matches Design, Desktop — say more");
     expect(() => chains.resolve("zzz")).toThrow('chain: no chain "zzz"');
+    expect(chains.resolve("SIGN").id).toBe(design.id);
+    expect(() => chains.resolve("es")).toThrow("/chain es matches Design, Desktop — say more");
+    const base = chains.create("Aave on Base");
+    expect(chains.resolve("base aave").id).toBe(base.id);
+    expect(() => chains.resolve("aave arb")).toThrow('chain: no chain "aave arb"');
+    chains.archive(base.id);
     chains.archive(desktop.id);
     expect(chains.resolve("deskt").id).toBe(desktop.id);
     const de = chains.create("De");

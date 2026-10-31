@@ -447,14 +447,15 @@ export class TaskService {
   unmatchedDone(chainId: string): readonly string[] { return this.unmatched.get(chainId) ?? []; }
 
   /** The user's close, `/done` and the status panel's Close: the open item of `chainId` that `query` names —
-   *  exactly in any case, else as the start of one key; with `exact`, only that key — closed as a `<done>`
+   *  exactly in any case, else the one key holding each of its words in any case; with `exact`, only that key — closed as a `<done>`
    *  closes it. Its head, attached, is told, or its later `<done>` of it would read as unmatched. An exact key
    *  already closed answers itself: the panel's row raced the head's own `<done>`, and the user's ask holds. */
   closeItem(chainId: string, query: string, now: number, exact = false): string {
     const q = query.trim();
     const keys = this.store.openItems(chainId).map((i) => i.problem);
     const same = keys.filter((k) => (exact ? k === query : k.toLowerCase() === q.toLowerCase()));
-    const named = same.length || exact ? same : keys.filter((k) => k.toLowerCase().startsWith(q.toLowerCase()));
+    const words = q.toLowerCase().split(/\s+/);
+    const named = same.length || exact ? same : keys.filter((k) => words.every((w) => k.toLowerCase().includes(w)));
     if (exact && !named.length) {
       const was = this.store.itemHistory(chainId, query);
       if (was?.problem === query && was.closedAt !== undefined) return query;

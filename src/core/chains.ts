@@ -93,15 +93,16 @@ export class Chains {
     return { ...chain, archivedAt: null };
   }
 
-  /** A name or a unique prefix of one, case-insensitive, among every chain:
-   *  the caller decides what an archived one means. An exact name wins over
-   *  prefixes, an active exact name over an archived one. */
+  /** A name, or the one name holding each of the query's words, case-insensitive, among every
+   *  chain: the caller decides what an archived one means. An exact name wins over
+   *  word matches, an active exact name over an archived one. */
   resolve(query: string): ChainRow {
     const q = query.trim().toLowerCase();
     const all = this.list();
     const exact = all.filter((c) => c.name.toLowerCase() === q);
     const active = exact.filter((c) => c.archivedAt === null);
-    const named = active.length ? active : exact.length ? exact : all.filter((c) => c.name.toLowerCase().startsWith(q));
+    const words = q.split(/\s+/);
+    const named = active.length ? active : exact.length ? exact : all.filter((c) => words.every((w) => c.name.toLowerCase().includes(w)));
     if (!q || !named.length) throw new Error(`chain: no chain "${query.trim()}"`);
     if (named.length > 1) throw new ChainAmbiguous(`/chain ${query.trim()} matches ${named.map((c) => c.name).join(", ")} — say more`);
     return named[0]!;

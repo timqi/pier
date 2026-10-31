@@ -242,7 +242,7 @@ export const CHAT_COMMANDS = {
   stop: "stop the reply in progress",
   skills: "the skills this session can run, by name",
   chain: "the chains — or /chain <name>, new <name>, rename <name>, archive",
-  done: "close an open item — /done <its name or a unique prefix>",
+  done: "close an open item — /done <words from its name>",
 } as const;
 
 export type ChatCommand = keyof typeof CHAT_COMMANDS;

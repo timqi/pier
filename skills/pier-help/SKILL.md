@@ -92,7 +92,7 @@ truth.
     its runs still run; or the thread's session.
   - `/skills` — one `<name> — <description>` line per skill of the session
     asked, head or thread.
-  - `/done <item>` — closes the open item it names (a unique prefix), answers
+  - `/done <item>` — closes the open item it names (any words from its name, any case), answers
     `✓ closed · <key>`; prose in a thread.
   - `/settings` — the panel on a thread; prose in the home chat.
   - `/s <text>` — on a thread root, the draft with `<text>` as its question;
@@ -100,7 +100,7 @@ truth.
   - `/bind <code>` — in a DM, binds the sender.
   - `/chain` — the chains, `✓` on the current; prose in a thread, as are
     the four below.
-  - `/chain <name>` — switch to it by a unique prefix of its name; the home
+  - `/chain <name>` — switch to it by any words from its name, any case; the home
     chat answers `↔ chain · <name>`.
   - `/chain new <name>` — create one and switch to it; turns chain mode on.
   - `/chain rename <name>` — rename the current chain.

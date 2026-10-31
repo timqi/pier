@@ -41,7 +41,7 @@ const processIo: SearchCliIo = {
  *  chain's, then, for what the limit still allows, every other session's; each
  *  named by its place — its chain's name, or its session's title as it is now,
  *  its id when gone from disk. `in` narrows to every chain (`main`, or its older
- *  spelling `pier`), one chain (`chain:<name>`, a unique prefix) or one session.
+ *  spelling `pier`), one chain (`chain:<name>`, words from its name) or one session.
  *  `around` replays one place instead: the caller's chain, every chain when the
  *  caller is in none, unless `in` names one. */
 export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, { chains, members }: SearchChains) => async (params: unknown, callerSessionId?: string): Promise<{ hits: Hit[] }> => {

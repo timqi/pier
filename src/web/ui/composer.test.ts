@@ -655,7 +655,7 @@ describe("the chat-command completion", () => {
     expect(menu().classList.contains("hidden")).toBe(true);
     type("/");
     expect(menu().classList.contains("hidden")).toBe(false);
-    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/newstart a new session now — or /new <text>, its first message", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name", "/chainthe chains — or /chain <name>, new <name>, rename <name>, archive", "/doneclose an open item — /done <its name or a unique prefix>"]);
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/newstart a new session now — or /new <text>, its first message", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name", "/chainthe chains — or /chain <name>, new <name>, rename <name>, archive", "/doneclose an open item — /done <words from its name>"]);
     expect(onScreen("#command-menu")[0]!.getAttribute("aria-selected")).toBe("true");
     type("/st");
     expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress"]);
@@ -727,7 +727,7 @@ describe("the chat-command completion", () => {
     composer.setSkills(skills);
     type("/");
     expect(rows()).toEqual([
-      "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now — or /new <text>, its first message", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name", "/chainthe chains — or /chain <name>, new <name>, rename <name>, archive", "/doneclose an open item — /done <its name or a unique prefix>",
+      "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now — or /new <text>, its first message", "/stopstop the reply in progress", "/skillsthe skills this session can run, by name", "/chainthe chains — or /chain <name>, new <name>, rename <name>, archive", "/doneclose an open item — /done <words from its name>",
       "/skill:pier-tasksDelegate work to a run.", "/skill:pier-webSearch the web.",
     ]);
     type("/s");

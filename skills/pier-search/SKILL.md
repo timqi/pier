@@ -20,7 +20,7 @@ All flags are optional and ANDed:
 
 | Flag | Values |
 | --- | --- |
-| `--in` | `main`, `chain:<name>` (a unique prefix, any case) or `<sessionId>` |
+| `--in` | `main`, `chain:<name>` (words from its name, any case) or `<sessionId>` |
 | `--since` | `<N>h`, `<N>d`, `YYYY-MM-DD` |
 | `--role` | `user` or `assistant` |
 | `--limit` | 1–50, default 10 |

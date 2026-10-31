@@ -162,7 +162,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 | Command | Answer |
 | --- | --- |
 | `/chain` | one line per chain, `<name> · N open · M waiting on you`, `✓ ` before the current, archived last with `(archived)` (`MainChain.chainsText`); on a chain with no head yet, or archived, the surface shows it (`ChainSent.answer`) and no head starts |
-| `/chain <name>` | switch by unique prefix, archived refused; ambiguity answers `/chain <q> matches A, B — say more`; never rotates |
+| `/chain <name>` | switch to the one name holding every word, any case (an exact name first), archived refused; ambiguity answers `/chain <q> matches A, B — say more`; never rotates |
 | `/chain new <name>` | create and switch; in Session mode turns chain mode on first |
 | `/chain rename <name>` | rename the current chain, answered as `/chain` is |
 | `/chain archive` | archive the current chain and switch to the first; refused while it has open items (`chain: <name> has N open — /status first`) |
@@ -233,7 +233,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   panel's **Close** both call `TaskService.closeItem`, which closes it as a
   `<done>` does (`TaskStore.closeOpenItem`) and broadcasts `open-items-changed`.
   `/done` resolves its words among the chain's open keys — exact in any case,
-  else the one key they start; several are refused `/done <q> matches <a>, <b> —
+  else the one key that contains every word, in any case; several are refused `/done <q> matches <a>, <b> —
   say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Close** names its
   key exactly, answering `{closed}` for a key the head's `<done>` closed first.
   The chain's head, when attached, is told with an `open-items`
