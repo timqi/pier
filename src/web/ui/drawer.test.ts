@@ -419,4 +419,13 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   const list = doc.querySelector("[data-list]")!;
   expect(list.children[0]!.textContent).toBe("no open item \"sign in\"");
   expect(list.children[0]!.className).toContain("text-red-600");
+
+  // The next Close takes that refusal off the top: focus lands on the row that took the closed one's place.
+  answer = { ok: true, status: 200, json: async () => ({ closed: "sign in" }) };
+  open = { items: [open.items[0]!, { problem: "deploy", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  drawer.renderDrawer();
+  close("item:a/sign in").focus();
+  close("item:a/sign in").onclick?.();
+  expect(labels()).toEqual(["deploy", "solo"]);
+  expect(doc.activeElement).toBe(item("item:a/deploy").querySelector(".session-open"));
 });

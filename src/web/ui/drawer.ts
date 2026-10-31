@@ -314,12 +314,14 @@ async function closeItem(problem: string, chain: string): Promise<void> {
   const key = itemKey(problem, chain);
   const row = list ? [...list.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
   const focused = row >= 0 && list!.children[row]!.contains(document.activeElement);
+  // The previous refusal atop the list leaves with this Close: the rows below it move up one.
+  const at = closeError && closeError.parentElement === list ? row - 1 : row;
   closing.add(key);
   closeError = null;
   found = found?.filter((r) => r.dataset.rowKey !== key) ?? null;
   renderDrawer();
   // Focus stays in the list for the keys' walk: on the row that took the closed one's place.
-  if (focused && list?.isConnected) (list.children[row] ?? list.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
+  if (focused && list?.isConnected) (list.children[at] ?? list.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
   const error = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
   if (error === undefined) return;
   closing.delete(key);
