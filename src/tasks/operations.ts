@@ -207,8 +207,8 @@ export async function handleTask(
   chain: TaskChain,
 ): Promise<unknown> {
   // The launching session controls a run, and so does the run's own; every
-  // member of the continuous conversation counts as the one that launched it.
-  const launchers = (): string[] => chain.chainOf(callerSessionId) ?? [callerSessionId];
+  // member of the caller's chain counts as the one that launched it.
+  const launchers = (): string[] => chain.chainOf(callerSessionId)?.members ?? [callerSessionId];
   const main = chain.chainOf(callerSessionId) !== undefined;
   const assertOwns = (target: TaskRun): void => {
     if (!launchers().includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {

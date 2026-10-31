@@ -92,11 +92,12 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
     answersOn: (id: string) => (id === "head" ? headOn : undefined),
   } as unknown as Router;
   const chain = {
-    send: (msg: InboundMessage, key?: ConversationKey) => {
+    send: (msg: InboundMessage, _chainId: string, key?: ConversationKey) => {
       headSent.push([msg.text, key]);
-      return headFails ? Promise.reject(headFails) : Promise.resolve({ sessionId: "head" });
+      return headFails ? Promise.reject(headFails) : Promise.resolve({ sessionId: "head", chainId: "main" });
     },
-    members: () => [{ sessionId: "head", startedAt: 0, reason: "first" }],
+    chains: { first: () => ({ id: "main", name: "Main", createdAt: 0, archivedAt: null }) },
+    firstHead: () => "head",
   } as unknown as MainChain;
   const control = {
     isHome: (key: ConversationKey) => key.conversationId.startsWith("D1"),

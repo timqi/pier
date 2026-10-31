@@ -333,19 +333,30 @@ export interface OpenItem {
   /** The first associated design that has not reported Design final, independent of status. */
   designSessionId?: string;
   waitsIn?: string;
+  /** The chain the item belongs to: on every row `TaskService.openItems` answers. */
+  chain?: ItemChain;
+}
+
+/** An open item's chain as a row names it; an archived chain's items still show. */
+export interface ItemChain {
+  id: string;
+  name: string;
+  archived: boolean;
 }
 
 /** One item of `GET /api/continuous/items`, open or closed (docs/design/15-item-view.md):
- *  `aliases` its earlier keys, `closedAt` set once a `<done>` closed it. */
+ *  `chain` the id of the chain it belongs to, `aliases` its earlier keys, `closedAt` set once a `<done>` closed it. */
 export interface ItemSummary {
+  chain: string;
   problem: string;
   aliases: string[];
   closedAt?: number;
   updatedAt: number;
 }
 
-/** An item's record for its view: the head sessions that wrote it and the runs it holds. */
+/** An item's record for its view: its chain's id, the head sessions that wrote it and the runs it holds. */
 export interface ItemRecord {
+  chain: string;
   problem: string;
   aliases: string[];
   closedAt?: number;

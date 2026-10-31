@@ -14,6 +14,7 @@ import type { AgentFactory } from "../core/types.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { openDb } from "../db.js";
+import { fakeChains } from "./chain.testkit.js";
 
 /** A bash action never reaches the agent seam; a factory that answered would
  *  hide it if one did. */
@@ -32,7 +33,7 @@ function setup() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("none"));
-  const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } });
+  const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub, { modelMenu: () => [], ...fakeChains() });
   return { cwd, service };
 }
 

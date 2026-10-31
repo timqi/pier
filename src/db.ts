@@ -432,6 +432,48 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE open_items ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE open_items ADD COLUMN sessions TEXT NOT NULL DEFAULT '[]';
   `,
+  // 41 — named chains (core/chains.ts), each with its own heads and open items; the
+  // migration's 'main' takes every existing row. Both tables are rebuilt under their
+  // own names: a REFERENCES column with a default cannot be added to a filled table,
+  // and an older Pier still finds open_items. home_chain is the home chat's current chain.
+  `
+  CREATE TABLE chains (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    archived_at INTEGER
+  );
+  INSERT INTO chains VALUES ('main', 'Main', CAST(unixepoch('subsec') * 1000 AS INTEGER), NULL);
+  CREATE TABLE main_chain_v2 (
+    session_id TEXT PRIMARY KEY,
+    chain_id TEXT NOT NULL REFERENCES chains(id),
+    started_at INTEGER NOT NULL,
+    reason TEXT NOT NULL
+  );
+  INSERT INTO main_chain_v2(session_id, chain_id, started_at, reason)
+    SELECT session_id, 'main', started_at, reason FROM main_chain ORDER BY rowid;
+  DROP TABLE main_chain;
+  ALTER TABLE main_chain_v2 RENAME TO main_chain;
+  CREATE INDEX main_chain_chain ON main_chain(chain_id, started_at);
+  CREATE TABLE open_items_v2 (
+    chain_id TEXT NOT NULL REFERENCES chains(id),
+    problem TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    run_ids TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    closed_at INTEGER,
+    aliases TEXT NOT NULL DEFAULT '[]',
+    sessions TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (chain_id, problem)
+  );
+  INSERT INTO open_items_v2(chain_id, problem, stage, run_ids, updated_at, closed_at, aliases, sessions)
+    SELECT 'main', problem, stage, run_ids, updated_at, closed_at, aliases, sessions FROM open_items ORDER BY rowid;
+  DROP TABLE open_items;
+  ALTER TABLE open_items_v2 RENAME TO open_items;
+  CREATE TABLE home_chain (
+    chain_id TEXT NOT NULL REFERENCES chains(id)
+  );
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

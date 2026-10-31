@@ -11,14 +11,15 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory } from "../core/types.js";
-import { TaskService, type TaskChain } from "./service.js";
+import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
-/** h0 is yesterday's head, h1 today's; "child" is nobody's member. */
+/** h0 is yesterday's head, h1 today's; d1 heads a second chain; "child" is nobody's member. */
 function rig() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-chain-tasks-"));
-  const sessions = new Map<string, FakeSession>(["h0", "h1", "h2", "stranger"].map((id) => [id, fakeSession(id)]));
+  const sessions = new Map<string, FakeSession>(["h0", "h1", "h2", "d1", "stranger"].map((id) => [id, fakeSession(id)]));
   const child = fakeSession("child");
   const factory: AgentFactory = {
     availableModels: async () => [],
@@ -31,14 +32,11 @@ function rig() {
     readSystemPrompt: async () => undefined,
   };
   const members = ["h1", "h0"];
-  const chain: TaskChain = {
-    chainOf: (id) => (members.includes(id) ? members : undefined),
-    members: () => members.map((sessionId) => ({ sessionId, startedAt: 1, reason: "first" as const })),
-  };
+  const chain = fakeChains({ main: members, design: ["d1"] });
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
-  const service = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: chain });
+  const service = new TaskService(store, factory, router, hub, { modelMenu: () => [], ...chain });
   const bash = () => service.create({ name: "command", trigger: { type: "manual" }, action: { type: "bash", cwd, script: "echo done" }, timeoutSeconds: 5 });
   return { cwd, sessions, child, service, store, bash, members };
 }
@@ -85,6 +83,20 @@ describe("tasks under the continuous conversation", () => {
     service.stop();
   });
 
+  it("delivers to the chain a run came from: its launcher's, else its definition's creator's, else the first chain's", async () => {
+    const { service, cwd } = rig();
+    const save = async (name: string, by: string) =>
+      await service.handle({ operation: "save", task: { name, action: { type: "bash", cwd, script: "true" } } }, by) as TaskDefinition;
+    const design = await save("design nightly", "d1");
+    const main = await save("main nightly", "h0");
+    expect(service.run(design.id, null, "cron", null, {}).callbackSessionId).toBe("d1");
+    expect(service.run(main.id, null, "cron", null, {}).callbackSessionId).toBe("h1");
+    expect(service.run(main.id, null, "agent", null, { invokedBySessionId: "d1" }).callbackSessionId).toBe("d1");
+    const outside = await service.create({ name: "outside", trigger: { type: "manual" }, callback: { type: "conversation" }, action: { type: "bash", cwd, script: "true" } });
+    expect(service.run(outside.id, null, "manual", null, {}).callbackSessionId).toBe("h1");
+    service.stop();
+  });
+
   it("keeps a definition saved with callback none silent, and every definition silent before the conversation has a head", async () => {
     const { service, members, cwd } = rig();
     const silent = await service.handle({ operation: "save", task: { name: "quiet", callback: { type: "none" }, action: { type: "bash", cwd, script: "true" } } }, "h1") as TaskDefinition;
@@ -105,6 +117,7 @@ describe("tasks under the continuous conversation", () => {
     store.saveRun(stored("r0", task, { invokedBySessionId: "h0" }));
     await expect(service.handle({ operation: "cancel", run_id: "r0" }, "h1")).resolves.toMatchObject({ runId: "r0" });
     await expect(service.handle({ operation: "cancel", run_id: "r0" }, "stranger")).rejects.toThrow(/does not own/);
+    await expect(service.handle({ operation: "cancel", run_id: "r0" }, "d1")).rejects.toThrow(/does not own/);
   });
 
   it("lists the runs the caller launched — the whole chain's, for a member — in flight and finished in the last day", async () => {

@@ -232,26 +232,30 @@ export interface OpenItemsStatus {
 }
 
 /** The chat commands, each with the one line the composer's completion shows:
- *  a message to the continuous conversation that is exactly `/<word>` or `%<word>` is a
- *  command, never a message (core/chain.ts). Browser-safe: the composer
- *  lists this table. */
+ *  a message to the continuous conversation that is exactly `/<word>` or `%<word>`,
+ *  or `/chain <args>`, is a command, never a message (core/chain.ts). Browser-safe:
+ *  the composer lists this table. */
 export const CHAT_COMMANDS = {
   status: "what is open — in flight, or waiting on you",
   new: "start a new session now",
   stop: "stop the reply in progress",
   skills: "the skills this session can run, by name",
+  chain: "the chains — or /chain <name>, new <name>, rename <name>, archive",
 } as const;
 
 export type ChatCommand = keyof typeof CHAT_COMMANDS;
 
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
-/** The command `text` is: only the exact word, the composer is not a shell.
- *  The chain answers it without a turn, so the composer paints none. */
-export function chatCommand(text: string): ChatCommand | undefined {
-  const draft = text.trim().toLowerCase();
-  const word = draft.slice(1);
-  return /^[/%]/.test(draft) && isChatCommand(word) ? word : undefined;
+/** The command `text` is: only the exact word, the composer is not a shell —
+ *  `chain` alone takes `args`, the rest of the line. The chain answers it
+ *  without a turn, so the composer paints none. */
+export function chatCommand(text: string): { command: ChatCommand; args: string } | undefined {
+  const [, spelled, rest] = /^[/%](\S+)(?:\s+([\s\S]*))?$/.exec(text.trim()) ?? [];
+  const command = spelled?.toLowerCase();
+  const args = rest?.trim() ?? "";
+  if (!isChatCommand(command) || (args && command !== "chain")) return undefined;
+  return { command, args };
 }
 
 /** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`), a word of two
@@ -398,6 +402,7 @@ export type WorkspaceEvent =
   | { type: "task-message-changed"; runId: string; messageId: string }
   | { type: "task-group-changed"; groupId: string }
   | { type: "open-items-changed" } // a head's turn end wrote an `<open>`/`<done>` marker
+  | { type: "chains-changed" } // a chain created, renamed, archived or unarchived, the mode switched, a head rotated
   /** The one event with content: a Web Push copy for a client push cannot
    *  reach (the native shell's webview). `browser` is the web auth session it
    *  targets (`sessionIdOf`, web/auth.ts), absent for every device; the SSE

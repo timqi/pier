@@ -20,6 +20,7 @@ import { fixPrompt, statusLine } from "./goals.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { GOAL_STEP, type Goal, type TaskDefinition, type TaskRun } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
 // No operator config reaches the service's git: hooks, fsmonitor or a pager would.
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -99,7 +100,7 @@ function rig(script: Record<string, Reply[]>, menu: { provider: string; id: stri
   };
   const service = new TaskService(store, factory, router, hub, {
     modelMenu: () => menu,
-    continuous: { chainOf: () => undefined, members: () => [] },
+    ...fakeChains(),
   });
   const main = sessions.get("main")!;
   const callbacks = () => main.systemInputs.filter((i) => i.origin.kind === "task-callback").map((i) => i.text);

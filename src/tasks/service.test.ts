@@ -28,11 +28,12 @@ import {
   type TaskDefinition,
   type TaskRun,
 } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
 /** A boot pass with nothing saved for any session. */
 const RESTART = { at: Date.now(), downMs: 7_000, queuedFor: () => [] };
 /** No model menu, and no session is a member of the continuous conversation. */
-const BARE = { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } };
+const BARE = { modelMenu: () => [], ...fakeChains() };
 
 function setup(session = fakeSession(), instance: ConstructorParameters<typeof TaskService>[4] = BARE) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
@@ -2464,10 +2465,7 @@ describe("resume after a restart", () => {
 describe("abnormal-end notice", () => {
   const withHead = (abnormalEnd: (run: TaskRun) => void) => ({
     ...BARE,
-    continuous: {
-      chainOf: (id: string) => (id === "head" ? ["head"] : undefined),
-      members: () => [{ sessionId: "head", startedAt: 1, reason: "first" as const }],
-    },
+    ...fakeChains({ main: ["head"] }),
     abnormalEnd,
   });
 
@@ -2517,6 +2515,20 @@ describe("abnormal-end notice", () => {
     await service.waitForRun(viaCli.id);
     expect(noticed.map((run) => [run.id, run.state])).toEqual([[byLead.id, "cancelled"], [viaCli.id, "cancelled"]]);
     expect(abnormalNote(byLead)).toBe(`"command" ended cancelled\n${runRef(byLead)}`);
+  });
+
+  it("notices a cancel of a chain's run asked from another chain, not one asked from its own", async () => {
+    const noticed: TaskRun[] = [];
+    const { cwd, service } = setup(fakeSession("head"), { ...BARE, ...fakeChains({ main: ["head"], design: ["other"] }), abnormalEnd: (run: TaskRun) => noticed.push(run) });
+    const task = await service.create(bashDraft(cwd, "sleep 5"));
+    const cancel = (by: string) => {
+      const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "head", callbackSessionId: null });
+      service.cancel(run.id, by);
+      return service.waitForRun(run.id);
+    };
+    const byOther = await cancel("other");
+    await cancel("head");
+    expect(noticed.map((run) => run.id)).toEqual([byOther.id]);
   });
 
   it("notices a run written off at boot even when its result goes to the head", async () => {

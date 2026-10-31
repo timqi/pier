@@ -8,11 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentDefaults } from "../agent/types.js";
 import { openDb } from "../db.js";
 import { MainChain } from "./chain.js";
+import { ChainArchived, ChainHasOpen, Chains } from "./chains.js";
 import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
 import { fakeSession, type FakeSession, type FakeSessionOptions } from "./session.testkit.js";
-import type { AgentFactory, AgentLaunchOptions, Channel, ConversationKey, LedgerRun, NoteOrigin } from "./types.js";
+import type { AgentFactory, AgentLaunchOptions, Channel, ConversationKey, LedgerRun, NoteOrigin, OpenItemTarget } from "./types.js";
 
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -28,7 +29,7 @@ function rig({
   const db = openDb(":memory:");
   const clock = { now: Date.now() };
   // A head already in the chain when the process starts.
-  if (head) db.prepare("INSERT INTO main_chain VALUES (?, ?, 'first')").run(head, clock.now);
+  if (head) db.prepare("INSERT INTO main_chain(session_id, chain_id, started_at, reason) VALUES (?, 'main', ?, 'first')").run(head, clock.now);
   const sessions = new Map<string, FakeSession>();
   const created: AgentLaunchOptions[] = [];
   const onDisk = new Set<string>();
@@ -50,39 +51,49 @@ function rig({
     list: async () => [],
     find: async (id: string) => (onDisk.has(id) ? { id, cwd: home, createdAt: 0 } : undefined),
     search: async () => [],
-    readHistory: async () => undefined,
+    readHistory: async (id: string) => sessions.get(id)?.history(),
     readSystemPrompt: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
   const hub = new EventHub();
   // The home chat answers for the head only, as main.ts wires it.
   const router = new Router(hub, (key) => factory.resume(key.conversationId), undefined,
-    (id) => (chat && chain.members()[0]?.sessionId === id ? chat : undefined));
+    (id) => (chat && chain.isHead(id) ? chat : undefined));
   // The open items' text is tasks/open-items.ts's; the chain only places it.
-  const status = { text: "Nothing open.", seed: undefined as string | undefined, sessions: {} as Record<string, string>, asked: [] as number[] };
-  const chain = new MainChain(db, {
-    factory, router, home,
+  const status = { text: "Nothing open.", seed: undefined as string | undefined, sessions: {} as Record<string, string>, asked: [] as number[],
+    // Per chain, the items `/chain` and `## Chains` count.
+    items: {} as Record<string, OpenItemTarget["status"][]> };
+  const chains = new Chains(db, (id) => status.items[id]?.length ?? 0);
+  const mode = { on: false, set: vi.fn(async (on: boolean) => { mode.on = on; }) };
+  const deps: ConstructorParameters<typeof MainChain>[1] = {
+    factory, router, home, chains,
+    mode: { get: () => mode.on, set: mode.set },
+    changed: vi.fn(),
     ledger: (ids, since) => {
       ledger.push({ ids, since });
       return typeof runs === "function" ? runs(ids, since) : runs;
     },
-    status: (now) => {
+    status: (now, chainId) => {
       status.asked.push(now);
-      return { text: status.text, seed: status.seed ?? status.text, snapshot: { version: 1, items: [] }, sessions: status.sessions };
+      const items = (status.items[chainId] ?? []).map((s, n) => ({ problem: `p${String(n)}`, status: s, runs: [], key: "", title: "", statusLabel: "", stage: "", metadata: [] }));
+      return { text: status.text, seed: status.seed ?? status.text, snapshot: { version: 1 as const, items }, sessions: status.sessions };
     },
     defaults: async () => (typeof defaults.value === "function" ? defaults.value() : defaults.value),
     now: () => clock.now,
-  });
+  };
+  const chain = new MainChain(db, deps);
+  /** The same database and sessions read by a new process. */
+  const restart = (): MainChain => new MainChain(db, deps);
   /** A head already in the chain, as a restart finds it: on disk, not live. */
   const existing = (id: string, startedAt: number, opts: FakeSessionOptions = {}): FakeSession => {
     const s = fakeSession(id, opts);
     sessions.set(id, s);
     onDisk.add(id);
-    db.prepare("INSERT OR IGNORE INTO main_chain VALUES (?, ?, 'first')").run(id, startedAt);
+    db.prepare("INSERT OR IGNORE INTO main_chain(session_id, chain_id, started_at, reason) VALUES (?, 'main', ?, 'first')").run(id, startedAt);
     return s;
   };
-  const say = (text: string) => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" });
-  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory };
+  const say = (text: string, chainId = "main") => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" }, chainId);
+  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory, restart };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -94,9 +105,9 @@ describe("the continuous conversation's chain", () => {
     writeFileSync(join(r.home, "memory", `${day(today)}.md`), "shipped the doc");
     writeFileSync(join(r.home, "memory", `${day(new Date(r.clock.now - 86_400_000))}.md`), "wrote the contract");
 
-    expect(await r.say("hello")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(await r.say("hello")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     expect(r.created).toEqual([{ cwd: r.home, thinking: "low" }]);
-    expect(r.chain.members()).toEqual([{ sessionId: "m1", startedAt: r.clock.now, reason: "first" }]);
+    expect(r.chain.members("main")).toEqual([{ sessionId: "m1", startedAt: r.clock.now, reason: "first" }]);
     const m1 = r.sessions.get("m1")!;
     const [seed] = m1.systemInputs;
     expect(seed?.mode).toBe("append");
@@ -118,11 +129,11 @@ describe("the continuous conversation's chain", () => {
     const history = (at: number) => [{ role: "user" as const, text: "earlier", at }, { role: "assistant" as const, text: "ok" }];
     // Started five hours ago, spoken to half an hour ago: still the head.
     r.existing("h1", r.clock.now - 5 * IDLE_MS, { history: history(r.clock.now - IDLE_MS / 2) });
-    expect(await r.say("still here")).toEqual({ sessionId: "h1" });
+    expect(await r.say("still here")).toEqual({ sessionId: "h1", chainId: "main" });
 
     const r2 = rig();
     r2.existing("h1", r2.clock.now - 5 * IDLE_MS, { history: history(r2.clock.now - IDLE_MS) });
-    expect(await r2.say("back")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(await r2.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
   });
 
   it("carries the head's model and effort into the next session with the ledger since its start, not its subject", async () => {
@@ -143,7 +154,7 @@ describe("the continuous conversation's chain", () => {
     const startedAt = r.clock.now - 3 * IDLE_MS;
     r.existing("h1", startedAt, { history: turns, model: { provider: "p", id: "strong" }, thinkingLevel: "high" });
 
-    expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
     expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
     expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
@@ -155,7 +166,7 @@ describe("the continuous conversation's chain", () => {
     // An idle head starts on a new subject: nothing of where the previous one left off.
     expect(seed.text).not.toContain("## Previous session");
     expect(seed.text).not.toContain("answer 4");
-    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "idle"], ["h1", "first"]]);
+    expect(r.chain.members("main").map((m) => [m.sessionId, m.reason])).toEqual([["m1", "idle"], ["h1", "first"]]);
     // The message went to the new head, not the one it was typed against.
     expect(r.sessions.get("m1")!.prompts[0]).toContain("new day");
     expect(r.sessions.get("h1")!.prompts).toEqual([]);
@@ -171,7 +182,7 @@ describe("the continuous conversation's chain", () => {
     r.sessions.get("m1")!.setThinkingLevel("high");
     r.defaults.value = { defaultModel: { provider: "p", id: "newer" }, defaultThinkingLevel: "xhigh" };
     r.clock.now += 2 * IDLE_MS;
-    expect(await r.say("later")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(await r.say("later")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
     expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "xhigh" });
 
     // Only the reasoning set: the model is the previous head's.
@@ -183,7 +194,7 @@ describe("the continuous conversation's chain", () => {
   it("stamps the seed with the language the previous head's user wrote in", async () => {
     const r = rig();
     r.existing("h1", r.clock.now - 3 * IDLE_MS, { history: [{ role: "user", text: "[Ada<U1> 12:00 lang=zh]\n帮我看看这个问题" }, { role: "assistant", text: "Looking at it now" }] });
-    expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
     expect(r.sessions.get("m1")!.systemInputs[0]!.text).toMatch(/^\[lang=zh\]\n\[Pier: a new session/);
     // Nothing to carry from a head that was never spoken to.
     const r2 = rig();
@@ -195,19 +206,19 @@ describe("the continuous conversation's chain", () => {
     const r = rig();
     r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: { provider: "p", id: "strong" }, thinkingLevel: "high" });
     r.defaults.value = () => { throw new Error("settings.json is not JSON"); };
-    expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
+    expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
     expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
   });
 
   it("starts a new head, named lost, when the head is gone from Pi, and drops the gone one from the chain", async () => {
     const r = rig();
     r.existing("h0", r.clock.now - 2);
-    r.db.prepare("INSERT INTO main_chain VALUES ('gone', ?, 'first')").run(r.clock.now - 1);
-    expect(await r.say("hi")).toEqual({ sessionId: "m1", rotated: "lost" });
+    r.db.prepare("INSERT INTO main_chain(session_id, chain_id, started_at, reason) VALUES ('gone', 'main', ?, 'first')").run(r.clock.now - 1);
+    expect(await r.say("hi")).toEqual({ sessionId: "m1", chainId: "main", rotated: "lost" });
     expect(r.created).toEqual([{ cwd: r.home, thinking: "low" }]);
     expect(r.sessions.get("m1")!.systemInputs[0]!.origin).toEqual({ kind: "session-seed", reason: "lost", previousSessionId: "gone" });
     // Nothing on disk to page back to: a member left behind would be an unknown session forever.
-    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
+    expect(r.chain.members("main").map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
     expect(r.chain.chainOf("gone")).toBeUndefined();
   });
 
@@ -216,11 +227,11 @@ describe("the continuous conversation's chain", () => {
     r.existing("h0", r.clock.now - 2);
     // Present, or not the head: a failed read of it is that read's error.
     expect(await r.chain.replaceLost("h0")).toBeUndefined();
-    r.db.prepare("INSERT INTO main_chain VALUES ('gone', ?, 'first')").run(r.clock.now - 1);
+    r.db.prepare("INSERT INTO main_chain(session_id, chain_id, started_at, reason) VALUES ('gone', 'main', ?, 'first')").run(r.clock.now - 1);
     expect(await r.chain.replaceLost("h0")).toBeUndefined();
     expect(await r.chain.replaceLost("gone")).toBe("m1");
     expect(r.sessions.get("m1")!.systemInputs[0]!.origin).toEqual({ kind: "session-seed", reason: "lost", previousSessionId: "gone" });
-    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
+    expect(r.chain.members("main").map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
     // Already moved on: a second read of the gone id starts nothing more.
     expect(await r.chain.replaceLost("gone")).toBeUndefined();
     expect(r.created).toHaveLength(1);
@@ -236,22 +247,34 @@ describe("the continuous conversation's chain", () => {
       return s;
     };
     await expect(r.say("back")).rejects.toThrow("disk full");
-    expect(r.chain.members().map((m) => m.sessionId)).toEqual(["h0"]);
+    expect(r.chain.members("main").map((m) => m.sessionId)).toEqual(["h0"]);
   });
 
-  it("appends the head's <note> lines to today's daily note, on its own line, and nobody else's", async () => {
+  it("appends the head's <note> lines to its chain's daily note, on its own line, and nobody else's", async () => {
     const r = rig();
     const head = r.existing("h1", r.clock.now - 60_000);
     const older = r.existing("h0", r.clock.now - 120_000);
     await r.router.ensure({ channelId: "web", conversationId: "h1" });
     await r.router.ensure({ channelId: "web", conversationId: "h0" });
-    const file = join(r.home, "memory", `${day(new Date(r.clock.now))}.md`);
+    const file = join(r.home, "chains", "main", "memory", `${day(new Date(r.clock.now))}.md`);
     head.emit({ type: "turn-end", text: "Merged.\n<note>决定：审查默认 balanced</note>" });
     expect(readFileSync(file, "utf8")).toBe("- 决定：审查默认 balanced\n");
     writeFileSync(file, "- edited by hand");
     older.emit({ type: "turn-end", text: "<note>not the head</note>" });
     head.emit({ type: "turn-end", text: "<note>one</note>\n<note>two</note>" });
     expect(readFileSync(file, "utf8")).toBe("- edited by hand\n- one\n- two\n");
+  });
+
+  it("appends a head's <note global> to the instance's daily note, whichever chain it heads", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    const head = r.existing("d1", r.clock.now - 60_000);
+    r.db.prepare("UPDATE main_chain SET chain_id = ? WHERE session_id = 'd1'").run(design.id);
+    await r.router.ensure({ channelId: "web", conversationId: "d1" });
+    head.emit({ type: "turn-end", text: "<note global>qiqi prefers zh</note>\n<note>sidebar first</note>" });
+    const today = `${day(new Date(r.clock.now))}.md`;
+    expect(readFileSync(join(r.home, "memory", today), "utf8")).toBe("- qiqi prefers zh\n");
+    expect(readFileSync(join(r.home, "chains", design.id, "memory", today), "utf8")).toBe("- sidebar first\n");
   });
 
   it("tells the head's conversation when a note could not be written", async () => {
@@ -261,7 +284,7 @@ describe("the continuous conversation's chain", () => {
     mkdirSync(r.home, { recursive: true });
     writeFileSync(join(r.home, "memory"), "a file, not the directory");
     const told = vi.spyOn(r.router, "reportTo");
-    head.emit({ type: "turn-end", text: "<note>kept anyway</note>" });
+    head.emit({ type: "turn-end", text: "<note global>kept anyway</note>" });
     expect(told).toHaveBeenCalledWith("h1", expect.stringMatching(/^notes: could not append to memory\/.*: kept anyway$/));
   });
 
@@ -271,7 +294,7 @@ describe("the continuous conversation's chain", () => {
     await r.router.ensure({ channelId: "web", conversationId: "h1" });
     void head.prompt("long job");
     await Promise.resolve();
-    expect(await r.say("and another thing")).toEqual({ sessionId: "h1" });
+    expect(await r.say("and another thing")).toEqual({ sessionId: "h1", chainId: "main" });
     expect(r.created).toEqual([]);
     await head.abort();
   });
@@ -285,11 +308,11 @@ describe("the continuous conversation's chain", () => {
       { role: "assistant" as const, text: i === 4 ? "agreed\n<topic>menu</topic>" : `answer ${String(i)}`, meta: { completedAt: done, durationMs: 1, tokens: 1 } },
     ]);
     r.existing("h1", r.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL, contextWindow: 400_000, compactAt: 100_000 } });
-    expect(await r.say("at the ceiling")).toEqual({ sessionId: "h1" });
+    expect(await r.say("at the ceiling")).toEqual({ sessionId: "h1", chainId: "main" });
 
     const r2 = rig();
     r2.existing("h1", r2.clock.now - IDLE_MS / 2, { history, contextUsage: { tokens: FULL + 1, contextWindow: 400_000, compactAt: 100_000 } });
-    expect(await r2.say("past it")).toEqual({ sessionId: "m1", rotated: "full" });
+    expect(await r2.say("past it")).toEqual({ sessionId: "m1", chainId: "main", rotated: "full" });
     const seed = r2.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "full", previousSessionId: "h1" });
     expect(seed.text).toContain("the previous one reached 60K tokens");
@@ -307,14 +330,14 @@ describe("the continuous conversation's chain", () => {
   it("never rotates on size when the size is unknown after a compaction, or mid-turn", async () => {
     const r = rig();
     r.existing("h1", r.clock.now, { contextUsage: { tokens: null, contextWindow: 400_000, compactAt: 100_000 } });
-    expect(await r.say("hi")).toEqual({ sessionId: "h1" });
+    expect(await r.say("hi")).toEqual({ sessionId: "h1", chainId: "main" });
 
     const r2 = rig();
     const head = r2.existing("h1", r2.clock.now, { hold: true, contextUsage: { tokens: 2 * FULL, contextWindow: 400_000, compactAt: 100_000 } });
     await r2.router.ensure({ channelId: "web", conversationId: "h1" });
     void head.prompt("long job");
     await Promise.resolve();
-    expect(await r2.say("and another thing")).toEqual({ sessionId: "h1" });
+    expect(await r2.say("and another thing")).toEqual({ sessionId: "h1", chainId: "main" });
     expect(r2.created).toEqual([]);
     await head.abort();
   });
@@ -330,7 +353,7 @@ describe("the continuous conversation's chain", () => {
     const r = rig();
     r.existing("h0", r.clock.now - 10);
     r.existing("h1", r.clock.now);
-    expect(r.chain.chainOf("h0")).toEqual(["h1", "h0"]);
+    expect(r.chain.chainOf("h0")).toEqual({ chainId: "main", members: ["h1", "h0"] });
     expect(r.chain.chainOf("child")).toBeUndefined();
   });
 
@@ -342,9 +365,9 @@ describe("the continuous conversation's chain", () => {
     } });
     await expect(r.say("hello")).rejects.toThrow("a new session could not start — its seed failed: Error: database is locked");
     expect(r.created).toEqual([]);
-    expect(r.chain.members()).toEqual([]);
+    expect(r.chain.members("main")).toEqual([]);
     broken = false;
-    expect(await r.say("again")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(await r.say("again")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     expect(r.created).toHaveLength(1);
   });
 
@@ -371,16 +394,22 @@ describe("the continuous conversation's chain", () => {
     expect(text).not.toContain("r1 · n");
   });
 
-  it("keeps the end of a day's notes, where the newest entries are", async () => {
+  it("keeps the end of a day's notes, where the newest entries are: 1K of the instance's, 2K of the chain's", async () => {
     const r = rig();
+    const today = `${day(new Date(r.clock.now))}.md`;
+    const lines = Array.from({ length: 400 }, (_, i) => `- entry ${String(i + 1)} ${"x".repeat(20)}`).join("\n");
     mkdirSync(join(r.home, "memory"), { recursive: true });
-    const lines = Array.from({ length: 400 }, (_, i) => `- entry ${String(i + 1)} ${"x".repeat(20)}`);
-    writeFileSync(join(r.home, "memory", `${day(new Date(r.clock.now))}.md`), lines.join("\n"));
+    mkdirSync(join(r.home, "chains", "main", "memory"), { recursive: true });
+    writeFileSync(join(r.home, "memory", today), lines);
+    writeFileSync(join(r.home, "chains", "main", "memory", today), lines);
     await r.say("hi");
     const text = r.sessions.get("m1")!.systemInputs[0]!.text;
-    const notes = text.slice(text.indexOf("## memory/"));
-    expect(notes.length).toBeLessThan(2_100);
-    expect(notes).toMatch(/^## memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 340 lines omitted, the rest in memory\/\1\.md\n- entry 341 x/);
+    const global = text.slice(text.indexOf("## memory/"), text.indexOf("\n\n## chains/main/memory/"));
+    expect(global.length).toBeLessThan(1_100);
+    expect(global).toMatch(/^## memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 370 lines omitted, the rest in memory\/\1\.md\n- entry 371 x/);
+    const notes = text.slice(text.indexOf("## chains/main/memory/"));
+    expect(notes.length).toBeLessThan(2_150);
+    expect(notes).toMatch(/^## chains\/main\/memory\/(\d{4}-\d{2}-\d{2})\.md\n\n… 340 lines omitted, the rest in chains\/main\/memory\/\1\.md\n- entry 341 x/);
     expect(notes).toContain("- entry 400 ");
     expect(notes).not.toContain("- entry 1 ");
   });
@@ -423,14 +452,14 @@ describe("the chat commands", () => {
   it("answers exactly `/status` with the list, appended to the head without a turn", async () => {
     const r = rig();
     r.status.text = "Open\n- model menu — merged";
-    expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     const m1 = r.sessions.get("m1")!;
     expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Open\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
     expect(m1.prompts).toEqual([]);
     for (const text of ["/tmp is full", "/status please", "status", "/stat", "%", "%unknown"]) await r.say(text);
     expect(m1.prompts).toHaveLength(6);
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
-    expect(await r.say(" %Status ")).toEqual({ sessionId: "m1" });
+    expect(await r.say(" %Status ")).toEqual({ sessionId: "m1", chainId: "main" });
     expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(2);
   });
 
@@ -444,8 +473,8 @@ describe("the chat commands", () => {
   it("rotates on `/new` with the seed as the answer, once when the head was due anyway, and refuses a replying head", async () => {
     const r = rig();
     r.existing("h1", r.clock.now, { history: [{ role: "user", text: "earlier", at: r.clock.now }] });
-    expect(await r.say("/new")).toEqual({ sessionId: "m1", rotated: "new" });
-    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "new"], ["h1", "first"]]);
+    expect(await r.say("/new")).toEqual({ sessionId: "m1", chainId: "main", rotated: "new" });
+    expect(r.chain.members("main").map((m) => [m.sessionId, m.reason])).toEqual([["m1", "new"], ["h1", "first"]]);
     const m1 = r.sessions.get("m1")!;
     expect(m1.systemInputs).toHaveLength(1);
     expect(m1.systemInputs[0]).toMatchObject({ origin: { kind: "session-seed", reason: "new", previousSessionId: "h1" } });
@@ -454,12 +483,12 @@ describe("the chat commands", () => {
 
     // Due for its own reason: one rotation, not two.
     r.clock.now += 2 * IDLE_MS;
-    expect(await r.say("/NEW")).toEqual({ sessionId: "m2", rotated: "idle" });
-    expect(r.chain.members()).toHaveLength(3);
+    expect(await r.say("/NEW")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
+    expect(r.chain.members("main")).toHaveLength(3);
 
     r.sessions.get("m2")!.setState("streaming");
     await expect(r.say("/new")).rejects.toThrow("the conversation is replying — /stop first");
-    expect(r.chain.members()).toHaveLength(3);
+    expect(r.chain.members("main")).toHaveLength(3);
     expect(r.sessions.get("m2")!.systemInputs.filter((i) => i.origin.kind === "chat-command")).toEqual([]);
   });
 
@@ -468,7 +497,7 @@ describe("the chat commands", () => {
     const h1 = r.existing("h1", r.clock.now, { hold: true });
     await r.say("go");
     expect(h1.state).toBe("streaming");
-    expect(await r.say("/stop")).toEqual({ sessionId: "h1" });
+    expect(await r.say("/stop")).toEqual({ sessionId: "h1", chainId: "main" });
     expect(h1.state).toBe("idle");
     expect(h1.calls.slice(-2)).toEqual(["abort", "systemInput:chat-command:append:stopped"]);
     expect(h1.systemInputs.at(-1)).toEqual({ text: "stopped", origin: { kind: "chat-command", command: "stop" }, mode: "append" });
@@ -482,7 +511,7 @@ describe("the chat commands", () => {
     const h1 = r.existing("h1", r.clock.now, {
       skills: [{ name: "pier-tasks", description: "run a task" }, { name: "pier-web", description: "search the web" }],
     });
-    expect(await r.say("%skills")).toEqual({ sessionId: "h1" });
+    expect(await r.say("%skills")).toEqual({ sessionId: "h1", chainId: "main" });
     expect(h1.systemInputs.at(-1)).toEqual({
       text: "pier-tasks — run a task\npier-web — search the web", origin: { kind: "chat-command", command: "skills" }, mode: "append",
     });
@@ -511,13 +540,13 @@ describe("a send under a chat's key", () => {
     return { channel, notes };
   };
   const send = (r: ReturnType<typeof rig>, text: string) =>
-    r.chain.send({ senderId: "u1", sender: { id: "u1", name: "qiqi" }, text, mode: "steer" }, KEY);
+    r.chain.send({ senderId: "u1", sender: { id: "u1", name: "qiqi" }, text, mode: "steer" }, "main", KEY);
 
   it("dispatches under that key, the head attached under it, and so is a rotation's next head", async () => {
     const r = rig();
     const im = lark();
     r.router.registerChannel(im.channel);
-    expect(await send(r, "hello")).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(await send(r, "hello")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     expect(r.router.conversationOf("m1")).toEqual(KEY);
     expect(r.router.sessionOf(KEY)?.id).toBe("m1");
     expect(r.sessions.get("m1")!.prompts[0]).toContain("lark:oc_home");
@@ -525,7 +554,7 @@ describe("a send under a chat's key", () => {
     expect(im.notes.map(([id, o]) => [id, o.kind])).toEqual([["oc_home", "session-seed"]]);
 
     r.clock.now += 2 * IDLE_MS;
-    expect(await send(r, "back")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(await send(r, "back")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
     expect(r.router.sessionOf(KEY)?.id).toBe("m2");
     expect(r.router.conversationOf("m2")).toEqual(KEY);
     // The previous head keeps no delivery: its next turn would otherwise answer in the chat too.
@@ -542,7 +571,7 @@ describe("a send under a chat's key", () => {
     expect(im.notes).toHaveLength(1);
 
     r.clock.now += 2 * IDLE_MS;
-    expect(await r.say("from the browser")).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(await r.say("from the browser")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
     expect(r.router.conversationOf("m2")).toEqual({ channelId: "web", conversationId: "m2" });
     expect((await r.say("/new")).sessionId).toBe("m3");
     expect(r.router.conversationOf("m3")).toEqual({ channelId: "web", conversationId: "m3" });
@@ -561,8 +590,173 @@ describe("a send under a chat's key", () => {
     const h1 = r.existing("h1", r.clock.now, { hold: true });
     await send(r, "go");
     expect(h1.state).toBe("streaming");
-    expect(await send(r, "/status")).toEqual({ sessionId: "h1" });
+    expect(await send(r, "/status")).toEqual({ sessionId: "h1", chainId: "main" });
     expect(h1.state).toBe("streaming");
     expect(im.notes.at(-1)).toEqual(["oc_home", expect.objectContaining({ kind: "chat-command", command: "status" })]);
+  });
+});
+
+describe("one chain per topic", () => {
+  it("keeps a head per chain, each rotating on its own, and answers which chain a session is in", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    expect(await r.say("hi")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
+    expect(await r.say("sidebar?", design.id)).toEqual({ sessionId: "m2", chainId: design.id, rotated: "first" });
+    expect(await r.say("again")).toEqual({ sessionId: "m1", chainId: "main" });
+    expect(r.chain.members(design.id).map((m) => m.sessionId)).toEqual(["m2"]);
+    expect(r.chain.chainOf("m2")).toEqual({ chainId: design.id, members: ["m2"] });
+    expect(r.chain.headOf("m2")).toBe("m2");
+    expect(r.chain.headOf("child")).toBe("child");
+    expect(r.chain.isHead("m1")).toBe(true);
+    expect(r.chain.firstHead()).toBe("m1");
+    expect(r.chain.heads()).toEqual([{ chainId: "main", sessionId: "m1" }, { chainId: design.id, sessionId: "m2" }]);
+    expect(r.chain.lastUserAt(design.id)).toBe(r.clock.now);
+    expect(r.chain.lastUserAt("other")).toBeUndefined();
+  });
+
+  it("knows each chain's last user message after a restart, from its head's transcript", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now - IDLE_MS, { history: [{ role: "user", text: "earlier", at: r.clock.now - 5_000 }, { role: "assistant", text: "ok" }] });
+    const restarted = r.restart();
+    await vi.waitFor(() => expect(restarted.lastUserAt("main")).toBe(r.clock.now - 5_000));
+  });
+
+  it("counts idle from each chain's own last user message", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    const history = (at: number) => [{ role: "user" as const, text: "earlier", at }];
+    r.existing("h1", r.clock.now - 5 * IDLE_MS, { history: history(r.clock.now - IDLE_MS) });
+    r.existing("d1", r.clock.now - 5 * IDLE_MS, { history: history(r.clock.now - IDLE_MS / 2) });
+    r.db.prepare("UPDATE main_chain SET chain_id = ? WHERE session_id = 'd1'").run(design.id);
+    expect(await r.say("sidebar again", design.id)).toEqual({ sessionId: "d1", chainId: design.id });
+    expect(await r.say("main again")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
+    expect(r.chain.chainOf("h1")).toEqual({ chainId: "main", members: ["m1", "h1"] });
+    expect(r.chain.headOf("h1")).toBe("m1");
+  });
+
+  it("has no first head before the first chain's first message", () => {
+    expect(rig().chain.firstHead()).toBeNull();
+  });
+
+  it("does not hold one chain's send behind another's", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    let release = (): void => undefined;
+    r.defaults.value = { defaultModel: null, defaultThinkingLevel: null };
+    const slow = vi.spyOn(r.factory, "create").mockImplementationOnce(async (opts) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      slow.mockRestore();
+      return r.factory.create(opts);
+    });
+    const main = r.say("hi");
+    await vi.waitFor(() => expect(slow).toHaveBeenCalled());
+    expect(await r.say("sidebar?", design.id)).toMatchObject({ chainId: design.id, rotated: "first" });
+    release();
+    expect(await main).toMatchObject({ chainId: "main", rotated: "first" });
+  });
+
+  it("seeds a head with its chain's name, memory and the other chains in chain mode, and only its own runs", async () => {
+    const r = rig({ runs: (ids) => ids.map((id) => ({ runId: `r-${id}`, name: "n", state: "failed" as const, targetSessionId: null, cwd: null, queuedAt: 1, finishedAt: 2 })) });
+    await r.say("hi");
+    const plain = r.sessions.get("m1")!.systemInputs[0]!.text;
+    expect(plain).toMatch(/^\[Pier: a new session of chain "Main" — the first one\. Your chain's memory: chains\/main\/MEMORY\.md, notes chains\/main\/memory\/\./);
+    // Session mode: the one chain's items are `## Open`.
+    expect(plain).not.toContain("## Chains");
+
+    r.mode.on = true;
+    const design = r.chains.create("Design");
+    mkdirSync(join(r.home, "chains", design.id), { recursive: true });
+    writeFileSync(join(r.home, "chains", design.id, "MEMORY.md"), "the sidebar is a list");
+    r.status.items = { main: ["waiting on you", "running"], [design.id]: ["running"] };
+    const archived = r.chains.create("Old");
+    r.chains.archive(archived.id);
+    await r.say("sidebar?", design.id);
+    const seed = r.sessions.get("m2")!.systemInputs[0]!.text;
+    expect(seed).toContain(`## chains/${design.id}/MEMORY.md\n\nthe sidebar is a list\n\n## Open`);
+    expect(seed).toContain(`## Chains\n\nMain · 2 open · 1 waiting on you\nDesign · 1 open · 0 waiting on you (this one)\n\n## Runs`);
+    expect(seed).not.toContain("Old ·");
+    expect(r.ledger.at(-1)!.ids).toEqual([]);
+    expect(seed).not.toContain("r-m1");
+  });
+
+  it("refuses a message to an archived chain, its head still answering for what it launched", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    await r.say("hi", design.id);
+    r.chains.archive(design.id);
+    await expect(r.say("more", design.id)).rejects.toThrow(ChainArchived);
+    await expect(r.say("/status", design.id)).rejects.toThrow("chain: Design is archived — unarchive first");
+    expect(r.chain.headOf("m1")).toBe("m1");
+    expect(r.chain.heads()).toContainEqual({ chainId: design.id, sessionId: "m1" });
+  });
+});
+
+describe("/chain", () => {
+  it("lists the chains on the head, the current one ticked and archived ones last", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    const old = r.chains.create("Old");
+    r.chains.archive(old.id);
+    r.status.items = { [design.id]: ["waiting on you", "running"] };
+    expect(await r.say("/chain", design.id)).toEqual({ sessionId: "m1", chainId: design.id, rotated: "first" });
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)).toMatchObject({
+      text: "Main · 0 open · 0 waiting on you\n✓ Design · 2 open · 1 waiting on you\nOld · 0 open · 0 waiting on you (archived)",
+      origin: { kind: "chat-command", command: "chain" },
+    });
+    expect(r.sessions.get("m1")!.prompts).toEqual([]);
+    // A list changes nothing: no surface re-reads for it.
+    expect(r.changed).not.toHaveBeenCalled();
+  });
+
+  it("switches by unique prefix without touching either head, and refuses an archived or ambiguous one", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    r.chains.create("Desktop");
+    const old = r.chains.create("Old");
+    r.chains.archive(old.id);
+    await r.say("hi");
+    expect(await r.say("/chain desi")).toEqual({ chainId: design.id, switched: expect.objectContaining({ id: design.id, name: "Design" }) });
+    expect(r.created).toHaveLength(1);
+    // Every surface's list and the home chat's card follow a switch from any surface.
+    expect(r.changed).toHaveBeenCalledTimes(1);
+    await r.say("sidebar?", design.id);
+    expect(await r.say("%chain MAIN", design.id)).toEqual({ sessionId: "m1", chainId: "main", switched: expect.objectContaining({ id: "main" }) });
+    await expect(r.say("/chain des")).rejects.toThrow("/chain des matches Design, Desktop — say more");
+    await expect(r.say("/chain old")).rejects.toThrow("chain: Old is archived — unarchive first");
+    // Out of an archived chain is the one thing it takes.
+    expect(await r.say("/chain main", old.id)).toMatchObject({ chainId: "main" });
+    expect(r.sessions.get("m1")!.prompts).toHaveLength(1);
+  });
+
+  it("creates and switches on `/chain new`, turning chain mode on first", async () => {
+    const r = rig();
+    const sent = await r.say("/chain new  Design ");
+    expect(sent).toEqual({ chainId: expect.any(String), switched: expect.objectContaining({ name: "Design" }) });
+    expect(r.chains.get(sent.chainId)?.name).toBe("Design");
+    expect(r.mode.set).toHaveBeenCalledWith(true);
+    expect(r.chain.lastUserAt(sent.chainId)).toBe(r.clock.now);
+    await r.say("/chain new Other", sent.chainId);
+    expect(r.mode.set).toHaveBeenCalledTimes(1);
+    await expect(r.say("/chain new design")).rejects.toThrow('chain: "design" exists');
+    await expect(r.say("/chain new")).rejects.toThrow("chain: name must be 1–40 characters");
+  });
+
+  it("renames the current chain and answers with the list", async () => {
+    const r = rig();
+    expect(await r.say("/chain rename  Home ")).toMatchObject({ sessionId: "m1", chainId: "main" });
+    expect(r.chains.get("main")?.name).toBe("Home");
+    expect(r.changed).toHaveBeenCalledTimes(1);
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.text).toBe("✓ Home · 0 open · 0 waiting on you");
+  });
+
+  it("archives the current chain onto the first, refusing one with open items and the last active one", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    r.status.items = { [design.id]: ["running"] };
+    await expect(r.say("/chain archive", design.id)).rejects.toThrow(ChainHasOpen);
+    r.status.items = {};
+    expect(await r.say("/chain archive", design.id)).toEqual({ chainId: "main", switched: expect.objectContaining({ id: "main" }) });
+    expect(r.chains.get(design.id)?.archivedAt).not.toBeNull();
+    await expect(r.say("/chain archive")).rejects.toThrow("chain: Main is the only active chain");
   });
 });

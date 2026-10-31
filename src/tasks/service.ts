@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { MODEL_TIERS, type AgentFactory, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
+import type { Chains } from "../core/chains.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -39,8 +40,8 @@ const runPrompt = (run: TaskRun): string | null => {
 type TriggerSource = TaskRun["triggerSource"];
 type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">;
 
-/** The continuous conversation as tasks see it: its members launch and receive as one. */
-export type TaskChain = Pick<MainChain, "chainOf" | "members">;
+/** The continuous conversation's chains as tasks see them: a chain's members launch and receive as one. */
+export type TaskChain = Pick<MainChain, "chainOf" | "members" | "headOf" | "firstHead" | "heads" | "isHead">;
 type Waiter = (run: TaskRun) => void;
 
 const TIER_ORDER: StatsRow["tier"][] = [...MODEL_TIERS, "named"];
@@ -117,8 +118,8 @@ export class TaskService {
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
   private readonly goals: TaskGoals;
-  /** The head's `<done>` keys that closed nothing, each until a `<done>` closes the item it names; in memory only. */
-  private unmatched: string[] = [];
+  /** Per chain, the head's `<done>` keys that closed nothing, each until a `<done>` closes the item it names; in memory only. */
+  private readonly unmatched = new Map<string, string[]>();
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
@@ -134,6 +135,8 @@ export class TaskService {
       modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous: TaskChain;
+      /** The chains' names, for the open items' rows. */
+      chains: Pick<Chains, "list">;
       /** A design lead's run settled: the user's turn (`waiting`), its `Design
        *  final:` (`final`), or a run of it that did not succeed (`failed`). */
       designLead?: (run: TaskRun, state: "waiting" | "final" | "failed") => void;
@@ -144,7 +147,9 @@ export class TaskService {
   ) {
     this.leftover = store.inFlightRuns();
     const headOf = (id: string): string => this.headOf(id);
-    const conversation = (): string | null => this.head();
+    // A `conversation` callback reaches the launcher's chain, else the definition creator's, else the first.
+    const conversation = (...by: (string | null)[]): string | null =>
+      by.map((id) => (id === null ? undefined : instance.continuous.chainOf(id)?.members[0])).find(Boolean) ?? instance.continuous.firstHead();
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable, (runId) => {
@@ -194,16 +199,18 @@ export class TaskService {
       worktree: (cwd) => this.worktree(cwd),
     });
     router.onTurnEnd((sessionId, text, opened) => {
-      // Only the head's turns write the list.
-      if (instance.continuous.members()[0]?.sessionId === sessionId) {
+      // Only a head's turns write the list, its chain's.
+      const chainId = instance.continuous.chainOf(sessionId)?.chainId;
+      if (chainId !== undefined && instance.continuous.isHead(sessionId)) {
         try {
           const answered = opened?.kind === "task-callback" ? opened.runIds ?? [opened.runId] : [];
-          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now(), sessionId, answered);
-          const keys = store.openItems().map((i) => i.problem);
+          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered);
+          const keys = store.openItems(chainId).map((i) => i.problem);
           // A head that keeps missing gets its latest few back; nothing open owes no resend.
-          this.unmatched = keys.length ? [...new Set([...this.unmatched.filter((u) => !closed.some((k) => namesKey(doneOld(u), k))), ...unmatched])].slice(-5) : [];
+          const owed = this.unmatchedDone(chainId).filter((u) => !closed.some((k) => namesKey(doneOld(u), k)));
+          this.unmatched.set(chainId, keys.length ? [...new Set([...owed, ...unmatched])].slice(-5) : []);
           if (changed) hub.emitWorkspace({ type: "open-items-changed" });
-          const stale = answered.length ? staleItems(store, text, answered) : [];
+          const stale = answered.length ? staleItems(store, text, answered, chainId) : [];
           const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
           if (notes.length) {
             const at = router.conversationOf(sessionId);
@@ -421,10 +428,16 @@ export class TaskService {
     return { days, rows: sorted };
   }
 
-  unmatchedDone(): readonly string[] { return this.unmatched; }
+  unmatchedDone(chainId: string): readonly string[] { return this.unmatched.get(chainId) ?? []; }
 
-  openItems(): OpenItems {
-    return openItems(this.store, this.router, this.instance.continuous.members().map((m) => m.sessionId));
+  /** `chainId`'s items, or every chain's in the chain list's order; each row names its chain. */
+  openItems(chainId?: string): OpenItems {
+    const each = this.instance.chains.list().filter((c) => chainId === undefined || c.id === chainId).map((c) => {
+      const open = openItems(this.store, this.router, this.instance.continuous.members(c.id).map((m) => m.sessionId), c.id);
+      const chain = { id: c.id, name: c.name, archived: c.archivedAt !== null };
+      return { items: open.items.map((i) => ({ ...i, chain })), unlisted: open.unlisted };
+    });
+    return { items: each.flatMap((o) => o.items), unlisted: each.flatMap((o) => o.unlisted) };
   }
 
   activeBackgroundRunCounts(): Map<string, number> {
@@ -494,7 +507,10 @@ export class TaskService {
       this.goals.cancel(goal, by ?? "Pier");
       return this.getRun(id);
     }
-    const unasked = by !== undefined && this.headOf(by) !== this.head();
+    // Asked: by a member of the run's chain, or any chain's when the run has none (the Console's).
+    const chainOf = (id: string | null) => (id === null ? undefined : this.instance.continuous.chainOf(id)?.chainId);
+    const runChain = chainOf(run.invokedBySessionId);
+    const unasked = by !== undefined && (chainOf(by) === undefined || (runChain !== undefined && chainOf(by) !== runChain));
     for (const target of [run, ...this.descendants(run)]) {
       if (!isTerminal(target.state)) this.execution.cancel(target.id, unasked && target === run);
     }
@@ -702,20 +718,15 @@ export class TaskService {
     this.abnormalEnd(run, unasked);
   }
 
-  private head(): string | null {
-    return this.instance.continuous.members()[0]?.sessionId ?? null;
-  }
-
   private headOf(id: string): string {
-    return this.instance.continuous.chainOf(id)?.[0] ?? id;
+    return this.instance.continuous.headOf(id);
   }
 
   /** A reporter that throws must not unwind the settle. */
   private abnormalEnd(run: TaskRun, unasked: boolean): void {
     const group = run.groupId === null ? undefined : this.store.getGroup(run.groupId);
     const resultTo = group ? group.callbackSessionId : run.callbackSessionId;
-    const head = this.head();
-    const toHead = resultTo !== null && head !== null && this.headOf(resultTo) === head;
+    const toHead = resultTo !== null && this.instance.continuous.isHead(this.headOf(resultTo));
     if (!this.instance.abnormalEnd || !owesNotice(run, unasked, toHead)) return;
     try {
       this.instance.abnormalEnd(run);

@@ -16,6 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { MainChain } from "../core/chain.js";
+import { Chains } from "../core/chains.js";
 import { splitItem, splitSpeaker, withItem } from "../core/identity.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
@@ -98,9 +99,12 @@ const SETTINGS_JSON = {
   toolsTaskId: null,
 };
 
+/** Session mode's register and switch, as main.ts wires them over `db`. */
+const chainsOf = (db: DatabaseSync) => ({ chains: new Chains(db, () => 0), mode: { get: () => false, set: async () => {} }, changed: () => {} });
+
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
-  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], status: () => ({ text: "Nothing open.", seed: "Nothing open.", snapshot: { version: 1, items: [] }, sessions: {} }), defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }) });
+  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ...chainsOf(db), ledger: () => [], status: () => ({ text: "Nothing open.", seed: "Nothing open.", snapshot: { version: 1, items: [] }, sessions: {} }), defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }) });
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
@@ -258,7 +262,7 @@ function setup(
     ? { apply: update.updater.apply, problem: update.updater.problem ?? (() => null) }
     : null;
   const continuous = idleChain(factory, router, hub, db);
-  const tasks = new TaskService(new TaskStore(db), factory, router, hub, { modelMenu: () => [], continuous });
+  const tasks = new TaskService(new TaskStore(db), factory, router, hub, { modelMenu: () => [], continuous, chains: continuous.chains });
   /** The configuration subscription's switch, as main.ts reads it from ConfigSync. */
   const subscription = { enabled: false };
   const app = new Hono();
@@ -576,7 +580,7 @@ describe("workbench server", () => {
 
     const head = fakeSession("head");
     router.attach({ channelId: "web", conversationId: "head" }, head);
-    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? ["head"] : undefined));
+    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? { chainId: "main", members: ["head"] } : undefined));
     head.emit({ type: "state", state: "streaming" });
     head.emit({ type: "state", state: "idle" });
     expect(state.unread("head")).toBe(true);
@@ -588,7 +592,7 @@ describe("workbench server", () => {
     const { app, router, state, continuous } = setup();
     const head = fakeSession("head");
     router.attach({ channelId: "web", conversationId: "head" }, head);
-    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? ["head"] : undefined));
+    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? { chainId: "main", members: ["head"] } : undefined));
     const turn = (...texts: string[]) => {
       head.emit({ type: "state", state: "streaming" });
       for (const text of texts) head.emit({ type: "turn-end", text });
@@ -2430,7 +2434,7 @@ describe("the continuous conversation's routes", () => {
     const router = new Router(hub, (key) => factory.resume(key.conversationId));
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
-      factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
+      factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"), ...chainsOf(db),
       ledger, status: () => ({ text: "Nothing open.", seed: "Nothing open.", snapshot: { version: 1, items: [] }, sessions: {} }), now: () => clock.now,
       defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }),
     });
@@ -2446,7 +2450,7 @@ describe("the continuous conversation's routes", () => {
     const restarted = () => {
       for (const [id, at] of [["old", clock.now - 3 * IDLE_MS], ["head", clock.now]] as const) {
         sessions.set(id, sharedFake(id));
-        db.prepare("INSERT INTO main_chain VALUES (?, ?, 'idle')").run(id, at);
+        db.prepare("INSERT INTO main_chain VALUES (?, 'main', ?, 'idle')").run(id, at);
       }
     };
     return { app, db, factory, sessions, clock, workspace, post, restarted };
@@ -2462,7 +2466,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("answers the items a search finds, closed ones too", async () => {
-    const found = [{ problem: "login", aliases: ["sign in"], updatedAt: 5 }, { problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 }];
+    const found: ItemSummary[] = [{ chain: "main", problem: "login", aliases: ["sign in"], updatedAt: 5 }, { chain: "main", problem: "sign up", aliases: [], closedAt: 3, updatedAt: 3 }];
     const items = vi.fn((_q: string) => found);
     const { app } = chainRig(undefined, undefined, { items });
     const res = await app.request("/api/continuous/items?q=sign%20in");
@@ -2473,7 +2477,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("answers an item's rows across its sessions oldest first, the head's up to its cursor, and 404 for no item", async () => {
-    const record: ItemRecord = { problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: [] };
+    const record: ItemRecord = { chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: [] };
     const itemHistory = vi.fn((p: string) => (p === "login" || p === "sign in" ? record : undefined));
     const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory });
     restarted();
@@ -2485,7 +2489,7 @@ describe("the continuous conversation's routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { epoch: string; lastSeq: number };
     expect(body).toEqual({
-      problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0,
+      chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0,
       sessions: [
         { sessionId: "gone", startedAt: 0, turns: [
           { index: 0, turn: { role: "system", text: "Session gone is no longer in the conversation's chain; its rows cannot be shown." } },
@@ -2506,7 +2510,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("shows an item's unreadable session as one row saying so, its other sessions still read", async () => {
-    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
+    const record: ItemRecord = { chain: "main", problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
     const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
     restarted();
     factory.readHistory.mockRejectedValue(new Error("bad JSON at line 3"));
@@ -2519,7 +2523,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("shows an item's session the chain no longer holds as one row saying so, first", async () => {
-    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "lost", "head"], runIds: [] };
+    const record: ItemRecord = { chain: "main", problem: "login", aliases: [], sessions: ["old", "lost", "head"], runIds: [] };
     const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
     restarted();
     factory.readHistory.mockResolvedValue([{ role: "user", text: "fix login" }, { role: "assistant", text: "On it.\n<open>login</open>" }]);
@@ -2533,7 +2537,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("shows the head's unreadable transcript as one row saying so, the earlier sessions still read", async () => {
-    const record: ItemRecord = { problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
+    const record: ItemRecord = { chain: "main", problem: "login", aliases: [], sessions: ["old", "head"], runIds: [] };
     const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory: () => record });
     restarted();
     factory.readHistory.mockResolvedValue([{ role: "user", text: "fix login" }, { role: "assistant", text: "On it.\n<open>login</open>" }]);
@@ -2551,11 +2555,11 @@ describe("the continuous conversation's routes", () => {
     const problem = "CI / deploy 修复";
     const store = new TaskStore(openDb(":memory:"));
     const { app, post, clock } = chainRig(undefined, undefined, {
-      itemHistory: (p) => store.itemHistory(p),
-      itemSent: (item, sessionId) => { store.markOpenItems([], clock.now, sessionId, { topic: item }); },
+      itemHistory: (p) => store.itemHistoryByProblem(p),
+      itemSent: (item, sessionId) => { store.markOpenItems([], clock.now, sessionId, "main", { topic: item }); },
     });
     await post("/api/continuous/messages", { text: "one" });
-    store.markOpenItems([{ op: "open", problem, stage: "", runIds: [] }], clock.now, "m1");
+    store.markOpenItems([{ op: "open", problem, stage: "", runIds: [] }], clock.now, "m1", "main");
     clock.now += 2 * IDLE_MS;
     expect((await post("/api/continuous/messages", { text: withItem(problem, "ship it"), mode: "auto" })).status).toBe(202);
     // Read before any reply: an untagged one, or none yet, records nothing at the turn end.
@@ -2572,13 +2576,13 @@ describe("the continuous conversation's routes", () => {
     const { app, sessions, clock, workspace, post } = chainRig();
     const first = await post("/api/continuous/messages", { text: "one" });
     expect(first.status).toBe(202);
-    expect(await first.json()).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(await first.json()).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     expect((await post("/api/continuous/messages", { text: "" })).status).toBe(400);
 
     // The client still thinks m1 is the head; the server decides.
     clock.now += 2 * IDLE_MS;
     const second = await post("/api/continuous/messages", { text: "two" });
-    expect(await second.json()).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(await second.json()).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
     expect(sessions.get("m1")!.prompts.map((p) => p.includes("two"))).toEqual([false]);
     expect(sessions.get("m2")!.prompts.some((p) => p.includes("two"))).toBe(true);
     expect(workspace).toContain("sessions-changed");
@@ -2590,7 +2594,7 @@ describe("the continuous conversation's routes", () => {
   it("starts the next head when a read finds the head gone from Pi, and names it in the read's error", async () => {
     const { app, db, sessions, workspace } = chainRig();
     sessions.set("old", sharedFake("old"));
-    db.prepare("INSERT INTO main_chain VALUES ('old', 1, 'first'), ('gone', 2, 'idle')").run();
+    db.prepare("INSERT INTO main_chain VALUES ('old', 'main', 1, 'first'), ('gone', 'main', 2, 'idle')").run();
     const read = await app.request("/api/sessions/gone/history");
     expect(read.status).toBe(404);
     expect(await read.json()).toEqual({ error: "Error: unknown session: gone \u2014 the conversation goes on in session m1" });
@@ -2617,7 +2621,7 @@ describe("the continuous conversation's routes", () => {
     await post("/api/continuous/messages", { text: "one" });
     const fresh = await post("/api/continuous/messages", { text: "/new" });
     expect(fresh.status).toBe(202);
-    expect(await fresh.json()).toEqual({ sessionId: "m2", rotated: "new" });
+    expect(await fresh.json()).toEqual({ sessionId: "m2", chainId: "main", rotated: "new" });
     expect(workspace).toContain("sessions-changed");
     sessions.get("m2")!.setState("streaming");
     const refused = await post("/api/continuous/messages", { text: "/new" });

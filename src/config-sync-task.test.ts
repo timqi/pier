@@ -11,6 +11,7 @@ import { SettingsStore } from "./settings.js";
 import { TaskService } from "./tasks/service.js";
 import { runResultText } from "./tasks/callbacks.js";
 import { TaskStore } from "./tasks/store.js";
+import { fakeChains } from "./tasks/chain.testkit.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -32,7 +33,7 @@ function rig() {
     } },
   });
   const store = new TaskStore(db);
-  const tasks = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] }, systemActions: { "config-sync": (signal) => sync.sync(signal) } });
+  const tasks = new TaskService(store, factory, router, hub, { modelMenu: () => [], ...fakeChains(), systemActions: { "config-sync": (signal) => sync.sync(signal) } });
   cleanups.push(() => { tasks.stop(); db.close(); });
   const owned = configSyncTask(tasks, sync);
   const enable = async () => {

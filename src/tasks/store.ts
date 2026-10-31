@@ -491,23 +491,24 @@ export class TaskStore {
     return this.#many<TaskRun>("SELECT json FROM task_runs WHERE state IN ('queued', 'running') ORDER BY queued_at");
   }
 
-  /** The continuous conversation's open items in creation order — an upsert keeps its place, a
+  /** One chain's open items in creation order — an upsert keeps its place, a
    *  reopened item takes the end as if new (`openItem`); `runIds` as main wrote them. */
-  openItems(): { problem: string; stage: string; runIds: string[] }[] {
-    return (this.sql("SELECT problem, stage, run_ids FROM open_items WHERE closed_at IS NULL ORDER BY rowid").all() as { problem: string; stage: string; run_ids: string }[])
+  openItems(chainId: string): { problem: string; stage: string; runIds: string[] }[] {
+    return (this.sql("SELECT problem, stage, run_ids FROM open_items WHERE chain_id = ? AND closed_at IS NULL ORDER BY rowid").all(chainId) as { problem: string; stage: string; run_ids: string }[])
       .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[] }));
   }
 
-  /** Items, closed included, whose key or one alias holds every whitespace-separated term of `q`
-   *  (case-insensitive), newest first; at most 50. A closed row another item holds as an alias
-   *  is that item's history, listed under it alone. */
-  items(q: string): ItemSummary[] {
+  /** Items, closed included, of `chainId` or every chain, whose key or one alias holds every
+   *  whitespace-separated term of `q` (case-insensitive), newest first; at most 50. A closed row
+   *  another item of its chain holds as an alias is that item's history, listed under it alone. */
+  items(q: string, chainId?: string): ItemSummary[] {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const rows = this.sql("SELECT problem, aliases, closed_at, updated_at FROM open_items ORDER BY updated_at DESC, rowid DESC")
-      .all() as { problem: string; aliases: string; closed_at: number | null; updated_at: number }[];
-    const items = rows.map((r) => ({ problem: r.problem, aliases: JSON.parse(r.aliases) as string[], ...(r.closed_at === null ? {} : { closedAt: r.closed_at }), updatedAt: r.updated_at }));
-    const absorbed = new Set(items.flatMap((i) => i.aliases));
-    return items.filter((i) => !(i.closedAt !== undefined && absorbed.has(i.problem)))
+    const rows = this.sql(`SELECT chain_id, problem, aliases, closed_at, updated_at FROM open_items
+      WHERE ?1 IS NULL OR chain_id = ?1 ORDER BY updated_at DESC, rowid DESC`)
+      .all(chainId ?? null) as { chain_id: string; problem: string; aliases: string; closed_at: number | null; updated_at: number }[];
+    const items = rows.map((r) => ({ chain: r.chain_id, problem: r.problem, aliases: JSON.parse(r.aliases) as string[], ...(r.closed_at === null ? {} : { closedAt: r.closed_at }), updatedAt: r.updated_at }));
+    const absorbed = new Set(items.flatMap((i) => i.aliases.map((a) => `${i.chain}\0${a}`)));
+    return items.filter((i) => !(i.closedAt !== undefined && absorbed.has(`${i.chain}\0${i.problem}`)))
       .filter((i) => [i.problem, ...i.aliases].some((key) => terms.every((t) => key.toLowerCase().includes(t))))
       .slice(0, 50);
   }
@@ -515,36 +516,44 @@ export class TaskStore {
   /** Open before closed; among open rows the one keyed `problem` first, among closed ones a row
    *  holding it as an alias — an arrow's closed `old` is the history of the item that absorbed it,
    *  as `items` lists it; then the newest. */
-  itemHistory(problem: string): ItemRecord | undefined {
+  itemHistory(chainId: string, problem: string): ItemRecord | undefined {
     const row = this.sql(`
-      SELECT problem, aliases, closed_at, sessions, run_ids FROM open_items
-      WHERE problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)
+      SELECT chain_id, problem, aliases, closed_at, sessions, run_ids FROM open_items
+      WHERE chain_id = ? AND (problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?))
       ORDER BY closed_at IS NULL DESC, CASE WHEN closed_at IS NULL THEN problem = ? ELSE problem <> ? END DESC, updated_at DESC LIMIT 1
-    `).get(problem, problem, problem, problem) as { problem: string; aliases: string; closed_at: number | null; sessions: string; run_ids: string } | undefined;
+    `).get(chainId, problem, problem, problem, problem) as { chain_id: string; problem: string; aliases: string; closed_at: number | null; sessions: string; run_ids: string } | undefined;
     return row && {
-      problem: row.problem, aliases: JSON.parse(row.aliases) as string[], ...(row.closed_at === null ? {} : { closedAt: row.closed_at }),
+      chain: row.chain_id, problem: row.problem, aliases: JSON.parse(row.aliases) as string[], ...(row.closed_at === null ? {} : { closedAt: row.closed_at }),
       sessions: JSON.parse(row.sessions) as string[], runIds: JSON.parse(row.run_ids) as string[],
     };
   }
 
-  /** Main's markers, in reply order, as one write; answers the rows each marker changed and the keys its `<done>`s closed.
-   *  A `<done>` closes and nothing deletes. Every item a marker touches, the item `answered.topic` names
-   *  (as `itemHistory` finds it) and every item holding one of `answered.runIds` record `sessionId`, the
-   *  writing head's, once. Arrows go last, so `<done>old → new</done>` finds `new` wherever in the reply it was opened. */
-  markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: number[]; closed: string[] } {
+  /** `itemHistory` in the one chain that knows `problem`; none when two do — a link that names no chain. */
+  itemHistoryByProblem(problem: string): ItemRecord | undefined {
+    const chains = this.sql(`SELECT DISTINCT chain_id FROM open_items
+      WHERE problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).all(problem, problem) as { chain_id: string }[];
+    return chains.length === 1 ? this.itemHistory(chains[0]!.chain_id, problem) : undefined;
+  }
+
+  /** Main's markers, in reply order, as one write into `chainId`'s items; answers the rows each marker
+   *  changed and the keys its `<done>`s closed. A `<done>` closes and nothing deletes. Every item a marker
+   *  touches, the item `answered.topic` names (as `itemHistory` finds it) and every item holding one of
+   *  `answered.runIds` record `sessionId`, the writing head's, once. Arrows go last, so
+   *  `<done>old → new</done>` finds `new` wherever in the reply it was opened. */
+  markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: number[]; closed: string[] } {
     const closed: string[] = [];
     const touched = new Set<string>();
     const changed = this.transact(() => {
-      const changed = markers.map((m) => m.op === "open" ? this.openItem(m, now, touched) : m.to === undefined ? this.closeItem(m.problem, now, closed, touched) : 0);
-      markers.forEach((m, i) => { if (m.op === "done" && m.to !== undefined) changed[i] = this.closeItem(m.problem, now, closed, touched, m.to); });
-      const topic = answered.topic === undefined ? undefined : this.itemHistory(answered.topic)?.problem;
+      const changed = markers.map((m) => m.op === "open" ? this.openItem(chainId, m, now, touched) : m.to === undefined ? this.closeItem(chainId, m.problem, now, closed, touched) : 0);
+      markers.forEach((m, i) => { if (m.op === "done" && m.to !== undefined) changed[i] = this.closeItem(chainId, m.problem, now, closed, touched, m.to); });
+      const topic = answered.topic === undefined ? undefined : this.itemHistory(chainId, answered.topic)?.problem;
       if (topic !== undefined) touched.add(topic);
       for (const id of answered.runIds ?? []) {
-        for (const row of this.sql("SELECT problem FROM open_items WHERE EXISTS (SELECT 1 FROM json_each(run_ids) WHERE value = ?)").all(id) as { problem: string }[]) touched.add(row.problem);
+        for (const row of this.sql("SELECT problem FROM open_items WHERE chain_id = ? AND EXISTS (SELECT 1 FROM json_each(run_ids) WHERE value = ?)").all(chainId, id) as { problem: string }[]) touched.add(row.problem);
       }
       for (const key of touched) {
-        this.sql("UPDATE open_items SET sessions = json_insert(sessions, '$[#]', ?) WHERE problem = ? AND NOT EXISTS (SELECT 1 FROM json_each(sessions) WHERE value = ?)")
-          .run(sessionId, key, sessionId);
+        this.sql("UPDATE open_items SET sessions = json_insert(sessions, '$[#]', ?) WHERE chain_id = ? AND problem = ? AND NOT EXISTS (SELECT 1 FROM json_each(sessions) WHERE value = ?)")
+          .run(sessionId, chainId, key, sessionId);
       }
       return changed;
     });
@@ -553,68 +562,68 @@ export class TaskStore {
 
   /** An upsert keeps its row's place; a closed key reopens as if new — its row inserted again, so it
    *  takes the end of the rowid order, with its aliases and sessions. */
-  private openItem(m: { problem: string; stage: string; runIds: string[] }, now: number, touched: Set<string>): number {
-    const { changed, absorbed } = this.claimRuns(m.problem, m.runIds, now);
-    const prior = (this.sql("DELETE FROM open_items WHERE problem = ? AND closed_at IS NOT NULL RETURNING aliases, sessions").all(m.problem) as { aliases: string; sessions: string }[])[0];
-    const upserted = Number(this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at, aliases, sessions) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
-      .run(m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]").changes);
+  private openItem(chainId: string, m: { problem: string; stage: string; runIds: string[] }, now: number, touched: Set<string>): number {
+    const { changed, absorbed } = this.claimRuns(chainId, m.problem, m.runIds, now);
+    const prior = (this.sql("DELETE FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL RETURNING aliases, sessions").all(chainId, m.problem) as { aliases: string; sessions: string }[])[0];
+    const upserted = Number(this.sql(`INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at, aliases, sessions) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(chain_id, problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
+      .run(chainId, m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]").changes);
     // A key an `<open>` writes is its own item: no row, its own included, holds it as an alias — a reopened
     // key or a renamed item's old one — so its later close keeps its history reachable.
     this.sql(`UPDATE open_items SET aliases = (SELECT json_group_array(value) FROM json_each(aliases) WHERE value <> ?)
-      WHERE EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).run(m.problem, m.problem);
-    for (const key of absorbed) this.absorb(m.problem, key);
+      WHERE chain_id = ? AND EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)`).run(m.problem, chainId, m.problem);
+    for (const key of absorbed) this.absorb(chainId, m.problem, key);
     touched.add(m.problem);
     return changed + upserted;
   }
 
-  /** The exact key, else the one item `namesKey` finds — an `<open>` written without ` — `
+  /** The exact key, else the one item of the chain `namesKey` finds — an `<open>` written without ` — `
    *  keyed the whole line; two such items close neither. With `to`, only into another open item. */
-  private closeItem(problem: string, now: number, closed: string[], touched: Set<string>, to?: string): number {
-    const keys = this.openItems().map((r) => r.problem);
+  private closeItem(chainId: string, problem: string, now: number, closed: string[], touched: Set<string>, to?: string): number {
+    const keys = this.openItems(chainId).map((r) => r.problem);
     const named = keys.includes(problem) ? [problem] : keys.filter((key) => namesKey(problem, key));
     const key = named.length === 1 ? named[0]! : undefined;
     if (key === undefined || (to !== undefined && (to === key || !keys.includes(to)))) return 0;
     closed.push(key);
     touched.add(key);
-    const changed = Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE problem = ?").run(now, now, key).changes);
+    const changed = Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, key).changes);
     if (to !== undefined) {
-      this.absorb(to, key);
+      this.absorb(chainId, to, key);
       touched.add(to);
     }
     return changed;
   }
 
   /** `into` takes `from`'s key, aliases and sessions, so its view reads `from`'s rows too. */
-  private absorb(into: string, from: string): void {
-    const row = (problem: string) => this.sql("SELECT aliases, sessions FROM open_items WHERE problem = ?").get(problem) as { aliases: string; sessions: string } | undefined;
+  private absorb(chainId: string, into: string, from: string): void {
+    const row = (problem: string) => this.sql("SELECT aliases, sessions FROM open_items WHERE chain_id = ? AND problem = ?").get(chainId, problem) as { aliases: string; sessions: string } | undefined;
     const [to, old] = [row(into), row(from)];
     if (!to || !old) return;
     const union = (...lists: string[][]) => [...new Set(lists.flat())];
     const parsed = (json: string) => JSON.parse(json) as string[];
     const aliases = union(parsed(to.aliases), [from], parsed(old.aliases)).filter((k) => k !== into);
-    this.sql("UPDATE open_items SET aliases = ?, sessions = ? WHERE problem = ?")
-      .run(JSON.stringify(aliases), JSON.stringify(union(parsed(to.sessions), parsed(old.sessions))), into);
+    this.sql("UPDATE open_items SET aliases = ?, sessions = ? WHERE chain_id = ? AND problem = ?")
+      .run(JSON.stringify(aliases), JSON.stringify(union(parsed(to.sessions), parsed(old.sessions))), chainId, into);
   }
 
   /** A session is behind one item, its newest run standing for it as in open-items.ts `openItems`:
-   *  an `<open>` takes its runs, and every run of their sessions, off every other item. One left
-   *  with no run was this item under an older key — the first becomes it in place, its old key an
+   *  an `<open>` takes its runs, and every run of their sessions, off every other item of the chain. One
+   *  left with no run was this item under an older key — the first becomes it in place, its old key an
    *  alias; the rest close, answered as `absorbed` for the item to take once it is written. */
-  private claimRuns(problem: string, runIds: string[], now: number): { changed: number; absorbed: string[] } {
+  private claimRuns(chainId: string, problem: string, runIds: string[], now: number): { changed: number; absorbed: string[] } {
     const sessions = new Set(runIds.flatMap((id) => this.getRun(id)?.targetSessionId ?? []));
     const claimed = (id: string) => runIds.includes(id) || sessions.has(this.getRun(id)?.targetSessionId ?? "");
     let changed = 0;
     const absorbed: string[] = [];
     // Closed rows count: the key is taken, and the `<open>` reopens that row instead.
-    let renamed = !!this.sql("SELECT 1 FROM open_items WHERE problem = ?").get(problem);
-    for (const row of this.openItems()) {
+    let renamed = !!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ?").get(chainId, problem);
+    for (const row of this.openItems(chainId)) {
       if (row.problem === problem || !row.runIds.some(claimed)) continue;
       const kept = row.runIds.filter((id) => !claimed(id));
-      if (kept.length) this.sql("UPDATE open_items SET run_ids = ?, updated_at = ? WHERE problem = ?").run(JSON.stringify(kept), now, row.problem);
-      else if (!renamed) this.sql("UPDATE open_items SET problem = ?, aliases = json_insert(aliases, '$[#]', problem) WHERE problem = ?").run(problem, row.problem);
+      if (kept.length) this.sql("UPDATE open_items SET run_ids = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(JSON.stringify(kept), now, chainId, row.problem);
+      else if (!renamed) this.sql("UPDATE open_items SET problem = ?, aliases = json_insert(aliases, '$[#]', problem) WHERE chain_id = ? AND problem = ?").run(problem, chainId, row.problem);
       else {
-        this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE problem = ?").run(now, now, row.problem);
+        this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, row.problem);
         absorbed.push(row.problem);
       }
       renamed ||= !kept.length;

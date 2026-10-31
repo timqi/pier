@@ -149,8 +149,9 @@ export class TaskCallbacks {
     /** Where a result owed to a session goes now: the continuous conversation's head, for a member. */
     private readonly headOf: (sessionId: string) => string = (id) => id,
     milestone?: Milestone,
-    /** The continuous conversation's head, null before its first message. */
-    private readonly conversation: () => string | null = () => null,
+    /** The head a `conversation` callback reaches: the first of these sessions' chains', else the
+     *  first chain's; null before its first message. */
+    private readonly conversation: (...by: (string | null)[]) => string | null = () => null,
   ) {
     this.outbox = new Outbox<TaskRun>(router, {
       id: (run) => run.id,
@@ -175,10 +176,11 @@ export class TaskCallbacks {
     });
   }
 
-  target(callback: TaskCallback, origin: string | null): string | null {
+  /** `creator`: the definition's creating session, the chain a run with no launcher in one reports to. */
+  target(callback: TaskCallback, origin: string | null, creator: string | null = null): string | null {
     if (callback.type === "session") return callback.sessionId;
     if (callback.type === "origin") return origin;
-    if (callback.type === "conversation") return this.conversation();
+    if (callback.type === "conversation") return this.conversation(origin, creator);
     return null;
   }
 

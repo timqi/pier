@@ -119,7 +119,7 @@ export class ChannelRuntime {
    *  chat's key. A refusal is the chat's to see (§5): the adapter only logs. */
   private toHead(channel: Channel, msg: InboundMessage): void {
     const conversationId = chatOf(msg.key.conversationId);
-    this.chain.send(msg, { channelId: msg.key.channelId, conversationId }).catch((err: unknown) => {
+    this.chain.send(msg, this.chain.chains.first().id, { channelId: msg.key.channelId, conversationId }).catch((err: unknown) => {
       this.log(`the conversation did not take a message: ${String(err)}`);
       if (err instanceof Refused) return;
       const text = err instanceof Error ? err.message : String(err);
@@ -172,7 +172,7 @@ export class ChannelRuntime {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
     if (!home || !channel) return;
-    const head = this.chain.members()[0]?.sessionId;
+    const head = this.chain.firstHead() ?? undefined;
     const on = head === undefined ? undefined : this.router.answersOn(head);
     // A `task:` key says nothing of the surface (main.ts `channelOf`); the durable rule is the home chat.
     if (on && on.channelId !== "task" && (on.channelId !== home.platform || on.conversationId !== home.chatId)) return;

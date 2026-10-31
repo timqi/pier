@@ -18,6 +18,7 @@ import { ConversationStore, resolveConversation } from "./channels/conversations
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { MainChain } from "./core/chain.js";
+import { Chains } from "./core/chains.js";
 import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { saidText } from "./core/reply.js";
@@ -133,10 +134,13 @@ const router = new Router(hub, (key) => {
   }
   return resolveIm(key);
 }, (key) => conversations.get(key), (id) => chatKeyOf(id));
+const chains = new Chains(db, (id) => taskStore.openItems(id).length);
 const chain = new MainChain(db, {
-  factory, router, home: pierPath("home"),
+  factory, router, home: pierPath("home"), chains,
   ledger: (ids, since) => tasks.ledger(ids, since),
-  status: (now) => openItemsStatus(tasks.openItems(), now, tasks.unmatchedDone()),
+  status: (now, chainId) => openItemsStatus(tasks.openItems(chainId), now, tasks.unmatchedDone(chainId)),
+  mode: { get: () => settings.get().chainMode, set: async (on) => { settings.setChainMode(on); } },
+  changed: () => hub.emitWorkspace({ type: "chains-changed" }),
   defaults: () => piConfig.readDefaults(),
 });
 const stopEviction = router.startIdleEviction();
@@ -150,6 +154,7 @@ tasks = new TaskService(taskStore, factory, router, hub, {
     },
   },
   continuous: chain,
+  chains,
   // `channels` is assigned below, before any run can settle.
   designLead: (run, state) => {
     if (!run.targetSessionId) return;
@@ -209,7 +214,7 @@ const refreshStatus = (repost = false): void => {
     const bottom = statusRepost;
     statusRepost = false;
     try {
-      const open = tasks.openItems();
+      const open = tasks.openItems(chains.first().id);
       const { text, snapshot } = openItemsStatus(open, Date.now());
       void channels.openItems({ text, snapshot }, bottom);
     } catch (err) {
@@ -227,7 +232,7 @@ hub.subscribeWorkspace((e) => {
 function chatKeyOf(sessionId: string): ConversationKey | undefined {
   // home() reads the vault; locked, no adapter can be live anyway.
   const home = secrets.state === "unlocked" ? channelStore.home() : undefined;
-  if (home && channels.live(home.platform) && chain.chainOf(sessionId)?.[0] === sessionId) {
+  if (home && channels.live(home.platform) && chain.firstHead() === sessionId) {
     return { channelId: home.platform, conversationId: home.chatId };
   }
   return conversations.keyOf(sessionId);
@@ -414,8 +419,10 @@ app.route("/", createServer({
   leads: () => taskStore.leads(),
   openItems: () => tasks.openItems(),
   items: (q) => taskStore.items(q),
-  itemHistory: (problem) => taskStore.itemHistory(problem),
-  itemSent: (item, sessionId) => { taskStore.markOpenItems([], Date.now(), sessionId, { topic: item }); },
+  itemHistory: (problem) => taskStore.itemHistoryByProblem(problem),
+  itemSent: (item, sessionId) => {
+    taskStore.markOpenItems([], Date.now(), sessionId, chain.chainOf(sessionId)?.chainId ?? chains.first().id, { topic: item });
+  },
   // The live key is the last surface spoken from; a task's alias says nothing.
   channelOf: (id) => {
     const live = router.conversationOf(id);
@@ -441,7 +448,7 @@ servePier({
     note(`done ${JSON.stringify(result.details)}`);
     return result;
   },
-  search: searchMessages(factory, () => chain.members().map((m) => m.sessionId)),
+  search: searchMessages(factory, () => chains.list().flatMap((c) => chain.members(c.id).map((m) => m.sessionId))),
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
   login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,

@@ -92,12 +92,19 @@ export function openItemDestination(t: OpenItemTarget): { session: string | null
   return { session: run, topic: !t.direct && waitsOnYou(t.status) ? t.problem : null };
 }
 
+const inProgress = (status: string): boolean => status === "running" || status === "queued";
+
 export function openItemGroups(items: OpenItemPresentation[]): { title: string; items: OpenItemPresentation[] }[] {
   return [
     { title: "Waiting on you", items: items.filter((i) => waitsOnYou(i.status)) },
-    { title: "In progress", items: items.filter((i) => i.status === "running" || i.status === "queued") },
+    { title: "In progress", items: items.filter((i) => inProgress(i.status)) },
     { title: "Other open", items: items.filter((i) => i.status === "wrapping up" || i.status === "stopped") },
   ].filter((g) => g.items.length);
+}
+
+/** One chain's counts on every surface: `/chain`, the seed's `## Chains`, the web's chain list and the card's `Other chains`. */
+export function chainCounts(items: readonly { status: string }[]): { open: number; waiting: number; inProgress: number } {
+  return { open: items.length, waiting: items.filter((i) => waitsOnYou(i.status)).length, inProgress: items.filter((i) => inProgress(i.status)).length };
 }
 
 /** The heading over `OpenItemsSnapshot.unmatched` on every surface; no `<`, which Lark's markdown reads as a tag. */

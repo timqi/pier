@@ -298,7 +298,7 @@ export function createServer(
 
   // An earlier member of the continuous conversation is read off disk and
   // never opened, so it can be neither edited nor resumed.
-  const older = (id: string): boolean => (continuous.chainOf(id)?.[0] ?? id) !== id;
+  const older = (id: string): boolean => continuous.headOf(id) !== id;
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
     if (!older(id)) return (await ensure(id)).history();
     const turns = await factory.readHistory(id);
@@ -523,7 +523,7 @@ export function createServer(
   };
 
   // The chain, newest first; the client pages back through it with /history.
-  app.get("/api/continuous", (c) => c.json({ chain: continuous.members(), rotateAt: CHAIN_FULL_TOKENS }));
+  app.get("/api/continuous", (c) => c.json({ chain: continuous.members(continuous.chains.first().id), rotateAt: CHAIN_FULL_TOKENS }));
 
   // The status panel's rows.
   app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [] }));
@@ -538,7 +538,7 @@ export function createServer(
     const problem = c.req.param("problem");
     const item = itemHistory?.(problem);
     if (!item) return c.json({ error: `No item "${problem}"` }, 404);
-    const members = continuous.members();
+    const members = continuous.members(item.chain);
     const [head, ...rest] = members;
     // An unreadable transcript is one row saying so; the item's other sessions still show.
     const read = async (m: { sessionId: string; startedAt: number }): Promise<{ sessionId: string; startedAt: number; turns: ChatTurn[]; missing?: string }> => {
@@ -579,7 +579,9 @@ export function createServer(
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
     try {
-      const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode });
+      const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode }, continuous.chains.first().id);
+      // Until the web names its chain, a switch is answered as it came.
+      if (head.switched) return c.json(head, 202);
       state.spokeFrom(head.sessionId, sessionIdOf(c));
       const { item } = splitItem(body.text);
       // Before any reply: one that comes back untagged, or a reload mid-turn, still finds the row.

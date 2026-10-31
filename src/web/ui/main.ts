@@ -490,7 +490,7 @@ function connectWorkspace(): void {
   src.onerror = () => streamDied(src, "Workspace", connectWorkspace);
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
-    if (e.type === "sessions-changed") {
+    if (e.type === "sessions-changed" || e.type === "chains-changed") {
       void refreshSessions();
       return;
     }

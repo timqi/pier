@@ -13,6 +13,7 @@ import { TaskStore } from "./store.js";
 import { handleTask, type GroupSummary, type RunSummary } from "./operations.js";
 import type { TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import type { TaskDefinitions } from "./definitions.js";
+import { fakeChains } from "./chain.testkit.js";
 
 const now = 1_700_000_000_000;
 
@@ -101,7 +102,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] 
       return task;
     },
   } as unknown as TaskDefinitions;
-  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1", { chainOf: () => (main ? ["s1"] : undefined), members: () => [] });
+  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1", fakeChains(main ? { main: ["s1"] } : {}).continuous);
   return Object.assign(ask, { created, changed });
 }
 

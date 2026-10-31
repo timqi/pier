@@ -16,6 +16,7 @@ import { LEAD_TURN, MILESTONE } from "./callbacks.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
 function rig() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-lead-"));
@@ -48,7 +49,7 @@ function rig() {
   const leadStates: [string, string][] = [];
   const service = new TaskService(store, factory, router, hub, {
     modelMenu: () => [],
-    continuous: { chainOf: () => undefined, members: () => [] },
+    ...fakeChains(),
     designLead: (run, state) => { leadStates.push([run.id, state]); },
   });
   const agent = (name: string, role?: "lead", design?: true) => service.create({
@@ -313,7 +314,7 @@ describe("a feature lead", () => {
     await leadRan();
     const lead = sessions.get("lead")!;
     router.attach({ channelId: "web", conversationId: "lead" }, lead);
-    store.markOpenItems([{ op: "open", problem: "Keep the original design question", stage: "waiting on you: finalize this scope?", runIds: ["missing-first-run", "lead-run"] }], Date.now(), "h1");
+    store.markOpenItems([{ op: "open", problem: "Keep the original design question", stage: "waiting on you: finalize this scope?", runIds: ["missing-first-run", "lead-run"] }], Date.now(), "h1", "main");
     const item = () => service.openItems().items.find((i) => i.problem === "Keep the original design question")!;
     expect(item()).toMatchObject({ status: "waiting on you", designSessionId: "lead" });
     lead.setState("streaming");

@@ -12,6 +12,7 @@ import { openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, un
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { Goal, OpenRun, TaskDefinition, TaskRun } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
 const warn = vi.hoisted(() => vi.fn());
 vi.mock("../log.js", async (actual) => {
@@ -58,7 +59,7 @@ function rig() {
     latestRunForTarget: (id) => store.latestRunForTarget(id),
     inFlightRuns: () => store.inFlightRuns(),
     leads: () => store.leads(),
-    openItems: () => store.openItems(),
+    openItems: () => store.openItems("main"),
     workerCounts: (ids) => {
       workerReads.push(ids);
       return store.workerCounts(ids);
@@ -70,8 +71,8 @@ function rig() {
     saved(`w-${lead}-${state}-${i}`, { invokedBySessionId: lead, state, finishedAt: state === "queued" || state === "running" ? null : now - ago })));
   const router = new Router(new EventHub(), () => Promise.reject(new Error("no session")));
   const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
-    db.prepare("INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
-  const list = (members = ["h1"]) => openItems(reads, router, members);
+    db.prepare("INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at) VALUES ('main', ?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
+  const list = (members = ["h1"]) => openItems(reads, router, members, "main");
   const goal = (rootRunId: string, over: Partial<Goal> = {}) => store.saveGoal({
     id: `g-${rootRunId}`, rootRunId, supervisorSessionId: "h1", cap: 3, round: 0, step: "work", currentRunId: rootRunId,
     outcome: null, reason: null, reviewModel: null, createdAt: 0, finishedAt: null, ...over,
@@ -391,21 +392,21 @@ describe("the open items", () => {
   it("keeps an item's place when an <open> updates it", () => {
     const r = rig();
     const open = (problem: string, stage: string) => ({ op: "open" as const, problem, stage, runIds: [] });
-    expect(r.store.markOpenItems([open("first", "a"), open("second", "b")], 1, "h1").changed).toEqual([1, 1]);
-    expect(r.store.markOpenItems([open("first", "a2"), { op: "done", problem: "never" }], 2, "h1").changed).toEqual([1, 0]);
-    expect(r.store.openItems().map((i) => [i.problem, i.stage])).toEqual([["first", "a2"], ["second", "b"]]);
+    expect(r.store.markOpenItems([open("first", "a"), open("second", "b")], 1, "h1", "main").changed).toEqual([1, 1]);
+    expect(r.store.markOpenItems([open("first", "a2"), { op: "done", problem: "never" }], 2, "h1", "main").changed).toEqual([1, 0]);
+    expect(r.store.openItems("main").map((i) => [i.problem, i.stage])).toEqual([["first", "a2"], ["second", "b"]]);
   });
 
   // The head restates an item's problem with the user's added asks: one run, one item.
   it("renames the item a run is behind when an <open> names it under a new key", () => {
     const r = rig();
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "investigating", runIds });
-    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
-    r.store.markOpenItems([open("before"), open("VM pairing", "rt1"), open("after", "rt9")], 1, "h1");
-    expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2, "h1").changed).toEqual([2]);
-    expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3, "h1").changed).toEqual([2]);
+    const rows = () => r.store.openItems("main").map((i) => [i.problem, i.runIds]);
+    r.store.markOpenItems([open("before"), open("VM pairing", "rt1"), open("after", "rt9")], 1, "h1", "main");
+    expect(r.store.markOpenItems([open("VM pairing, also check logs", "rt1")], 2, "h1", "main").changed).toEqual([2]);
+    expect(r.store.markOpenItems([open("VM pairing, logs and retry", "rt1")], 3, "h1", "main").changed).toEqual([2]);
     expect(rows()).toEqual([["before", []], ["VM pairing, logs and retry", ["rt1"]], ["after", ["rt9"]]]);
-    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing" }, { op: "done", problem: "VM pairing, also check logs" }], 4, "h1").changed).toEqual([0, 0]);
+    expect(r.store.markOpenItems([{ op: "done", problem: "VM pairing" }, { op: "done", problem: "VM pairing, also check logs" }], 4, "h1", "main").changed).toEqual([0, 0]);
   });
 
   // An <open> written with another separator than ` — ` keyed its whole line; the <done> naming its head still closes it.
@@ -413,30 +414,30 @@ describe("the open items", () => {
     const r = rig();
     const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
     const done = (problem: string) => ({ op: "done" as const, problem });
-    const keys = () => r.store.openItems().map((i) => i.problem);
-    r.store.markOpenItems([open("顶栏条目关闭匹配。当前进度：排查中"), open("auth：review"), open("fix parser"), open("fix parser tests"), open("dup: a"), open("dup – b"), open("pairing, logs")], 1, "h1");
-    expect(r.store.markOpenItems([done("顶栏条目关闭匹配"), done("auth"), done("fix pars"), done("dup"), done("pairing")], 2, "h1"))
+    const keys = () => r.store.openItems("main").map((i) => i.problem);
+    r.store.markOpenItems([open("顶栏条目关闭匹配。当前进度：排查中"), open("auth：review"), open("fix parser"), open("fix parser tests"), open("dup: a"), open("dup – b"), open("pairing, logs")], 1, "h1", "main");
+    expect(r.store.markOpenItems([done("顶栏条目关闭匹配"), done("auth"), done("fix pars"), done("dup"), done("pairing")], 2, "h1", "main"))
       .toEqual({ changed: [1, 1, 0, 0, 0], closed: ["顶栏条目关闭匹配。当前进度：排查中", "auth：review"] });
     expect(keys()).toEqual(["fix parser", "fix parser tests", "dup: a", "dup – b", "pairing, logs"]);
     // A word after the key is another item; the exact key wins over a prefixed one.
-    expect(r.store.markOpenItems([done("fix parser")], 3, "h1")).toEqual({ changed: [1], closed: ["fix parser"] });
+    expect(r.store.markOpenItems([done("fix parser")], 3, "h1", "main")).toEqual({ changed: [1], closed: ["fix parser"] });
     expect(keys()).toEqual(["fix parser tests", "dup: a", "dup – b", "pairing, logs"]);
   });
 
   it("collapses every item a run is behind into the one an <open> names, and leaves other runs where they are", () => {
     const r = rig();
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
-    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    const rows = () => r.store.openItems("main").map((i) => [i.problem, i.runIds]);
     // Rows written before the rule: one run behind three keys.
     for (const p of ["dup 1", "dup 2", "dup 3"]) r.item(p, "", ["rt1"], 1);
-    r.store.markOpenItems([open("pair", "rt2", "rt3")], 1, "h1");
-    expect(r.store.markOpenItems([open("dup 2", "rt1")], 2, "h1").changed).toEqual([3]);
+    r.store.markOpenItems([open("pair", "rt2", "rt3")], 1, "h1", "main");
+    expect(r.store.markOpenItems([open("dup 2", "rt1")], 2, "h1", "main").changed).toEqual([3]);
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
-    r.store.markOpenItems([open("pair", "rt2", "rt3")], 3, "h1");
+    r.store.markOpenItems([open("pair", "rt2", "rt3")], 3, "h1", "main");
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2", "rt3"]]]);
-    r.store.markOpenItems([open("split", "rt3")], 4, "h1");
+    r.store.markOpenItems([open("split", "rt3")], 4, "h1", "main");
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair", ["rt2"]], ["split", ["rt3"]]]);
-    r.store.markOpenItems([open("pair, restated", "rt2", "rt3")], 5, "h1");
+    r.store.markOpenItems([open("pair, restated", "rt2", "rt3")], 5, "h1", "main");
     expect(rows()).toEqual([["dup 2", ["rt1"]], ["pair, restated", ["rt2", "rt3"]]]);
   });
 
@@ -444,132 +445,132 @@ describe("the open items", () => {
   it("collapses the item a run's session is behind into the one an <open> names with its newer run", () => {
     const r = rig();
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
-    const rows = () => r.store.openItems().map((i) => [i.problem, i.runIds]);
+    const rows = () => r.store.openItems("main").map((i) => [i.problem, i.runIds]);
     r.save(saved("rs1", { targetSessionId: "s1", state: "succeeded" }), saved("rs2", { targetSessionId: "s1" }), saved("rt1", { targetSessionId: "t1" }));
-    r.store.markOpenItems([open("lead", "rs1", "rt1"), open("lost", "gone")], 1, "h1");
-    expect(r.store.markOpenItems([open("lead, woken again", "rs2")], 2, "h1").changed).toEqual([2]);
+    r.store.markOpenItems([open("lead", "rs1", "rt1"), open("lost", "gone")], 1, "h1", "main");
+    expect(r.store.markOpenItems([open("lead, woken again", "rs2")], 2, "h1", "main").changed).toEqual([2]);
     expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, woken again", ["rs2"]]]);
-    r.store.markOpenItems([open("lead, third time", "rs1")], 3, "h1");
+    r.store.markOpenItems([open("lead, third time", "rs1")], 3, "h1", "main");
     expect(rows()).toEqual([["lead", ["rt1"]], ["lost", ["gone"]], ["lead, third time", ["rs1"]]]);
   });
 
   it("keeps a closed item's record, reopens it at the end of the list, and records each writing session once", () => {
     const r = rig();
     const open = (problem: string, stage = "") => ({ op: "open" as const, problem, stage, runIds: [] });
-    const keys = () => r.store.openItems().map((i) => i.problem);
-    r.store.markOpenItems([open("login"), open("parser")], 1, "h1");
-    r.store.markOpenItems([open("login", "testing")], 2, "h1");
-    expect(r.store.markOpenItems([{ op: "done", problem: "login" }], 3, "h2")).toEqual({ changed: [1], closed: ["login"] });
+    const keys = () => r.store.openItems("main").map((i) => i.problem);
+    r.store.markOpenItems([open("login"), open("parser")], 1, "h1", "main");
+    r.store.markOpenItems([open("login", "testing")], 2, "h1", "main");
+    expect(r.store.markOpenItems([{ op: "done", problem: "login" }], 3, "h2", "main")).toEqual({ changed: [1], closed: ["login"] });
     expect(keys()).toEqual(["parser"]);
-    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: [], closedAt: 3, sessions: ["h1", "h2"], runIds: [] });
+    expect(r.store.itemHistory("main", "login")).toEqual({ chain: "main", problem: "login", aliases: [], closedAt: 3, sessions: ["h1", "h2"], runIds: [] });
     // A closed item is closed: a second <done> names nothing open.
-    expect(r.store.markOpenItems([{ op: "done", problem: "login" }], 4, "h2").changed).toEqual([0]);
-    r.store.markOpenItems([open("login", "again")], 5, "h3");
+    expect(r.store.markOpenItems([{ op: "done", problem: "login" }], 4, "h2", "main").changed).toEqual([0]);
+    r.store.markOpenItems([open("login", "again")], 5, "h3", "main");
     expect(keys()).toEqual(["parser", "login"]);
-    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: [], sessions: ["h1", "h2", "h3"], runIds: [] });
+    expect(r.store.itemHistory("main", "login")).toEqual({ chain: "main", problem: "login", aliases: [], sessions: ["h1", "h2", "h3"], runIds: [] });
   });
 
   it("records the head on the item a reply with no marker is about: its topic's, by key or alias, and its answered run's", () => {
     const r = rig();
-    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }, { op: "open", problem: "parser", stage: "", runIds: [] }], 1, "h1");
-    r.store.markOpenItems([{ op: "done", problem: "parser", to: "login" }], 2, "h1");
-    expect(recordOpenItems(r.store, "Still green.\n<topic>parser</topic>", 3, "h2")).toEqual({ changed: false, closed: [], unmatched: [] });
-    recordOpenItems(r.store, "Merged.", 4, "h3", ["rt1"]);
-    recordOpenItems(r.store, "Hello.", 5, "h4");
+    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }, { op: "open", problem: "parser", stage: "", runIds: [] }], 1, "h1", "main");
+    r.store.markOpenItems([{ op: "done", problem: "parser", to: "login" }], 2, "h1", "main");
+    expect(recordOpenItems(r.store, "Still green.\n<topic>parser</topic>", 3, "h2", "main")).toEqual({ changed: false, closed: [], unmatched: [] });
+    recordOpenItems(r.store, "Merged.", 4, "h3", "main", ["rt1"]);
+    recordOpenItems(r.store, "Hello.", 5, "h4", "main");
     // `parser`'s topic is the open item that absorbed it.
-    expect(r.store.itemHistory("login")?.sessions).toEqual(["h1", "h2", "h3"]);
-    expect(r.store.itemHistory("parser")?.problem).toBe("login");
+    expect(r.store.itemHistory("main", "login")?.sessions).toEqual(["h1", "h2", "h3"]);
+    expect(r.store.itemHistory("main", "parser")?.problem).toBe("login");
   });
 
   it("records a stamped send's head on the item under its key when the stamp names an alias", () => {
     const r = rig();
     // Pier's rename leaves the old key no row of its own: only the alias names it.
-    r.store.markOpenItems([{ op: "open", problem: "sign in", stage: "", runIds: ["rt1"] }], 1, "h1");
-    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 2, "h1");
+    r.store.markOpenItems([{ op: "open", problem: "sign in", stage: "", runIds: ["rt1"] }], 1, "h1", "main");
+    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 2, "h1", "main");
     // What WebDeps.itemSent does (src/main.ts) for a send stamped `[item: sign in]`.
-    expect(r.store.markOpenItems([], 3, "h2", { topic: "sign in" })).toEqual({ changed: [], closed: [] });
-    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: ["sign in"], sessions: ["h1", "h2"], runIds: ["rt1"] });
+    expect(r.store.markOpenItems([], 3, "h2", "main", { topic: "sign in" })).toEqual({ changed: [], closed: [] });
+    expect(r.store.itemHistory("main", "login")).toEqual({ chain: "main", problem: "login", aliases: ["sign in"], sessions: ["h1", "h2"], runIds: ["rt1"] });
   });
 
   it("closes an arrow's item into the one the reply leaves open, and nothing when that one is not open", () => {
     const r = rig();
     const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
     const arrow = (problem: string, to: string) => ({ op: "done" as const, problem, to });
-    r.store.markOpenItems([open("login"), open("parser")], 1, "h1");
+    r.store.markOpenItems([open("login"), open("parser")], 1, "h1", "main");
     // The <open> of `new` may follow its arrow in the reply.
-    expect(r.store.markOpenItems([arrow("login", "login, also SSO"), open("login, also SSO")], 2, "h2"))
+    expect(r.store.markOpenItems([arrow("login", "login, also SSO"), open("login, also SSO")], 2, "h2", "main"))
       .toEqual({ changed: [1, 1], closed: ["login"] });
-    expect(r.store.markOpenItems([arrow("login, also SSO", "auth")], 3, "h2")).toEqual({ changed: [0], closed: [] });
-    expect(r.store.openItems().map((i) => i.problem)).toEqual(["parser", "login, also SSO"]);
-    r.store.markOpenItems([open("auth"), arrow("login, also SSO", "auth")], 4, "h3");
-    expect(r.store.itemHistory("auth")).toEqual({ problem: "auth", aliases: ["login, also SSO", "login"], sessions: ["h1", "h2", "h3"], runIds: [] });
+    expect(r.store.markOpenItems([arrow("login, also SSO", "auth")], 3, "h2", "main")).toEqual({ changed: [0], closed: [] });
+    expect(r.store.openItems("main").map((i) => i.problem)).toEqual(["parser", "login, also SSO"]);
+    r.store.markOpenItems([open("auth"), arrow("login, also SSO", "auth")], 4, "h3", "main");
+    expect(r.store.itemHistory("main", "auth")).toEqual({ chain: "main", problem: "auth", aliases: ["login, also SSO", "login"], sessions: ["h1", "h2", "h3"], runIds: [] });
     // An arrow's closed `old` row is `new`'s history: its key opens `new`, a search lists `new` once.
-    for (const old of ["login", "login, also SSO"]) expect(r.store.itemHistory(old)).toEqual(r.store.itemHistory("auth"));
+    for (const old of ["login", "login, also SSO"]) expect(r.store.itemHistory("main", old)).toEqual(r.store.itemHistory("main", "auth"));
     expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["auth", undefined]]);
     expect(r.store.items("LOGIN sso").map((i) => i.problem)).toEqual(["auth"]);
     expect(r.store.items("login nothing")).toEqual([]);
     // A closed item nothing absorbed keeps its own record and row; with `new` closed too, `old` is still `new`'s,
     // and so is a stamped send naming it.
-    r.store.markOpenItems([{ op: "done", problem: "parser" }, { op: "done", problem: "auth" }], 5, "h3");
-    expect(r.store.itemHistory("parser")).toMatchObject({ problem: "parser", closedAt: 5 });
-    expect(r.store.itemHistory("login")).toEqual(r.store.itemHistory("auth"));
+    r.store.markOpenItems([{ op: "done", problem: "parser" }, { op: "done", problem: "auth" }], 5, "h3", "main");
+    expect(r.store.itemHistory("main", "parser")).toMatchObject({ problem: "parser", closedAt: 5 });
+    expect(r.store.itemHistory("main", "login")).toEqual(r.store.itemHistory("main", "auth"));
     expect(r.store.items("").map((i) => i.problem)).toEqual(["auth", "parser"]);
-    r.store.markOpenItems([], 6, "h4", { topic: "login" });
-    expect(r.store.itemHistory("auth")?.sessions).toEqual(["h1", "h2", "h3", "h4"]);
+    r.store.markOpenItems([], 6, "h4", "main", { topic: "login" });
+    expect(r.store.itemHistory("main", "auth")?.sessions).toEqual(["h1", "h2", "h3", "h4"]);
   });
 
   it("gives a reopened key back its own history: no other item holds it as an alias", () => {
     const r = rig();
     const open = (problem: string) => ({ op: "open" as const, problem, stage: "", runIds: [] });
-    r.store.markOpenItems([open("login")], 1, "h1");
-    r.store.markOpenItems([open("login v2"), { op: "done", problem: "login", to: "login v2" }], 2, "h2");
-    r.store.markOpenItems([open("login")], 3, "h3");
-    expect(r.store.itemHistory("login v2")?.aliases).toEqual([]);
-    r.store.markOpenItems([{ op: "done", problem: "login" }], 4, "h3");
-    expect(r.store.itemHistory("login")).toEqual({ problem: "login", aliases: [], closedAt: 4, sessions: ["h1", "h2", "h3"], runIds: [] });
+    r.store.markOpenItems([open("login")], 1, "h1", "main");
+    r.store.markOpenItems([open("login v2"), { op: "done", problem: "login", to: "login v2" }], 2, "h2", "main");
+    r.store.markOpenItems([open("login")], 3, "h3", "main");
+    expect(r.store.itemHistory("main", "login v2")?.aliases).toEqual([]);
+    r.store.markOpenItems([{ op: "done", problem: "login" }], 4, "h3", "main");
+    expect(r.store.itemHistory("main", "login")).toEqual({ chain: "main", problem: "login", aliases: [], closedAt: 4, sessions: ["h1", "h2", "h3"], runIds: [] });
     expect(r.store.items("login").map((i) => [i.problem, i.closedAt])).toEqual([["login", 4], ["login v2", undefined]]);
   });
 
   it("gives a renamed item's old key back when an <open> writes it again", () => {
     const r = rig();
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
-    r.store.markOpenItems([open("sign in", "rt1")], 1, "h1");
+    r.store.markOpenItems([open("sign in", "rt1")], 1, "h1", "main");
     // Pier's rename: the row takes the new key in place, the old one only an alias.
-    r.store.markOpenItems([open("login", "rt1")], 2, "h1");
-    expect(r.store.itemHistory("login")?.aliases).toEqual(["sign in"]);
-    r.store.markOpenItems([open("sign in")], 3, "h2");
-    expect(r.store.itemHistory("login")?.aliases).toEqual([]);
-    expect(r.store.itemHistory("sign in")).toEqual({ problem: "sign in", aliases: [], sessions: ["h2"], runIds: [] });
+    r.store.markOpenItems([open("login", "rt1")], 2, "h1", "main");
+    expect(r.store.itemHistory("main", "login")?.aliases).toEqual(["sign in"]);
+    r.store.markOpenItems([open("sign in")], 3, "h2", "main");
+    expect(r.store.itemHistory("main", "login")?.aliases).toEqual([]);
+    expect(r.store.itemHistory("main", "sign in")).toEqual({ chain: "main", problem: "sign in", aliases: [], sessions: ["h2"], runIds: [] });
     // Renamed back onto a key it once held, the row holds no alias of itself.
     const back = rig();
-    back.store.markOpenItems([open("sign in", "rt1")], 1, "h1");
-    back.store.markOpenItems([open("login", "rt1")], 2, "h1");
-    back.store.markOpenItems([open("sign in", "rt1")], 3, "h1");
+    back.store.markOpenItems([open("sign in", "rt1")], 1, "h1", "main");
+    back.store.markOpenItems([open("login", "rt1")], 2, "h1", "main");
+    back.store.markOpenItems([open("sign in", "rt1")], 3, "h1", "main");
     expect(back.store.items("").map((i) => [i.problem, i.aliases])).toEqual([["sign in", ["login"]]]);
   });
 
   it("tells the head an arrow into no open item, and counts the arrow's target as named", () => {
     const r = rig();
-    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 1, "h1");
-    const told = recordOpenItems(r.store, "<done>login → auth</done>", 2, "h1");
+    r.store.markOpenItems([{ op: "open", problem: "login", stage: "", runIds: ["rt1"] }], 1, "h1", "main");
+    const told = recordOpenItems(r.store, "<done>login → auth</done>", 2, "h1", "main");
     expect(told).toEqual({ changed: false, closed: [], unmatched: ["login → auth"] });
     expect(unmatchedNote(told.unmatched, ["login"]))
       .toBe("[Pier: <done>login → auth</done> (\"auth\" is not open) closed no open item. Resend <done> with one of these keys exactly:\n- login]");
     r.save(saved("rt1", { state: "succeeded" }));
-    expect(staleItems(r.store, "Done.", ["rt1"])).toEqual([{ runId: "rt1", problem: "login" }]);
-    expect(staleItems(r.store, "<done>x → login</done>", ["rt1"])).toEqual([]);
+    expect(staleItems(r.store, "Done.", ["rt1"], "main")).toEqual([{ runId: "rt1", problem: "login" }]);
+    expect(staleItems(r.store, "<done>x → login</done>", ["rt1"], "main")).toEqual([]);
   });
 
   it("records the old key of the item Pier renames, and closes the rest into it", () => {
     const r = rig();
     const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
     for (const p of ["dup 1", "dup 2"]) r.item(p, "", ["rt1"], 1);
-    r.store.markOpenItems([open("pair", "rt1")], 2, "h1");
-    expect(r.store.openItems().map((i) => i.problem)).toEqual(["pair"]);
-    expect(r.store.itemHistory("pair")).toEqual({ problem: "pair", aliases: ["dup 1", "dup 2"], sessions: ["h1"], runIds: ["rt1"] });
+    r.store.markOpenItems([open("pair", "rt1")], 2, "h1", "main");
+    expect(r.store.openItems("main").map((i) => i.problem)).toEqual(["pair"]);
+    expect(r.store.itemHistory("main", "pair")).toEqual({ chain: "main", problem: "pair", aliases: ["dup 1", "dup 2"], sessions: ["h1"], runIds: ["rt1"] });
     // The renamed key is no row of its own, a closed dup's row is the item's history: both find the item.
-    expect(r.store.itemHistory("dup 1")?.problem).toBe("pair");
-    expect(r.store.itemHistory("dup 2")?.problem).toBe("pair");
+    expect(r.store.itemHistory("main", "dup 1")?.problem).toBe("pair");
+    expect(r.store.itemHistory("main", "dup 2")?.problem).toBe("pair");
     expect(r.store.items("dup").map((i) => i.problem)).toEqual(["pair"]);
   });
 
@@ -630,7 +631,7 @@ describe("the open items", () => {
     const db = openDb(":memory:");
     const service = new TaskService(new TaskStore(db), {} as AgentFactory, router, hub, {
       modelMenu: () => [],
-      continuous: { chainOf: () => members, members: () => members.map((sessionId) => ({ sessionId, startedAt: 1, reason: "first" as const })) },
+      ...fakeChains({ main: members }),
     });
     const end = (id: string, text: string) => sessions.get(id)!.emit({ type: "turn-end", text });
     const count = () => db.prepare("SELECT count(*) AS n FROM open_items WHERE closed_at IS NULL").get();
@@ -650,8 +651,8 @@ describe("the open items", () => {
     const h0 = sessions.get("h0")!;
     expect(h0.systemInputs).toEqual([{ mode: "append", origin: { kind: "open-items" },
       text: "[Pier: <done>never open</done> closed no open item. Resend <done> with one of these keys exactly:\n- open items]" }]);
-    expect(service.unmatchedDone()).toEqual(["never open"]);
-    const owed = openItemsStatus(service.openItems(), 1, service.unmatchedDone());
+    expect(service.unmatchedDone("main")).toEqual(["never open"]);
+    const owed = openItemsStatus(service.openItems(), 1, service.unmatchedDone("main"));
     expect(owed.seed.split("\n"))
       .toEqual(["- open items — worker running (run r1) · stopped", "- unmatched <done>: never open (closed nothing: resend <done> with an item's full key above)"]);
     expect(owed.snapshot.unmatched).toEqual(["never open"]);
@@ -659,10 +660,10 @@ describe("the open items", () => {
 
     // An ambiguous key stays owed until the item it names closes; one naming nothing open is untouched.
     end("h0", "<open>dup: a</open><open>dup: b</open><done>dup</done>");
-    expect(service.unmatchedDone()).toEqual(["never open", "dup"]);
+    expect(service.unmatchedDone("main")).toEqual(["never open", "dup"]);
     expect(h0.systemInputs).toHaveLength(2);
     end("h0", "<done>dup: a</done>");
-    expect(service.unmatchedDone()).toEqual(["never open"]);
+    expect(service.unmatchedDone("main")).toEqual(["never open"]);
     expect(h0.systemInputs).toHaveLength(2);
     workspace.length = 1;
 
@@ -672,10 +673,38 @@ describe("the open items", () => {
     expect(count()).toEqual({ n: 2 });
     end("m1", "Merged.\n<open>open items — merged, restart pending</open>\n<done>open items</done><done>dup: b</done>");
     expect(count()).toEqual({ n: 0 });
-    expect(service.unmatchedDone()).toEqual([]);
+    expect(service.unmatchedDone("main")).toEqual([]);
     expect(openItemsStatus(service.openItems(), 1, ["never open"]).seed).toBe("Nothing open.");
     expect(workspace).toEqual(["open-items-changed", "open-items-changed"]);
   });
+  it("writes each chain's head into its own chain: a key matches only there, and the list names each item's chain", () => {
+    const hub = new EventHub();
+    const sessions = new Map(["h0", "d0"].map((id) => [id, fakeSession(id)]));
+    const router = new Router(hub, (key) => Promise.resolve(sessions.get(key.conversationId)!));
+    for (const s of sessions.values()) router.attach({ channelId: "web", conversationId: s.id }, s);
+    const db = openDb(":memory:");
+    db.exec("INSERT INTO chains VALUES ('design', 'design', 1, NULL)");
+    const service = new TaskService(new TaskStore(db), {} as AgentFactory, router, hub, {
+      modelMenu: () => [],
+      ...fakeChains({ main: ["h0"], design: ["d0"] }),
+    });
+    const end = (id: string, text: string) => sessions.get(id)!.emit({ type: "turn-end", text });
+    const rows = () => db.prepare("SELECT chain_id, problem, closed_at IS NULL AS open FROM open_items ORDER BY chain_id").all();
+
+    end("d0", "<open>login \u2014 drafting</open>");
+    end("h0", "<open>login \u2014 testing</open>");
+    expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 1 }]);
+    end("h0", "<done>login</done>");
+    expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 0 }]);
+
+    end("d0", "<done>never open</done>");
+    expect([service.unmatchedDone("design"), service.unmatchedDone("main")]).toEqual([["never open"], []]);
+    end("h0", "<open>deploy</open>");
+    const design = { id: "design", name: "design", archived: false };
+    expect(service.openItems().items.map((i) => [i.problem, i.chain])).toEqual([["deploy", { id: "main", name: "Main", archived: false }], ["login", design]]);
+    expect(service.openItems("design").items.map((i) => [i.problem, i.chain])).toEqual([["login", design]]);
+  });
+
   it("tells the head when its turn answering a run's result, a steer's included, left that run's item at its old stage", () => {
     const hub = new EventHub();
     const h0 = fakeSession("h0", { scripted: true });
@@ -684,7 +713,7 @@ describe("the open items", () => {
     const store = new TaskStore(openDb(":memory:"));
     new TaskService(store, {} as AgentFactory, router, hub, {
       modelMenu: () => [],
-      continuous: { chainOf: () => ["h0"], members: () => [{ sessionId: "h0", startedAt: 1, reason: "first" as const }] },
+      ...fakeChains({ main: ["h0"] }),
     });
     const end = (text: string) => h0.emit({ type: "turn-end", text });
     const notes = () => h0.systemInputs.filter((i) => i.mode === "append").map((i) => i.text);

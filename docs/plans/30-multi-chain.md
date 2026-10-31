@@ -350,11 +350,11 @@ Worker 1 实现并提交后，其余 worker 只依赖这里写的签名；改签
 export interface ChainRow { id: string; name: string; createdAt: number; archivedAt: number | null }
 export class ChainExists extends Error {}      // message `chain: "<name>" exists`
 export class ChainInvalid extends Error {}     // message `chain: name must be 1–40 characters`
-export class ChainArchived extends Error {}    // message `chain: <name> is archived — unarchive first`
-export class ChainHasOpen extends Error { open: number }  // message `chain: <name> has N open — /status first`
+export class ChainArchived extends Error { constructor(name: string) }   // message `chain: <name> is archived — unarchive first`
+export class ChainHasOpen extends Error { constructor(name: string, readonly open: number) }  // message `chain: <name> has N open — /status first`
 export class ChainAmbiguous extends Error {}   // message `/chain <q> matches A, B — say more`
 export class Chains {
-  constructor(db: DatabaseSync, openCount: (chainId: string) => number)
+  constructor(db: DatabaseSync, openCount: (chainId: string) => number, now?: () => number)
   list(): ChainRow[]                 // 活跃在前按 created_at，归档在后按 archived_at
   get(id: string): ChainRow | undefined
   first(): ChainRow                  // 活跃里 created_at 最早的；不变量保证至少一条
@@ -374,6 +374,7 @@ constructor(db, deps: ChainDeps & {
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
   status: (now: number, chainId: string) => OpenItemsStatus;   // 本 chain 的 items
   mode: { get(): boolean; set(on: boolean): Promise<void> };   // settings.chainMode
+  changed: () => void;   // `/chain` 切换/新建/改名/归档之后：chains-changed
 })
 members(chainId: string): ChainMember[]                 // newest first；head = [0]
 chainOf(sessionId: string): { chainId: string; members: string[] } | undefined   // members newest first
@@ -382,13 +383,17 @@ firstHead(): string | null                              // 首条 chain 的 head
 heads(): { chainId: string; sessionId: string }[]       // 每条 chain（含归档）的 head
 isHead(sessionId: string): boolean
 lastUserAt(chainId: string): number | undefined         // 列表排序用；由 send 记在内存 + 启动时取 head 最近 user turn
-send(message: Omit<InboundMessage, "key">, chainId: string, key?: ConversationKey):
-  Promise<{ sessionId: string; chainId: string; rotated?: ChainReason; switched?: ChainRow }>
-  // 归档的 chain → throw ChainArchived；`/chain …` 由 command 处理：`switched` 是切到的 chain，
-  // 调用方据此改 hash / DM 指针；`/chain new|rename|archive` 在 Session 模式下按设计置 mode
+send(message: Omit<InboundMessage, "key">, chainId: string, key?: ConversationKey): Promise<ChainSent>
+type ChainSent =
+  | { sessionId: string; chainId: string; rotated?: ChainReason; switched?: undefined }
+  | { sessionId?: string; chainId: string; switched: ChainRow }   // 切换不碰 head；新 chain 还没有 head
+  // 归档的 chain → throw ChainArchived；`/chain <name>`、`/chain new <name>`、`/chain archive` 返回 `switched`
+  // （归档后切到 `first()`），调用方据此改 hash / DM 指针；`/chain` 与 `/chain rename <name>` 在 head 上答，
+  // 返回第一种；`/chain new` 在 Session 模式下先 `mode.set(true)`
 replaceLost(sessionId: string): Promise<string | undefined>
 status(chainId: string): OpenItemsStatus
 chainsText(currentId: string): string                   // `/chain` 列表文案，供 web/IM 同用
+get chains(): Chains                                    // 构造时传入的登记表，web/channels 经它取 `first()` 等
 ```
 
 - 每条 chain 一把串行锁（`Map<chainId, Promise>`）。
@@ -399,13 +404,16 @@ chainsText(currentId: string): string                   // `/chain` 列表文案
 
 - `TaskChain = Pick<MainChain, "chainOf" | "members" | "headOf" | "firstHead" | "heads" | "isHead">`。
 - `TaskStore.openItems(chainId)`、`markOpenItems(…, chainId)`、`items(q, chainId?)`（行带 `chain`）、`itemHistory(chainId, problem)`、`itemHistoryByProblem(problem)`（唯一才返回，旧路由用）。
-- `TaskService.openItems(chainId?)`：缺省全部，每行 `chain: { id, name, archived }`；`openItemsStatus(open, now, unmatched)` 不变。
+- `TaskService.openItems(chainId?)`：缺省全部，每行 `chain: ItemChain`（`{ id, name, archived }`，`tasks/types.ts`）；`openItemsStatus(open, now, unmatched)` 不变。
+- `TaskService` 的 instance deps 多 `chains: Pick<Chains, "list">`；`unmatchedDone(chainId)` 按 chain。
+- `ItemSummary.chain`、`ItemRecord.chain` 是 chain id（字符串）；`open_items.chain_id` 无默认值。
+- `open-items.ts`：`openItems(reads, router, members, chainId)`、`recordOpenItems(store, text, now, sessionId, chainId, runIds?)`、`staleItems(store, text, runIds, chainId)`。
 - callback 解析：`conversation` → `headOf(run.invokedBySessionId)`，定时任务 → `headOf(createdBySessionId)`，都无 → `firstHead()`。
 
 ### web
 
 - 路由按 §路由；`GET /api/chains` 的 `head.state` 取 `router.stateOf`。请求头 `X-Pier-Chain` 可带当前 chain（`PUT /api/chains/mode` 关时的默认 `keep`）。
-- SSE `chains-changed` 由 web server 在建/改名/归档/恢复/开关后发；head 轮换时 `MainChain` 的 `rotated` 处已发 `sessions-changed`，同处再发 `chains-changed`。
+- SSE `chains-changed` 由 web server 在建/改名/归档/恢复/开关后发；`/chain` 的切换、新建、改名、归档不论来自哪个表面，由 `MainChain` 经 `deps.changed()` 发（`main.ts` 接到 hub），home DM 的状态消息也随它刷新；head 轮换时 `sessions-changed` 由 `web/server.ts` 见到 `rotated` 时发（`MainChain` 不发），同处再发 `chains-changed`。
 
 ### channels
 

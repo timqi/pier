@@ -53,7 +53,7 @@ export class TaskRunQueue {
     );
     const callbackSessionId = provenance.callbackSessionId !== undefined
       ? provenance.callbackSessionId
-      : this.callbacks.target(definition.callback, invokedBySessionId);
+      : this.callbacks.target(definition.callback, invokedBySessionId, definition.createdBySessionId);
     // Overlap is derived from the durable run store — no parallel bookkeeping.
     const interactiveAgent = definition.action.type === "agent" && source !== "cron" && source !== "watch";
     const overlapped = !interactiveAgent && this.store.findActiveRun(definition.id) !== undefined;

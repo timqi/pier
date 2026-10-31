@@ -12,6 +12,7 @@ import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskRow, TaskRun } from "./types.js";
+import { fakeChains } from "./chain.testkit.js";
 
 function setup() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-routes-"));
@@ -21,7 +22,7 @@ function setup() {
   const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, new Router(hub, () => factory.resume(session.id)), hub, {
     modelMenu: () => [],
-    continuous: { chainOf: () => undefined, members: () => [] },
+    ...fakeChains(),
   });
   const app = new Hono();
   registerTaskRoutes(app, service);

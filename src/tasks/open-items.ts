@@ -57,12 +57,12 @@ export function openStatus(
 /** The store reads the list is joined against. */
 export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
-/** `members`: the chain, newest first. */
-export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[]): OpenItems {
+/** `chainId`'s items; `members`: that chain, newest first. */
+export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], chainId: string): OpenItems {
   // A session's newest run stands for it, so a lead woken again stays the same item.
   const newest = (sessionId: string | null) => (sessionId ? store.latestRunForTarget(sessionId) : undefined);
   const tracked = new Set<string>();
-  const items = store.openItems().map((row): Unrated => {
+  const items = store.openItems(chainId).map((row): Unrated => {
     const named = row.runIds.map((id): OpenRun => {
       const own = store.getRun(id);
       tracked.add(own?.targetSessionId ?? id);
@@ -111,10 +111,10 @@ const ARROW = " \u2192 ";
  *  — a marker's, its topic's, the one holding a run of the results it answers (`runIds`) — so the
  *  item's view finds its rows after a reload. Answers whether a row changed, the keys its `<done>`s
  *  closed, and the `<done>` bodies that closed none — an arrow's as `old → new` — for the head to be told. */
-export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number, sessionId: string, runIds: readonly string[] = []): { changed: boolean; closed: string[]; unmatched: string[] } {
+export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: string, now: number, sessionId: string, chainId: string, runIds: readonly string[] = []): { changed: boolean; closed: string[]; unmatched: string[] } {
   const { markers, dropped } = openItemMarkers(text);
   for (const marker of dropped) log.warn(`open items: dropped a marker with no text: ${marker}`);
-  const { changed, closed } = store.markOpenItems(markers, now, sessionId, { topic: replyTopic(text), runIds });
+  const { changed, closed } = store.markOpenItems(markers, now, sessionId, chainId, { topic: replyTopic(text), runIds });
   const unmatched = markers.flatMap((m, i) => (m.op === "done" && !changed[i] ? [m.to === undefined ? m.problem : `${m.problem}${ARROW}${m.to}`] : []));
   for (const problem of unmatched) log.warn(`open items: <done> named no open item: ${problem}`);
   return { changed: changed.some((n) => n > 0), closed, unmatched };
@@ -134,11 +134,11 @@ export const unmatchedNote = (unmatched: readonly string[], keys: readonly strin
 
 /** The items a turn answering `runIds`' results left as they were: one holding a run of a
  *  result's session, no run of its sessions still live, its exact key in none of the reply's markers. */
-export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[]): { runId: string; problem: string }[] {
+export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[], chainId: string): { runId: string; problem: string }[] {
   const named = new Set(openItemMarkers(text).markers.flatMap((m) => (m.op === "done" && m.to !== undefined ? [m.problem, m.to] : [m.problem])));
   const sessionOf = (id: string) => store.getRun(id)?.targetSessionId ?? id;
   const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(id)) ?? store.getRun(id))?.state ?? "") === "live";
-  return store.openItems().flatMap((item) => {
+  return store.openItems(chainId).flatMap((item) => {
     const runId = named.has(item.problem) ? undefined : runIds.find((r) => item.runIds.some((id) => sessionOf(id) === sessionOf(r)));
     return runId && !item.runIds.some(live) ? [{ runId, problem: item.problem }] : [];
   });
