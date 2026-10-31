@@ -1,7 +1,7 @@
 // The bar: the way back, the title, the meta chips and the ⋯ menu. Owns the
 // model/context state the snapshot reports.
 
-import { ArrowLeft, ChevronLeft, X } from "lucide";
+import { ArrowLeft, ChevronDown, ChevronLeft, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
@@ -10,6 +10,8 @@ import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { openChains, setChainMode } from "./chains.js";
+import type { ChainInfo } from "../types.js";
 import { openSystemPrompt } from "./system-prompt.js";
 import { chord, chordLabel, escapeKey, modalOpen } from "./shortcut.js";
 import { topicColour } from "./topics.js";
@@ -31,8 +33,14 @@ interface HeaderDeps {
   continuousOpen: () => boolean;
   /** The conversation's rotation threshold (`GET /api/continuous`); null before it answers. */
   rotateAt: () => number | null;
-  /** The `‹`, the item view's `×` and the floating home button: back to `#/conversation`. */
+  /** The item view's `×` and the floating home button: back to the current chain. */
   openContinuous: () => void;
+  /** The `‹`: to the chain whose run launched the session on screen, else the current one. */
+  back: () => void;
+  /** The current chain's row in chain mode, whose name is the title; undefined in session mode. */
+  chain: () => ChainInfo | undefined;
+  /** Chain mode is on (`GET /api/chains`). */
+  chainMode: () => boolean;
   /** The item view's problem, null off it. */
   item: () => string | null;
 }
@@ -41,7 +49,7 @@ let deps: HeaderDeps;
 
 export function initHeader(d: HeaderDeps): void {
   deps = d;
-  back.onclick = () => deps.openContinuous();
+  back.onclick = () => deps.back();
   toMain.onclick = () => deps.openContinuous();
   itemClose.onclick = () => deps.openContinuous();
   // After the composer's Stop: a running turn takes Esc first. The bar hides under Settings.
@@ -120,8 +128,9 @@ export function renderHeader(): void {
   // The conversation rotates sessions and spans topics: its name is its own,
   // not the head's title. A detached session not listed yet — a task run's
   // own, opened from its run card — is named by its id.
+  const chain = conversation ? deps.chain() : undefined;
   chatTitle.textContent = item ?? (conversation
-    ? "Pier"
+    ? (chain ? `${chain.name}${chain.archivedAt === undefined ? "" : " · archived"}` : "Pier")
     : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session"));
   if (item) {
     const dot = h("span", "mr-1.5 inline-block h-2 w-2 rounded-full align-middle");
@@ -129,11 +138,15 @@ export function renderHeader(): void {
     chatTitle.prepend(dot);
   }
   itemClose.classList.toggle("hidden", !item);
-  // The title is what the panel is *about*, so it is also the way in.
-  chatTitle.disabled = !s;
-  chatTitle.classList.toggle("cursor-pointer", !!s);
-  chatTitle.title = s ? "Session info" : "";
-  chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
+  // The title is what the panel is *about*, so it is also the way in: the chain list in chain mode.
+  const list = !!chain && !item;
+  if (list) chatTitle.append(icon(ChevronDown, "ml-1 inline-block h-3.5 w-3.5 align-middle text-neutral-500"));
+  chatTitle.disabled = !s && !list;
+  chatTitle.classList.toggle("cursor-pointer", !!s || list);
+  chatTitle.title = list ? "Chains" : s ? "Session info" : "";
+  if (list) chatTitle.setAttribute("aria-haspopup", "dialog");
+  else chatTitle.removeAttribute("aria-haspopup");
+  chatTitle.onclick = list ? () => openChains() : s ? () => sessionInfo(chatTitle, s) : null;
   back.classList.toggle("hidden", conversation && !item);
   back.classList.toggle("flex", !conversation || !!item);
   toMain.toggleAttribute("data-show", !conversation || !!item);
@@ -434,13 +447,21 @@ function barMenu(anchor: HTMLElement): void {
       ...later,
     },
     {
-      label: "Settings",
+      label: "Chain mode",
       separatorBefore: true,
+      hint: deps.chainMode() ? "On" : "Off",
+      onSelect: () => {
+        closeMenu();
+        void setChainMode(!deps.chainMode()).then((why) => { if (why) appendTurn("error", why); });
+      },
+    },
+    {
+      label: "Settings",
       onSelect: () => {
         closeMenu();
         deps.openSettings();
       },
     },
   ];
-  openMenu(anchor, items, conversation ? "Pier" : s ? (s.title ?? untitled(s.cwd)) : "Session");
+  openMenu(anchor, items, conversation ? (deps.chain()?.name ?? "Pier") : s ? (s.title ?? untitled(s.cwd)) : "Session");
 }

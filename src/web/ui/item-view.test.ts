@@ -33,7 +33,7 @@ const shown = () => pane().children.filter((r) => !r.hasAttribute("data-item-hid
 const text = (r: FakeElement) => r.textContent;
 
 const turns: ItemTurns = {
-  problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9,
+  chain: "main", problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9,
   sessions: [
     { sessionId: "h0", startedAt: 1, turns: [
       { index: 0, turn: { role: "user", text: "fix login", at: 1 } },

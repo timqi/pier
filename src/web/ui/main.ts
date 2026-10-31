@@ -46,7 +46,8 @@ import {
   updateComposer,
 } from "./composer.js";
 import { initPush, isIOS } from "./notifications.js";
-import { initReport } from "./report.js";
+import { initReport, report } from "./report.js";
+import { initChains, renderChains, unarchive } from "./chains.js";
 import { notify } from "./shell.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
 import { initTheme } from "./theme.js";
@@ -87,7 +88,8 @@ import type {
   ThinkingLevel,
   WorkspaceEvent,
 } from "../../core/types.js";
-import type { OpenItems, ParkedMessage } from "../../tasks/types.js";
+import type { ItemSummary, OpenItems, ParkedMessage } from "../../tasks/types.js";
+import type { ChainList } from "../types.js";
 
 /** GET /api/sessions/:id/history — the snapshot every delta is applied onto. */
 interface SessionSnapshot {
@@ -126,7 +128,13 @@ let optimistic = false;
 
 // --- the continuous conversation (docs/design/10-continuous-session.md) -------------
 
-/** Its sessions, newest first; empty before its first session exists. */
+/** Every chain, `GET /api/chains`; null before it answers. */
+let chainList: ChainList | null = null;
+/** The chain the pane shows (docs/plans/30-multi-chain.md §对话面板); null before the first read names one. */
+let chainId: string | null = null;
+/** `#/conversation` lands on the chain last viewed. */
+const LAST_CHAIN = "pier.chain";
+/** The current chain's sessions, newest first; empty before its first session exists. */
 let chain: ChainMember[] = [];
 /** The head's context size past which the next message starts a new session; null before the chain answers. */
 let rotateAt: number | null = null;
@@ -148,14 +156,68 @@ const headId = (): string | null => chain[0]?.sessionId ?? null;
 const inConversation = (id: string): boolean => chain.some((m) => m.sessionId === id);
 const continuousOpen = (): boolean => unstarted || (currentId !== null && currentId === headId());
 
-async function loadChain(): Promise<{ chain: ChainMember[]; rotateAt: number }> {
-  const res = await fetch("/api/continuous");
+/** One chain's sessions; none named is the first chain. A link to no chain is its 404, said in the pane. */
+async function loadChain(id: string | null): Promise<{ chainId: string; chain: ChainMember[]; rotateAt: number }> {
+  const res = await fetch(id ? `/api/continuous?chain=${encodeURIComponent(id)}` : "/api/continuous");
   if (!res.ok) throw new Error(await failure(res, "Could not load the continuous conversation"));
-  const { chain, rotateAt } = (await res.json()) as { chain?: unknown; rotateAt?: unknown };
-  if (!Array.isArray(chain) || typeof rotateAt !== "number" || !(rotateAt > 0)) {
+  const { chainId, chain, rotateAt } = (await res.json()) as { chainId?: unknown; chain?: unknown; rotateAt?: unknown };
+  if (typeof chainId !== "string" || !Array.isArray(chain) || typeof rotateAt !== "number" || !(rotateAt > 0)) {
     throw new Error("The continuous conversation's chain is malformed");
   }
-  return { chain: chain as ChainMember[], rotateAt };
+  return { chainId, chain: chain as ChainMember[], rotateAt };
+}
+
+const activeChains = () => chainList?.chains.filter((c) => c.archivedAt === undefined) ?? [];
+const firstChain = (): string | undefined => [...activeChains()].sort((a, b) => a.createdAt - b.createdAt)[0]?.id;
+
+/** `#/conversation`'s chain: the last one viewed while it is active, else the first. */
+function landing(): string | null {
+  const last = localStorage.getItem(LAST_CHAIN);
+  return activeChains().find((c) => c.id === last)?.id ?? firstChain() ?? chainId;
+}
+
+/** A bookmark from before chains names only an item: the one active chain holding it, else the first. */
+async function chainHolding(problem: string): Promise<string | null> {
+  const got = await getJson<{ items: ItemSummary[] }>(`/api/continuous/items?q=${encodeURIComponent(problem)}`, `Could not find the chain of "${problem}"`);
+  if (!got.ok) {
+    report(got.error);
+    return landing();
+  }
+  const live = new Set(activeChains().map((c) => c.id));
+  const holding = new Set(got.value.items.filter((i) => (i.problem === problem || i.aliases.includes(problem)) && live.has(i.chain)).map((i) => i.chain));
+  return holding.size === 1 ? [...holding][0]! : firstChain() ?? chainId;
+}
+
+/** Make `id` the pane's chain and read its sessions; false when a later switch took over or the read failed, said in the pane. */
+async function switchChain(id: string): Promise<boolean> {
+  chainId = id;
+  chain = [];
+  earlier = [];
+  unstarted = false;
+  renderChains();
+  try {
+    const next = await loadChain(id);
+    if (chainId !== id) return false;
+    ({ chainId, chain, rotateAt } = next);
+  } catch (err) {
+    if (chainId === id) appendTurn("error", String(err));
+    return false;
+  }
+  localStorage.setItem(LAST_CHAIN, chainId);
+  renderChains();
+  renderDrawer();
+  return true;
+}
+
+/** A chain's conversation, or an item's view in it; no chain is `#/conversation`'s (`landing`). */
+async function openChain(id: string | null, problem: string | null = null, user = true): Promise<void> {
+  if (user) cancelNavigation();
+  const intent = navigation;
+  const to = id ?? (problem ? await chainHolding(problem) : landing());
+  if (intent !== navigation) return;
+  if (to && to !== chainId && (!(await switchChain(to)) || intent !== navigation)) return;
+  if (problem) openItemView(problem);
+  else openContinuous(false);
 }
 
 async function loadOpenItems(): Promise<OpenItems> {
@@ -181,12 +243,14 @@ let navigation = 0;
 let snapshotReady = false;
 const cancelNavigation = (): void => { ++navigation; };
 
-/** One click owns topic lookup and fallback; only a successfully loaded, missing topic may fall back. */
-async function openItem(target: OpenItemTarget): Promise<void> {
+/** One click owns topic lookup and fallback; only a successfully loaded, missing topic may fall back.
+ *  `chain`: the item's, read first when the pane shows another. */
+async function openItem(target: OpenItemTarget, chain?: string): Promise<void> {
   const intent = ++navigation;
   const current = (): boolean => intent === navigation && isChatVisible();
   const { session, topic } = openItemDestination(target);
   if (session && !topic) return select(session, false);
+  if (chain && chain !== chainId && (!(await switchChain(chain)) || !current())) return;
   const head = headId();
   if (!head) return openContinuous(false);
   await select(head, false);
@@ -323,17 +387,21 @@ function commitSessions(rows: SessionInfo[]): void {
 // that quietly stopped updating is the shape of bug principle 5 is about.
 // coalesce retries it, so one dropped read does not strand the pane on an old head.
 const refreshSessions = coalesce(async () => {
-  const [rows, next, open] = await Promise.all([
+  const reading = chainId ?? localStorage.getItem(LAST_CHAIN);
+  const [rows, list, next, open] = await Promise.all([
     mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"),
-    loadChain(),
+    mustGetJson<ChainList>("/api/chains", "Could not load the chains"),
+    loadChain(reading),
     loadOpenItems(),
   ]);
   const following = continuousOpen() && isChatVisible();
   const was = headId();
-  chain = next.chain;
-  rotateAt = next.rotateAt;
+  chainList = list;
+  // A switch meanwhile owns the chain it reads.
+  if (chainId === null || chainId === reading) ({ chainId, chain, rotateAt } = next);
   commitOpenItems(open);
   commitSessions(rows);
+  renderChains();
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   // Not awaited: the move's reads, guarded by their own generation, must not hold every later refresh behind them.
   const head = headId();
@@ -360,9 +428,13 @@ function currentSession(): SessionInfo | undefined {
     ?? (detached && detached.id === currentId ? detached : undefined);
 }
 
-/** Summary of a selected session the listing does not carry. */
+/** The chain whose run launched a session off the conversation, which its `‹` returns to. */
+const launchedFrom = new Map<string, string>();
+
+/** Summary of a selected session the listing does not carry, and the chain only it names. */
 async function loadDetached(id: string): Promise<void> {
   const got = await getJson<SessionInfo>(`/api/sessions/${id}`, "failed to load session");
+  if (got.ok && got.value.chain) launchedFrom.set(id, got.value.chain);
   // A 404 here is a session that is genuinely gone; the snapshot load says so
   // in the transcript, and the header keeps naming it by its id.
   if (currentId !== id || !got.ok) return;
@@ -549,6 +621,9 @@ function connect(id: string, cursor: string, generation: number): void {
 /** `problem`: the item view of the conversation, at its head. */
 async function select(id: string, user = true, problem: string | null = null): Promise<void> {
   if (user) cancelNavigation();
+  // Another chain's head opens that chain (a Web Push names the session).
+  const other = chainList?.chains.find((c) => c.id !== chainId && c.head?.sessionId === id);
+  if (other) return openChain(other.id, problem, false);
   // Any session of the continuous conversation opens the conversation, at its head.
   if (inConversation(id)) id = headId()!;
   if (id !== currentId || unstarted) {
@@ -572,7 +647,7 @@ function choose(id: string): void {
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   detached = null;
-  if (!sessions.some((s) => s.id === id)) void loadDetached(id);
+  if (!sessions.some((s) => s.id === id) || (activeChains().length > 1 && !inConversation(id))) void loadDetached(id);
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
   restoreDraft(id);
   renderDrawer();
@@ -620,7 +695,7 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   }
   const problem = (paneItem = item);
   // Read first: its `lastSeq` is the cursor, and the head's snapshot read after it is no older.
-  const view = problem ? await getJson<ItemTurns>(itemTurnsUrl(problem), `Could not load the item "${problem}"`) : null;
+  const view = problem && chainId ? await getJson<ItemTurns>(itemTurnsUrl(problem, chainId), `Could not load the item "${problem}"`) : null;
   if (currentId !== id || generation !== loadSeq) return;
   const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
@@ -734,15 +809,30 @@ initComposer({
   item: () => item,
   // The re-list sees the rotation and moves the pane to the new head.
   headMoved: () => void refreshSessions(),
+  chain: () => chainId,
+  switched: (id) => void openChain(id),
 });
 initDrawer({
   sessions: () => sessions,
   currentId: () => currentId,
   chain: () => chain,
+  chains: () => chainList?.chains ?? [],
+  chainId: () => chainId,
   openContinuous,
   open: () => openItems,
   openItem,
-  itemView: openItemView,
+  itemView: (problem, id) => void openChain(id ?? chainId, problem),
+  reopen: (id, problem) => void unarchive(id).then((why) => {
+    if (why) appendTurn("error", why);
+    else void openChain(id, problem);
+  }),
+});
+initChains({
+  list: () => chainList,
+  current: () => chainId,
+  go: (id) => void openChain(id),
+  refresh: () => void refreshSessions(),
+  anchor: () => document.getElementById("chat-title")!,
 });
 initHeader({
   currentId: () => currentId,
@@ -753,6 +843,9 @@ initHeader({
   continuousOpen,
   rotateAt: () => rotateAt,
   openContinuous,
+  back: () => void openChain((currentId && launchedFrom.get(currentId)) || chainId),
+  chain: () => (chainList?.mode === "chain" ? chainList.chains.find((c) => c.id === chainId) : undefined),
+  chainMode: () => chainList?.mode === "chain",
   item: () => item,
 });
 initViews({
@@ -761,8 +854,8 @@ initViews({
   currentSession,
   select: (id) => void select(id),
   inConversation,
-  openContinuous,
-  openItemView,
+  chainId: () => chainId,
+  openChain: (id, problem) => void openChain(id, problem),
   maybeAckRead,
 });
 

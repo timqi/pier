@@ -53,7 +53,7 @@ vi.mock("./session-header.js", () => ({
 vi.mock("./theme.js", () => ({ initTheme: vi.fn() }));
 vi.mock("./item-view.js", () => ({
   itemMissing: h.itemMissing, renderItem: h.renderItem,
-  itemTurnsUrl: (problem: string) => `/api/continuous/items/${encodeURIComponent(problem)}/turns`,
+  itemTurnsUrl: (problem: string, chain: string) => `/api/continuous/items/${chain}/${encodeURIComponent(problem)}/turns`,
 }));
 vi.mock("./version.js", () => ({ initVersion: vi.fn() }));
 vi.mock("./drawer.js", () => ({
@@ -65,7 +65,7 @@ vi.mock("./turn-activity.js", () => ({
 }));
 vi.mock("./views.js", () => ({
   // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).
-  applyRoute: vi.fn(() => { if (typeof location !== "undefined" && !location.hash) h.views.openContinuous(); }),
+  applyRoute: vi.fn(() => { if (typeof location !== "undefined" && !location.hash) h.views.openChain(null, null); }),
   initViews: (deps: typeof h.views) => { h.views = deps; }, isChatVisible: vi.fn(() => true),
   setConversationHash: vi.fn(), setItemHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
   showConsole: vi.fn(), showFiles: vi.fn(),
@@ -96,6 +96,10 @@ const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, backgroundRuns: [], skills: [],
 });
 const latest = () => Stream.all.at(-1)!;
+/** A read of the chain's sessions, named or not. */
+const chainUrl = (url: string) => /^\/api\/continuous(\?|$)/.test(url);
+/** `GET /api/chains`: the one chain, in session mode. */
+const chainList = () => Response.json({ mode: "session", chains: [{ id: "c1", name: "main", createdAt: 1, unread: false, waiting: 0 }] });
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 beforeEach(async () => {
@@ -113,7 +117,8 @@ beforeEach(async () => {
   const rows = ["a", "b"].map((id, i) => ({ id, cwd: "/test", createdAt: 1 + i, modified: 9 - i, state: "idle" }));
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
-    if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [], rotateAt: 60_000 }));
+    if (chainUrl(url)) return Promise.resolve(Response.json({ chainId: "c1", chain: [], rotateAt: 60_000 }));
+    if (url === "/api/chains") return Promise.resolve(chainList());
     if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
     const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
     if (one && !init?.method) {
@@ -327,7 +332,8 @@ describe("acking an unread session", () => {
     fetcher = vi.fn((url: string) => {
       if (url === "/api/sessions/a/read") unread = false;
       return Promise.resolve(url.endsWith("/history") ? snapshot("loaded")
-        : url === "/api/continuous" ? Response.json({ chain: [], rotateAt: 60_000 })
+        : chainUrl(url) ? Response.json({ chainId: "c1", chain: [], rotateAt: 60_000 })
+        : url === "/api/chains" ? chainList()
         : url === "/api/continuous/open" ? Response.json({ items: [], unlisted: [] })
         : Response.json([{ id: "a", cwd: "/test", createdAt: 1, state: "idle", unread }]));
     });
@@ -480,16 +486,17 @@ describe("the continuous conversation", () => {
   let chain: ReturnType<typeof member>[] = [];
   const earlier = (id: string) => Response.json({ turns: [{ role: "user", text: `said in ${id}` }], backgroundRuns: [], readonly: true });
 
-  let chainRead = () => Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
+  let chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
   async function boot(members: ReturnType<typeof member>[]) {
     chain = members;
-    chainRead = () => Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
+    chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
     vi.resetModules();
     Stream.all = [];
     Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
     const fetcher = vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/api/continuous") return chainRead();
+      if (chainUrl(url)) return chainRead();
+      if (url === "/api/chains") return Promise.resolve(chainList());
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
       if (url.endsWith("/history")) return h.history(url, init);
       if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);
@@ -539,9 +546,9 @@ describe("the continuous conversation", () => {
     h.itemTurns.mockResolvedValue(Response.json(view));
     h.renderItem.mockReturnValue(h.itemFilter);
     const views = await import("./views.js");
-    h.views.openItemView("auth review");
+    h.views.openChain("c1", "auth review");
     await settled();
-    expect(h.itemTurns).toHaveBeenCalledWith("/api/continuous/items/auth%20review/turns");
+    expect(h.itemTurns).toHaveBeenCalledWith("/api/continuous/items/c1/auth%20review/turns");
     // Opened by an alias: the item's key replaces it in the hash, the bar and the stamp.
     expect(views.setItemHash).toHaveBeenCalledWith("auth review");
     expect(views.setItemHash).toHaveBeenLastCalledWith("auth", true);
@@ -561,7 +568,7 @@ describe("the continuous conversation", () => {
   it("reads an unknown item's 404 with the way back", async () => {
     await boot([member("h1")]);
     h.itemTurns.mockResolvedValue(Response.json({ error: 'No item "nope"' }, { status: 404 }));
-    h.views.openItemView("nope");
+    h.views.openChain("c1", "nope");
     await settled();
     expect(h.itemMissing).toHaveBeenCalledWith('No item "nope"', expect.any(Function));
     expect(h.renderItem).not.toHaveBeenCalled();
@@ -940,7 +947,7 @@ describe("the continuous conversation", () => {
       expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
 
       visible.mockReturnValue(true);
-      h.views.openContinuous();
+      h.views.openChain(null, null);
       await settled();
       expect(h.header.currentId()).toBe("h2");
       const next = deferred();
@@ -1008,5 +1015,121 @@ describe("the continuous conversation", () => {
     await settled();
     expect(h.composer.sessionId()).toBe("h1");
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+  });
+});
+
+describe("chains", () => {
+  const info = (id: string, head: string, over: object = {}) =>
+    ({ id, name: id.toUpperCase(), createdAt: id === "c1" ? 1 : 2, unread: false, waiting: 0, head: { sessionId: head, state: "idle" }, ...over });
+  const heads: Record<string, string> = { c1: "h1", c2: "h2" };
+  let items: object[] = [];
+  let stored: string | null = null;
+  const reads = () => vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+
+  beforeEach(async () => {
+    vi.resetModules();
+    Stream.all = [];
+    stored = null;
+    items = [];
+    h.itemTurns.mockImplementation(async (url) =>
+      Response.json({ chain: url.split("/")[4], problem: "auth", aliases: [], sessions: [], epoch: "ep", lastSeq: 1 }));
+    Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
+    const fetcher = vi.fn((url: string) => {
+      const named = /^\/api\/continuous(?:\?chain=(\w+))?$/.exec(url);
+      if (named?.[1] === "gone") return Promise.resolve(Response.json({ error: "chain: no chain gone" }, { status: 404 }));
+      if (named) {
+        const id = named[1] ?? "c1";
+        return Promise.resolve(Response.json({ chainId: id, chain: [{ sessionId: heads[id], startedAt: 1, reason: "first" }], rotateAt: 60_000 }));
+      }
+      if (url === "/api/chains") return Promise.resolve(Response.json({ mode: "chain", chains: [info("c2", "h2"), info("c1", "h1"), info("c0", "h0", { archivedAt: 5 })] }));
+      if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
+      if (url.startsWith("/api/continuous/items?")) return Promise.resolve(Response.json({ items }));
+      if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);
+      if (url === "/api/sessions/child") return Promise.resolve(Response.json({ id: "child", cwd: "/w", createdAt: 1, state: "idle", chain: "c2" }));
+      if (url.endsWith("/history")) return Promise.resolve(snapshot(url.split("/")[3]!));
+      return Promise.resolve(Response.json(["h1", "h2", "child"].map((id) => ({ id, cwd: "/w", createdAt: 1, state: "idle" }))));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("localStorage", { getItem: () => stored, setItem: (_k: string, v: string) => { stored = v; } });
+    vi.stubGlobal("location", { hash: "" });
+    vi.stubGlobal("history", { replaceState: vi.fn() });
+    await import("./main.js");
+    await settled();
+  });
+
+  // #/conversation lands on the first chain with nothing remembered, else the last one viewed.
+  it("opens a chain's head on its route, remembering it for the bare address", async () => {
+    expect(h.header.currentId()).toBe("h1");
+    expect(h.header.chain()?.name).toBe("C1");
+    h.views.openChain("c2", null);
+    await settled();
+    expect(reads()).toContain("/api/continuous?chain=c2");
+    expect(h.header.currentId()).toBe("h2");
+    expect(h.composer.chain?.()).toBe("c2");
+    expect(stored).toBe("c2");
+    h.views.openChain("c1", null);
+    await settled();
+    stored = "c2";
+    h.views.openChain(null, null);
+    await settled();
+    expect(h.header.currentId()).toBe("h2");
+    // An archived chain is no landing.
+    stored = "c0";
+    h.views.openChain(null, null);
+    await settled();
+    expect(h.header.currentId()).toBe("h1");
+  });
+
+  it("says a link to no chain in the pane, opening no other chain in its place", async () => {
+    const before = reads().length;
+    h.views.openChain("gone", null);
+    await settled();
+    expect(h.content.join(" ")).toContain("chain: no chain gone");
+    expect(reads().slice(before)).toEqual(["/api/continuous?chain=gone"]);
+    expect(stored).not.toBe("gone");
+  });
+
+  // A Web Push names a session: another chain's head opens that chain.
+  it("opens another chain's head as that chain, and a /chain switch the chain it named", async () => {
+    h.views.select("h2");
+    await settled();
+    expect(h.views.chainId()).toBe("c2");
+    expect(h.header.currentId()).toBe("h2");
+    h.composer.switched?.("c1");
+    await settled();
+    expect(h.views.chainId()).toBe("c1");
+    expect(h.header.currentId()).toBe("h1");
+  });
+
+  // ‹ from a child goes to the chain whose run launched it, which only the session's own row names.
+  it("returns from a child to its launcher's chain", async () => {
+    h.views.select("child");
+    await settled();
+    expect(reads()).toContain("/api/sessions/child");
+    h.header.back();
+    await settled();
+    expect(h.views.chainId()).toBe("c2");
+    expect(h.header.currentId()).toBe("h2");
+  });
+
+  // A pre-chain item address finds the one chain holding it, else the first.
+  it("resolves #/conversation/item/<p> to the one active chain that has it", async () => {
+    items = [{ chain: "c2", problem: "auth", aliases: [], updatedAt: 1 }, { chain: "c0", problem: "auth", aliases: [], updatedAt: 1 }];
+    h.views.openChain(null, "auth");
+    await settled();
+    expect(h.views.chainId()).toBe("c2");
+    expect(h.itemTurns).toHaveBeenCalledWith("/api/continuous/items/c2/auth/turns");
+    items = [{ chain: "c2", problem: "deploy", aliases: [], updatedAt: 1 }, { chain: "c1", problem: "deploy", aliases: [], updatedAt: 1 }];
+    h.views.openChain(null, "deploy");
+    await settled();
+    expect(h.views.chainId()).toBe("c1");
+  });
+
+  // The panel's rows of another chain navigate there first.
+  it("opens another chain's item view from the status panel", async () => {
+    h.drawer.itemView("auth", "c2");
+    await settled();
+    expect(h.views.chainId()).toBe("c2");
+    expect(h.itemTurns).toHaveBeenLastCalledWith("/api/continuous/items/c2/auth/turns");
   });
 });

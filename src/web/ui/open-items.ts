@@ -15,6 +15,10 @@ interface Actions {
   grouped?: boolean;
   /** The status panel's alone: an item row's secondary action, the item view. */
   panelView?: (problem: string) => void;
+  /** The status panel's: the chain a row of another chain belongs to. */
+  tag?: string;
+  /** An archived chain's row: unarchive it and open the item there. */
+  reopen?: () => void;
 }
 
 /** A status's word, tone and glyph; running wears the still sky dot every run does.
@@ -66,14 +70,19 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     return existing;
   }
   const dot = h("span", "open-item-dot h-2 w-2 flex-none rounded-full");
-  const title = h("span", "open-item-title block text-sm text-neutral-900");
+  const title = h("span", "open-item-title block min-w-0 text-sm text-neutral-900");
+  const tag = chainChip();
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
   const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase);
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
-  const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot, h("span", "min-w-0 flex-1", title, stage, metadata));
+  const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
+  reopen.setAttribute("type", "button");
+  const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot,
+    h("span", "min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, tag), stage, metadata));
   main.setAttribute("type", "button");
-  const li = h("li", "open-item", main);
+  const column = h("div", "min-w-0 flex-1", main);
+  const li = h("li", "open-item", column);
   // A row's key is its identity, so whether it is an item never changes under the row.
   const view = actions.panelView && p.key.startsWith("item:") ? viewButton() : null;
   if (view) li.append(view);
@@ -87,6 +96,12 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     else main.removeAttribute("title");
     // A grouped card's head already says `Waiting on you`.
     paintStatus(status, item, !(a.grouped && waitsOnYou(item.status)));
+    tag.textContent = a.tag ?? "";
+    tag.classList.toggle("hidden", !a.tag);
+    // In the row only when it has somewhere to go: a row is one control otherwise.
+    if (a.reopen) column.append(reopen);
+    else reopen.remove();
+    reopen.onclick = a.reopen ?? null;
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
@@ -111,12 +126,20 @@ function viewButton(): HTMLElement {
   return b;
 }
 
+/** A row's chain, where a lead's phase sits on its own row (drawer.ts `phaseTag`). */
+const chainChip = (): HTMLElement =>
+  h("span", "open-item-chain hidden flex-none rounded bg-neutral-100 px-1 text-[0.6875rem] font-medium leading-4 text-neutral-500 mt-0.5");
+
 /** A closed item the panel's search found: the view is the only place it has left. */
-export function closedItemRow(problem: string, closedAt: number, itemView: (problem: string) => void): HTMLElement {
+export function closedItemRow(problem: string, closedAt: number, itemView: (problem: string) => void, chain?: string): HTMLElement {
   const dot = h("span", "open-item-dot h-2 w-2 flex-none rounded-full");
   dot.style.background = topicColour(problem);
+  const tag = chainChip();
+  tag.textContent = chain ?? "";
+  tag.classList.toggle("hidden", !chain);
   const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot, h("span", "min-w-0 flex-1",
-    h("span", "open-item-title block text-sm text-neutral-900", problem), h("span", "open-item-meta block text-xs text-neutral-500", `closed ${agoLabel(closedAt)}`)));
+    h("span", "flex items-start gap-1.5", h("span", "open-item-title block min-w-0 text-sm text-neutral-900", problem), tag),
+    h("span", "open-item-meta block text-xs text-neutral-500", `closed ${agoLabel(closedAt)}`)));
   main.setAttribute("type", "button");
   main.onclick = () => itemView(problem);
   const li = h("li", "open-item", main);

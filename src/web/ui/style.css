@@ -407,7 +407,35 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
-  :is(.open-item .session-open, .open-item .item-view-open, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
+  :is(.open-item .session-open, .open-item .item-view-open, .open-item .open-item-reopen, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
+}
+/* The chain list (chains.ts): the same rows floated and docked. A row's ⋯ waits for the hover a finger has not got. */
+.chain-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.chain-dot { margin-top: 6px; }
+.chain-row:has(.chain-open:hover), .chain-row:focus-within, .chain-row:has([aria-current]) { background: var(--color-neutral-100); }
+.chain-open[aria-current] .chain-name { font-weight: 600; }
+:is(.chain-open, .chain-more):focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) {
+  .chain-more { opacity: 0; }
+  .chain-row:is(:hover, :focus-within) .chain-more, .chain-more[aria-expanded="true"] { opacity: 1; }
+}
+@media (pointer: coarse) { :is(.chain-open, .chain-more) { min-height: 44px; min-width: 44px; } }
+#chain-rail { display: none; }
+@media (width >= 80rem) {
+  /* Beside the reading column, under the bar, content height and no plate (06 §Layout). */
+  #chain-rail[data-on] {
+    display: block;
+    grid-row: 1 / -1;
+    align-self: start;
+    justify-self: start;
+    width: 15rem;
+    max-height: calc(100% - var(--head-h));
+    margin: var(--head-h) 0 0 0.5rem;
+    overflow-y: auto;
+    position: relative;
+    z-index: 1;
+  }
+  #bar.hidden ~ #chain-rail { display: none; }
 }
 /* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the

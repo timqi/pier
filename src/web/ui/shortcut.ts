@@ -27,6 +27,10 @@ export function chordLabel(spec: string): string {
 export const modalOpen = (own?: Element): boolean =>
   [...document.querySelectorAll("dialog[open]")].some((d) => !d.contains(own ?? null));
 
+/** What Shift turns a bracket into on a US layout — the only non-letter keys
+ *  a chord here is written with. */
+const SHIFTED: Record<string, string | undefined> = { "[": "{", "]": "}" };
+
 const CARD =
   "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
 
@@ -114,11 +118,14 @@ export function letterKey(
  *  card: the affordance is a menu row. Never unbound. */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {
   const { key, shift } = parse(spec);
+  // A shifted bracket arrives as the character Shift makes of it (`{`).
+  const shifted = SHIFTED[key];
   document.addEventListener(
     "keydown",
     (ev) => {
       if (!ev.key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
-      if (ev.key.toLowerCase() !== key) return;
+      const pressed = ev.key.toLowerCase();
+      if (pressed !== key && pressed !== shifted) return;
       if (!ev.metaKey && !ev.ctrlKey) return;
       if (unless?.()) return;
       ev.preventDefault();

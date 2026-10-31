@@ -8,8 +8,9 @@ import { h } from "./dom.js";
 import { button } from "./form.js";
 import { runTopic } from "./topics.js";
 
-/** GET /api/continuous/items/:problem/turns — the item's sessions in chain order, the head's up to `lastSeq`. */
+/** GET /api/continuous/items/:chain/:problem/turns — the item's sessions in chain order, the head's up to `lastSeq`. */
 export interface ItemTurns {
+  chain: string;
   problem: string;
   aliases: string[];
   closedAt?: number;
@@ -18,7 +19,8 @@ export interface ItemTurns {
   lastSeq: number;
 }
 
-export const itemTurnsUrl = (problem: string): string => `/api/continuous/items/${encodeURIComponent(problem)}/turns`;
+export const itemTurnsUrl = (problem: string, chain: string): string =>
+  `/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/turns`;
 
 /** Each session's rows as the pane replays them: only the head's, of an open item, take
  *  next steps and its runs; returns the filter each later event runs. `head.turns` is its

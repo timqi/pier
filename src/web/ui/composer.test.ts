@@ -582,6 +582,26 @@ it("starts no optimistic turn for a continuous command", async () => {
   expect(state.appendTurn).toHaveBeenCalledWith("user", "/status please", false, expect.any(Number));
 });
 
+// A send names the pane's chain; `/chain <name>` answering `switched` moves the pane there, not to a new head.
+it("sends the conversation's chain and follows a /chain switch", async () => {
+  const switched = vi.fn();
+  const headMoved = vi.fn();
+  composer.initComposer({
+    sessionId: () => "m1", sessionState: () => "idle", chatVisible: () => true, setState: vi.fn(), reload: state.reload,
+    continuous: () => true, chain: () => "c2", switched, headMoved,
+  });
+  state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", chainId: "c2" }, { status: 202 }));
+  type("hello");
+  await composer.send("auto");
+  expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string)).toMatchObject({ text: "hello", chain: "c2" });
+  state.fetch.mockResolvedValueOnce(Response.json({ chainId: "c3", switched: { id: "c3", name: "ops" } }, { status: 202 }));
+  type("/chain ops");
+  await composer.send("auto");
+  expect(JSON.parse(state.fetch.mock.calls[1]?.[1]?.body as string).chain).toBe("c2");
+  expect(switched).toHaveBeenCalledWith("c3");
+  expect(headMoved).not.toHaveBeenCalled();
+});
+
 // The item view's sends name the item on their first line, above a quote; a command names nothing.
 it("stamps a send from the item view with its item, before the quote, and sends a command unstamped", async () => {
   composer.initComposer({

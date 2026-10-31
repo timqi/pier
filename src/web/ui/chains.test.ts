@@ -1,0 +1,182 @@
+// The chain list: its rows, inline create and rename, archive's confirm, the archived fold, the mode switch and the chords.
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { ChainInfo, ChainList } from "../types.js";
+import { fake, FakeElement, installPage } from "./dom.testkit.js";
+
+const menu = vi.hoisted(() => ({
+  panel: null as HTMLElement | null,
+  closeMenu: vi.fn(() => { menu.panel?.remove(); menu.panel = null; }),
+  openPanel: vi.fn((_anchor: HTMLElement, content: HTMLElement) => {
+    const panel = document.createElement("div");
+    panel.append(content);
+    document.body.append(panel);
+    menu.panel = panel;
+    return panel;
+  }),
+}));
+vi.mock("./menu.js", async (actual) => ({ ...(await actual<typeof import("./menu.js")>()), ...menu }));
+const api = vi.hoisted(() => ({ sendJson: vi.fn<(url: string, body: unknown, method?: string) => Promise<Response>>() }));
+vi.mock("./api.js", async (actual) => ({ ...(await actual<typeof import("./api.js")>()), sendJson: api.sendJson }));
+const chords = vi.hoisted(() => new Map<string, () => void>());
+vi.mock("./shortcut.js", () => ({ chord: (key: string, run: () => void) => chords.set(key, run), modalOpen: () => false }));
+
+const chain = (id: string, over: Partial<ChainInfo> = {}): ChainInfo =>
+  ({ id, name: id, createdAt: 1, unread: false, waiting: 0, ...over });
+let list: ChainList;
+let current: string | null;
+const go = vi.fn();
+const refresh = vi.fn();
+let chains: typeof import("./chains.js");
+const confirm = vi.fn(() => true);
+
+beforeEach(async () => {
+  vi.resetModules(); vi.clearAllMocks(); chords.clear();
+  installPage();
+  // Laid out: the list redraws only a surface on screen.
+  vi.spyOn(FakeElement.prototype, "getClientRects").mockReturnValue([{}]);
+  vi.stubGlobal("window", { confirm });
+  list = { mode: "chain", chains: [chain("main", { waiting: 2 }), chain("ops", { createdAt: 2, head: { sessionId: "h", state: "streaming" } }),
+    chain("old", { archivedAt: 3 })] };
+  current = "main";
+  chains = await import("./chains.js");
+  chains.initChains({ list: () => list, current: () => current, go, refresh, anchor: () => document.querySelector("#chat-title")! });
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+const floated = (): FakeElement => fake(menu.panel);
+const names = (root: FakeElement) => root.querySelector("[data-list]")!.querySelectorAll(".chain-name").map((n) => n.textContent);
+const inRow = (id: string, sel: string) => floated().querySelector(`[data-chain="${id}"]`)!.querySelector(sel)!;
+const button = (root: FakeElement, text: string) => root.querySelectorAll("button").find((b) => b.textContent === text)!;
+const settled = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+const key = (input: FakeElement, k: string) => input.onkeydown?.({ key: k, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn() });
+
+// One set of rows: dot, name, what waits, the current one marked; the rail is there in chain mode only.
+it("lists the active chains in the server's order with their marks, the rail only in chain mode", () => {
+  chains.renderChains();
+  const rail = fake(document.querySelector("#chain-rail"));
+  expect(rail.hasAttribute("data-on")).toBe(true);
+  chains.openChains();
+  expect(names(floated())).toEqual(["main", "ops"]);
+  expect(inRow("main", ".chain-open").getAttribute("aria-current")).toBe("page");
+  expect(inRow("main", ".chain-open").textContent).toContain("2 waiting");
+  expect(inRow("ops", ".chain-dot").classList.contains("bg-sky-500")).toBe(true);
+  expect(inRow("main", ".chain-dot").classList.contains("bg-amber-500")).toBe(true);
+  expect(button(floated(), "Archived · 1").getAttribute("aria-expanded")).toBe("false");
+  inRow("ops", ".chain-open").onclick?.();
+  expect(go).toHaveBeenCalledWith("ops");
+  expect(menu.closeMenu).toHaveBeenCalled();
+  list = { ...list, mode: "session" };
+  chains.renderChains();
+  expect(rail.hasAttribute("data-on")).toBe(false);
+});
+
+// New chain…: ↵ posts with a pending row, a refusal stays in the field with its sentence, Esc cancels.
+it("creates a chain inline, its refusal said under the field, and navigates to it", async () => {
+  chains.openChains();
+  button(floated(), "New chain…").onclick?.();
+  let input = floated().querySelector("input")!;
+  expect(input.getAttribute("aria-label")).toBe("New chain name");
+  input.value = "design";
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: 'chain: "design" exists' }, { status: 409 }));
+  key(input, "Enter");
+  expect(names(floated())).toEqual(["design", "main", "ops"]);
+  await settled();
+  input = floated().querySelector("input")!;
+  expect(input.value).toBe("design");
+  expect(floated().textContent).toContain('chain: "design" exists');
+  api.sendJson.mockResolvedValueOnce(Response.json(chain("design"), { status: 201 }));
+  key(input, "Enter");
+  await settled();
+  expect(api.sendJson).toHaveBeenLastCalledWith("/api/chains", { name: "design" });
+  expect(refresh).toHaveBeenCalled();
+  expect(go).toHaveBeenCalledWith("design");
+  // ⌘⇧O takes the docked rail's field when the rail is on screen; Esc puts the button back.
+  const rail = fake(document.querySelector("#chain-rail"));
+  chords.get("shift+o")!();
+  expect(menu.panel).toBeNull();
+  input = rail.querySelector("input")!;
+  key(input, "Escape");
+  expect(rail.querySelector("input")).toBeNull();
+  expect(button(rail, "New chain…")).toBeDefined();
+});
+
+// A row's ⋯: Rename in place; Archive asks with the open count, then forces, the pane leaving an archived current chain.
+it("renames in place and archives after the open count's confirm", async () => {
+  chains.openChains();
+  const more = () => inRow("main", ".chain-more");
+  more().onclick?.();
+  expect(more().getAttribute("aria-expanded")).toBe("true");
+  button(floated(), "Rename").onclick?.();
+  const input = floated().querySelector("input")!;
+  expect(input.value).toBe("main");
+  api.sendJson.mockResolvedValueOnce(Response.json(chain("main", { name: "Home" })));
+  input.value = "Home";
+  key(input, "Enter");
+  await settled();
+  expect(api.sendJson).toHaveBeenLastCalledWith("/api/chains/main", { name: "Home" }, "PATCH");
+  expect(floated().querySelector("input")).toBeNull();
+
+  more().onclick?.();
+  api.sendJson
+    .mockResolvedValueOnce(Response.json({ error: "chain: main has 3 open — /status first", open: 3 }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json(chain("main", { archivedAt: 9 })));
+  button(floated(), "Archive").onclick?.();
+  await settled();
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining("3 open items"));
+  expect(api.sendJson).toHaveBeenLastCalledWith("/api/chains/main", { archived: true, force: true }, "PATCH");
+  expect(go).toHaveBeenCalledWith("ops");
+
+  // Declined: nothing forced. The last active chain's refusal is said in the list.
+  confirm.mockReturnValueOnce(false);
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: ops has 1 open", open: 1 }, { status: 409 }));
+  inRow("ops", ".chain-more").onclick?.();
+  button(floated(), "Archive").onclick?.();
+  await settled();
+  expect(api.sendJson).toHaveBeenCalledTimes(4);
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: ops is the last active chain" }, { status: 400 }));
+  button(floated(), "Archive").onclick?.();
+  await settled();
+  expect(floated().textContent).toContain("chain: ops is the last active chain");
+});
+
+it("folds the archived chains under Archived · N, each with Unarchive", async () => {
+  chains.openChains();
+  button(floated(), "Archived · 1").onclick?.();
+  const back = floated().querySelector("[aria-label='Unarchive old']")!;
+  api.sendJson.mockResolvedValueOnce(Response.json(chain("old")));
+  back.onclick?.();
+  await settled();
+  expect(api.sendJson).toHaveBeenLastCalledWith("/api/chains/old", { archived: false }, "PATCH");
+  expect(refresh).toHaveBeenCalled();
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: "no chain old" }, { status: 404 }));
+  expect(await chains.unarchive("old")).toBe("no chain old");
+});
+
+// Off keeps the current chain and lists what it would archive before forcing it.
+it("turns chain mode off after confirming the chains it archives, keeping the current one", async () => {
+  api.sendJson
+    .mockResolvedValueOnce(Response.json({ error: "chain mode off archives ops", chains: [{ id: "ops", name: "ops", open: 2, waiting: 1 }] }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json(list));
+  expect(await chains.setChainMode(false)).toBeNull();
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining("ops · 2 open · 1 waiting on you"));
+  expect(api.sendJson.mock.calls.map(([, body]) => body)).toEqual([{ chain: false, keep: "main" }, { chain: false, keep: "main", force: true }]);
+  confirm.mockReturnValueOnce(false);
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: "x", chains: [{ id: "ops", name: "ops", open: 0, waiting: 0 }] }, { status: 409 }));
+  expect(await chains.setChainMode(false)).toBeNull();
+  expect(api.sendJson).toHaveBeenCalledTimes(3);
+  api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: keep is not active" }, { status: 400 }));
+  expect(await chains.setChainMode(false)).toBe("chain: keep is not active");
+});
+
+it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode only", () => {
+  chords.get("shift+]")!();
+  expect(go).toHaveBeenLastCalledWith("ops");
+  chords.get("shift+[")!();
+  expect(go).toHaveBeenLastCalledWith("ops");
+  current = "ops";
+  chords.get("shift+]")!();
+  expect(go).toHaveBeenLastCalledWith("main");
+  list = { ...list, mode: "session" };
+  chords.get("shift+]")!();
+  expect(go).toHaveBeenCalledTimes(3);
+});

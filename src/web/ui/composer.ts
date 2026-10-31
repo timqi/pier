@@ -38,6 +38,10 @@ interface ComposerDeps {
   item?: () => string | null;
   /** The head a continuous send landed on is not the one on screen. */
   headMoved?: () => void;
+  /** The chain the conversation's sends go to. */
+  chain?: () => string | null;
+  /** A `/chain` command named another chain: the pane goes there. */
+  switched?: (chainId: string) => void;
 }
 
 let deps: ComposerDeps;
@@ -551,7 +555,8 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
       appendTurn("user", text, false, Date.now());
       scrollBottom(true);
     }
-    const res = await sendJson(continuous ? "/api/continuous/messages" : `/api/sessions/${id}/messages`, { text, mode });
+    const chain = continuous ? deps.chain?.() : null;
+    const res = await sendJson(continuous ? "/api/continuous/messages" : `/api/sessions/${id}/messages`, { text, mode, ...(chain ? { chain } : {}) });
     if (!res.ok) {
       // The body names the cause when there is one — a session that cannot open, say.
       // After the reload, which wipes the pane an error row would go into.
@@ -559,8 +564,9 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
       if (id) await deps.reload(id);
       appendTurn("error", why);
     } else if (continuous) {
-      const { sessionId } = (await res.json()) as { sessionId: string };
-      if (sessionId !== id) deps.headMoved?.();
+      const sent = (await res.json()) as { sessionId?: string; chainId?: string; switched?: unknown };
+      if (sent.switched && sent.chainId) deps.switched?.(sent.chainId);
+      else if (sent.sessionId !== id) deps.headMoved?.();
     }
   } finally {
     if (label === undefined) sending = false;

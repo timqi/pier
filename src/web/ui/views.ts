@@ -12,12 +12,13 @@ interface ViewsDeps {
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
-  /** One of the continuous conversation's sessions, which its route names instead. */
+  /** One of the current chain's sessions, which its route names instead. */
   inConversation: (id: string) => boolean;
-  openContinuous: () => void;
-  /** The conversation in one item's company (docs/design/15-item-view.md); false when there
-   *  is no head to read it from and the conversation opened instead. */
-  openItemView: (problem: string) => boolean;
+  /** The chain the conversation pane shows; null before the list answers. */
+  chainId: () => string | null;
+  /** A chain's conversation, or one item's view in it (docs/design/15-item-view.md); no chain
+   *  is the last one viewed (an item: the one chain holding it), else the first. */
+  openChain: (chain: string | null, problem: string | null) => void;
   /** The selected session's turns just came (back) on screen. */
   maybeAckRead: () => void;
 }
@@ -130,22 +131,29 @@ export function showChat(): void {
 // --- routing -----------------------------------------------------------------------
 // Hash, not path: the static file server stays a static file server.
 
-// The conversation's own route: its head session rotates, the address does not.
+// A chain's own route: its head session rotates, the address does not. `#/conversation`
+// (no chain) is a bookmark from before chains, resolved by main.ts.
 type Route =
   | { kind: "session"; id: string }
-  | { kind: "conversation" }
-  | { kind: "item"; problem: string }
+  | { kind: "conversation"; chain?: string }
+  | { kind: "item"; problem: string; chain?: string }
   | { kind: "console"; name: ConsoleName; arg?: string; query?: string };
 
 const CONVERSATION: Route = { kind: "conversation" };
+
+/** A route without its chain names the current one. */
+function chainPath(chain?: string): string {
+  const id = chain ?? deps.chainId();
+  return id ? `#/chain/${encodeURIComponent(id)}` : "#/conversation";
+}
 
 const hashOf = (r: Route): string =>
   r.kind === "session"
     ? `#/session/${encodeURIComponent(r.id)}`
     : r.kind === "conversation"
-    ? "#/conversation"
+    ? chainPath(r.chain)
     : r.kind === "item"
-    ? `#/conversation/item/${encodeURIComponent(r.problem)}`
+    ? `${chainPath(r.chain)}/item/${encodeURIComponent(r.problem)}`
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}${r.query ? `?${r.query}` : ""}`;
 
 /** Bookmarks to `#/config`, `#/channels`, `#/providers` land on the Settings tab that holds them. */
@@ -154,20 +162,26 @@ const FOLDED: Record<string, string> = { config: "files", channels: "channels", 
 function parseHash(): Route | null {
   const tail = location.hash.replace(/^#\/?/, "");
   const mark = tail.indexOf("?");
-  const [head = "", encoded, problem] = (mark < 0 ? tail : tail.slice(0, mark)).split("/");
+  const parts = (mark < 0 ? tail : tail.slice(0, mark)).split("/");
+  const [head = "", encoded] = parts;
   const query = mark < 0 ? undefined : tail.slice(mark + 1) || undefined;
   let arg: string | undefined;
+  let problem: string | undefined;
   // A hand-typed hash may not decode; that is the unknown-route fallback, not a crash.
-  try { arg = encoded ? decodeURIComponent(encoded) : undefined; } catch { return null; }
-  if (head === "conversation" && arg === "item" && problem) {
-    try { return { kind: "item", problem: decodeURIComponent(problem) }; } catch { return null; }
-  }
+  try {
+    arg = encoded ? decodeURIComponent(encoded) : undefined;
+    // `#/chain/<id>/item/<p>`, `#/conversation/item/<p>`.
+    const at = head === "chain" ? 2 : 1;
+    problem = parts[at] === "item" && parts[at + 1] ? decodeURIComponent(parts[at + 1]!) : undefined;
+  } catch { return null; }
+  if (head === "chain" && arg) return problem ? { kind: "item", problem, chain: arg } : { kind: "conversation", chain: arg };
+  if (head === "conversation" && problem) return { kind: "item", problem };
   if (FOLDED[head]) return { kind: "console", name: "settings", arg: FOLDED[head] };
   // The labels are the name list too — a route may not wait for a view to be
   // built. hasOwn, not `in`: `#/toString` is a hash anyone can type.
   if (Object.hasOwn(CONSOLE_LABELS, head)) return { kind: "console", name: head as ConsoleName, arg, query };
   if (head === "session" && arg) return { kind: "session", id: arg };
-  if (head === "conversation") return CONVERSATION;
+  if (head === "conversation" && !arg) return CONVERSATION;
   return null; // unknown or empty → the fallback in applyRoute()
 }
 
@@ -193,25 +207,24 @@ export const setItemHash = (problem: string, replace = false): void => setHash({
  *  verifies them. A bare or unknown hash is the conversation. */
 export function applyRoute(): void {
   deps.cancelNavigation();
-  let route = parseHash() ?? CONVERSATION;
+  const route = parseHash() ?? CONVERSATION;
   applyingRoute = true;
   try {
-    if (route.kind === "conversation") deps.openContinuous();
-    else if (route.kind === "item") {
-      if (!deps.openItemView(route.problem)) route = CONVERSATION;
-    }
+    if (route.kind === "conversation") deps.openChain(route.chain ?? null, null);
+    else if (route.kind === "item") deps.openChain(route.chain ?? null, route.problem);
     else if (route.kind === "session") {
       if (route.id !== deps.currentId()) deps.select(route.id);
       else showChat();
     } else {
       // An overlay over nothing yet (a reloaded #/settings): the conversation is what it closes to.
-      if (!deps.currentId()) deps.openContinuous();
+      if (!deps.currentId()) deps.openChain(null, null);
       showConsole(route.name, route.arg, route.query);
     }
   } finally {
     applyingRoute = false;
   }
-  // Name where we landed without adding a history entry: a chain member's id is the conversation.
+  // Name where we landed without adding a history entry: a chain member's id is its chain,
+  // `#/conversation` the chain it resolved to.
   if (route.kind === "conversation") setHash(CONVERSATION, true);
   else if (route.kind === "session") setHash(chatRoute(route.id), true);
 }

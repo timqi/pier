@@ -12,6 +12,7 @@ import { closedItemRow, openItemRow, paintDot, paintStatus, stageLine, stagePhra
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
 import type { ItemSummary, OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
+import type { ChainInfo } from "../types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -28,6 +29,8 @@ export interface SessionInfo {
   channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
+  /** The chain whose member launched it, which its `‹` returns to (`GET /api/sessions/:id` only). */
+  chain?: string;
   /** A feature lead's session (`pier task run --role lead`): its phase,
    *  designing with the user or building per a doc. */
   phase?: LeadPhase;
@@ -40,14 +43,21 @@ interface DrawerDeps {
   /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   currentId: () => string | null;
-  /** The continuous conversation's sessions, newest first; its row is the bar's title, not a drawer row. */
+  /** The current chain's sessions, newest first; its row is the bar's title, not a drawer row. */
   chain: () => ChainMember[];
+  /** Every chain, `GET /api/chains`: their heads are their rows in the chain list, not here. */
+  chains: () => ChainInfo[];
+  /** The chain the pane shows: its rows carry no chain tag. */
+  chainId: () => string | null;
   openContinuous: () => void;
   /** `GET /api/continuous/open`; null before it answers. */
   open: () => OpenItems | null;
-  openItem: (target: OpenItemTarget) => void;
+  /** `chain`: the item's, navigated to first when it is not the current one. */
+  openItem: (target: OpenItemTarget, chain?: string) => void;
   /** An item row's secondary action, and a closed item's click: its view. */
-  itemView: (problem: string) => void;
+  itemView: (problem: string, chain?: string) => void;
+  /** An archived chain's item row's secondary action: unarchive it and open the item there. */
+  reopen: (chain: string, problem: string) => void;
 }
 
 let deps: DrawerDeps;
@@ -122,10 +132,10 @@ const tag = (text: string, title: string): HTMLElement[] => {
   return [el];
 };
 
-/** The live sessions, less the conversation's own, which the bar stands for;
+/** The live sessions, less the conversation's own, which the bar and the chain list stand for;
  *  a finished lead stays while unread and leaves once viewed. */
-export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
-  const members = new Set(chain.map((m) => m.sessionId));
+export function inProgress(list: SessionInfo[], chain: ChainMember[], chains: ChainInfo[] = []): SessionInfo[] {
+  const members = new Set([...chain.map((m) => m.sessionId), ...chains.flatMap((c) => (c.head ? [c.head.sessionId] : []))]);
   return list.filter((s) => isLive(s) && !members.has(s.id));
 }
 
@@ -160,7 +170,16 @@ function sessionRow(s: SessionInfo, mark: Mark): OpenItemPresentation {
     metadata: [whoOf(s), `active ${agoLabel(lastActive(s))}`].filter(Boolean) };
 }
 
-const itemRow = (i: OpenItem, now: number): OpenItemPresentation => openItemPresentation(i, now);
+/** Keyed by chain too: two chains may each hold an item of the same name. */
+const itemKey = (problem: string, chain?: string): string => `item:${chain ? `${chain}/` : ""}${problem}`;
+
+const itemRow = (i: OpenItem, now: number): OpenItemPresentation => openItemPresentation(i, now, itemKey(i.problem, i.chain?.id));
+
+/** A row of another chain names it, `· archived` when it is; the current chain's says nothing. */
+function chainTag(chain: { id: string; name: string; archived?: boolean } | undefined): string | undefined {
+  if (!chain || chain.id === deps.chainId()) return undefined;
+  return chain.archived ? `${chain.name} · archived` : chain.name;
+}
 
 function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
   return { ...openItemPresentation({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" : "running" }, now, `run:${r.runId}`), direct: true };
@@ -168,11 +187,13 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
 
 const rowNodes = new Map<string, HTMLElement>();
 
-/** Items keep their own identity even when they hold the same session; only independent sessions deduplicate. */
+/** Items keep their own identity even when they hold the same session; only independent sessions deduplicate.
+ *  Waiting on you first, every chain's; then the current chain's rest, then the other chains' (§状态面板). */
 function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentation[]; sessions: SessionInfo[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
-  const sessions = inProgress(deps.sessions(), deps.chain());
+  const sessions = inProgress(deps.sessions(), deps.chain(), deps.chains());
+  const chainOf = new Map(open.items.map((i) => [itemKey(i.problem, i.chain?.id), i.chain]));
   const all = [
     ...open.items.map((i) => itemRow(i, now)),
     ...open.unlisted.map((r) => unlistedRow(r, now)),
@@ -182,15 +203,19 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
     }),
   ];
   const waits = (r: OpenItemPresentation): boolean => waitsOnYou(r.status);
-  const waiting = all.filter(waits);
+  const elsewhere = (r: OpenItemPresentation): boolean => chainTag(chainOf.get(r.key)) !== undefined;
   const keys = new Set(all.map((p) => p.key));
   for (const [key, node] of rowNodes) if (!keys.has(key)) { node.remove(); rowNodes.delete(key); }
-  const ordered = [...waiting, ...all.filter((r) => !waits(r))];
+  const rest = all.filter((r) => !waits(r));
+  const ordered = [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)];
   const rows = ordered.map((p) => {
+    const chain = chainOf.get(p.key);
     const node = openItemRow(p, {
       currentId: deps.currentId(),
-      openItem: (target) => { closeMenu(); deps.openItem(target); },
-      panelView: toView,
+      openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
+      panelView: (problem) => toView(problem, chain?.id),
+      tag: chainTag(chain),
+      ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
     }, rowNodes.get(p.key));
     rowNodes.set(p.key, node);
     return node;
@@ -212,7 +237,7 @@ let topKey: string | null = null;
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
+  `${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
 let drawn = "";
 
@@ -224,8 +249,9 @@ export function renderDrawer(): void {
   rows = got.rows;
   ordered = got.ordered;
   // The app icon counts a turn to look at — an unread one —
-  // plus the conversation's own unread reply, which the bar stands for instead of a row.
-  setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + (headSession()?.unread ? 1 : 0));
+  // plus each chain's unread head reply, which the bar and the chain list stand for instead of a row.
+  const heads = deps.chains().length ? deps.chains().filter((c) => c.unread).length : headSession()?.unread ? 1 : 0;
+  setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + heads);
   paintLead();
   if (list?.isConnected && !list.closest("[inert]")) {
     if (!rows.length) closeMenu();
@@ -270,7 +296,7 @@ function fill(into: HTMLElement): void {
   into.scrollTop = top;
 }
 
-const toView = (problem: string): void => { closeMenu(); deps.itemView(problem); };
+const toView = (problem: string, chain?: string): void => { closeMenu(); deps.itemView(problem, chain); };
 
 // --- search -------------------------------------------------------------------------------
 
@@ -290,10 +316,12 @@ async function search(q: string): Promise<void> {
   if (!got) found = null;
   else if (!got.ok) found = [note(got.error, "text-red-600")];
   else {
-    const open = new Set(got.value.items.filter((i) => i.closedAt === undefined).map((i) => `item:${i.problem}`));
+    const open = new Set(got.value.items.filter((i) => i.closedAt === undefined).map((i) => itemKey(i.problem, i.chain)));
     const closed = got.value.items.filter((i) => i.closedAt !== undefined);
+    const chains = new Map(deps.chains().map((c) => [c.id, { id: c.id, name: c.name, archived: c.archivedAt !== undefined }]));
     found = [...rows.filter((r) => open.has(r.dataset.rowKey ?? "")),
-      ...(closed.length ? [note("Closed"), ...closed.map((i) => closedItemRow(i.problem, i.closedAt!, toView))] : [])];
+      ...(closed.length ? [note("Closed"), ...closed.map((i) =>
+        closedItemRow(i.problem, i.closedAt!, (problem) => toView(problem, i.chain), chainTag(chains.get(i.chain))))] : [])];
     if (!found.length) found = [note("No item matches.")];
   }
   fill(list);

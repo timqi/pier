@@ -201,30 +201,39 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - Two floating buttons stack above the dock's right end: ↓ (`滚到底部`) shows
   once follow is released away from the tail, wears a dot when a message
   lands after that — a turn's reply once, however its row is redrawn — and its click scrolls smoothly to the end and re-arms follow;
-  ⌂ (`回到主会话`) shows off the conversation and opens `#/conversation`, as ‹ does.
+  ⌂ (`回到主会话`) shows off the conversation and opens the current chain's `#/chain/<id>`.
 
 ### Bar and status panel (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar, the only chrome: the transcript runs the full pane under it. Pier shows its title (opens Session info); a child session shows ‹ (back to `#/conversation`, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
-- Right of the title the bar leads with the panel's first row — the most urgent — as its topic dot, title, status mark and phrase, each truncated; with several rows a `1/N` counter before it, at a place that does not move with the lead's length, cycles the lead through them, and a new first row takes the lead back. Below md it is the status glyph and the row count only. With no rows the area is empty and the panel cannot open. The app icon badge counts only a turn to look at — an unread turn (**Unread** above) outside the conversation — plus the conversation's own unread reply.
+- The single column has one bar, the only chrome: the transcript runs the full pane under it. In session mode the conversation's title is Pier (opens Session info); in chain mode it is `<chain name> ▾` (` · archived` on an archived chain), which opens the chain list (**Chains** below). A child session shows ‹ (back to the chain whose run launched it — the `chain` of `GET /api/sessions/:id` — else the current one, wearing the head's dot when it is streaming or unread), its title — the run's `--name` — and the lead's `phase` tag.
+- Right of the title the bar leads with the panel's first row — the most urgent — as its topic dot, title, status mark and phrase, each truncated; with several rows a `1/N` counter before it, at a place that does not move with the lead's length, cycles the lead through them, and a new first row takes the lead back. Below md it is the status glyph and the row count only. With no rows the area is empty and the panel cannot open. The app icon badge counts only a turn to look at — an unread turn (**Unread** above) outside the conversation — plus each chain's unread head reply (`GET /api/chains` `unread`); no chain's head is a row.
 - Context chip: Pier shows only its used tokens, amber ≥ 70% and red ≥ 90% of `rotateAt` (`GET /api/continuous`), the size past which the next message starts a new session; Session info reads `used/rotateAt`. A child session shows model · reasoning · used tokens, toned against `compactAt`, and they open model selection; below md its context shows only from 70%.
-- The ⋯ menu contains Session info, System prompt, Browse files, Model & reasoning…, and Settings. Session info, System prompt and model actions are disabled before the first reply.
-- The status panel is the one place the web shows what is going on: one flat list, no group heads, the rows `waiting on you` first and the rest after in `/status`'s order ([10 §Open items](10-continuous-session.md#open-items)).
-- Marker items are keyed by problem, unlisted runs by full run ID, and independent live sessions by session ID; these identities occupy separate namespaces, so equal names never merge rows. Items sharing a target remain distinct, while a session held by an item or unlisted run has no extra independent row. A session is live while streaming, while a run targets it or while runs it launched are in flight, or while its last turn is unread.
+- The ⋯ menu contains Session info, System prompt, Browse files, Model & reasoning…, Chain mode (its hint `On`/`Off`) and Settings. Session info, System prompt and model actions are disabled before the first reply. Chain mode off sends `PUT /api/chains/mode {chain: false, keep: <current>}`; a 409 naming other active chains is a `confirm()` listing each as `<name> · N open · N waiting on you`, then the same with `force`; a refusal is an error row.
+- The status panel is the one place the web shows what is going on: one flat list, no group heads, every chain's items: the rows `waiting on you` first, then the current chain's, then the other chains', each in `/status`'s order ([10 §Open items](10-continuous-session.md#open-items)). A row of another chain carries a chip with its chain's name (` · archived` when it is); a click opens the item in its chain, switching the pane there first; an archived chain's row adds **Open in its chain**, which unarchives it and opens the item there.
+- Marker items are keyed by chain and problem, unlisted runs by full run ID, and independent live sessions by session ID; these identities occupy separate namespaces, so equal names never merge rows. Items sharing a target remain distinct, while a session held by an item or unlisted run has no extra independent row. A session is live while streaming, while a run targets it or while runs it launched are in flight, or while its last turn is unread.
 - `core/open-items.ts` owns the shared title, status, stage, time, goal and worker wording; `web/ui/open-items.ts` renders it for the panel and command cards. Titles prefer the task layer's creation name, then a valid run name, then problem, and clamp to two lines; IDs never name missing runs.
 - Rows show the topic dot, title, a second line and useful metadata, with no right-hand badge. The second line, like the bar's lead, opens on a status mark — glyph and word in one tone: amber `waiting on you`, sky `in progress` (the still running dot), neutral `queued`, green `wrapping up`, red `failed` (the `stopped` status; the metadata names the run's state) — then the stage's phrase: its first clause, cut at `?` (kept), `。；，` or `. `/`, `, a wait's place and age dropped. The whole second line, `<status> · <stage>`, and the problem when the title differs are the control's `title` tooltip. Grouped command cards keep the glyph and omit the repeated waiting word.
 - A row is one control: dot, title, second line and metadata ([10 §Open items](10-continuous-session.md#open-items)). Independent sessions use their existing mark and title. An item's row carries one secondary action beside it, its item view (**Item view** in the chat pane), 44px on a coarse pointer; the row's click is unchanged.
-- A search field tops the panel: typing calls `GET /api/continuous/items?q=<words>` → `{items: [{problem, aliases, closedAt?, updatedAt}]}` (every item, closed ones too, newest first, at most 50), debounced 250ms; the list becomes the matching open items' own rows, then a `Closed` group of rows reading `closed <age> ago` (`agoLabel`), whose click opens the item view; `No item matches.` when none, the error in place when the read fails; an empty field restores the panel's rows. The field takes focus on open with a fine pointer; on a coarse one the first row does, so no keyboard rises over the list.
+- A search field tops the panel: typing calls `GET /api/continuous/items?q=<words>` → `{items: [{problem, aliases, closedAt?, updatedAt}]}` (every item, closed ones too, newest first, at most 50), debounced 250ms; the list becomes the matching open items' own rows, then a `Closed` group of rows reading `closed <age> ago` (`agoLabel`), with the chain chip as an open row's, whose click opens the item view in its chain; `No item matches.` when none, the error in place when the read fails; an empty field restores the panel's rows. The field takes focus on open with a fine pointer; on a coarse one the first row does, so no keyboard rises over the list.
 - Re-read on `sessions-changed`, `task-run-changed`, `open-items-changed`, and a state change of a session an item holds; reconciliation retains row controls, focus and scroll by identity.
 - Main owns item navigation, to where the item happened (`openItemDestination`, `core/open-items.ts`): `designSessionId`, then `waitsIn`; a `waiting on you` item with neither is answered in the chat, so the head's latest on-screen topic, falling back to the newest run's session; any other item with a run opens its newest run's session; with no run, the head's tail. Topic lookup waits for a successful head snapshot; HTTP or network failure stays visible and stops fallback, and a later item, session, Console or browser navigation cancels the earlier intent. Unlisted runs and independent sessions open their session directly. A row is current when its click lands on a session, not a topic, and that session is shown. The panel closes on navigation; viewing marks a session read. Reload follows the hash, a bare or unknown hash opens the conversation, and a child sends to `POST /api/sessions/:id/messages`.
+- Routes (`views.ts`): `#/chain/<id>` is a chain's conversation and `#/chain/<id>/item/<problem>` its item view; `#/conversation` lands on the last chain viewed (`localStorage` `pier.chain`) while it is active, else the active chain created first; `#/conversation/item/<problem>` on the one active chain whose items (`GET /api/continuous/items?q=`) have that problem or alias, else that first chain. Opening a chain reads `GET /api/continuous?chain=<id>`, then its head's `/history`; a chain that is not there is its 404's error line in the pane, no other chain opened in its place; another chain's head named by a session route (a Web Push) opens its chain.
 - The panel is a 32rem popover under the lead item at widths of 640px and above, and a bottom sheet below 640px, with `menu.ts` focus, inertness and backdrop behavior. The lead item or ⌘⇧P opens it and a second press or a click outside closes it; ↑↓ walk the rows' controls from the field or a row, ↵ opens, Esc closes and returns focus to the lead item.
 - The lead and the rows share `drawer.ts` state; session and open-item changes refresh the panel.
+
+### Chains (`chains.ts`)
+
+- One list, two surfaces: floated from the bar's title as a popover at 640px and above, a bottom sheet below (`menu.ts`), and docked from 80rem in chain mode as a 15rem left rail beside the column, hidden with the bar.
+- Rows are the active chains as `GET /api/chains` orders them (latest user message first): a dot — sky while the head streams, amber while something waits or its reply is unread —, the name clamped to two lines, `N waiting` when any; the current one is `aria-current`. A row's ⋯ (shown on hover or focus with a fine pointer, always on a coarse one, where rows and ⋯ are 44px targets) offers Rename, an inline field, and Archive: `PATCH /api/chains/:id {archived: true}`, a 409 with `open` a `confirm()` naming the count, then `force`; archiving the current chain moves the pane to the active chain created first.
+- Below the rows, New chain… becomes an inline field: ↵ posts `POST /api/chains`, its row drawn at once and the pane moved to the chain on 201; a refusal stays under the field with its text; Esc restores the button. `Archived · N` folds the archived chains, each with Unarchive. A refusal of either is said in the list.
+- Keys: ↑↓ walk the rows, ↵ opens, Esc closes the floated list; ⌘⇧[ and ⌘⇧] cycle the active chains, wrapping; ⌘⇧O opens New chain…'s field — the rail's when it is on screen.
+- Re-read with the sessions on `chains-changed` and `sessions-changed`.
 
 ### Menus (`menu.ts`, `model-picker.ts`)
 
 - One menu primitive allows one open panel at a time. Outside pointerdown, wheel or focus, Esc, and a scroll that moves its anchor close it; the page's own scrolling (the transcript pinning a reply) does not. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
-- The bar menu provides Session info, System prompt, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- The bar menu provides Session info, System prompt, Browse files, Model & reasoning…, Chain mode and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 - System prompt (`system-prompt.ts`) is a read-only modal dialog: the estimated total, one block per source with its label, path and share, and a Copy of the whole text; it opens before the read lands and says in place why it has nothing to show. ✕ or Esc closes it.
 
@@ -325,12 +334,12 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (**Item view** below). On a coarse pointer the tag's hit area is 44px tall, like a chip's,
   without growing the tag.
 - **Item view** (`item-view.ts`, [15](15-item-view.md)):
-  `#/conversation/item/<encodeURIComponent(problem)>` is the conversation's
+  `#/chain/<id>/item/<encodeURIComponent(problem)>` is the chain's
   pane at the head in one item's company; the hash is the state, so reload
   reopens it. Opened from a topic tag, a status panel row's view action, or a
   closed item found by the panel's search.
-  - Read: `GET /api/continuous/items/:problem/turns` →
-    `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns: [{index, turn}]}], epoch, lastSeq}`,
+  - Read: `GET /api/continuous/items/:chain/:problem/turns` →
+    `{chain, problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns: [{index, turn}]}], epoch, lastSeq}`,
     read before the head's `/history`; each session's rows drawn in chain
     order as the pane draws a session, the seed's divider included, a row's
     steps fetched by its own session and `index`; an earlier session's or a
@@ -347,7 +356,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
     conversation button; any other failure reads its error the same way.
   - Bar: the item's dot (`topicColour`) and problem as the title, `×`
     beside it, and ‹; `×`, ‹ and Esc (after a running turn's Stop) return to
-    `#/conversation` at its tail.
+    the chain at its tail.
   - Composer: a send is `withItem(problem, text)` — `[item: <problem>]` on
     the first line, above a quote block — to `POST /api/continuous/messages`;
     a chat command or skill ask goes unstamped. Every user bubble and queue
@@ -394,7 +403,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   stands down meanwhile. Paging keeps the current event stream active until both reads complete;
   a newer navigation or session load cancels the page before history changes or redraw.
   Each of a page's two reads gives up after 10s; a head read that failed or gave up is redone as a plain load with its loading state.
-  Sends take the alias route; a send whose 202 names
+  Sends take the alias route with the pane's `chain`; a 202 with `switched` moves the pane to that chain; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
   the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a move in progress never holds a later re-list, a failed re-list retries itself (1s doubling to 30s) until one succeeds, reported once per distinct failure meanwhile, and a head snapshot answered `readonly` — rotated past since the chain was read — re-lists and follows instead of drawing, an error row in the pane while the chain cannot name the new head yet; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
   folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
@@ -642,7 +651,8 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   `src/core/session.testkit.ts`). Cover: message → router → session call; SSE replay from
   `Last-Event-ID`; abort route.
 - Frontend: Vitest in `src/web/ui/*.test.ts` on the shared fake DOM
-  `src/web/ui/dom.testkit.ts`, plus browser interaction checks
+  `src/web/ui/dom.testkit.ts` (chains: `chains.test.ts` the list, `views.test.ts` the
+  hashes, `main.test.ts` navigation, `drawer.test.ts` tags and order), plus browser interaction checks
   for layout, edit lifecycle, overlays, disclosures and replay. Use the UI/UX
   guide's validation matrix; state browser coverage explicitly.
 

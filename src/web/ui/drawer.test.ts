@@ -35,16 +35,19 @@ let sessions: Row[] = [];
 let chain: ChainMember[] = [];
 let current: string | null = null;
 let open: import("../../tasks/types.js").OpenItems | null = null;
+let chains: import("../types.js").ChainInfo[] = [];
+let chainId: string | null = null;
 const openItem = vi.fn();
 const itemView = vi.fn();
+const reopen = vi.fn();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
   doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   drawer = await import("./drawer.js");
-  sessions = []; chain = []; current = null; open = null;
+  sessions = []; chain = []; current = null; open = null; chains = []; chainId = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
-    openContinuous: vi.fn(), open: () => open, openItem, itemView });
+    chains: () => chains, chainId: () => chainId, openContinuous: vi.fn(), open: () => open, openItem, itemView, reopen });
 });
 afterEach(() => vi.restoreAllMocks());
 const lead = () => doc.querySelector("#status-item")!;
@@ -160,13 +163,13 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
-  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }));
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
   expect(menu.closeMenu).toHaveBeenCalled();
   drawer.openDrawer();
   const view = item("item:auth").querySelector(".item-view-open")!;
   expect(view.getAttribute("aria-label")).toBe("Item view — auth review");
   view.onclick?.();
-  expect(itemView).toHaveBeenCalledWith("auth");
+  expect(itemView).toHaveBeenCalledWith("auth", undefined);
 });
 
 it("keeps controls and focus on problem identity across title and state refreshes", () => {
@@ -184,7 +187,7 @@ it("keeps controls and focus on problem identity across title and state refreshe
   expect(doc.activeElement).toBe(control);
   expect(second.querySelector(".open-item-title")!.textContent).toBe("short");
   second.querySelector(".session-open")!.onclick?.();
-  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "second", runs: [{ runId: "r2", targetSessionId: "s-r" }] }));
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "second", runs: [{ runId: "r2", targetSessionId: "s-r" }] }), undefined);
   expect(second.querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
@@ -211,7 +214,7 @@ it("retains same-titled designs on refresh, focus and navigation", () => {
     const node = item(`item:${id}`);
     node.querySelector(".session-open")!.onclick?.();
     expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: id, designSessionId: id,
-      runs: [{ runId: id === "first" ? "followup" : `root-${id}`, targetSessionId: id }] }));
+      runs: [{ runId: id === "first" ? "followup" : `root-${id}`, targetSessionId: id }] }), undefined);
   }
 });
 
@@ -234,7 +237,7 @@ it("forwards design and waiting entrances without inferring a current session fr
   drawer.renderDrawer(); drawer.openDrawer();
   const button = panelRows()[0]!;
   button.onclick?.();
-  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }));
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }), undefined);
   expect(button.getAttribute("aria-current")).toBe("page");
   expect(shown("#status-item-title")).toBe("first");
 });
@@ -260,7 +263,7 @@ it("opens the panel from the lead and ⌘⇧P, closing on a second press", () =>
   expect(chords.get("shift+p")![1]).toBeTypeOf("function");
   chords.get("shift+p")![0](); expect(menu.openPanel).toHaveBeenCalledTimes(2);
   panelRows()[1]!.onclick?.();
-  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "a", targetSessionId: "a" }] }));
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "a", targetSessionId: "a" }] }), undefined);
 });
 
 
@@ -302,7 +305,7 @@ it("searches every item as the user types, closed ones under Closed with their a
   expect(list.children.map((li) => li.textContent)).toEqual([expect.stringContaining("auth"), "Closed", "auth v1closed 3h ago"]);
   expect(list.children[0]).toBe(item("item:auth"));
   item("closed:auth v1").querySelector(".session-open")!.onclick?.();
-  expect(itemView).toHaveBeenCalledWith("auth v1");
+  expect(itemView).toHaveBeenCalledWith("auth v1", undefined);
   expect(menu.closeMenu).toHaveBeenCalled();
   // An emptied field gives the panel its own rows back.
   drawer.openDrawer();
@@ -313,5 +316,66 @@ it("searches every item as the user types, closed ones under Closed with their a
   again.oninput?.(new Event("input"));
   await vi.advanceTimersByTimeAsync(300);
   expect(labels()).toEqual(["auth", "deploy"]);
+  vi.useRealTimers();
+});
+
+// Every chain's items, tagged by chain where it is not the current one: waiting first across chains,
+// then this chain's, then the others' (§状态面板); an archived chain's offers to reopen it.
+it("tags other chains' rows, orders this chain's before them, and reopens an archived chain's item", () => {
+  const c = (id: string, name: string, archived = false) => ({ id, name, archived });
+  chainId = "a";
+  open = { items: [
+    { problem: "other", stage: "", status: "running", runs: [], chain: c("b", "Ops") },
+    { problem: "here", stage: "", status: "running", runs: [], chain: c("a", "Main") },
+    { problem: "asks", stage: "", status: "waiting on you", runs: [], chain: c("b", "Ops") },
+    { problem: "old", stage: "", status: "running", runs: [], chain: c("z", "Past", true) },
+  ], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  expect(labels()).toEqual(["asks", "here", "other", "old"]);
+  const tag = (key: string) => item(key).querySelector(".open-item-chain")!;
+  expect(tag("item:a/here").classList.contains("hidden")).toBe(true);
+  expect([tag("item:b/asks").textContent, tag("item:z/old").textContent]).toEqual(["Ops", "Past · archived"]);
+  item("item:b/other").querySelector(".session-open")!.onclick?.();
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "other" }), "b");
+  drawer.openDrawer();
+  item("item:b/other").querySelector(".item-view-open")!.onclick?.();
+  expect(itemView).toHaveBeenLastCalledWith("other", "b");
+  drawer.openDrawer();
+  const reopenButton = (key: string) => item(key).querySelector(".open-item-reopen")!;
+  expect(reopenButton("item:b/other")).toBeNull();
+  expect(reopenButton("item:z/old").textContent).toBe("Open in its chain");
+  reopenButton("item:z/old").onclick?.();
+  expect(reopen).toHaveBeenCalledWith("z", "old");
+});
+
+// Every chain's head reply counts on the app icon, and no head is an In progress row.
+it("counts each chain's unread head on the badge and leaves every head off the list", () => {
+  const info = (id: string, head: string, unread: boolean) =>
+    ({ id, name: id, createdAt: 1, unread, waiting: 0, head: { sessionId: head, state: "idle" as const } });
+  chains = [info("a", "ha", true), info("b", "hb", true), info("c", "hc", false)];
+  sessions = [row("ha", { unread: true }), row("hb", { unread: true }), row("x", { unread: true })];
+  drawer.renderDrawer();
+  expect(badge).toHaveBeenLastCalledWith(3);
+  expect(drawer.inProgress(sessions, chain, chains).map((s) => s.id)).toEqual(["x"]);
+});
+
+// A closed item the search found in another chain carries that chain's tag, and opens there.
+it("tags a found closed item with its chain", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  chainId = "a";
+  chains = [{ id: "a", name: "Main", createdAt: 1, unread: false, waiting: 0 }, { id: "b", name: "Ops", createdAt: 2, archivedAt: 3, unread: false, waiting: 0 }];
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [
+    { chain: "b", problem: "deploy", aliases: [], closedAt: 1, updatedAt: 1 }, { chain: "a", problem: "auth", aliases: [], closedAt: 1, updatedAt: 1 },
+  ] }) })));
+  open = { items: [{ problem: "live", stage: "", status: "running", runs: [] }], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  const field = doc.querySelector("input[type='search']")!;
+  field.value = "d";
+  field.oninput?.(new Event("input"));
+  await vi.advanceTimersByTimeAsync(300);
+  const tag = (key: string) => item(key).querySelector(".open-item-chain")!;
+  expect([tag("closed:deploy").textContent, tag("closed:auth").classList.contains("hidden")]).toEqual(["Ops · archived", true]);
+  item("closed:deploy").querySelector(".session-open")!.onclick?.();
+  expect(itemView).toHaveBeenLastCalledWith("deploy", "b");
   vi.useRealTimers();
 });

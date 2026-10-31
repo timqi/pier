@@ -38,7 +38,7 @@ beforeEach(async () => {
   Object.assign(state, { chain: [], current: null, items: null });
   drawer.initDrawer({
     sessions: () => sessions, currentId: () => state.current, chain: () => state.chain, openContinuous, open: () => state.items,
-    openItem, itemView: vi.fn(),
+    openItem, itemView: vi.fn(), chains: () => [], chainId: () => null, reopen: vi.fn(),
   });
 });
 
@@ -93,9 +93,9 @@ it("lists each open item once, what waits on you first, with who runs it and whe
   expect(byId("item:open items 视图").querySelector(".open-item-meta")!.textContent).toContain("workers: 1 running");
   expect(byId("item:model menu").textContent).toContain("not in the ledger");
   byId("item:auth review").querySelector("button")!.onclick?.();
-  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "auth review" }));
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "auth review" }), undefined);
   byId("run:q1").querySelector("button")!.onclick?.();
-  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "q1", targetSessionId: null }] }));
+  expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ direct: true, runs: [{ runId: "q1", targetSessionId: null }] }), undefined);
 });
 
 it("adds no row when nothing is open, and does not open with nothing to list", () => {
