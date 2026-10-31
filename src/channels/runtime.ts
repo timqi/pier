@@ -239,7 +239,8 @@ export class ChannelRuntime {
     let view: StatusView;
     try {
       const current = this.current();
-      view = { ...viewOf(current.id), others: this.chain.chains.list().filter((c) => c.id !== current.id).flatMap((c) => other(c, viewOf(c.id))) };
+      const own = viewOf(current.id);
+      view = { ...own, snapshot: { ...own.snapshot, chain: current.name }, others: this.chain.chains.list().filter((c) => c.id !== current.id).flatMap((c) => other(c, viewOf(c.id))) };
     } catch (err) {
       return this.log(`status: the open items could not be read: ${String(err)}`);
     }

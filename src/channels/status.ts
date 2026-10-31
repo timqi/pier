@@ -51,8 +51,8 @@ export interface StatusLayout<E> {
 /** The sidebar's groups, waiting first, laid out while they fit the budget; the
  *  items past it are counted, never cut mid-item. */
 export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] {
-  const out: E[] = [];
-  let spent = 0;
+  const out: E[] = view.snapshot.chain === undefined ? [] : layout.heading(`Chain: ${view.snapshot.chain}`);
+  let spent = layout.cost(out);
   let left = view.snapshot.items.length;
   for (const group of openItemGroups(view.snapshot.items)) {
     const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
@@ -107,7 +107,8 @@ export class StatusMessage<B = string> {
    *  something is open; false — nothing open, no view yet, or the post failed —
    *  leaves the answer to the note. */
   async answer(chatId: string, text: string, snapshot?: OpenItemsSnapshot): Promise<boolean> {
-    if (this.last?.chatId !== chatId || (text === NOTHING_OPEN && !this.last.view.others?.length)) return false;
+    // `/status`'s text names its chain, so the snapshot says whether anything is open.
+    if (this.last?.chatId !== chatId || ((snapshot ? !snapshot.items.length : text === NOTHING_OPEN) && !this.last.view.others?.length)) return false;
     const before = this.messageId(chatId);
     await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, true);
     // A failed re-post keeps the old row, so only a new id is the one it posted.

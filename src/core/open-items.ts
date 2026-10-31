@@ -122,7 +122,7 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
   const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
   const strings = (v: unknown): boolean => Array.isArray(v) && v.every((s) => typeof s === "string");
   const optional = (v: Record<string, unknown>, k: string): boolean => v[k] === undefined || typeof v[k] === "string";
-  return record(value) && value.version === 1 && (value.unmatched === undefined || strings(value.unmatched)) && Array.isArray(value.items) && value.items.every((i: unknown) =>
+  return record(value) && value.version === 1 && (value.unmatched === undefined || strings(value.unmatched)) && optional(value, "chain") && Array.isArray(value.items) && value.items.every((i: unknown) =>
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
     && optional(i, "designSessionId") && optional(i, "waitsIn") && (i.direct === undefined || typeof i.direct === "boolean")

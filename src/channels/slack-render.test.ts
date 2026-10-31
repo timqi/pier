@@ -209,6 +209,11 @@ describe("statusMessage", () => {
     expect(sent.blocks.slice(-2)).toEqual([context("*Unmatched done · 1*"), section("*fix &lt;parser&gt;*")]);
   });
 
+  it("names its chain over the items", () => {
+    const sent = statusMessage({ text: "", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "pier" } });
+    expect(sent.blocks.slice(0, 3)).toEqual([context("_▤ open items_"), context("*Chain: pier*"), context("*In progress · 1*")]);
+  });
+
   // docs/plans/30-multi-chain.md §IM
   it("ends on a line per other chain, an archived one tagged", () => {
     const sent = statusMessage({ ...view([item("Docs", "queued", "")]), others: [

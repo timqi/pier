@@ -199,7 +199,8 @@ final move.
   included. A card left behind meanwhile is reconciled by the first refresh
   after the chat speaks again.
 - The status message is `▤ open items` in the platform's emphasis over the
-  view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
+  view's snapshot, one per home chat, headed `Chain: <name>` — the current
+  chain's, the first line of `/status`'s text too — and laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
   `Waiting on you · N`, `In progress · N`, `Other open · N`; per item the title in
   bold with its status label as a tag (`Queued`, `Stopped`, …; none while

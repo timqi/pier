@@ -408,7 +408,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a move in progress never holds a later re-list, a failed re-list retries itself (1s doubling to 30s) until one succeeds, reported once per distinct failure meanwhile, and a head snapshot answered `readonly` — rotated past since the chain was read — re-lists and follows instead of drawing, an error row in the pane while the chain cannot name the new head yet; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
   folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
   a `/status` answer uses the same solid card material and shared open-item rows,
-  grouped with counts under `Waiting on you`, `In progress` and `Other open`.
+  headed `Chain: <name>` (its snapshot's `chain`), grouped with counts under `Waiting on you`, `In progress` and `Other open`.
   Its optional versioned `origin.statusSnapshot` fixes text, times and full navigation targets at send time;
   `agent/events.ts` validates it on replay, logging malformed snapshots and showing original text with a fallback notice.
   Old text cards retain `origin.sessions` links: full run IDs match exactly, and a shortened prefix links only when unique, with an ambiguity notice otherwise;

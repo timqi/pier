@@ -319,6 +319,7 @@ describe("ChannelRuntime", () => {
       await rt.openItems((id) => ({ text: id, snapshot: { version: 1, items: (of[id] ?? []).map(item) } }));
       expect(views).toEqual([expect.objectContaining({
         text: "d",
+        snapshot: expect.objectContaining({ chain: "Design" }),
         others: [
           { name: "Main", waiting: 1, inProgress: 2, archived: false },
           { name: "Old", waiting: 1, inProgress: 0, archived: true },

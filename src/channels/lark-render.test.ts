@@ -117,6 +117,13 @@ describe("statusCard", () => {
     ]);
   });
 
+  it("names its chain over the items", () => {
+    const sent = statusCard({ text: "x", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "pier" } });
+    expect(sent.body.elements.slice(0, 3).map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
+      "*▤ open items*", "<font color='grey'>Chain: pier</font>", "<font color='grey'>In progress · 1</font>",
+    ]);
+  });
+
   // docs/plans/30-multi-chain.md §IM
   it("ends on a line per other chain, an archived one tagged", () => {
     const sent = statusCard({ ...view([item("Docs", "queued", "")]), others: [

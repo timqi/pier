@@ -221,6 +221,8 @@ export interface OpenItemsSnapshot {
   items: OpenItemPresentation[];
   /** The head's `<done>` keys that closed no item, still owed a resend. */
   unmatched?: string[];
+  /** The name of the chain the items are in, where the reader must tell chains apart. */
+  chain?: string;
 }
 
 /** One read produces the compact answer, complete seed and fixed history content. */
