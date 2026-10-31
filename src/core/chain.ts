@@ -48,6 +48,8 @@ interface ChainDeps {
   chains: Chains;
   /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`. */
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
+  /** The session that launched run `runId`; null for a cron or watch run, which has no launcher, or an unknown id. */
+  launcher: (runId: string) => string | null;
   /** One chain's items: a single read supplies the complete seed, compact answer and fixed command snapshot. */
   status: (now: number, chainId: string) => OpenItemsStatus;
   /** `/done <query>`: closes the one open item of the chain `query` names, answering its key;
@@ -89,11 +91,6 @@ function previousSession(id: string, turns: ChatTurn[]): string {
   if (at === undefined) return `session ${id}, last on ${item}`;
   return `session ${id}, last on ${item} at ${minute(at)}\nreplay: \`pier search --in ${id} --around "${minute(at)}"\``;
 }
-
-/** When the user was last in the exchange: their message's arrival, or the completion of a reply they saw. */
-const exchangedAt = (t: ChatTurn): number | undefined =>
-  t.role === "user" ? t.at
-    : t.role === "assistant" && t.meta && !isSilentReply(splitReply(t.text)) ? t.meta.completedAt : undefined;
 
 const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
@@ -382,6 +379,36 @@ export class MainChain {
     return this.deps.now?.() ?? Date.now();
   }
 
+  /** When the user was last in the exchange: their message, or a reply that reached them answering one —
+   *  or answering the result of a run this chain dispatched, so a button pressed on it is not a new subject.
+   *  A scheduled report's answer is not: a head fed by its crons would never roll over. A head with
+   *  neither yet counts from its start: its seed is not the user speaking. */
+  private lastExchange(chainId: string, turns: ChatTurn[], startedAt: number): number {
+    let at = startedAt;
+    // A reply answers everything since the previous one, not only the last input: a steer lands mid-answer.
+    let user = false;
+    let runIds: string[] = [];
+    const answered: { runIds: string[]; at: number }[] = [];
+    for (const t of turns) {
+      if (t.role === "user") {
+        user = true;
+        at = Math.max(at, t.at ?? 0);
+      } else if (t.role === "system") {
+        if (t.origin?.kind === "task-callback") runIds.push(...(t.origin.runIds ?? [t.origin.runId]));
+      } else {
+        if (t.meta && !isSilentReply(splitReply(t.text))) {
+          if (user) at = Math.max(at, t.meta.completedAt);
+          else if (runIds.length) answered.push({ runIds, at: t.meta.completedAt });
+        }
+        user = false;
+        runIds = [];
+      }
+    }
+    const members = new Set(this.members(chainId).map((m) => m.sessionId));
+    const ours = (id: string): boolean => members.has(this.deps.launcher(id) ?? "");
+    return answered.filter((a) => a.at > at).sort((a, b) => b.at - a.at).find((a) => a.runIds.some(ours))?.at ?? at;
+  }
+
   private async current(chainId: string, key: ConversationKey | undefined): Promise<Head> {
     const head = this.members(chainId)[0];
     if (!head) return { session: await this.rotate(chainId, "first", key), rotated: "first" };
@@ -390,10 +417,7 @@ export class MainChain {
       return { session: await this.rotate(chainId, "lost", key, head), rotated: "lost" };
     }
     const session = await this.deps.router.ensure(webKey(head.sessionId));
-    // Idle counts from the last exchange the user was in: their message, or a reply
-    // that reached them — a callback's answer too, so a button pressed on it is not a new subject.
-    // A head with neither yet counts from its start: its seed is not the user speaking.
-    const spoke = (await session.history()).reduce((at, t) => Math.max(at, exchangedAt(t) ?? 0), head.startedAt);
+    const spoke = this.lastExchange(chainId, await session.history(), head.startedAt);
     if (session.state === "streaming") return { session };
     if (this.now() - spoke >= CHAIN_IDLE_MS) return { session: await this.rotate(chainId, "idle", key, head, session), rotated: "idle" };
     // Unknown right after a compaction: that head is small again, not full.

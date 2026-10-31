@@ -102,7 +102,7 @@ const SETTINGS_JSON = {
 
 /** Session mode's register and switch, as main.ts wires them over `db`; `/done` is the route's test's. */
 const chainsOf = (db: DatabaseSync, openCount: (chainId: string) => number = () => 0) =>
-  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {}, close: (): string => { throw new Error("unused"); } });
+  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {}, close: (): string => { throw new Error("unused"); }, launcher: () => null });
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>

@@ -138,6 +138,7 @@ const chains = new Chains(db, (id) => taskStore.openItems(id).length);
 const chain = new MainChain(db, {
   factory, router, home: pierPath("home"), chains,
   ledger: (ids, since) => tasks.ledger(ids, since),
+  launcher: (runId) => taskStore.getRun(runId)?.invokedBySessionId ?? null,
   status: (now, chainId) => openItemsStatus(tasks.openItems(chainId), now, tasks.unmatchedDone(chainId)),
   close: (chainId, query) => tasks.closeItem(chainId, query, Date.now()),
   mode: { get: () => settings.get().chainMode, set: async (on) => { settings.setChainMode(on); } },

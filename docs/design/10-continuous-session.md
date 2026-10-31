@@ -171,7 +171,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 | Event | Rule |
 | --- | --- |
-| User message, head ≥ 1h (`CHAIN_IDLE_MS`) since the user was last in the exchange — the later of its last user message and the completion of its last reply that reached them (a non-silent turn, a callback's answer included) — or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
+| User message, head ≥ 1h (`CHAIN_IDLE_MS`) since the user was last in the exchange — the later of its last user message and the completion of its last reply that reached them (a non-silent turn answering a user message, or the result of a run a chain member launched; a cron or watch run's report never counts) — or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the seed pointing at where the previous head left off; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`, at the next send or the next web read of the head; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn), and joins `main_chain` only once that lands |
@@ -181,8 +181,9 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
   one at a time per chain, so a race rotates once and chains never wait on
   each other; idle counts from the chain's own last exchange — the user's
-  message or the reply they saw, so a button pressed on a callback's answer
-  hours after the last question stays in the session that asked; `/new`
+  message or the reply they saw, so a button pressed on the answer to a run
+  it dispatched hours after the last question stays in the session that
+  asked, while scheduled reports alone still let it roll over; `/new`
   rotates the current chain.
 - Compaction, decided at open (`agent/pi.ts`): a
   session in the home at 100K, a worker's at 180K, a lead's at 200K (the

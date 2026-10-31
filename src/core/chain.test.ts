@@ -18,10 +18,14 @@ import type { AgentFactory, AgentLaunchOptions, Channel, ConversationKey, Ledger
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+const meta = (completedAt: number) => ({ completedAt, durationMs: 1000, tokens: 1 });
+
 function rig({
   runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
   head = undefined as string | undefined,
   chat = undefined as ConversationKey | undefined,
+  // Run id → the session that launched it; a cron or watch run has none.
+  launchers = {} as Record<string, string>,
 } = {}) {
   // Settings' default model and reasoning, as the operator last saved them; a function may throw.
   const defaults: { value: AgentDefaults | (() => AgentDefaults) } = { value: { defaultModel: null, defaultThinkingLevel: null } };
@@ -55,6 +59,7 @@ function rig({
     readSystemPrompt: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
+  const launcherAsked: string[] = [];
   const hub = new EventHub();
   // The home chat answers for the head only, as main.ts wires it.
   const router = new Router(hub, (key) => factory.resume(key.conversationId), undefined,
@@ -72,6 +77,10 @@ function rig({
     ledger: (ids, since) => {
       ledger.push({ ids, since });
       return typeof runs === "function" ? runs(ids, since) : runs;
+    },
+    launcher: (runId) => {
+      launcherAsked.push(runId);
+      return launchers[runId] ?? null;
     },
     status: (now, chainId) => {
       status.asked.push(now);
@@ -98,7 +107,7 @@ function rig({
     return s;
   };
   const say = (text: string, chainId = "main") => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" }, chainId);
-  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, existing, say, router, status, defaults, factory, restart };
+  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, launcherAsked, existing, say, router, status, defaults, factory, restart };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -142,14 +151,14 @@ describe("the continuous conversation's chain", () => {
   });
 
   it("counts idle from the later of the user's last message and the last reply that reached them", async () => {
-    const meta = (completedAt: number) => ({ completedAt, durationMs: 1000, tokens: 1 });
-    // Asked two hours ago; a callback's answer reached the user half an hour ago: a button pressed on it is the same subject.
+    // Asked two hours ago, answered half an hour ago: the answer is the exchange.
     const r = rig();
     r.existing("h1", r.clock.now - 5 * IDLE_MS, { history: [
       { role: "user", text: "ship it", at: r.clock.now - 2 * IDLE_MS },
       { role: "assistant", text: "merge?\n---\n[Yes] | [No]", meta: meta(r.clock.now - IDLE_MS / 2) },
     ] });
     expect(await r.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+    expect(r.launcherAsked).toEqual([]);
 
     // A silent turn reached no one: it does not keep the head.
     const r2 = rig();
@@ -158,6 +167,65 @@ describe("the continuous conversation's chain", () => {
       { role: "assistant", text: "<silent>stage moved</silent>", meta: meta(r2.clock.now - IDLE_MS / 2) },
     ] });
     expect(await r2.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
+  });
+
+  it("counts a reply to a run the chain dispatched as an exchange, never one to a scheduled report", async () => {
+    const callback = (runId: string, runIds?: string[]) => ({
+      role: "system" as const, text: `result of ${runId}`,
+      origin: { kind: "task-callback" as const, taskId: "t", runId, sourceSessionId: null, ...(runIds ? { runIds } : {}) },
+    });
+    const history = (now: number, ...callbacks: ReturnType<typeof callback>[]) => [
+      { role: "user" as const, text: "ship it", at: now - 2 * IDLE_MS },
+      { role: "assistant" as const, text: "dispatched", meta: meta(now - 2 * IDLE_MS) },
+      ...callbacks,
+      { role: "assistant" as const, text: "built \u2014 merge?\n---\n[Yes] | [No]", meta: meta(now - IDLE_MS / 2) },
+      // A command's note lands without a turn and answers nothing.
+      { role: "system" as const, text: "Nothing open.", origin: { kind: "chat-command" as const, command: "status" as const } },
+    ];
+    const launchers = { r1: "h1" };
+    // The head's own dispatch: a button pressed on its result's answer stays in the session.
+    const r = rig({ launchers });
+    r.existing("h1", r.clock.now - 5 * IDLE_MS, { history: history(r.clock.now, callback("r1")) });
+    expect(await r.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+    // Only the runs a reply answered are looked up, never the ledger.
+    expect(r.launcherAsked).toEqual(["r1"]);
+    expect(r.ledger).toEqual([]);
+
+    // One of a batch is enough, and so is one of two results the reply answered together.
+    const r2 = rig({ launchers });
+    r2.existing("h1", r2.clock.now - 5 * IDLE_MS, { history: history(r2.clock.now, callback("cron", ["cron", "r1"])) });
+    expect(await r2.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+    const r2b = rig({ launchers });
+    r2b.existing("h1", r2b.clock.now - 5 * IDLE_MS, { history: history(r2b.clock.now, callback("r1"), callback("cron")) });
+    expect(await r2b.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+
+    // A cron or watch run has no launcher: its report keeps nothing.
+    const r3 = rig({ launchers });
+    r3.existing("h1", r3.clock.now - 5 * IDLE_MS, { history: history(r3.clock.now, callback("cron")) });
+    expect(await r3.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
+    // Nor does a run another chain launched.
+    const r3b = rig({ launchers: { r1: "elsewhere" } });
+    r3b.existing("h1", r3b.clock.now - 5 * IDLE_MS, { history: history(r3b.clock.now, callback("r1")) });
+    expect(await r3b.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
+
+    // A user message steered in while a report was being answered: the reply answers the user too.
+    const r4 = rig({ launchers });
+    r4.existing("h1", r4.clock.now - 5 * IDLE_MS, { history: [
+      callback("cron"),
+      { role: "user", text: "and the docs?", at: r4.clock.now - 2 * IDLE_MS },
+      { role: "assistant", text: "report read; docs next", meta: meta(r4.clock.now - IDLE_MS / 2) },
+    ] });
+    expect(await r4.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+
+    // Nor does any other system input the head answered: a run's message, a restart.
+    const r5 = rig({ launchers });
+    r5.existing("h1", r5.clock.now - 5 * IDLE_MS, { history: [
+      { role: "user", text: "ship it", at: r5.clock.now - 2 * IDLE_MS },
+      { role: "assistant", text: "on it", meta: meta(r5.clock.now - 2 * IDLE_MS) },
+      { role: "system", text: "progress", origin: { kind: "task-message", taskId: "t", runId: "r1", sourceSessionId: "w1", messageId: "x", messageKind: "follow_up" } },
+      { role: "assistant", text: "noted", meta: meta(r5.clock.now - IDLE_MS / 2) },
+    ] });
+    expect(await r5.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
   });
 
   it("carries the head's model and effort into the next session with the ledger since its start, not its subject", async () => {
