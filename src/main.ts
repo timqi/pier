@@ -415,8 +415,9 @@ app.route("/", createServer({
   taskSessions: () => tasks.taskSessions(),
   leads: () => taskStore.leads(),
   openItems: () => tasks.openItems(),
-  items: (q) => taskStore.items(q),
-  itemHistory: (problem) => taskStore.itemHistoryByProblem(problem),
+  items: (q, chainId) => taskStore.items(q, chainId),
+  itemHistory: (problem, chainId) => (chainId === undefined ? taskStore.itemHistoryByProblem(problem) : taskStore.itemHistory(chainId, problem)),
+  invokedBy: (id) => taskStore.creatorOf(id)?.invokedBySessionId ?? undefined,
   itemSent: (item, sessionId) => {
     taskStore.markOpenItems([], Date.now(), sessionId, chain.chainOf(sessionId)?.chainId ?? chains.first().id, { topic: item });
   },

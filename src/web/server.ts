@@ -11,6 +11,7 @@ import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { ChatCommandRefused, type MainChain } from "../core/chain.js";
+import { ChainAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainInvalid, type ChainRow } from "../core/chains.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { isSilentReply, splitReply } from "../core/reply.js";
@@ -40,16 +41,16 @@ import type {
 import { CHAIN_FULL_TOKENS, isThinkingLevel } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
-import { itemTurns } from "../core/open-items.js";
+import { chainCounts, itemTurns } from "../core/open-items.js";
 import { splitItem } from "../core/identity.js";
-import type { ItemRecord, ItemSummary, OpenItems, ParkedMessage } from "../tasks/types.js";
+import type { ItemRecord, ItemSummary, OpenItem, OpenItems, ParkedMessage } from "../tasks/types.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
 import type { PasskeyStore } from "./passkeys.js";
-import type { ToolsSyncNote } from "./types.js";
+import type { ChainInfo, ChainList, ChainOpen, ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
@@ -156,9 +157,12 @@ interface WebDeps {
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
   openItems?: () => OpenItems;
-  /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's two routes read. */
-  items?: (q: string) => ItemSummary[];
-  itemHistory?: (problem: string) => ItemRecord | undefined;
+  /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's routes read;
+   *  with no chain an item is found by its problem alone, when only one chain has it. */
+  items?: (q: string, chainId?: string) => ItemSummary[];
+  itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
+  /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
+  invokedBy?: (sessionId: string) => string | undefined;
   /** `TaskStore.markOpenItems` with no marker: the head a message stamped `[item: <key>]`
    *  reached becomes one of the item's sessions, before any reply names it. */
   itemSent?: (item: string, sessionId: string) => void;
@@ -229,6 +233,7 @@ export function createServer(
     items,
     itemHistory,
     itemSent,
+    invokedBy,
     channelOf,
     continuous,
   }: WebDeps,
@@ -293,6 +298,7 @@ export function createServer(
     const next = await continuous.replaceLost(id);
     if (!next) throw err;
     hub.emitWorkspace({ type: "sessions-changed" });
+    hub.emitWorkspace({ type: "chains-changed" });
     throw new Error(`${err instanceof Error ? err.message : String(err)} — the conversation goes on in session ${next}`);
   });
 
@@ -345,7 +351,9 @@ export function createServer(
     const id = c.req.param("id");
     const summary = (await listSessions()).find((s) => s.id === id);
     if (!summary) return c.json({ error: `no session ${id}` }, 404);
-    return c.json(present(summary, state.flags().get(id), activeRuns(), leads?.() ?? new Map()));
+    // One session's lookup only: the launcher is a ledger scan per session, too dear for the list.
+    const chain = continuous.chainOf(invokedBy?.(id) ?? "")?.chainId;
+    return c.json({ ...present(summary, state.flags().get(id), activeRuns(), leads?.() ?? new Map()), ...(chain ? { chain } : {}) });
   });
 
   app.post("/api/sessions/:id/read", (c) => {
@@ -516,27 +524,136 @@ export function createServer(
     }
   });
 
-  /** A rotation re-lists every surface. */
+  /** A rotation re-lists every surface, the chain list with them. */
   const reached = <T extends { rotated?: unknown }>(head: T): T => {
-    if (head.rotated) hub.emitWorkspace({ type: "sessions-changed" });
+    if (head.rotated) {
+      hub.emitWorkspace({ type: "sessions-changed" });
+      hub.emitWorkspace({ type: "chains-changed" });
+    }
     return head;
   };
 
-  // The chain, newest first; the client pages back through it with /history.
-  app.get("/api/continuous", (c) => c.json({ chain: continuous.members(continuous.chains.first().id), rotateAt: CHAIN_FULL_TOKENS }));
+  // --- chains (docs/plans/30-multi-chain.md §路由) ---------------------------------
 
-  // The status panel's rows.
+  const chains = continuous.chains;
+  const openRows = (): OpenItem[] => openItems?.().items ?? [];
+  const chainsChanged = (): void => hub.emitWorkspace({ type: "chains-changed" });
+  /** Creating or unarchiving a chain is asking for more than one: session mode cannot hold it. */
+  const chainModeOn = (): void => {
+    if (!settings.get().chainMode) settings.setChainMode(true);
+  };
+  const openIn = (id: string, all: OpenItem[]): { open: number; waiting: number } => {
+    const { open, waiting } = chainCounts(all.filter((i) => i.chain?.id === id));
+    return { open, waiting };
+  };
+  const chainInfo = (row: ChainRow, open: OpenItem[]): ChainInfo => {
+    const head = continuous.members(row.id)[0]?.sessionId;
+    const lastUserAt = continuous.lastUserAt(row.id);
+    return {
+      id: row.id, name: row.name, createdAt: row.createdAt,
+      ...(row.archivedAt === null ? {} : { archivedAt: row.archivedAt }),
+      ...(lastUserAt === undefined ? {} : { lastUserAt }),
+      ...(head ? { head: { sessionId: head, state: router.stateOf(head) ?? "idle" } } : {}),
+      unread: head !== undefined && state.unread(head),
+      waiting: openIn(row.id, open).waiting,
+    };
+  };
+  // Creating a chain is a user act too: it rises to the top until another is spoken to.
+  const recency = (c: ChainInfo): number => Math.max(c.lastUserAt ?? 0, c.createdAt);
+  const chainList = (): ChainList => {
+    const open = openRows();
+    const rows = chains.list().map((row) => chainInfo(row, open));
+    const active = rows.filter((c) => c.archivedAt === undefined).sort((a, b) => recency(b) - recency(a));
+    return { mode: settings.get().chainMode ? "chain" : "session", chains: [...active, ...rows.filter((c) => c.archivedAt !== undefined)] };
+  };
+  const chainRefused = (c: Context, err: unknown): Response => {
+    if (err instanceof ChainInvalid) return c.json({ error: err.message }, 400);
+    if (err instanceof ChainExists) return c.json({ error: err.message }, 409);
+    if (err instanceof ChainHasOpen) return c.json({ error: err.message, open: err.open }, 409);
+    throw err;
+  };
+
+  app.get("/api/chains", (c) => c.json(chainList()));
+
+  guarded(app, "POST", "/api/chains", 400, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
+    try {
+      const row = chains.create(body.name);
+      chainModeOn();
+      chainsChanged();
+      return c.json(chainInfo(row, openRows()), 201);
+    } catch (err) {
+      return chainRefused(c, err);
+    }
+  });
+
+  guarded(app, "PATCH", "/api/chains/:id", 400, async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    if (!chains.get(id)) return c.json({ error: `chain: no chain ${id}` }, 404);
+    if (typeof body?.name !== "string" && typeof body?.archived !== "boolean") return c.json({ error: "name or archived required" }, 400);
+    try {
+      let row = typeof body.name === "string" ? chains.rename(id, body.name) : chains.get(id)!;
+      if (body.archived === true) row = chains.archive(id, body.force === true);
+      if (body.archived === false) {
+        row = chains.unarchive(id);
+        chainModeOn();
+      }
+      chainsChanged();
+      return c.json(chainInfo(row, openRows()));
+    } catch (err) {
+      return chainRefused(c, err);
+    }
+  });
+
+  // Off keeps one chain, the caller's own by default, and archives the rest once the caller has seen them.
+  guarded(app, "PUT", "/api/chains/mode", 400, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.chain !== "boolean") return c.json({ error: "chain: boolean required" }, 400);
+    if (body.chain) {
+      chainModeOn();
+      chainsChanged();
+      return c.json(chainList());
+    }
+    const keep = typeof body.keep === "string" ? body.keep : c.req.header("X-Pier-Chain") ?? chains.first().id;
+    if (chains.get(keep)?.archivedAt !== null) return c.json({ error: `chain: no active chain ${keep}` }, 400);
+    const others = chains.list().filter((r) => r.archivedAt === null && r.id !== keep);
+    if (others.length && body.force !== true) {
+      const open = openRows();
+      const listed: ChainOpen[] = others.map((r) => ({ id: r.id, name: r.name, ...openIn(r.id, open) }));
+      return c.json({ error: `chain mode off archives ${others.map((r) => r.name).join(", ")}`, chains: listed }, 409);
+    }
+    for (const r of others) chains.archive(r.id, true);
+    settings.setChainMode(false);
+    chainsChanged();
+    return c.json(chainList());
+  });
+
+  // One chain's sessions, newest first; the client pages back through them with /history. No chain: the first.
+  app.get("/api/continuous", (c) => {
+    const id = c.req.query("chain") ?? chains.first().id;
+    if (!chains.get(id)) return c.json({ error: `chain: no chain ${id}` }, 404);
+    return c.json({ chainId: id, chain: continuous.members(id), rotateAt: CHAIN_FULL_TOKENS });
+  });
+
+  // The status panel's rows, every chain's.
   app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [] }));
 
   // The status panel's search, closed items too: an open hit is drawn as its panel row.
-  app.get("/api/continuous/items", (c) => c.json({ items: items?.(c.req.query("q") ?? "") ?? [] }));
+  app.get("/api/continuous/items", (c) => {
+    const q = c.req.query("q") ?? "";
+    const chain = c.req.query("chain");
+    return c.json({ items: (chain ? items?.(q, chain) : items?.(q)) ?? [] });
+  });
 
   // One item's rows (docs/design/15-item-view.md \u00a7Rows), its sessions oldest first; the head's
-  // up to the snapshot's cursor, read as /history reads it.
+  // up to the snapshot's cursor, read as /history reads it. Without a chain, the route of
+  // bookmarks made before chains: an item only one chain has.
+  app.use("/api/continuous/items/:chain/:problem/turns", compress());
   app.use("/api/continuous/items/:problem/turns", compress());
-  guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, async (c) => {
-    const problem = c.req.param("problem");
-    const item = itemHistory?.(problem);
+  const itemTurnsOf = async (c: Context, problem: string, chainId?: string): Promise<Response> => {
+    const item = chainId === undefined ? itemHistory?.(problem) : itemHistory?.(problem, chainId);
     if (!item) return c.json({ error: `No item "${problem}"` }, 404);
     const members = continuous.members(item.chain);
     const [head, ...rest] = members;
@@ -570,7 +687,10 @@ export function createServer(
     }
     log.warn(`item view of "${problem}": the head changed during all 3 reads`);
     return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
-  });
+  };
+  guarded(app, "GET", "/api/continuous/items/:chain/:problem/turns", 404, (c) =>
+    itemTurnsOf(c, c.req.param("problem"), c.req.param("chain")));
+  guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, (c) => itemTurnsOf(c, c.req.param("problem")));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.
@@ -578,9 +698,11 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
+    const chainId = typeof body.chain === "string" ? body.chain : chains.first().id;
+    if (!chains.get(chainId)) return c.json({ error: `chain: no chain ${chainId}` }, 404);
     try {
-      const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode }, continuous.chains.first().id);
-      // Until the web names its chain, a switch is answered as it came.
+      const head = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode }, chainId);
+      // The client navigates to the chain named; nothing was sent to a head.
       if (head.switched) return c.json(head, 202);
       state.spokeFrom(head.sessionId, sessionIdOf(c));
       const { item } = splitItem(body.text);
@@ -594,7 +716,11 @@ export function createServer(
       }
       return c.json(reached(head), 202);
     } catch (err) {
-      if (err instanceof ChatCommandRefused || err instanceof SkillAmbiguous) return c.json({ error: err.message }, 409);
+      // A refused `/chain` is the user's to fix, said as the command line would say it.
+      if (err instanceof ChainInvalid) return c.json({ error: err.message }, 400);
+      if ([ChatCommandRefused, SkillAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainAmbiguous].some((E) => err instanceof E)) {
+        return c.json({ error: (err as Error).message }, 409);
+      }
       throw err;
     }
   });

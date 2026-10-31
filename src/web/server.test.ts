@@ -17,6 +17,7 @@ import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { MainChain } from "../core/chain.js";
 import { Chains } from "../core/chains.js";
+import type { ChainList } from "./types.js";
 import { splitItem, splitSpeaker, withItem } from "../core/identity.js";
 import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
@@ -100,7 +101,8 @@ const SETTINGS_JSON = {
 };
 
 /** Session mode's register and switch, as main.ts wires them over `db`. */
-const chainsOf = (db: DatabaseSync) => ({ chains: new Chains(db, () => 0), mode: { get: () => false, set: async () => {} }, changed: () => {} });
+const chainsOf = (db: DatabaseSync, openCount: (chainId: string) => number = () => 0) =>
+  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {} });
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
@@ -2401,10 +2403,12 @@ describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
   function chainRig(
     ledger: () => LedgerRun[] = () => [], open?: OpenItems,
-    record: {
-      items?: (q: string) => ItemSummary[];
-      itemHistory?: (problem: string) => ItemRecord | undefined;
+    { openCount, ...record }: {
+      items?: (q: string, chainId?: string) => ItemSummary[];
+      itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
       itemSent?: (item: string, sessionId: string) => void;
+      invokedBy?: (sessionId: string) => string | undefined;
+      openCount?: (chainId: string) => number;
     } = {},
   ) {
     const db = openDb(":memory:");
@@ -2434,9 +2438,10 @@ describe("the continuous conversation's routes", () => {
     const router = new Router(hub, (key) => factory.resume(key.conversationId));
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
-      factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"), ...chainsOf(db),
+      factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"), ...chainsOf(db, openCount),
       ledger, status: () => ({ text: "Nothing open.", seed: "Nothing open.", snapshot: { version: 1, items: [] }, sessions: {} }), now: () => clock.now,
       defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }),
+      changed: () => hub.emitWorkspace({ type: "chains-changed" }),
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2453,7 +2458,9 @@ describe("the continuous conversation's routes", () => {
         db.prepare("INSERT INTO main_chain VALUES (?, 'main', ?, 'idle')").run(id, at);
       }
     };
-    return { app, db, factory, sessions, clock, workspace, post, restarted };
+    const send = (path: string, body: unknown, method: "PATCH" | "PUT", headers: Record<string, string> = {}) =>
+      app.request(path, { method, body: JSON.stringify(body), headers });
+    return { app, db, factory, sessions, clock, workspace, post, send, settings, chain, restarted };
   }
 
   it("answers the open items the task service lists", async () => {
@@ -2586,6 +2593,7 @@ describe("the continuous conversation's routes", () => {
     expect(sessions.get("m1")!.prompts.map((p) => p.includes("two"))).toEqual([false]);
     expect(sessions.get("m2")!.prompts.some((p) => p.includes("two"))).toBe(true);
     expect(workspace).toContain("sessions-changed");
+    expect(workspace).toContain("chains-changed");
     const { chain, rotateAt } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[]; rotateAt: number };
     expect(chain.map((m) => [m.sessionId, m.reason])).toEqual([["m2", "idle"], ["m1", "first"]]);
     expect(rotateAt).toBe(CHAIN_FULL_TOKENS);
@@ -2641,5 +2649,132 @@ describe("the continuous conversation's routes", () => {
     expect(edit.status).toBe(409);
     expect(await edit.json()).toEqual({ error: "an earlier session of the continuous conversation is read-only" });
     expect(factory.resume).not.toHaveBeenCalled();
+  });
+
+  describe("chains", () => {
+    const listed = async (app: Hono) => (await (await app.request("/api/chains")).json()) as ChainList;
+    const idOf = async (app: Hono, name: string) => (await listed(app)).chains.find((c) => c.name === name)!.id;
+
+    it("creates a chain, turning chain mode on, and refuses a bad or taken name", async () => {
+      const { app, post, settings, workspace } = chainRig();
+      expect(await listed(app)).toEqual({ mode: "session", chains: [expect.objectContaining({ id: "main", name: "Main", unread: false, waiting: 0 })] });
+      const made = await post("/api/chains", { name: " Design " });
+      expect(made.status).toBe(201);
+      expect(await made.json()).toEqual({ id: expect.any(String), name: "Design", createdAt: expect.any(Number), unread: false, waiting: 0 });
+      expect(settings.get().chainMode).toBe(true);
+      expect(workspace).toContain("chains-changed");
+      expect((await listed(app)).mode).toBe("chain");
+      const taken = await post("/api/chains", { name: "design" });
+      expect(taken.status).toBe(409);
+      expect(await taken.json()).toEqual({ error: 'chain: "design" exists' });
+      expect((await post("/api/chains", { name: "" })).status).toBe(400);
+      expect((await post("/api/chains", {})).status).toBe(400);
+    });
+
+    it("lists active chains newest user message first with their head, waiting count and unread, archived last", async () => {
+      const open: OpenItems = { items: [
+        { problem: "ask", stage: "", runs: [], status: "waiting on you", chain: { id: "main", name: "Main", archived: false } },
+        { problem: "build", stage: "", runs: [], status: "running", chain: { id: "main", name: "Main", archived: false } },
+      ], unlisted: [] };
+      const { app, post, send, clock } = chainRig(undefined, open);
+      await post("/api/chains", { name: "Design" });
+      await post("/api/chains", { name: "Old" });
+      await send(`/api/chains/${await idOf(app, "Old")}`, { archived: true }, "PATCH");
+      // Main spoken to after Design was made: it rises above it.
+      clock.now = Date.now() + 60_000;
+      await post("/api/continuous/messages", { text: "hi" });
+      const { chains } = await listed(app);
+      expect(chains.map((c) => [c.name, c.archivedAt === undefined])).toEqual([["Main", true], ["Design", true], ["Old", false]]);
+      expect(chains[0]).toMatchObject({ lastUserAt: clock.now, head: { sessionId: "m1", state: expect.any(String) }, unread: true, waiting: 1 });
+      expect(chains[1]!.head).toBeUndefined();
+    });
+
+    it("renames, archives once the open items are confirmed, and unarchives into chain mode", async () => {
+      const { app, post, send, settings, workspace } = chainRig(undefined, undefined, { openCount: (id) => (id === "main" ? 2 : 0) });
+      await post("/api/chains", { name: "Design" });
+      const id = await idOf(app, "Design");
+      const renamed = await send(`/api/chains/${id}`, { name: "Desk" }, "PATCH");
+      expect(await renamed.json()).toMatchObject({ id, name: "Desk" });
+      expect((await send(`/api/chains/${id}`, { name: "main" }, "PATCH")).status).toBe(409);
+      expect((await send("/api/chains/nope", { name: "x" }, "PATCH")).status).toBe(404);
+      expect((await send(`/api/chains/${id}`, {}, "PATCH")).status).toBe(400);
+      const asked = await send("/api/chains/main", { archived: true }, "PATCH");
+      expect(asked.status).toBe(409);
+      expect(await asked.json()).toEqual({ error: "chain: Main has 2 open — /status first", open: 2 });
+      workspace.length = 0;
+      const archived = await send("/api/chains/main", { archived: true, force: true }, "PATCH");
+      expect(await archived.json()).toMatchObject({ id: "main", archivedAt: expect.any(Number) });
+      expect(workspace).toEqual(["chains-changed"]);
+      // The last active chain stays.
+      expect((await send(`/api/chains/${id}`, { archived: true }, "PATCH")).status).toBe(400);
+      settings.setChainMode(false);
+      const back = await send("/api/chains/main", { archived: false }, "PATCH");
+      expect(await back.json()).not.toHaveProperty("archivedAt");
+      expect(settings.get().chainMode).toBe(true);
+    });
+
+    it("turns chain mode off only once the chains it archives were seen, keeping the caller's", async () => {
+      const { app, post, send, settings } = chainRig();
+      await post("/api/chains", { name: "Design" });
+      const id = await idOf(app, "Design");
+      const asked = await send("/api/chains/mode", { chain: false }, "PUT", { "X-Pier-Chain": id });
+      expect(asked.status).toBe(409);
+      expect(await asked.json()).toEqual({ error: "chain mode off archives Main", chains: [{ id: "main", name: "Main", open: 0, waiting: 0 }] });
+      expect(settings.get().chainMode).toBe(true);
+      const off = await send("/api/chains/mode", { chain: false, force: true }, "PUT", { "X-Pier-Chain": id });
+      expect(off.status).toBe(200);
+      const body = await off.json() as ChainList;
+      expect(body.mode).toBe("session");
+      expect(body.chains.map((c) => [c.name, c.archivedAt === undefined])).toEqual([["Design", true], ["Main", false]]);
+      expect((await send("/api/chains/mode", { chain: false, keep: "main" }, "PUT")).status).toBe(400);
+      expect((await send("/api/chains/mode", { chain: true }, "PUT")).status).toBe(200);
+      expect(settings.get().chainMode).toBe(true);
+      expect((await send("/api/chains/mode", {}, "PUT")).status).toBe(400);
+    });
+
+    it("reads and sends to the chain named, refuses an archived one, and answers a `/chain` switch", async () => {
+      const { app, post, send, workspace } = chainRig();
+      await post("/api/chains", { name: "Design" });
+      const id = await idOf(app, "Design");
+      expect(await (await app.request(`/api/continuous?chain=${id}`)).json()).toEqual({ chainId: id, chain: [], rotateAt: CHAIN_FULL_TOKENS });
+      expect((await app.request("/api/continuous?chain=nope")).status).toBe(404);
+      expect(await (await app.request("/api/continuous")).json()).toMatchObject({ chainId: "main" });
+      const sent = await post("/api/continuous/messages", { text: "draw it", chain: id });
+      expect(await sent.json()).toEqual({ sessionId: "m1", chainId: id, rotated: "first" });
+      expect(workspace).toContain("chains-changed");
+      expect((await post("/api/continuous/messages", { text: "hi", chain: "nope" })).status).toBe(404);
+      workspace.length = 0;
+      const switched = await post("/api/continuous/messages", { text: "/chain main", chain: id });
+      expect(switched.status).toBe(202);
+      expect(await switched.json()).toMatchObject({ chainId: "main", switched: { id: "main", name: "Main" } });
+      expect(workspace).toEqual(["chains-changed"]);
+      await send(`/api/chains/${id}`, { archived: true }, "PATCH");
+      const refused = await post("/api/continuous/messages", { text: "more", chain: id });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({ error: "chain: Design is archived — unarchive first" });
+      expect((await post("/api/continuous/messages", { text: "/chain new main", chain: "main" })).status).toBe(409);
+    });
+
+    it("finds an item in the chain its route names, and searches one chain", async () => {
+      const record: ItemRecord = { chain: "c2", problem: "login", aliases: [], sessions: [], runIds: [] };
+      const itemHistory = vi.fn((_p: string, chainId?: string) => (chainId === "c2" ? record : undefined));
+      const items = vi.fn((_q: string, _chain?: string) => [] as ItemSummary[]);
+      const { app } = chainRig(undefined, undefined, { itemHistory, items });
+      expect((await app.request("/api/continuous/items/c2/login/turns")).status).toBe(200);
+      expect(itemHistory).toHaveBeenLastCalledWith("login", "c2");
+      expect((await app.request("/api/continuous/items/main/login/turns")).status).toBe(404);
+      expect((await app.request("/api/continuous/items/login/turns")).status).toBe(404);
+      expect(itemHistory).toHaveBeenLastCalledWith("login");
+      await app.request("/api/continuous/items?q=log&chain=c2");
+      expect(items).toHaveBeenLastCalledWith("log", "c2");
+    });
+
+    it("names the chain a task run's session was launched from", async () => {
+      const { app, factory, post } = chainRig(undefined, undefined, { invokedBy: (id) => (id === "run" ? "m1" : undefined) });
+      await post("/api/continuous/messages", { text: "go" });
+      factory.list.mockResolvedValue([{ id: "run", cwd: "/w", createdAt: 1 }, { id: "solo", cwd: "/w", createdAt: 1 }] as never);
+      expect(await (await app.request("/api/sessions/run")).json()).toMatchObject({ id: "run", chain: "main" });
+      expect(await (await app.request("/api/sessions/solo")).json()).not.toHaveProperty("chain");
+    });
   });
 });

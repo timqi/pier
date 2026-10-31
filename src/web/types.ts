@@ -21,3 +21,31 @@ export interface ConfigSyncStatus {
   nextRunAt?: number | null;
   publicUrl?: string;
 }
+
+/** One row of `GET /api/chains`: `head` absent before the chain's first message,
+ *  `waiting` its open items waiting on you, `unread` its head's reply not viewed yet. */
+export interface ChainInfo {
+  id: string;
+  name: string;
+  createdAt: number;
+  archivedAt?: number;
+  lastUserAt?: number;
+  head?: { sessionId: string; state: "idle" | "streaming" };
+  unread: boolean;
+  waiting: number;
+}
+
+/** `GET /api/chains`, and what `PUT /api/chains/mode` answers: active chains
+ *  first, newest user message first, then the archived. */
+export interface ChainList {
+  mode: "session" | "chain";
+  chains: ChainInfo[];
+}
+
+/** A chain `PUT /api/chains/mode` would archive, in its 409's `chains`. */
+export interface ChainOpen {
+  id: string;
+  name: string;
+  open: number;
+  waiting: number;
+}

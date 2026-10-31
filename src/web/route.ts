@@ -6,7 +6,7 @@ import type { Context, Env, Hono } from "hono";
 /** Takes the literal path so `c.req.param()` keeps its typed keys. */
 export function guarded<P extends string>(
   app: Hono,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "PATCH",
   path: P,
   status: 400 | 404,
   fn: (c: Context<Env, P>) => Promise<Response>,
