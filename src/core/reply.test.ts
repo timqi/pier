@@ -415,6 +415,7 @@ describe("originLabel", () => {
     expect(originLabel({ kind: "session-seed", reason: "idle", previousSessionId: "h1" })).toBe("↺ new session · idle");
     expect(originLabel({ kind: "session-seed", reason: "first", previousSessionId: null })).toBe("↺ new session · first");
     expect(originLabel({ kind: "chat-command", command: "status" })).toBe("/status");
+    expect(originLabel({ kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [], chain: "Main" } })).toBe("/status · Main");
     expect(originLabel({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe("↩ task callback");
   });
 

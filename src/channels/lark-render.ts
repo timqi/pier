@@ -14,7 +14,7 @@ import type {
   LarkElement,
   LarkFormInput,
 } from "./lark-api.js";
-import { statusLayout, type StatusRow, type StatusView } from "./status.js";
+import { otherCounts, statusLabel, statusLayout, type OtherChain, type StatusRow, type StatusView } from "./status.js";
 
 /** The binding limit is the card's 30KB request cap in bytes; a CJK character
  *  spends three, so 7000 chars keeps an all-CJK turn near 21KB plus scaffolding. */
@@ -116,11 +116,19 @@ const statusRow = (r: StatusRow): string => [
   r.meta && `<font color='grey'>${cut(r.meta, FIELD_MAX)}</font>`,
 ].filter(Boolean).join("\n");
 
+const otherChains = (chains: OtherChain[]): LarkElement => ({
+  tag: "markdown",
+  content: ["<font color='grey'>Other chains</font>", ...chains.map((c) =>
+    `${cut(c.name, FIELD_MAX)}${c.archived ? " <text_tag color='neutral'>archived</text_tag>" : ""} <font color='grey'>· ${otherCounts(c)}</font>`)].join("\n"),
+  text_size: "notation",
+});
+
 /** The open items as the web sidebar lays them out, one markdown element per item. */
-export const statusCard = (view: StatusView): LarkCard => card([markdown("*▤ open items*"), ...statusLayout<LarkElement>(view, {
+export const statusCard = (view: StatusView): LarkCard => card([markdown(`*${statusLabel(view)}*`), ...statusLayout<LarkElement>(view, {
   heading: (text) => [markdown(`<font color='grey'>${text}</font>`)],
   row: (r) => [markdown(statusRow(r))],
   more: (n) => [markdown(`<font color='grey'>… ${String(n)} more</font>`)],
+  others: (chains) => [otherChains(chains)],
   cost: (els) => els.reduce((sum, el) => sum + (el.tag === "markdown" ? el.content.length : 0) + LARK_MAX / STATUS_ELEMENTS, 0),
   max: LARK_MAX - LARK_MAX / STATUS_ELEMENTS,
 })]);

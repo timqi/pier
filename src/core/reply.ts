@@ -17,7 +17,7 @@ export function originLabel(origin: NoteOrigin): string {
     case "task-callback": return "\u21a9 task callback";
     case "session-seed": return `\u21ba new session \u00b7 ${origin.reason}`;
     case "restart": return "\u21bb restarted \u00b7 continuing";
-    case "chat-command": return `/${origin.command}`;
+    case "chat-command": return `/${origin.command}${origin.statusSnapshot?.chain === undefined ? "" : ` \u00b7 ${origin.statusSnapshot.chain}`}`;
     case "open-items": return "\u25a4 open items";
     case "task-message":
       return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;

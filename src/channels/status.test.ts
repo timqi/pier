@@ -96,7 +96,7 @@ describe("the status message", () => {
   it("/status naming its chain over nothing open leaves the answer to the note", async () => {
     const { status, calls } = rig();
     await status.show("D1", view("a"));
-    expect(await status.answer("D1", `Chain: pier\n\n${NOTHING_OPEN}`, { version: 1, items: [], chain: "pier" })).toBe(false);
+    expect(await status.answer("D1", NOTHING_OPEN, { version: 1, items: [], chain: "pier" })).toBe(false);
     expect(calls).toEqual(["post D1 > a"]);
   });
 

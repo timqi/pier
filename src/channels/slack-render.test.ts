@@ -209,24 +209,19 @@ describe("statusMessage", () => {
     expect(sent.blocks.slice(-2)).toEqual([context("*Unmatched done · 1*"), section("*fix &lt;parser&gt;*")]);
   });
 
-  it("names its chain over the items", () => {
-    const sent = statusMessage({ text: "", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "pier" } });
-    expect(sent.blocks.slice(0, 3)).toEqual([context("_▤ open items_"), context("*Chain: pier*"), context("*In progress · 1*")]);
+  it("names its chain in its label, over the items", () => {
+    const sent = statusMessage({ text: "", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "a<b" } });
+    expect(sent.blocks.slice(0, 2)).toEqual([context("_▤ open items · a&lt;b_"), context("*In progress · 1*")]);
+    expect(sent.text.split("\n")[0]).toBe("_▤ open items · a&lt;b_");
   });
 
   // docs/plans/30-multi-chain.md §IM
-  it("ends on a line per other chain, an archived one tagged", () => {
+  it("ends on one small section, a line per other chain, an archived one tagged", () => {
     const sent = statusMessage({ ...view([item("Docs", "queued", "")]), others: [
       { name: "Design", waiting: 1, inProgress: 2, archived: false },
       { name: "Old", waiting: 1, inProgress: 0, archived: true },
     ] });
-    expect(sent.blocks.slice(-5)).toEqual([
-      context("*Other chains*"),
-      section("*Design*"),
-      context("1 waiting · 2 in progress"),
-      section("*Old*  `archived`"),
-      context("1 waiting · 0 in progress"),
-    ]);
+    expect(sent.blocks.at(-1)).toEqual(context("Other chains\n*Design* · 1 waiting · 2 in progress\n*Old*  `archived` · 1 waiting · 0 in progress"));
   });
 
   it("stays within Slack's 50 blocks", () => {

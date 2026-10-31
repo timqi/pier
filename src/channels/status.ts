@@ -43,6 +43,8 @@ export interface StatusLayout<E> {
   heading(text: string): E[];
   row(row: StatusRow): E[];
   more(count: number): E[];
+  /** The other chains as one minor section under a small heading, a line each. */
+  others(chains: OtherChain[]): E[];
   cost(pieces: E[]): number;
   /** Leaves room for `more`'s pieces. */
   max: number;
@@ -51,8 +53,8 @@ export interface StatusLayout<E> {
 /** The sidebar's groups, waiting first, laid out while they fit the budget; the
  *  items past it are counted, never cut mid-item. */
 export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] {
-  const out: E[] = view.snapshot.chain === undefined ? [] : layout.heading(`Chain: ${view.snapshot.chain}`);
-  let spent = layout.cost(out);
+  const out: E[] = [];
+  let spent = 0;
   let left = view.snapshot.items.length;
   for (const group of openItemGroups(view.snapshot.items)) {
     const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
@@ -73,9 +75,7 @@ export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] 
   // Whole sections after the items, each left out when it does not fit.
   const tails = [
     owed.length ? [...layout.heading(`${UNMATCHED_DONE} · ${String(owed.length)}`), ...owed.flatMap((title) => layout.row({ title, tag: "", stage: "", waiting: false, meta: "" }))] : [],
-    others.length ? [...layout.heading("Other chains"), ...others.flatMap((c) => layout.row({
-      title: c.name, tag: c.archived ? "archived" : "", stage: "", waiting: c.waiting > 0, meta: `${String(c.waiting)} waiting · ${String(c.inProgress)} in progress`,
-    }))] : [],
+    others.length ? layout.others(others) : [],
   ];
   for (const pieces of tails) {
     const cost = layout.cost(pieces);
@@ -85,6 +85,12 @@ export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] 
   }
   return out;
 }
+
+/** The status message's label, naming the chain its items are in. */
+export const statusLabel = (view: StatusView): string =>
+  `▤ open items${view.snapshot.chain === undefined ? "" : ` · ${view.snapshot.chain}`}`;
+
+export const otherCounts = (c: OtherChain): string => `${String(c.waiting)} waiting · ${String(c.inProgress)} in progress`;
 
 export class StatusMessage<B = string> {
   /** `repost` survives a newer view replacing this one: `/status` or a design final asked for the bottom. */

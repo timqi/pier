@@ -198,9 +198,8 @@ final move.
   rule); nothing otherwise — no post, edit or delete, a design final's re-post
   included. A card left behind meanwhile is reconciled by the first refresh
   after the chat speaks again.
-- The status message is `▤ open items` in the platform's emphasis over the
-  view's snapshot, one per home chat, headed `Chain: <name>` — the current
-  chain's, the first line of `/status`'s text too — and laid out by `statusLayout` in the sidebar's
+- The status message is `▤ open items · <chain>` — the current chain's name —
+  in the platform's emphasis over the view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
   `Waiting on you · N`, `In progress · N`, `Other open · N`; per item the title in
   bold with its status label as a tag (`Queued`, `Stopped`, …; none while
@@ -213,8 +212,9 @@ final move.
   waiting stage quoted, under the compact text as the message's `text` for
   notifications. Each field is cut at a fixed length; items past the budget
   (Lark 7000 chars and 100 elements, Slack 50 blocks) are left out whole behind
-  `… N more`. Under the groups, `Other chains`: one row per other chain with
-  `N waiting · M in progress` as its metadata — an active chain when either
+  `… N more`. Under the groups, one minor section (Lark one notation-size
+  element, Slack one `context` block) under a plain `Other chains`: a line per
+  other chain, its name then `· N waiting · M in progress` — an active chain when either
   is non-zero, an archived one only while something waits on the user,
   tagged `archived`; no such chain, no section. No run IDs appear, and old text-only `/status` notes retain the
   legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;

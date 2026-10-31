@@ -99,8 +99,10 @@ it("shows a /status snapshot's unmatched <done> keys, and an open-items note as 
   const named = { ...statusSnapshot, chain: "pier" };
   expect(isOpenItemsSnapshot(named)).toBe(true);
   expect(isOpenItemsSnapshot({ ...statusSnapshot, chain: 7 })).toBe(false);
-  chat.appendSystemInput("Chain: pier\n\nold", { kind: "chat-command", command: "status", statusSnapshot: named });
-  expect(card().querySelector(".open-items-card")!.firstElementChild!.textContent).toBe("Chain: pier");
+  chat.appendSystemInput("old", { kind: "chat-command", command: "status", statusSnapshot: { ...named, unmatched: [] } });
+  expect(card().textContent).toContain("/status · pier");
+  expect(card().textContent).not.toContain("Chain:");
+  expect(card().querySelector(".open-items-card")!.textContent).toBe("Nothing open.");
   chat.appendSystemInput("[Pier: <done>x</done> closed no open item.]", { kind: "open-items" });
   expect(card().dataset.kind).toBe("system");
   expect(card().textContent).toContain("open items");

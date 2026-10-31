@@ -454,7 +454,7 @@ describe("the chat commands", () => {
     r.status.text = "Open\n- model menu — merged";
     expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
     const m1 = r.sessions.get("m1")!;
-    expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Chain: Main\n\nOpen\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
+    expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Open\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
     expect(m1.prompts).toEqual([]);
     for (const text of ["/tmp is full", "/status please", "status", "/stat", "%", "%unknown"]) await r.say(text);
     expect(m1.prompts).toHaveLength(6);
@@ -470,12 +470,12 @@ describe("the chat commands", () => {
     expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { "r-sess": "s-r" }, statusSnapshot: { version: 1, items: [], chain: "Main" } });
   });
 
-  it("names the chain `/status` answers for, in its text and its snapshot", async () => {
+  it("names the chain `/status` answers for in its snapshot, not its text", async () => {
     const r = rig();
     const { chainId } = await r.say("/chain new Design");
     await r.say("/status", chainId);
     const answer = [...r.sessions.values()].flatMap((s) => s.systemInputs).find((i) => i.origin.kind === "chat-command")!;
-    expect(answer.text).toBe("Chain: Design\n\nNothing open.");
+    expect(answer.text).toBe("Nothing open.");
     expect(answer.origin).toMatchObject({ statusSnapshot: { chain: "Design" } });
   });
 

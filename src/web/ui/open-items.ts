@@ -149,12 +149,11 @@ export function closedItemRow(problem: string, closedAt: number, itemView: (prob
 
 export function openItemsCard(snapshot: OpenItemsSnapshot, actions: Actions): HTMLElement {
   const content = h("div", "open-items-card");
-  if (snapshot.chain !== undefined) content.append(h("p", "mt-1.5 text-xs text-neutral-500", `Chain: ${snapshot.chain}`));
   for (const group of openItemGroups(snapshot.items)) {
     content.append(h("h3", "mt-3 mb-2 text-xs text-neutral-500", `${group.title} · ${group.items.length}`),
       h("ul", "", ...group.items.map((p) => openItemRow(p, { ...actions, grouped: true }))));
   }
   if (snapshot.unmatched?.length) content.append(h("h3", "mt-3 mb-2 text-xs text-neutral-500", `${UNMATCHED_DONE} · ${snapshot.unmatched.length}`), h("ul", "", ...snapshot.unmatched.map((p) => h("li", "text-sm text-amber-700", p))));
-  if (!snapshot.items.length) content.append(h("p", "text-xs text-neutral-500", "Nothing open."));
+  if (!snapshot.items.length) content.append(h("p", "mt-1.5 text-xs text-neutral-500", "Nothing open."));
   return content;
 }

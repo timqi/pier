@@ -301,7 +301,7 @@ export class MainChain {
       return undefined;
     }
     const { text, sessions, snapshot } = this.status(chainId);
-    await session.systemInput(`Chain: ${chain}\n\n${text}`, { ...origin, sessions, statusSnapshot: { ...snapshot, chain } }, "append");
+    await session.systemInput(text, { ...origin, sessions, statusSnapshot: { ...snapshot, chain } }, "append");
     return undefined;
   }
 

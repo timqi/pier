@@ -6,7 +6,7 @@
 import { cut } from "../core/reply.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
-import { statusLayout, type StatusRow, type StatusView } from "./status.js";
+import { otherCounts, statusLabel, statusLayout, type StatusRow, type StatusView } from "./status.js";
 
 /** Slack caps `markdown` blocks at 12,000 cumulative chars per message. */
 export const MARKDOWN_MAX = 11_000;
@@ -148,7 +148,6 @@ export function offeredLabel(
 
 // --- the status message ------------------------------------------------------
 
-const STATUS_LABEL = "_▤ open items_";
 // Cut per field, not per block: a cut through `<url|label>` would leave it unclosed.
 // Escaped first: an entity is up to five times its character, and the cap is on what is sent.
 const FIELD_MAX = 900;
@@ -163,14 +162,15 @@ function statusRow(r: StatusRow): SlackBlock[] {
 
 /** The open items as the web sidebar lays them out in Block Kit, under the
  *  plain text Slack shows where blocks are not rendered (notifications). */
-export const statusMessage = (view: StatusView): { text: string; blocks: SlackBlock[] } => ({
-  text: `${STATUS_LABEL}\n${escapeMrkdwn(cut(view.text, MRKDWN_MAX))}`,
-  blocks: [context(STATUS_LABEL), ...statusLayout<SlackBlock>(view, {
+export const statusMessage = (view: StatusView): { text: string; blocks: SlackBlock[] } => {
+  const label = `_${escapeMrkdwn(statusLabel(view))}_`;
+  return { text: `${label}\n${escapeMrkdwn(cut(view.text, MRKDWN_MAX))}`, blocks: [context(label), ...statusLayout<SlackBlock>(view, {
     heading: (text) => [context(`*${escapeMrkdwn(text)}*`)],
     row: statusRow,
     more: (n) => [context(`… ${String(n)} more`)],
+    others: (chains) => [context(["Other chains", ...chains.map((c) => `*${field(c.name)}*${c.archived ? "  `archived`" : ""} · ${otherCounts(c)}`)].join("\n"))],
     cost: (blocks) => blocks.length,
     // Slack's 50 blocks, less the label and the closing count.
     max: 48,
-  })],
-});
+  })] };
+};

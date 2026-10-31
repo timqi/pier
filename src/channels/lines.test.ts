@@ -16,4 +16,8 @@ describe("noteBody", () => {
     expect(noteBody({ text, origin: { kind: "error" } }, "*")).toContain("run x0d7dyb1…");
     expect(noteBody({ text, origin: { kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [] } } }, "*")).toBe(`*/status*\n> ${text}`);
   });
+
+  it("names `/status`'s chain in its label, so nothing open is one quoted line", () => {
+    expect(noteBody({ text: "Nothing open.", origin: { kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [], chain: "Main" } } }, "*")).toBe("*/status · Main*\n> Nothing open.");
+  });
 });

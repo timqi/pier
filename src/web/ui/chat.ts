@@ -4,7 +4,7 @@
 
 import { ArrowUpRight, CornerDownLeft, History, ListX, Pencil, RefreshCcw, Reply, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { isSilentReply, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
+import { isSilentReply, originLabel, replyTopic, silentReason, splitReply, stableBlockEnd, streamBody, streamTail } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
@@ -576,7 +576,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const head = origin.kind === "session-seed"
     ? runHead({ glyph: glyphEl(), label, labelCls, taskName: name, sessionId: origin.previousSessionId })
     : origin.kind === "chat-command" || origin.kind === "open-items"
-    ? runHead({ glyph: glyphEl(), label: origin.kind === "chat-command" ? `/${origin.command}` : label, labelCls })
+    ? runHead({ glyph: glyphEl(), label: origin.kind === "chat-command" ? originLabel(origin) : label, labelCls })
     : runHead({
       labelCls,
       ...(name ? { taskName: name } : {}),

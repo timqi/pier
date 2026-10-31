@@ -117,24 +117,24 @@ describe("statusCard", () => {
     ]);
   });
 
-  it("names its chain over the items", () => {
+  it("names its chain in its label, over the items", () => {
     const sent = statusCard({ text: "x", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "pier" } });
-    expect(sent.body.elements.slice(0, 3).map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
-      "*▤ open items*", "<font color='grey'>Chain: pier</font>", "<font color='grey'>In progress · 1</font>",
+    expect(sent.body.elements.slice(0, 2).map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
+      "*▤ open items · pier*", "<font color='grey'>In progress · 1</font>",
     ]);
   });
 
   // docs/plans/30-multi-chain.md §IM
-  it("ends on a line per other chain, an archived one tagged", () => {
+  it("ends on one small section, a line per other chain, an archived one tagged", () => {
     const sent = statusCard({ ...view([item("Docs", "queued", "")]), others: [
       { name: "Design", waiting: 1, inProgress: 2, archived: false },
       { name: "Old", waiting: 1, inProgress: 0, archived: true },
     ] });
-    expect(sent.body.elements.slice(-3).map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
+    expect(sent.body.elements.at(-1)).toEqual({ tag: "markdown", text_size: "notation", content: [
       "<font color='grey'>Other chains</font>",
-      "**Design**\n<font color='grey'>1 waiting · 2 in progress</font>",
-      "**Old** <text_tag color='neutral'>archived</text_tag>\n<font color='grey'>1 waiting · 0 in progress</font>",
-    ]);
+      "Design <font color='grey'>· 1 waiting · 2 in progress</font>",
+      "Old <text_tag color='neutral'>archived</text_tag> <font color='grey'>· 1 waiting · 0 in progress</font>",
+    ].join("\n") });
   });
 
   it("counts what the card's budget leaves out", () => {
