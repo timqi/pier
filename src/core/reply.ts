@@ -51,7 +51,7 @@ export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
 export const awaitsTurn = (origin: NoteOrigin): boolean =>
   origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed" && origin.kind !== "open-items";
 
-/** Is this note progress the home chat's status message already shows? A run
+/** Is this note progress the home main flow leaves to `/status` and the head's reply? A run
  *  that failed is not: its trace must not depend on the head choosing to speak. */
 export const shownByStatus = (origin: NoteOrigin): boolean =>
   (origin.kind === "task-delegation" || origin.kind === "task-callback")

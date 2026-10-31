@@ -53,7 +53,7 @@ interface ChainDeps {
   /** Settings' chainMode: `/chain new` in Session mode turns it on. */
   mode: { get(): boolean; set(on: boolean): Promise<void> };
   /** A `/chain` command switched to, created, renamed or archived a chain, from any surface:
-   *  every chain list and the home chat's status card re-read (`chains-changed`). */
+   *  every chain list re-read (`chains-changed`). */
   changed: () => void;
   /** The operator's Settings default model and reasoning, read at each new head. */
   defaults: () => Promise<AgentDefaults>;

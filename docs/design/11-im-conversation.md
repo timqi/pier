@@ -174,8 +174,9 @@ thread half only for the home chat; any other is refused.
 | a cut send | ledger note, as today |
 | the stop itself | journal: `SIGTERM — N turn(s) aborted, K run(s) left running for the next boot` |
 
-- Receipts: the home chat, main flow and threads, wears no reaction; its
-  messages are still booked under the home conversation id and settled by the
+- Receipts: the home chat, main flow and threads, wears no reaction unless the
+  message reached a head mid-turn or waits past 20 s ([04 §Reaction
+  receipts](04-im-channels.md#reaction-receipts)); its messages are still booked under the home conversation id and settled by the
   head's turn-end, which tells a silent turn whether it settled one (§Status).
   A chat command is not booked — its answer is a note, and no turn would
   settle it — and neither is a `chat-command`, `open-items` or `session-seed` note
@@ -387,7 +388,8 @@ through what the head launches (`pier task`), never by a group's message.
   `tasks/service.test.ts` (§abnormal-end notice): which ends owe a notice, the
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `channels/receipts.test.ts` a quiet chat booked, settled and
-  periodically swept with no reaction call, cleared by the startup sweep;
+  periodically swept with no reaction call, 👀 on a busy head or past `lateMs`,
+  cleared by the startup sweep;
   `channels/status.test.ts` a post on each answer, nothing open, a failed post;
   `channels/lark-render.test.ts` `statusCard` and
   `channels/slack-render.test.ts` `statusMessage` the layout and the budget;
