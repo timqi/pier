@@ -26,17 +26,13 @@ html {
   --workbench-canvas: #f1f4f3;
   --workbench-mist: #e6f1f3;
   --workbench-mint: #e8f3ed;
-  /* Glass chrome (bar, composer, menus): a neutral hairline the
-     canvas shows through, a top-edge highlight, and a shadow in two parts —
-     wide ambient plus tight contact — which is what reads as lifted rather
-     than drawn on. `-raised` is one step higher, for what sits over content
-     (composer, an open panel). Dark swaps the hairline for a light one, since a
-     shadow alone disappears against a dark canvas. */
-  --glass-edge: rgb(16 24 40 / 0.08);
-  --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14),
-    inset 0 1px 0 rgb(255 255 255 / 0.7);
-  --glass-shadow-raised: 0 1px 2px rgb(16 24 40 / 0.08), 0 6px 18px -2px rgb(16 24 40 / 0.12),
-    0 18px 40px -8px rgb(16 24 40 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.7);
+  /* Flat chrome: the bar and the rail are one surface a step off the canvas,
+     bounded by a hairline; nothing is blurred or lifted. The one shadow is a
+     popover's, which has to read as over the page. Dark swaps the hairline for
+     a light one, since a dark line disappears against a dark canvas. */
+  --workbench-chrome: oklch(93.8% 0.006 250);
+  --line: rgb(16 24 40 / 0.1);
+  --shadow-pop: 0 4px 14px -2px rgb(16 24 40 / 0.14);
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -63,19 +59,19 @@ html[data-theme="dark"] {
   --workbench-canvas: #14171a;
   --workbench-mist: #1d282d;
   --workbench-mint: #1d2925;
-  --glass-edge: rgb(255 255 255 / 0.09);
-  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.55),
-    inset 0 1px 0 rgb(255 255 255 / 0.07);
-  --glass-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 18px -2px rgb(0 0 0 / 0.45),
-    0 18px 44px -8px rgb(0 0 0 / 0.65), inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --workbench-chrome: oklch(20.5% 0.004 260);
+  --line: rgb(255 255 255 / 0.1);
+  --shadow-pop: 0 6px 18px -2px rgb(0 0 0 / 0.55);
   background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it,
-     100–300 the chrome over it; 400 and up is type. */
-  --color-white: oklch(22.5% 0 none);
+     100–300 the chrome over it; 400 and up is type. The pane sits a step
+     further from the canvas than a plain inversion: a reply card has to lift
+     off a near-black page without a shadow to do it. */
+  --color-white: oklch(24.5% 0.004 260);
   --color-neutral-50: oklch(19% 0 none);
-  --color-neutral-100: oklch(27.5% 0 none);
-  --color-neutral-200: oklch(32.5% 0 none);
+  --color-neutral-100: oklch(29% 0 none);
+  --color-neutral-200: oklch(34% 0 none);
   --color-neutral-300: oklch(39% 0 none);
   --color-neutral-400: oklch(62% 0 none);
   --color-neutral-500: oklch(70% 0 none);
@@ -283,8 +279,7 @@ html[data-theme="dark"][data-accent="violet"] {
    (n/16) instead of being rewritten at every call site. New code should use the
    named scale (`text-sm`) and this block should shrink, not grow. */
 html {
-  font-size: 112.5%; /* 18px base */
-  --glass-surface: color-mix(in oklab, var(--color-white) 80%, transparent);
+  font-size: 112.5%; /* 18px base: a phone's chrome is read at arm's length and pressed with a thumb */
   --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
@@ -292,6 +287,12 @@ html {
      one place magnifying is offered is the lightbox, and it is a tap on the
      image rather than a pinch — the rules here leave no gesture to use. */
   touch-action: pan-x pan-y;
+}
+/* Desktop chrome at the web's own scale: bar, menus, rows and chips step down
+   with the root while the transcript keeps its 16px (`#turns`) and 44px coarse
+   targets are px, so nothing a finger needs shrinks. */
+@media (width >= 48rem) {
+  html { font-size: 100%; }
 }
 .text-\[9px\] { font-size: 0.5625rem; }
 .text-\[10px\] { font-size: 0.625rem; }
@@ -315,25 +316,24 @@ html {
   margin: 0;
 }
 
-/* The transcript runs the full pane and the glass chrome floats over it, so a
-   message slides under the bar and the dock instead of being cut off at
-   their edges — the same on a phone as on a desktop. One
-   column, three rows: the heading pins to the top of row 1, the dock (queue,
-   composer) owns rows 2–3 by height, and the transcript spans all
-   three, padding its ends by what covers them — the heading's fixed height,
-   and the dock's live one (composer.ts). */
+/* The transcript runs the full pane and the chrome sits over it, so a message
+   slides under the bar and the dock instead of being cut off at their edges —
+   the same on a phone as on a desktop. One column, three rows: the heading
+   pins to the top of row 1, the dock (queue, composer) owns rows 2–3 by
+   height, and the transcript spans all three, padding its ends by what covers
+   them — the heading's fixed height, and the dock's live one (composer.ts). */
 main {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto auto;
-  /* What the floating heading covers: its 8px top inset plus the 3rem height
-     both of them are (`h-12` on the bar, the height rule below on the rest).
-     Everything that pads by the heading reads it from here — the dock's own
-     footprint is the same idea, measured live into --dock-h by composer.ts. */
-  --head-h: calc(3rem + 8px);
+  /* What the heading covers: the 3rem both of them are (`h-12` on the bar,
+     the height rule below on the rest). Everything that pads by the heading
+     reads it from here — the dock's own footprint is the same idea, measured
+     live into --dock-h by composer.ts. */
+  --head-h: 3rem;
   /* The reading column — transcript, queue card, composer: 35–45 CJK
-     characters a line in a bubble, one inset for all three so they share both edges. */
-  --read-w: 44rem;
+     characters a line in a reply, one inset for all three so they share both edges. */
+  --read-w: 46rem;
   --col-pad: max(1rem, calc((100% - var(--read-w)) / 2));
 }
 /* Explicit column on everything: auto-placement would push an overlapping
@@ -345,7 +345,7 @@ main > section, #turns { grid-row: 1 / -1; }
 #composer { grid-row: 3; }
 :is(#bar, #queue-panel, #composer, #fabs) { position: relative; z-index: 1; }
 /* The floating buttons end where the dock starts, so they follow its height and
-   clear the send key: right on the reading column's edge, 10px above the pill
+   clear the send key: right on the reading column's edge, 10px above the box
    (the composer's 0.5rem top padding is inside the dock) or the queue card. */
 #fabs {
   grid-row: 1;
@@ -365,13 +365,14 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--color-white);
   color: var(--color-neutral-700);
   cursor: pointer;
   pointer-events: auto;
-  transition: opacity 180ms var(--ease-surface), transform 180ms var(--ease-surface), color 150ms;
+  transition: opacity 180ms var(--ease-surface), transform 180ms var(--ease-surface), color 150ms, background-color 150ms;
 }
-/* Id-scoped: the glass material's own rule carries an id's specificity. */
-#fabs .fab:hover { background: var(--color-white); color: var(--color-neutral-900); }
+.fab:hover { background: var(--color-neutral-100); color: var(--color-neutral-900); }
 .fab:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; }
 /* A hidden button leaves the stack, so the other one rests on the dock;
    `display` animates discretely where supported, else it is instant. */
@@ -394,14 +395,34 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
   box-shadow: 0 0 0 2px var(--color-white);
 }
 @media (pointer: coarse) { .fab { width: 44px; height: 44px; } }
-.open-item { margin-block: 8px; padding: 4px 6px; border-radius: 10px; overflow-wrap: anywhere; }
-.open-item:has(.item-view-open, .item-close) { display: flex; align-items: flex-start; gap: 4px; }
-.open-item:has(.session-open:hover), .open-item:focus-within, .open-item:has([aria-current]) { background: var(--color-neutral-100); }
-.open-item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.open-item-dot { margin-top: 6px; }
+/* One row vocabulary for the panel and the rail (chain rows below share it):
+   hover and focus a neutral plate, the current one the command list's
+   selection tint. A status row is two lines, title then status · stage ·
+   metadata; its actions wait for hover or focus with a fine pointer. */
+:root { --row-hover: var(--color-neutral-100); }
+.open-item { margin-block: 2px; padding: 0.375rem 0.5rem; border-radius: 0.5rem; overflow-wrap: anywhere; }
+.open-item:has(.item-view-open, .item-close) { display: flex; align-items: center; gap: 2px; }
+.open-item:has(.session-open:hover), .open-item:focus-within { background: var(--row-hover); }
+.open-item:has([aria-current]) { background: var(--color-indigo-100); }
+.open-item:has([aria-current]) .open-item-title { color: var(--color-indigo-700); }
+.open-item-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 500; line-height: 1.35; }
+.open-item-dot { margin-top: 0.375rem; }
 /* A running dot holds still: an endless pulse repaints the page for as long as the work runs. */
 .running-dot { outline: 1px solid var(--color-neutral-500); outline-offset: 2px; }
-.open-item-stage, .open-item-meta { margin-top: 3px; white-space: pre-wrap; }
+.open-item-stage { display: inline-flex; max-width: 100%; margin-top: 2px; vertical-align: top; white-space: nowrap; }
+.open-item-phrase { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.open-item-meta:not(.hidden) { display: inline; white-space: nowrap; }
+.open-item-meta::before { content: "·"; margin-inline: 0.25rem 0.375rem; color: var(--color-neutral-400); }
+/* With a mouse the actions float over the row's right end on hover or focus, on
+   the row's own hover plate, so the title has the whole width to read in. */
+@media (hover: hover) and (pointer: fine) {
+  .open-item:has(.item-view-open, .item-close) { position: relative; }
+  .open-item :is(.item-view-open, .item-close) { position: absolute; top: 50%; translate: 0 -50%; opacity: 0; background: var(--row-hover); transition: opacity 120ms; }
+  .open-item:has([aria-current]) :is(.item-view-open, .item-close) { background: var(--color-indigo-100); }
+  .open-item .item-close { right: 0.25rem; }
+  .open-item .item-view-open { right: 2.375rem; }
+  .open-item:is(:hover, :focus-within) :is(.item-view-open, .item-close) { opacity: 1; }
+}
 /* Below md the bar's lead is the status glyph and the count (index.html). */
 @media (width < 48rem) { #status-item-state > .status-label { display: none; } }
 .open-item button { cursor: pointer; }
@@ -412,8 +433,9 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 /* The chain list (chains.ts): the same rows floated and docked. A row's ⋯ waits for the hover a finger has not got. */
 .chain-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .chain-dot { margin-top: 6px; }
-.chain-row:has(.chain-open:hover), .chain-row:focus-within, .chain-row:has([aria-current]) { background: var(--color-neutral-100); }
-.chain-open[aria-current] .chain-name { font-weight: 600; }
+.chain-row:has(.chain-open:hover), .chain-row:focus-within { background: var(--row-hover); }
+.chain-row:has([aria-current]) { background: var(--color-indigo-100); }
+.chain-open[aria-current] .chain-name { font-weight: 600; color: var(--color-indigo-700); }
 :is(.chain-open, .chain-more):focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: -2px; }
 @media (hover: hover) and (pointer: fine) {
   .chain-more { opacity: 0; }
@@ -422,31 +444,61 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 @media (pointer: coarse) { :is(.chain-open, .chain-more) { min-height: 44px; min-width: 44px; } }
 #chain-rail { display: none; }
 @media (width >= 80rem) {
-  /* Beside the reading column, under the bar, content height and no plate (06 §Layout). */
+  /* Two columns side by side: the sidebar is the grid's first, the window's
+     full height, and everything else — the bar included, and a Console view
+     — is the content column, so the reading column centres beside the
+     sidebar and the bar is the content column's own (06 §Layout). */
+  main:has(#chain-rail[data-on]) { grid-template-columns: 16rem minmax(0, 1fr); }
+  main:has(#chain-rail[data-on]) > :not(#chain-rail) { grid-column: 2; }
+  /* The chrome surface with its hairline on the right; `data-on` is chain
+     mode and the sidebar not hidden by ⌘B (chains.ts). */
   #chain-rail[data-on] {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    grid-column: 1;
     grid-row: 1 / -1;
-    align-self: start;
-    justify-self: start;
-    width: 15rem;
-    max-height: calc(100% - var(--head-h));
-    margin: var(--head-h) 0 0 0.5rem;
-    overflow-y: auto;
+    width: 16rem;
     position: relative;
     z-index: 1;
+    background: var(--workbench-chrome);
+    border-right: 1px solid var(--line);
+    --row-hover: color-mix(in oklab, var(--color-neutral-900) 7%, var(--workbench-chrome));
   }
-  #bar.hidden ~ #chain-rail { display: none; }
 }
+/* The sidebar's head is the bar's height under the same hairline, so the two
+   top edges meet at the sidebar's edge; the lists scroll under it. */
+.rail-title {
+  flex: none;
+  height: var(--head-h);
+  line-height: calc(var(--head-h) - 1px);
+  padding-inline: 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-neutral-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#rail-body { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 0.5rem 0.5rem 0.75rem; }
+/* A rail section's head (Chains, Items · N), the sidebar's only type besides
+   its rows; the sections meet at a hairline. */
+.rail-head { padding: 0.375rem 0.75rem 0.25rem; font-size: 0.75rem; font-weight: 600; color: var(--color-neutral-600); }
+#rail-items { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
+/* The rail's row is the title and its status line; the metadata stays in the
+   panel and in the row's title tooltip, which keeps the whole text. */
+#rail-items .open-item-meta { display: none; }
+.chain-row { border-radius: 0.5rem; }
+.chain-row .chain-open { padding-block: 0.4375rem; }
 /* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the
    composer's top padding already leaves between it and the input.
-   Attaching it to the pill instead would have to unround its top corners
+   Attaching it to the box instead would have to unround its top corners
    and hide its top border in two more states, for a seam either way. */
 #queue-panel {
   margin-inline: var(--col-pad);
-  border: 1px solid var(--glass-edge);
-  border-radius: 1.25rem;
-  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 
 /* Desktop has the width to keep title, tabs and action on one line, so the
@@ -502,7 +554,7 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
   :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 3px; }
   input, textarea, select { accent-color: var(--color-indigo-600); }
   dialog { background: var(--color-white); color: var(--color-neutral-800); }
-  dialog::backdrop { backdrop-filter: blur(3px); }
+  dialog::backdrop { background: rgb(0 0 0 / 0.3); }
   * { scrollbar-width: thin; scrollbar-color: var(--color-neutral-300) transparent; }
 }
 
@@ -538,53 +590,36 @@ main {
   background-color: var(--color-indigo-100);
   box-shadow: none;
 }
-/* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #bar, .pagehead) {
-  background: var(--glass-surface);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(28px) saturate(1.4);
-}
 /* The queue is the composer's overflow, not a second composer: the wash is the
-   amber the send button, the label and the queue actions already carry. Solid,
-   for the reason a menu is — these are messages, and a transcript coming
-   through the text you are about to send is noise. */
+   amber the send button, the label and the queue actions already carry. */
 #queue-panel {
   background: color-mix(in oklab, var(--color-amber-50) 55%, var(--color-white));
-  border-color: var(--glass-edge);
 }
-/* Chrome is glanced at, a menu is read: model ids, paths and session actions
-   are scanned over whatever is scrolling behind them, and a transcript coming
-   through a search field is noise in the one place that needs none. So a panel
-   is not glass at all — it takes the same shadow and entrance on a solid
-   surface, and `menu.ts` does not put `glass` on it. Overriding the rule above
-   was tried and does not work: its `:is()` holds ids, so the whole selector
-   carries an id's specificity and no class can outrank it. */
-.glass-menu {
+/* A popover is the one thing over the page: solid, a hairline, and the one
+   shadow the workbench keeps. */
+.popover {
   background: var(--color-white);
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--shadow-pop);
 }
-/* One heading material: the bar is a slim inset strip in glass, and a Console
-   page's head is that strip too, so a Console page and a chat read as one workbench. */
+/* One heading material: the bar is a flat full-width strip on the chrome
+   surface under a hairline, and a Console page's head is that strip too, so a
+   Console page and a chat read as one workbench. */
 #bar, .pagehead {
-  margin: 8px 8px 0;
-  border: 1px solid var(--glass-edge);
-  border-radius: 18px;
-  box-shadow: var(--glass-shadow);
+  background: var(--workbench-chrome);
+  border-bottom: 1px solid var(--line);
   font-size: 0.9375rem;
 }
 /* A bar holds one line and is that tall; the head may wrap — a phone's tab row
    takes two lines — so its `min-h-12` is a floor instead. */
 #bar { height: 3rem; }
 /* A head that hugs its controls — Channels' platform switch, which is one
-   switch and a status line, not a page's worth of band — centres over the
-   column of cards below it instead of hanging off the left edge. The cap is
-   what keeps the inset: auto margins are zero while `fit-content` measures,
-   so without it a wide switch on a phone would reach both edges. */
-.pagehead-hug { width: fit-content; margin-inline: auto; max-width: calc(100% - 16px); }
-/* The ends are under the floating chrome (grid above), so they pad by what
-   covers them, and rows dissolve into the pane's edges instead of being cut
-   at a chrome boundary. An end row's own --turn-gap is its distance from the
-   chrome; the dock's top 0.5rem (`#composer` pt-2) is clear glass, paid back. */
+   switch and a status line, not a page's worth of band — centres them over the
+   column of cards below it instead of hanging them off the left edge. */
+.pagehead-hug { justify-content: center; }
+/* The ends are under the chrome (grid above), so they pad by what covers them,
+   and rows dissolve into the pane's edges instead of being cut at a chrome
+   boundary. An end row's own --turn-gap is its distance from the chrome; the
+   dock's top 0.5rem (`#composer` pt-2) is clear canvas, paid back. */
 #turns {
   padding:
     var(--head-h)
@@ -598,23 +633,21 @@ main {
      a continuation (`mb-1.5` under a header). */
   --turn-gap: 0.75rem;
   --tight-gap: 0.375rem;
-  /* `text-sm` snapped to a whole pixel: 0.875rem of the 18px root is 15.75px,
-     which a 1x screen renders soft. The `.md` sizes below are em of this 16.
-     The plain 16px is for engines without round() (Chromium <125). */
+  /* The one size that does not follow the root: a reply reads at 16px on a
+     phone and a desktop alike; the `.md` sizes below are em of it. */
   font-size: 16px;
-  font-size: round(0.875rem, 1px);
+  line-height: 1.55;
   overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
-  /* The fade is complete across the heading's 8px inset (margin above): a row
-     showing through that strip is a ghost line over the bar, which iOS 26's
-     scroll edge effect smears into the status bar. */
-  mask-image: linear-gradient(to bottom, transparent 8px, black 2.5rem, black calc(100% - 2rem), transparent);
+  /* A row leaving under the bar's hairline or the dock fades, rather than being
+     cut at the edge. */
+  mask-image: linear-gradient(to bottom, transparent var(--head-h), black calc(var(--head-h) + 1.25rem), black calc(100% - 2rem), transparent);
 }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
   max-width: 88%;
   margin-block: var(--turn-gap);
-  padding: 0.5625rem 0.75rem;
-  border-radius: 1.375rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 10px;
   overflow-wrap: anywhere;
   /* WebKit fills a selection running past a positioned bubble down to its
      border edge, through the bottom padding; a transformed box is never gap-filled. */
@@ -622,18 +655,22 @@ main {
 }
 /* Margins collapse: a continuation sums to the tight step, not the turn gap. */
 #turns > [data-grouped] { margin-top: calc(var(--tight-gap) - var(--turn-gap)); }
+/* The user's message is a bounded bubble; a reply is the reading surface, a card
+   the column wide on a desktop — a table or a diff is a document, not a speech. */
 #turns > [data-kind="user"] {
   margin-left: auto;
-  border-bottom-right-radius: 0.375rem;
   background: var(--color-indigo-100);
   color: var(--color-neutral-900);
-  box-shadow: inset 0 0 0 1px var(--color-indigo-300);
+  box-shadow: inset 0 0 0 1px var(--color-indigo-200);
 }
 #turns > [data-kind="assistant"] {
   margin-right: auto;
-  border-bottom-left-radius: 0.375rem;
   background: var(--color-white);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
+  box-shadow: inset 0 0 0 1px var(--color-neutral-200);
+}
+@media (width >= 48rem) {
+  #turns > [data-kind="assistant"] { width: 100%; max-width: 100%; }
+  #turns > [data-kind="user"] { max-width: 76%; }
 }
 #turns > :is([data-kind="system"], [data-kind="error"]) {
   border-left-width: 2px;
@@ -662,16 +699,17 @@ main {
 #turns > [data-kind="system"].system-card {
   width: auto;
   padding-block: 0.625rem;
-  border-radius: 0.75rem;
 }
 /* The chip row (chat.ts chipSlots): the reply's process, one chip per cause,
    steps group and run, at the top of its bubble. A chip is the button that
    opens its detail (turn-activity.ts chip): open, it wears a ring, and the
    detail lies under the row in the card that line opened to before. A bubble
    of chips alone keeps the reply's material. */
-.chip { position: relative; cursor: pointer; transition: background-color 120ms; }
-.chip:hover { background: color-mix(in oklab, currentColor 14%, transparent); }
-.chip[data-open] { box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 40%, transparent); }
+/* The topic tag is the row's one filled label; the process chips are outlined,
+   so a row of four reads as one line of metadata and the state colour is the text. */
+.chip { position: relative; cursor: pointer; transition: background-color 120ms; background: transparent; box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 28%, transparent); }
+.chip:hover { background: color-mix(in oklab, currentColor 10%, transparent); }
+.chip[data-open] { background: color-mix(in oklab, currentColor 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 55%, transparent); }
 .chip:focus-visible { outline: 2px solid var(--color-indigo-400); outline-offset: 1px; }
 .chip > .chip-name { max-width: 24ch; }
 .chip-details > * + * { margin-top: 0.375rem; }
@@ -700,7 +738,7 @@ main {
 .topic-tag[data-waiting]::after { content: ""; flex: none; width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: var(--color-amber-700); }
 /* The item view's live rows of other items (item-view.ts): still in the pane, not shown. */
 #turns > [data-item-hidden] { display: none; }
-#turns > [data-kind="user"]:has(textarea) { width: 88%; }
+#turns > [data-kind="user"]:has(textarea) { width: 76%; }
 /* The row toolbar (chat.ts rowTools): shown on hover. Without hover it is the
    keyboard's and the screen reader's — a finger swipes and holds the row
    (row-gestures.ts) — so it stays in the tree, painted only under focus-visible. */
@@ -799,20 +837,16 @@ main {
   .run-model-line .run-model-id { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
   .run-model-line .run-model:has(.run-tier) .run-model-id { display: none; }
 }
-#composer { --composer-control-size: 2rem; position: relative; z-index: 1; padding-inline: var(--col-pad); }
+#composer { --composer-control-size: 2.125rem; position: relative; z-index: 1; padding-inline: var(--col-pad); }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
-/* The one control on the coloured gradient; `.glass` below picks the token up. */
-#composer > div { --glass-shadow: var(--glass-shadow-raised); }
-#composer > div:focus-within {
-  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
-}
+/* The box docked at the column's foot: a bordered surface, its focus a ring. */
+#composer > div:focus-within { box-shadow: 0 0 0 3px var(--color-indigo-100); }
 #composer :is(#attach, #send, #stop) {
   width: var(--composer-control-size);
   height: var(--composer-control-size);
   border-radius: 50%;
 }
-.glass { box-shadow: var(--glass-shadow); }
 /* Opacity/transform entrances avoid layout animation; history replay skips them. */
 @keyframes surface-in {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }
@@ -837,25 +871,25 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   to { outline: 3px solid transparent; outline-offset: 3px; }
 }
 #turns > [data-reveal] { animation: turn-reveal 1.2s ease-out; }
-.glass-menu {
+.popover {
   --menu-shift: translateY(-4px) scale(0.97);
   transform-origin: top center;
   opacity: 1;
   transform: none;
   transition: opacity 180ms var(--ease-surface), transform 220ms var(--ease-surface);
 }
-.glass-menu[data-presentation="sheet"] {
+.popover[data-presentation="sheet"] {
   --menu-shift: translateY(1.25rem);
   transform-origin: bottom center;
 }
-.glass-menu[data-closing] {
+.popover[data-closing] {
   opacity: 0;
   transform: var(--menu-shift);
   pointer-events: none;
   transition-duration: 120ms;
 }
 @starting-style {
-  .glass-menu { opacity: 0; transform: var(--menu-shift); }
+  .popover { opacity: 0; transform: var(--menu-shift); }
 }
 /* Native disclosure state stays authoritative, including keyboard activation.
    Engines without details-content/interpolate-size retain instant expansion. */
@@ -872,10 +906,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   transition: background-color 180ms, box-shadow 180ms, transform 180ms var(--ease-surface);
 }
 :is(.btn, .icon-btn, #composer button, #fabs button):active:not(:disabled) { transform: scale(0.95); }
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, .glass-menu, #bar, #queue-panel, .pagehead) {
-    background: var(--color-white);
-    backdrop-filter: none;
+@media (prefers-contrast: more) {
+  :is(.popover, #bar, #queue-panel, .pagehead, #chain-rail, #composer > div) {
     border-color: var(--color-neutral-400);
     box-shadow: none;
   }
@@ -889,7 +921,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      to be seen without opening anything (data-urgent, session-header.ts). The
      strip's height is declared, not measured, so --head-h can be too: the
      transcript pads by what covers it. */
-  main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
+  main { --bar-h: 3rem; --head-h: var(--bar-h); }
   main:has(#bar:not(.hidden)):has(#session-meta[data-urgent]:not([data-inline]):not(.hidden)) { --bar-h: 4rem; }
   #bar { flex-wrap: wrap; align-content: center; row-gap: 0; height: var(--bar-h); }
   /* A wrapping row breaks at the title's full width before it would shrink it,
@@ -917,7 +949,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .chip { transition: none; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
   #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
-  .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
+  .popover, .popover[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
   :is(#turns, #files-dialog) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button, #fabs button):active:not(:disabled) { transform: none; }
   .fab:not([data-show]) { transform: none; }
@@ -947,7 +979,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
    modules; everything else is utilities at the call site. */
 @layer components {
   .btn {
-    @apply rounded-full border border-neutral-200 bg-white px-4 py-2 font-medium shadow-2xs transition-colors hover:border-neutral-300 hover:bg-neutral-50 active:bg-neutral-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
+    @apply rounded-lg border border-neutral-200 bg-white px-4 py-2 font-medium transition-colors hover:border-neutral-300 hover:bg-neutral-50 active:bg-neutral-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
   }
   /* Dark: the indigo ramp flattens upward so accent *text* stays readable, and
      a label over that brighter fill has to go the other way. */
@@ -966,7 +998,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
   /* Compact icon-only controls, including the theme switch. */
   .icon-btn {
-    @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
+    @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
   }
   /* A Console page's head: its title, the view's tab pills and the page's
      primary action on one band, in the heading strip's material (below). Below
@@ -1187,7 +1219,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      keeps its shape and the block scrolls sideways in its own box, as a table
      does; contain keeps that scroll off the back-swipe. */
   .md pre {
-    @apply overflow-x-auto whitespace-pre rounded-xl border border-neutral-200/70 bg-neutral-50 px-4 py-3 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
+    @apply overflow-x-auto whitespace-pre rounded-lg border border-neutral-200/70 bg-neutral-50 px-4 py-3 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
     overflow-wrap: normal;
     overscroll-behavior-x: contain;
     color: var(--color-neutral-800);

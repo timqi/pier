@@ -45,7 +45,7 @@ import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
 import { AuthStore, requireAuth } from "./auth.js";
 import { MAX_FILE_BYTES } from "./fs.js";
-import { createServer, instanceManifest, tabPrefix, withAccent, withAccentIcon, withTabPrefix } from "./server.js";
+import { createServer, instanceManifest, tabPrefix, withAccent, withAccentIcon, withInstanceName, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 import type { ToolsSyncNote } from "./types.js";
 
@@ -2406,6 +2406,12 @@ describe("the app shell", () => {
     // Nothing to say, and any shell that does not say Pier: served as built.
     expect(withTabPrefix(html, "")).toBe(html);
     expect(withTabPrefix("<title>Other</title>", "g1")).toBe("<title>Other</title>");
+    // The sidebar's head says the same name, Pier when there is none.
+    const head = '<h1 id="rail-title" class="rail-title">Pier</h1>';
+    expect(withInstanceName(head, "stag<ing")).toBe('<h1 id="rail-title" class="rail-title">stag&lt;ing</h1>');
+    expect(withInstanceName(head, "  ")).toBe(head);
+    // Taken as text, not as a replacement pattern.
+    expect(withInstanceName(head, "a$&b")).toBe('<h1 id="rail-title" class="rail-title">a$&amp;b</h1>');
   });
 });
 

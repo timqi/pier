@@ -10,7 +10,7 @@ import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
-import { openChains, setChainMode } from "./chains.js";
+import { openChains, setChainMode, SIDEBAR_KEY, sidebarDocked, toggleSidebar } from "./chains.js";
 import type { ChainInfo } from "../types.js";
 import { openSystemPrompt } from "./system-prompt.js";
 import { chord, chordLabel, escapeKey, modalOpen } from "./shortcut.js";
@@ -138,15 +138,18 @@ export function renderHeader(): void {
     chatTitle.prepend(dot);
   }
   itemClose.classList.toggle("hidden", !item);
-  // The title is what the panel is *about*, so it is also the way in: the chain list in chain mode.
-  const list = !!chain && !item;
+  // The title is what the panel is *about*, so it is also the way in: the chain
+  // list in chain mode — unless the list is already on screen as the docked
+  // sidebar, when the title is a plain heading.
+  const plain = !!chain && !item && sidebarDocked();
+  const list = !!chain && !item && !plain;
   if (list) chatTitle.append(icon(ChevronDown, "ml-1 inline-block h-3.5 w-3.5 align-middle text-neutral-500"));
-  chatTitle.disabled = !s && !list;
-  chatTitle.classList.toggle("cursor-pointer", !!s || list);
-  chatTitle.title = list ? "Chains" : s ? "Session info" : "";
+  chatTitle.disabled = plain || (!s && !list);
+  chatTitle.classList.toggle("cursor-pointer", !plain && (!!s || list));
+  chatTitle.title = list ? "Chains" : s && !plain ? "Session info" : "";
   if (list) chatTitle.setAttribute("aria-haspopup", "dialog");
   else chatTitle.removeAttribute("aria-haspopup");
-  chatTitle.onclick = list ? () => openChains() : s ? () => sessionInfo(chatTitle, s) : null;
+  chatTitle.onclick = list ? () => openChains() : s && !plain ? () => sessionInfo(chatTitle, s) : null;
   back.classList.toggle("hidden", conversation && !item);
   back.classList.toggle("flex", !conversation || !!item);
   toMain.toggleAttribute("data-show", !conversation || !!item);
@@ -454,6 +457,15 @@ function barMenu(anchor: HTMLElement): void {
         closeMenu();
         void setChainMode(!deps.chainMode()).then((why) => { if (why) appendTurn("error", why); });
       },
+    },
+    {
+      label: "Sidebar",
+      hint: deps.chainMode() ? chordLabel(SIDEBAR_KEY) : "in chain mode",
+      onSelect: () => {
+        closeMenu();
+        toggleSidebar();
+      },
+      ...(deps.chainMode() ? {} : { disabled: true }),
     },
     {
       label: "Settings",

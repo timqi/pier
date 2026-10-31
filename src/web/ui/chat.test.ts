@@ -866,7 +866,7 @@ describe("a touch on a row", () => {
     pointer(row, "pointerdown", 100);
     for (let x = 100; x <= 100 + to; x += 10) pointer(row, "pointermove", x, 100 + (dy * (x - 100)) / (to || 1));
   };
-  const sheet = () => doc.querySelector(".glass-menu");
+  const sheet = () => doc.querySelector(".popover");
   const items = () => sheet()?.querySelectorAll("button").map((b) => b.textContent) ?? [];
   const pick = (label: string) => sheet()!.querySelectorAll("button").find((b) => b.textContent === label)!.onclick!();
 
@@ -926,7 +926,7 @@ describe("a touch on a row", () => {
     // An editing row keeps its textarea's own touch.
     pointer(row, "pointerdown", 100);
     vi.advanceTimersByTime(450);
-    expect(doc.querySelectorAll(".glass-menu").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
+    expect(doc.querySelectorAll(".popover").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
   });
 
   it("copies a reply's words without its markers, and an earlier session's rows offer no Edit", async () => {
@@ -991,7 +991,7 @@ describe("a touch on a row", () => {
     vi.advanceTimersByTime(400);
     pointer(row, "pointerdown", 100);
     vi.advanceTimersByTime(450);
-    expect(doc.querySelectorAll(".glass-menu").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
+    expect(doc.querySelectorAll(".popover").filter((m) => !m.hasAttribute("data-closing"))).toEqual([]);
     swipe(row, 70);
     expect(row.style.transform ?? "").toBe("");
     pointer(row, "pointerup", 170);

@@ -833,6 +833,7 @@ initChains({
   go: (id) => void openChain(id),
   refresh: () => void refreshSessions(),
   anchor: () => document.getElementById("chat-title")!,
+  docked: renderHeader,
 });
 initHeader({
   currentId: () => currentId,

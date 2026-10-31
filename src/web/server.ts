@@ -75,13 +75,14 @@ const slim = (turn: ChatTurn): ChatTurn =>
 export const tabPrefix = (title: string | undefined, host: string): string =>
   [title?.trim(), host.trim()].filter(Boolean).join(" - ").slice(0, 60);
 
+const escapeHtml = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
 export const withTabPrefix = (html: string, prefix: string): string =>
-  prefix
-    ? html.replace(
-      "<title>Pier</title>",
-      `<title>${prefix.replace(/&/g, "&amp;").replace(/</g, "&lt;")} - Pier</title>`,
-    )
-    : html;
+  prefix ? html.replace("<title>Pier</title>", `<title>${escapeHtml(prefix)} - Pier</title>`) : html;
+
+/** The sidebar's head names the instance as the manifest does: `$PIER_TITLE`, `Pier` when unset. */
+export const withInstanceName = (html: string, title: string | undefined): string =>
+  title?.trim() ? html.replace('<h1 id="rail-title" class="rail-title">Pier</h1>', () => `<h1 id="rail-title" class="rail-title">${escapeHtml(title.trim())}</h1>`) : html;
 
 /** Safari, the iOS Home Screen, the Dock and launchers take PNG links, never
  *  the served SVG, so every `/app/icon-*.png` reference (shell and manifest)
@@ -922,7 +923,7 @@ export function createServer(
     c.header("cache-control", "private, no-store");
     if (shell === null) {
       try {
-        shell = withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix);
+        shell = withInstanceName(withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix), process.env.PIER_TITLE);
       } catch (err) {
         // A workbench that will not load is not worth a nicer tab.
         log.warn(`shell unreadable, serving it unpatched: ${String(err)}`);

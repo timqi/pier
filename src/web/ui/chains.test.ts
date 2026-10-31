@@ -26,20 +26,26 @@ let list: ChainList;
 let current: string | null;
 const go = vi.fn();
 const refresh = vi.fn();
+const retitle = vi.fn();
 let chains: typeof import("./chains.js");
 const confirm = vi.fn(() => true);
+/** The sidebar's `pier.rail` and whether the viewport docks it (≥ 80rem). */
+const stored = new Map<string, string>();
+let docked = true;
 
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
   installPage();
   // Laid out: the list redraws only a surface on screen.
   vi.spyOn(FakeElement.prototype, "getClientRects").mockReturnValue([{}]);
-  vi.stubGlobal("window", { confirm });
+  vi.stubGlobal("window", { confirm, matchMedia: () => ({ matches: docked, addEventListener: vi.fn() }) });
+  stored.clear();
+  vi.stubGlobal("localStorage", { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => stored.set(k, v), removeItem: (k: string) => stored.delete(k) });
   list = { mode: "chain", chains: [chain("main", { waiting: 2 }), chain("ops", { createdAt: 2, head: { sessionId: "h", state: "streaming" } }),
     chain("old", { archivedAt: 3 })] };
   current = "main";
   chains = await import("./chains.js");
-  chains.initChains({ list: () => list, current: () => current, go, refresh, anchor: () => document.querySelector("#chat-title")! });
+  chains.initChains({ list: () => list, current: () => current, go, refresh, anchor: () => document.querySelector("#chat-title")!, docked: retitle });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -181,4 +187,27 @@ it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode o
   list = { ...list, mode: "session" };
   chords.get("shift+]")!();
   expect(go).toHaveBeenCalledTimes(3);
+});
+
+// One key for the sidebar: the docked rail where it is laid out, kept in pier.rail; the floated list below 80rem.
+it("⌘B hides and shows the docked rail, remembered, and opens the floated list where there is no rail", () => {
+  const rail = fake(document.querySelector("#chain-rail"));
+  chains.renderChains();
+  expect(chains.sidebarDocked()).toBe(true);
+  chords.get("b")!();
+  expect(rail.hasAttribute("data-on")).toBe(false);
+  expect(stored.get("pier.rail")).toBe("off");
+  expect(menu.openPanel).not.toHaveBeenCalled();
+  // The bar's title turns back into the list's way in (session-header.ts).
+  expect(retitle).toHaveBeenCalledTimes(1);
+  expect(chains.sidebarDocked()).toBe(false);
+  chords.get("b")!();
+  expect(rail.hasAttribute("data-on")).toBe(true);
+  expect(stored.has("pier.rail")).toBe(false);
+  docked = false;
+  expect(chains.sidebarDocked()).toBe(false);
+  chords.get("b")!();
+  expect(menu.openPanel).toHaveBeenCalledTimes(1);
+  expect(rail.hasAttribute("data-on")).toBe(true);
+  docked = true;
 });

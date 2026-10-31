@@ -21,11 +21,20 @@ interface ChainsDeps {
   refresh: () => void;
   /** The bar's title, which the list floats from. */
   anchor: () => HTMLElement;
+  /** The docked sidebar came on or went off screen: the bar's title changes shape (session-header.ts). */
+  docked: () => void;
 }
 
 let deps: ChainsDeps;
 
 const rail = $("#chain-rail");
+/** The rail's chain section; its items section is the drawer's (`renderDrawer`). */
+const railChains = $("#rail-chains");
+/** ⌘B, the sidebar's key; the ⋯ menu's Sidebar row teaches it (session-header.ts). */
+export const SIDEBAR_KEY = "b";
+/** `off` while ⌘B has hidden the docked rail; absent is shown, the default. */
+const RAIL = "pier.rail";
+const DOCKED = "(width >= 80rem)";
 /** The floated list's root while it is open. */
 let floated: HTMLElement | null = null;
 
@@ -51,9 +60,9 @@ function dotOf(c: ChainInfo): HTMLElement {
   return dot;
 }
 
-const ROW = "chain-row group flex items-start gap-1 rounded-xl";
-const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-xl px-2.5 py-2 text-left";
-const SMALL = "cursor-pointer rounded-lg px-2 py-1 text-[13px] text-neutral-600 hover:bg-neutral-100";
+const ROW = "chain-row group flex items-start gap-1 rounded-lg";
+const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left";
+const SMALL = "cursor-pointer rounded-md px-2 py-1 text-[0.8125rem] text-neutral-600 hover:bg-(--row-hover)";
 
 function field(value: string, label: string, save: (v: string) => void, edit: (v: string) => void, cancel: () => void): HTMLInputElement {
   const input = h("input", "w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-sm text-neutral-900") as HTMLInputElement;
@@ -131,7 +140,9 @@ function fill(root: HTMLElement): void {
     fold.onclick = () => { archivedOpen = !archivedOpen; draw(true); };
     parts.push(h("hr", "my-1 border-neutral-200"), fold, ...(archivedOpen ? [h("ul", "", ...old.map(archivedRow))] : []));
   }
-  root.replaceChildren(...parts);
+  // The rail names its sections; the floated list is the chains alone.
+  if (root === rail) railChains.replaceChildren(h("p", "rail-head", "Chains"), ...parts);
+  else root.replaceChildren(...parts);
 }
 
 /** Laid out and not fading: the rail is display:none below 80rem and off in session mode. */
@@ -153,8 +164,24 @@ function draw(force = false): void {
 
 /** The list changed, or which chain is current did. */
 export function renderChains(): void {
-  rail.toggleAttribute("data-on", deps.list()?.mode === "chain");
+  rail.toggleAttribute("data-on", deps.list()?.mode === "chain" && localStorage.getItem(RAIL) !== "off");
   draw();
+}
+
+/** The sidebar is on screen beside the column, so the chain list needs no
+ *  other way in: the bar's title is a plain heading while this holds. */
+export const sidebarDocked = (): boolean => rail.hasAttribute("data-on") && window.matchMedia(DOCKED).matches;
+
+/** ⌘B and the ⋯ menu's Sidebar: one key for "the sidebar" — the docked rail
+ *  where it is laid out (its choice kept in `pier.rail`), the floated list below
+ *  80rem. Nothing in session mode, which has no chains to list. */
+export function toggleSidebar(): void {
+  if (deps.list()?.mode !== "chain") return;
+  if (!window.matchMedia(DOCKED).matches) return openChains();
+  if (localStorage.getItem(RAIL) === "off") localStorage.removeItem(RAIL);
+  else localStorage.setItem(RAIL, "off");
+  renderChains();
+  deps.docked();
 }
 
 const focusField = (): void => (shown(floated) ? floated : rail).querySelector<HTMLInputElement>("input")?.focus();
@@ -289,4 +316,7 @@ export function initChains(d: ChainsDeps): void {
   chord("shift+[", () => cycle(-1), modalOpen);
   chord("shift+]", () => cycle(1), modalOpen);
   chord("shift+o", startCreate, modalOpen);
+  chord(SIDEBAR_KEY, toggleSidebar, modalOpen);
+  // A window resized across 80rem docks or floats the list; the title follows.
+  window.matchMedia(DOCKED).addEventListener("change", () => { draw(); deps.docked(); });
 }

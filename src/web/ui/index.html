@@ -74,9 +74,9 @@
       <div id="status-lead" class="mr-auto flex min-w-0 items-center gap-0.5 text-[13px]">
         <!-- The counter first: a fixed place to click again, whatever the lead's length. -->
         <button type="button" id="status-next" aria-label="Next open item"
-          class="hidden flex-none cursor-pointer rounded-full px-1.5 py-0.5 text-[12px] tabular-nums text-neutral-500 hover:bg-neutral-100 max-md:hidden"></button>
+          class="hidden flex-none cursor-pointer rounded-md px-1.5 py-0.5 text-[12px] tabular-nums text-neutral-500 hover:bg-neutral-200 max-md:hidden"></button>
         <button type="button" id="status-item" aria-haspopup="dialog"
-          class="hidden min-w-0 max-w-[36rem] cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 hover:bg-neutral-100">
+          class="hidden min-w-0 max-w-[36rem] cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 hover:bg-neutral-200">
           <span id="status-item-dot" class="h-2 w-2 flex-none rounded-full max-md:hidden"></span>
           <span id="status-item-title" class="min-w-0 truncate text-neutral-800 max-md:hidden"></span>
           <span id="status-item-state" class="text-[12px]"></span>
@@ -89,8 +89,17 @@
       <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
         class="icon-btn"><span data-icon="Ellipsis" class="h-3.5 w-3.5"></span></button>
     </header>
-    <!-- The chain list docked from 80rem in chain mode (chains.ts); after the bar, which it hides with. -->
-    <nav id="chain-rail" aria-label="Chains"></nav>
+    <!-- The sidebar, docked from 80rem in chain mode as the shell's first
+         column, the window's full height: its head is the instance's name
+         (server.ts patches it), level with the bar; under it the chain list
+         (chains.ts) over the open items (drawer.ts), the panel's rows. -->
+    <nav id="chain-rail" aria-label="Chains and items">
+      <h1 id="rail-title" class="rail-title">Pier</h1>
+      <div id="rail-body">
+        <div id="rail-chains"></div>
+        <section id="rail-items" aria-label="Items"></section>
+      </div>
+    </nav>
     <!-- The transcript's own type scale, inherited by rows, chips and markdown. -->
     <!-- data-gallery: the lightbox pages within the container it was opened
          from (see attachments.ts), so transcript and pending strip stay apart. -->
@@ -119,8 +128,8 @@
            (18px leading) rather than shrinking the turns pane any further. -->
       <ul id="queue-rows" class="flex max-h-[6rem] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
     </div>
-    <form id="composer" class="flex-none pb-4 pt-2">
-      <div class="glass rounded-[1.75rem] border border-neutral-200 px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
+    <form id="composer" class="flex-none pb-3 pt-2">
+      <div class="rounded-[10px] border border-neutral-200 bg-white px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- The row the next send answers (composer.ts setQuote). -->
         <div id="quote-strip" class="hidden px-1 pb-1.5 pt-1"></div>
@@ -151,10 +160,10 @@
     </form>
     <!-- Floating over the transcript's foot; shown by data-show (chat.ts, session-header.ts). -->
     <div id="fabs">
-      <button type="button" id="to-main" class="fab glass border" title="回到主会话" aria-label="回到主会话">
+      <button type="button" id="to-main" class="fab" title="回到主会话" aria-label="回到主会话">
         <span data-icon="House" class="h-4 w-4"></span>
       </button>
-      <button type="button" id="to-bottom" class="fab glass border" title="滚到底部" aria-label="滚到底部">
+      <button type="button" id="to-bottom" class="fab" title="滚到底部" aria-label="滚到底部">
         <span data-icon="ArrowDown" class="h-4 w-4"></span>
       </button>
     </div>

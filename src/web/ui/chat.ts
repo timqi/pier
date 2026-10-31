@@ -125,7 +125,7 @@ function chipSlots(bubble: HTMLElement): [row: HTMLElement, details: HTMLElement
   const kids = [...bubble.children] as HTMLElement[];
   const row = kids.find((el) => el.classList.contains("chip-row"));
   if (row) return [row, row.nextElementSibling as HTMLElement];
-  const made = h("div", "chip-row mb-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-tight");
+  const made = h("div", "chip-row mb-2 flex flex-wrap items-center gap-1.5 text-[12px] leading-tight");
   const details = h("div", "chip-details");
   const tag = kids.find((el) => el.classList.contains("topic-tag"));
   if (tag) {
@@ -428,7 +428,7 @@ export function appendTurn(
   }
   if (kind === "user" || kind === "assistant") row.append(rowGestures(row, rowTools(kind, row, node), node));
   if (stamp !== undefined) {
-    const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
+    const time = h("div", "my-4 text-center text-[11.5px] text-neutral-400");
     time.dataset.kind = "time";
     time.dataset.at = String(stamp);
     paintTime(time);
@@ -446,7 +446,7 @@ export function appendTurn(
 
 /** The caption identifies the IM speaker; clocks sit outside the bubble. */
 function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
-  const line = h("div", "speaker-line mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
+  const line = h("div", "speaker-line mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[12px] leading-tight text-neutral-600");
   const who = speaker?.name ?? speaker?.id;
   if (who) {
     const label = h("span", "font-semibold text-inherit", who);

@@ -134,14 +134,14 @@ const isSheet = (): boolean => window.innerWidth < 640;
 export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElement {
   closeMenu();
   // Replacing a menu is one surface changing content, not stacked exits.
-  document.querySelectorAll(".glass-menu[data-closing]").forEach((el) => el.remove());
+  document.querySelectorAll(".popover[data-closing]").forEach((el) => el.remove());
   const sheet = isSheet();
   panel = h(
     "div",
-    `glass-menu fixed z-50 border border-neutral-200 p-2 font-sans leading-6 ${
+    `popover fixed z-50 border border-neutral-200 p-2 font-sans leading-6 ${
       sheet
-        ? "rounded-3xl inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
-        : "rounded-2xl min-w-60 max-w-[min(42rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto text-[15px]"
+        ? "rounded-[10px] inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
+        : "rounded-[10px] min-w-60 max-w-[min(42rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto text-[15px]"
     }`,
   );
   panel.dataset.presentation = sheet ? "sheet" : "popover";
@@ -184,7 +184,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElemen
 function menuItem(item: MenuItem): HTMLElement {
   const row = h(
     "button",
-    `flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100 ${
+    `flex w-full cursor-pointer items-center gap-2 rounded-md px-3 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100 ${
       isSheet() ? "min-h-12 py-3" : "min-h-10 py-2"
     }`,
     ...(item.checked === undefined ? [] : [icon(Check, `h-3 w-3 text-indigo-600 ${item.checked ? "" : "invisible"}`)]),

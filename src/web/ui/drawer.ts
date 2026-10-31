@@ -189,6 +189,8 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
 }
 
 const rowNodes = new Map<string, HTMLElement>();
+/** The docked rail's Items section (index.html), drawn with the panel's list. */
+const railItems = $("#rail-items");
 /** Items the panel's Close took off the list, until the stream's re-read drops them too. */
 const closing = new Set<string>();
 
@@ -214,19 +216,30 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
   for (const [key, node] of rowNodes) if (!keys.has(key)) { node.remove(); rowNodes.delete(key); }
   const rest = all.filter((r) => !waits(r));
   const ordered = [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)];
-  const rows = ordered.map((p) => {
+  const rowOf = (p: OpenItemPresentation, existing?: HTMLElement): HTMLElement => {
     const chain = chainOf.get(p.key);
-    const node = openItemRow(p, {
+    return openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
       panelView: (problem) => toView(problem, chain?.id),
       ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id) } : {}),
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
-    }, rowNodes.get(p.key));
+    }, existing);
+  };
+  const rows = ordered.map((p) => {
+    const node = rowOf(p, rowNodes.get(p.key));
     rowNodes.set(p.key, node);
     return node;
   });
+  // The rail's own nodes: a row is in one list at a time, and the panel's are cached by key.
+  // Filled while laid out, as the chain section is (chains.ts `shown`).
+  if (railItems.getClientRects().length > 0) {
+    const ul = h("ul", "", ...ordered.map((p) => rowOf(p)));
+    ul.dataset.list = "";
+    railItems.replaceChildren(h("p", "rail-head", ordered.length ? `Items \u00b7 ${ordered.length}` : "Items"),
+      ordered.length ? ul : h("p", "px-3 py-1 text-sm text-neutral-500", "Nothing open"));
+  }
   return { rows, ordered, sessions };
 }
 
