@@ -239,7 +239,7 @@ head 的 cwd 仍是 `home`（所有 chain 同一个）：`dispatcher.md` 注入�
 
 | 命令 | head（home DM、web） | 别的 chat 的线程 |
 | --- | --- | --- |
-| `/chain` | 列表：每行 `<name> · N open · M waiting`，当前行前 `✓`，归档的在末尾带 `(archived)` | prose |
+| `/chain` | 列表：每行 `<name> · N open · M waiting on you`，当前行前 `✓`，归档的在末尾带 `(archived)` | prose |
 | `/chain <name>` | 切换：唯一前缀；答 `↔ chain · <name>` 注记（`chat-command`，不进模型上下文）；web 端是 hash 导航，不发命令 | prose |
 | `/chain new <name>` | 建并切；Session 模式下开开关 | prose |
 | `/chain rename <name>` | 改当前的名 | prose |
@@ -254,7 +254,7 @@ head 的 cwd 仍是 `home`（所有 chain 同一个）：`dispatcher.md` 注入�
 
 ## 模式互转与迁移
 
-- **升级**：迁移建 `chains('main','Main')`，`main_chain` 和 `open_items` 全部归 `main`；`chainMode=false`；`home/MEMORY.md`、`home/memory/` 原地不动，成为 global——所有 chain 都看得见今天的全部记忆，没有东西被藏起来。`chains/main/` 为空，head 在之后的工作中把「只关 Main 的」逐行挪下去（`DISPATCHER` 的归属规则；不做一次性自动分拣）。升级后的行为与升级前逐字一致，直到用户打开开关。
+- **升级**：迁移建 `chains('main','Main')`，`main_chain` 和 `open_items` 全部归 `main`；`chainMode=false`；`home/MEMORY.md`、`home/memory/` 原地不动，成为 global——所有 chain 都看得见今天的全部记忆，没有东西被藏起来。`chains/main/` 为空，head 在之后的工作中把「只关 Main 的」逐行挪下去（`DISPATCHER` 的归属规则；不做一次性自动分拣）。升级后的行为与升级前一致，直到用户打开开关——只有 §memory 分层 改的部分不同，且以它为准：seed 首行点名 chain `Main` 与 `chains/main/`，`<note>` 写进 `chains/main/memory/`，原 `memory/` 作为 global 以 1K 进 seed。
 - **关 → 开**：零迁移，列表出现一条 `Main`。
 - **开 → 关**：当前留下、其余归档（§开关的确认）。归档不是丢：run 照跑、callback 照落、item 照显示、memory 照搜；恢复一下就回来。
 - **降级到不带本功能的版本**：`main_chain.chain_id` 列多余无害；`open_items_v2` 不会被旧代码读到——所以迁移要保留旧表名（新表拷完后 `DROP` 旧表、`RENAME` 新表为 `open_items`），旧代码读到的 PK 多一列但 `problem` 仍在，跨 chain 同名的行会撞。写进 CHANGELOG 的升级说明即可，不做降级迁移。
@@ -306,7 +306,7 @@ head 的 cwd 仍是 `home`（所有 chain 同一个）：`dispatcher.md` 注入�
 
 ## 验收
 
-- 开关关时：一周日常使用与升级前逐字一致（seed、`/status`、DM、面板）；升级本身不改任何文件内容。
+- 开关关时：一周日常使用与升级前一致（seed、`/status`、DM、面板），只差 §升级 列出的 §memory 分层 部分；升级本身不改任何文件内容。
 - 开关开、两条 chain 各做一件事一天：各自的 head transcript 里没有对方的 item、note、callback；各自的 `chains/<id>/memory/` 只有自己的 `<note>`；global 日记只有 `<note global>`；一条 chain 问对方的事，head 答一行指向 `/chain <name>`，或一次 `pier search --in chain:<name>` 后作答，不猜。
 - 任一 chain 的 run 失败、design lead 等人：bar 的 lead、面板首行、DM 状态消息的 `Other chains` 行、`/status` 都看得到，带 chain 名；一键到它。
 - DM 里 `/chain B` 后，A 的 callback 回复带 `chain · A` 灰行，按钮点击回到 A。
@@ -339,3 +339,75 @@ head 的 cwd 仍是 `home`（所有 chain 同一个）：`dispatcher.md` 注入�
 3. web 后端 + 前端：路由、hash、列表模块、面板 tag、`⋯` 开关、确认对话框。
 4. channels：`/chain`、指针、灰行与按钮路由、`Other chains`。
 5. search 与提示词：`--in chain:`、顺序、`place`；`DISPATCHER`；skills 与 owner 文档、CHANGELOG。
+
+## 构建契约（build lead 定，worker 据此并行）
+
+Worker 1 实现并提交后，其余 worker 只依赖这里写的签名；改签名要先改这一节。
+
+### `core/chains.ts` — chain 登记表（新文件：chain 行的读写与命名规则，和 head 生命周期是两个理由）
+
+```ts
+export interface ChainRow { id: string; name: string; createdAt: number; archivedAt: number | null }
+export class ChainExists extends Error {}      // message `chain: "<name>" exists`
+export class ChainInvalid extends Error {}     // message `chain: name must be 1–40 characters`
+export class ChainArchived extends Error {}    // message `chain: <name> is archived — unarchive first`
+export class ChainHasOpen extends Error { open: number }  // message `chain: <name> has N open — /status first`
+export class ChainAmbiguous extends Error {}   // message `/chain <q> matches A, B — say more`
+export class Chains {
+  constructor(db: DatabaseSync, openCount: (chainId: string) => number)
+  list(): ChainRow[]                 // 活跃在前按 created_at，归档在后按 archived_at
+  get(id: string): ChainRow | undefined
+  first(): ChainRow                  // 活跃里 created_at 最早的；不变量保证至少一条
+  create(name: string): ChainRow     // 随机 8 字符 id；ChainInvalid / ChainExists
+  rename(id: string, name: string): ChainRow
+  archive(id: string, force?: boolean): ChainRow   // 无 force 且 open>0 → ChainHasOpen；归档最后一条活跃 chain → Error
+  unarchive(id: string): ChainRow
+  resolve(query: string): ChainRow   // 名字唯一前缀，不区分大小写，在**全部** chain 里找（含归档，调用方再判 archived）；无 → Error `chain: no chain "<q>"`；多 → ChainAmbiguous；精确命中优先
+}
+```
+
+### `core/chain.ts` — `MainChain` 按 chain
+
+```ts
+constructor(db, deps: ChainDeps & {
+  chains: Chains;
+  ledger: (sessionIds: string[], since: number) => LedgerRun[];
+  status: (now: number, chainId: string) => OpenItemsStatus;   // 本 chain 的 items
+  mode: { get(): boolean; set(on: boolean): Promise<void> };   // settings.chainMode
+})
+members(chainId: string): ChainMember[]                 // newest first；head = [0]
+chainOf(sessionId: string): { chainId: string; members: string[] } | undefined   // members newest first
+headOf(sessionId: string): string                       // chainOf(id)?.members[0] ?? id
+firstHead(): string | null                              // 首条 chain 的 head，无则 null
+heads(): { chainId: string; sessionId: string }[]       // 每条 chain（含归档）的 head
+isHead(sessionId: string): boolean
+lastUserAt(chainId: string): number | undefined         // 列表排序用；由 send 记在内存 + 启动时取 head 最近 user turn
+send(message: Omit<InboundMessage, "key">, chainId: string, key?: ConversationKey):
+  Promise<{ sessionId: string; chainId: string; rotated?: ChainReason; switched?: ChainRow }>
+  // 归档的 chain → throw ChainArchived；`/chain …` 由 command 处理：`switched` 是切到的 chain，
+  // 调用方据此改 hash / DM 指针；`/chain new|rename|archive` 在 Session 模式下按设计置 mode
+replaceLost(sessionId: string): Promise<string | undefined>
+status(chainId: string): OpenItemsStatus
+chainsText(currentId: string): string                   // `/chain` 列表文案，供 web/IM 同用
+```
+
+- 每条 chain 一把串行锁（`Map<chainId, Promise>`）。
+- `<note>` 落 `chains/<id>/memory/<day>.md`，`<note global>` 落 `memory/<day>.md`；`openItemMarkers` 返回 `notes` 与 `globalNotes`。
+- `/chain` 命令：`CHAT_COMMANDS.chain`，`chatCommand(text)` 返回 `{ command, args }`（旧命令 `args === ""`）——`core/types.ts` 的签名变化，所有调用方同步。
+
+### tasks
+
+- `TaskChain = Pick<MainChain, "chainOf" | "members" | "headOf" | "firstHead" | "heads" | "isHead">`。
+- `TaskStore.openItems(chainId)`、`markOpenItems(…, chainId)`、`items(q, chainId?)`（行带 `chain`）、`itemHistory(chainId, problem)`、`itemHistoryByProblem(problem)`（唯一才返回，旧路由用）。
+- `TaskService.openItems(chainId?)`：缺省全部，每行 `chain: { id, name, archived }`；`openItemsStatus(open, now, unmatched)` 不变。
+- callback 解析：`conversation` → `headOf(run.invokedBySessionId)`，定时任务 → `headOf(createdBySessionId)`，都无 → `firstHead()`。
+
+### web
+
+- 路由按 §路由；`GET /api/chains` 的 `head.state` 取 `router.stateOf`。请求头 `X-Pier-Chain` 可带当前 chain（`PUT /api/chains/mode` 关时的默认 `keep`）。
+- SSE `chains-changed` 由 web server 在建/改名/归档/恢复/开关后发；head 轮换时 `MainChain` 的 `rotated` 处已发 `sessions-changed`，同处再发 `chains-changed`。
+
+### channels
+
+- `home_chain` 指针由 `channels/` 自己的 store 读写（`ChannelStore`），不进 core；`send` 返回 `switched` 时写指针并发 `↔ chain · <name>`。
+- `ChannelRuntime` 收 `MainChain` 全量，按 `chain.heads()` 判断某 session 是否 head、`chainOf` 取 chain 名（经 `chains.get`）。
