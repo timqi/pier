@@ -33,6 +33,8 @@ export interface LarkActionValue {
   root: string;
   /** Next-step buttons only; panel buttons repaint from their own state. */
   label?: string;
+  /** Next-step buttons in the home chat's main flow: the chain whose head offered them. */
+  chain?: string;
   /** Panel buttons of a thread without a session: the card is the draft's store. */
   draft?: PanelDraft;
 }

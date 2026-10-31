@@ -14,9 +14,8 @@ import type {
   ConversationKey,
   InboundMessage,
   NoteOrigin,
-  OpenItemsView,
 } from "../core/types.js";
-import { isChatCommand } from "../core/types.js";
+import { chatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
@@ -28,7 +27,7 @@ import { Chains } from "./chains.js";
 import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, HomeChains } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import {
   LarkApi,
@@ -44,7 +43,7 @@ import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, cardText, markdown, OFFER_PREFIX, statusCard } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage } from "./status.js";
+import { StatusMessage, type StatusView } from "./status.js";
 
 const REACTION = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
@@ -85,6 +84,8 @@ interface LarkDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `/stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** Wired by runtime.ts: which chain a main-flow reply is, and where its buttons go. */
+  home?: HomeChains;
 }
 
 export class LarkChannel implements Channel {
@@ -259,7 +260,7 @@ export class LarkChannel implements Channel {
     const body = [text, ...markers].filter(Boolean).join("\n");
     const said = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId, body) : body;
     // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
-    const answered = home && command && !command.args && isChatCommand(command.name);
+    const answered = home && chatCommand(text) !== undefined;
     if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({ key: here, senderId, sender, text: said, mode: "steer" });
@@ -433,7 +434,9 @@ export class LarkChannel implements Channel {
         this.log(`option echo failed: ${String(err)}`);
         return undefined;
       });
-    await this.deliver(key, action, echo?.messageId, await said, onMessage);
+    // A main-flow button names the chain whose head offered it (lark-outbound `reply`).
+    const chain = home && typeof action.value?.chain === "string" ? action.value.chain : undefined;
+    await this.deliver(key, action, echo?.messageId, await said, onMessage, chain);
   }
 
   /** A tap's text as the tapper's message; `messageId` is the message that carries the 👀. */
@@ -443,11 +446,14 @@ export class LarkChannel implements Channel {
     messageId: string | undefined,
     text: string,
     onMessage: (msg: InboundMessage) => void,
+    chain?: string,
   ): Promise<void> {
     const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     // No await between mark and dispatch — see onMessage.
     if (messageId) this.receipts.mark(key.conversationId, action.chatId, messageId);
-    onMessage({ key, senderId: action.operatorId, sender, text, mode: "steer" });
+    const msg: InboundMessage = { key, senderId: action.operatorId, sender, text, mode: "steer" };
+    if (chain && this.deps.home) this.deps.home.tap(msg, chain);
+    else onMessage(msg);
   }
 
   /** The abort ends the turn, which reaches send() and clears the receipts. */
@@ -530,11 +536,13 @@ export class LarkChannel implements Channel {
       return;
     }
     const main = "chatId" in to;
+    // Read now, not after the receipts: the head holding the chat is the one answering.
+    const speaker = main ? this.deps.home?.speaker() : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only when it settled a message of the user's.
       if (main && isSilentReply(reply) && !settles) return;
-      await this.out.reply(to, reply);
+      await this.out.reply(to, reply, speaker);
     }, reply.meta);
   }
 
@@ -568,7 +576,7 @@ export class LarkChannel implements Channel {
     return conversationId(chatId, messageId);
   }
 
-  async status(chatId: string, view: OpenItemsView, repost?: boolean): Promise<void> {
+  async status(chatId: string, view: StatusView, repost?: boolean): Promise<void> {
     if (!this.isHome(chatId)) throw new Error(`refusing a status message in ${chatId}: not the home chat`);
     await this.statusLine.show(chatId, view, repost);
   }

@@ -117,6 +117,19 @@ describe("statusCard", () => {
     ]);
   });
 
+  // docs/plans/30-multi-chain.md §IM
+  it("ends on a line per other chain, an archived one tagged", () => {
+    const sent = statusCard({ ...view([item("Docs", "queued", "")]), others: [
+      { name: "Design", waiting: 1, inProgress: 2, archived: false },
+      { name: "Old", waiting: 1, inProgress: 0, archived: true },
+    ] });
+    expect(sent.body.elements.slice(-3).map((el) => (el.tag === "markdown" ? el.content : el.tag))).toEqual([
+      "<font color='grey'>Other chains</font>",
+      "**Design**\n<font color='grey'>1 waiting · 2 in progress</font>",
+      "**Old** <text_tag color='neutral'>archived</text_tag>\n<font color='grey'>1 waiting · 0 in progress</font>",
+    ]);
+  });
+
   it("counts what the card's budget leaves out", () => {
     const many = statusCard(view(Array.from({ length: 300 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(2000)))));
     const contents = many.body.elements.map((el) => (el.tag === "markdown" ? el.content : ""));

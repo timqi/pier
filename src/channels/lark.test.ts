@@ -19,7 +19,7 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { ChannelStore } from "./config.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, Speaker } from "./control.js";
 import { LarkChannel } from "./lark.js";
 import { STALE_OPTION } from "./lines.js";
 import type {
@@ -156,6 +156,9 @@ let aborted: string[];
 let known: Set<string>;
 /** The home chat's id, when the test made one. */
 let homeChat: string | undefined;
+/** The chain the runtime would say a main-flow reply is, and the taps it was handed. */
+let speaker: Speaker | undefined;
+let tapped: [string, string][];
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   sessionState: SessionState;
@@ -294,8 +297,11 @@ beforeEach(async () => {
   aborted = [];
   known = new Set();
   homeChat = undefined;
+  speaker = undefined;
+  tapped = [];
   control = fakeControl();
-  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+  const home = { speaker: () => speaker, tap: (m: InboundMessage, chain: string) => void tapped.push([m.text, chain]) };
+  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, home });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -1015,6 +1021,46 @@ describe("the home chat", () => {
     expect(bodyText(client.sent.at(-1)!.card)).toBe("▸ Deploy");
     expect(client.reactions).toEqual([]);
     expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: "Deploy" });
+  });
+
+  // docs/plans/30-multi-chain.md §IM
+  it("/chain and its arguments are the head's chat commands and wear no 👀; in another chat's topic, prose", async () => {
+    await feed(
+      dm({ text: "/chain", messageId: "om_c1" }),
+      dm({ text: "%chain des", messageId: "om_c2" }),
+      dm({ text: "/chain new Design", messageId: "om_c3" }),
+      dm({ text: "/chain rename Ops", messageId: "om_c4" }),
+      dm({ text: "/chain archive", messageId: "om_c5" }),
+    );
+    expect(inbound.map((m) => [m.key, m.text])).toEqual(
+      ["/chain", "%chain des", "/chain new Design", "/chain rename Ops", "/chain archive"].map((t) => [homeKey, t]),
+    );
+    expect(client.reactions).toEqual([]);
+    openGates();
+    await feed(message({ text: "/chain new x", messageId: "om_c6", rootId: "om_1" }));
+    expect(inbound.at(-1)).toMatchObject({ key: { channelId: "lark", conversationId: `${CHAT}/om_1` }, text: "/chain new x" });
+    expect(client.reactions).toHaveLength(1);
+  });
+
+  it("a reply from a chain the chat switched away from opens on a grey chain line; its buttons name that chain", async () => {
+    speaker = { id: "d", name: "Design", away: true };
+    await channel.send(HOME, { text: "storage is done", suggestions: ["Ship"] });
+    const away = client.sent.at(-1)!.card;
+    expect(bodyText(away)).toBe("<font color='grey'>chain · Design</font>\nstorage is done");
+    expect(JSON.stringify(away)).toContain('"chain":"d"');
+    speaker = { id: "main", name: "Main", away: false };
+    await channel.send(HOME, { text: "hi", suggestions: [] });
+    expect(bodyText(client.sent.at(-1)!.card)).toBe("hi");
+  });
+
+  it("a main-flow button goes to the chain that offered it, not the chat's current one", async () => {
+    speaker = { id: "d", name: "Design", away: true };
+    await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+    const offerId = [...client.cards.keys()].at(-1)!;
+    await act({ messageId: offerId, chatId: HOME, operatorId: USER, value: { key: "sg:0", root: "", label: "Deploy", chain: "d" } });
+    expect(bodyText(client.sent.at(-1)!.card)).toBe("▸ Deploy");
+    expect(tapped).toEqual([["Deploy", "d"]]);
+    expect(inbound).toEqual([]);
   });
 
   it("a button in an old topic of the home chat still steers the head, echoed in that topic", async () => {

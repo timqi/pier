@@ -27,6 +27,17 @@ export interface StatusRow {
   meta: string;
 }
 
+/** Another chain's line under `Other chains` (docs/plans/30-multi-chain.md §IM). */
+export interface OtherChain {
+  name: string;
+  waiting: number;
+  inProgress: number;
+  archived: boolean;
+}
+
+/** The home chat's current chain's view, and the other chains with something in them. */
+export type StatusView = OpenItemsView & { others?: OtherChain[] };
+
 /** A platform's pieces for one heading, row or closing count; `cost` is what the budget counts. */
 export interface StatusLayout<E> {
   heading(text: string): E[];
@@ -39,7 +50,7 @@ export interface StatusLayout<E> {
 
 /** The sidebar's groups, waiting first, laid out while they fit the budget; the
  *  items past it are counted, never cut mid-item. */
-export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E[] {
+export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] {
   const out: E[] = [];
   let spent = 0;
   let left = view.snapshot.items.length;
@@ -58,16 +69,29 @@ export function statusLayout<E>(view: OpenItemsView, layout: StatusLayout<E>): E
     }
   }
   const owed = view.snapshot.unmatched ?? [];
-  const pieces = owed.length ? [...layout.heading(`${UNMATCHED_DONE} · ${String(owed.length)}`), ...owed.flatMap((title) => layout.row({ title, tag: "", stage: "", waiting: false, meta: "" }))] : [];
-  return spent + layout.cost(pieces) > layout.max ? out : [...out, ...pieces];
+  const others = view.others ?? [];
+  // Whole sections after the items, each left out when it does not fit.
+  const tails = [
+    owed.length ? [...layout.heading(`${UNMATCHED_DONE} · ${String(owed.length)}`), ...owed.flatMap((title) => layout.row({ title, tag: "", stage: "", waiting: false, meta: "" }))] : [],
+    others.length ? [...layout.heading("Other chains"), ...others.flatMap((c) => layout.row({
+      title: c.name, tag: c.archived ? "archived" : "", stage: "", waiting: c.waiting > 0, meta: `${String(c.waiting)} waiting · ${String(c.inProgress)} in progress`,
+    }))] : [],
+  ];
+  for (const pieces of tails) {
+    const cost = layout.cost(pieces);
+    if (spent + cost > layout.max) break;
+    out.push(...pieces);
+    spent += cost;
+  }
+  return out;
 }
 
 export class StatusMessage<B = string> {
   /** `repost` survives a newer view replacing this one: `/status` or a design final asked for the bottom. */
-  private queued?: { chatId: string; view: OpenItemsView; repost: boolean };
+  private queued?: { chatId: string; view: StatusView; repost: boolean };
   private tail: Promise<void> = Promise.resolve();
   /** The last view shown, so `/status` can re-post it without waiting for an event. */
-  private last?: { chatId: string; view: OpenItemsView };
+  private last?: { chatId: string; view: StatusView };
 
   constructor(
     private readonly platform: ChannelPlatform,
@@ -75,7 +99,7 @@ export class StatusMessage<B = string> {
     private readonly api: StatusApi<B>,
     private readonly log: (message: string) => void,
     /** The view under the platform's label. */
-    private readonly render: (view: OpenItemsView) => B,
+    private readonly render: (view: StatusView) => B,
   ) {}
 
   /** `/status` in the main flow: the status message, re-posted below with the
@@ -83,7 +107,7 @@ export class StatusMessage<B = string> {
    *  something is open; false — nothing open, no view yet, or the post failed —
    *  leaves the answer to the note. */
   async answer(chatId: string, text: string, snapshot?: OpenItemsSnapshot): Promise<boolean> {
-    if (this.last?.chatId !== chatId || text === NOTHING_OPEN) return false;
+    if (this.last?.chatId !== chatId || (text === NOTHING_OPEN && !this.last.view.others?.length)) return false;
     const before = this.messageId(chatId);
     await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, true);
     // A failed re-post keeps the old row, so only a new id is the one it posted.
@@ -99,7 +123,7 @@ export class StatusMessage<B = string> {
 
   /** One refresh at a time; one arriving mid-run waits, and a newer view
    *  replaces the one waiting. Never rejects. */
-  show(chatId: string, view: OpenItemsView, repost = false): Promise<void> {
+  show(chatId: string, view: StatusView, repost = false): Promise<void> {
     const idle = !this.queued;
     this.last = { chatId, view };
     this.queued = { ...this.last, repost: repost || (this.queued?.chatId === chatId && this.queued.repost) };
@@ -111,14 +135,14 @@ export class StatusMessage<B = string> {
     return this.tail;
   }
 
-  private async apply(chatId: string, view: OpenItemsView, repost: boolean): Promise<void> {
+  private async apply(chatId: string, view: StatusView, repost: boolean): Promise<void> {
     // The home moved within the platform: the old chat's card would read as current.
     const stale = this.db.prepare("SELECT chat_id, message_id FROM status_messages WHERE platform = ? AND chat_id <> ?")
       .all(this.platform, chatId) as { chat_id: string; message_id: string }[];
     for (const old of stale) await this.forget(old.chat_id, old.message_id);
     const row = this.db.prepare("SELECT message_id, text FROM status_messages WHERE platform = ? AND chat_id = ?")
       .get(this.platform, chatId) as { message_id: string; text: string } | undefined;
-    const empty = view.text === NOTHING_OPEN;
+    const empty = view.text === NOTHING_OPEN && !view.others?.length;
     const body = this.render(view);
     // The rendered body, not the text: the snapshot's layout changes without it.
     const drawn = JSON.stringify(body);

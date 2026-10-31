@@ -2,15 +2,18 @@
 // apply a config change.
 
 import type { MainChain } from "../core/chain.js";
+import type { ChainRow } from "../core/chains.js";
+import { chainCounts } from "../core/open-items.js";
 import { splitReply } from "../core/reply.js";
 import { Refused, type Router } from "../core/router.js";
 import type { Channel, InboundMessage, NoteOrigin, OpenItemsView } from "../core/types.js";
 import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, HomeChains, Speaker } from "./control.js";
 import type { ConversationStore } from "./conversations.js";
 import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
+import type { OtherChain, StatusView } from "./status.js";
 import { type ChannelPlatform, chatOf } from "./types.js";
 
 const ADAPTERS: {
@@ -19,6 +22,7 @@ const ADAPTERS: {
     store: ChannelStore;
     log: (m: string) => void;
     control: ChannelControl;
+    home: HomeChains;
   }): Channel;
 }[] = [
   { platform: "slack", build: (deps) => new SlackChannel(deps) },
@@ -37,6 +41,13 @@ export interface LeadTurn {
 }
 export type LeadState = "waiting" | "final" | "failed";
 
+/** Another chain's line: an active one with anything waiting or running, an archived one only while it waits on the user. */
+function other(chain: ChainRow, view: OpenItemsView): OtherChain[] {
+  const { waiting, inProgress } = chainCounts(view.snapshot.items);
+  const archived = chain.archivedAt !== null;
+  return waiting || (!archived && inProgress) ? [{ name: chain.name, waiting, inProgress, archived }] : [];
+}
+
 const rootLine = (lead: LeadTurn, state: LeadState): string =>
   state === "waiting" ? `▷ ${lead.name} · design — waiting for you`
     : state === "final" ? `✓ ${lead.name} · design final`
@@ -50,6 +61,8 @@ const warn = (m: string): void => log.warn(m);
 export class ChannelRuntime {
   private readonly running = new Map<ChannelPlatform, Channel>();
   private reloading: Promise<void> = Promise.resolve();
+  /** The home chat's messages, one at a time: a `/chain <name>` moves the pointer the next one reads. */
+  private homeQueue: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(
@@ -98,6 +111,10 @@ export class ChannelRuntime {
       store: this.store,
       log: (m) => this.log(`${platform}: ${m}`),
       control: this.control,
+      home: {
+        speaker: () => this.speaker(platform),
+        tap: (msg, chainId) => this.toHead(channel, msg, chainId),
+      },
     });
     try {
       await channel.start((msg) => {
@@ -115,17 +132,56 @@ export class ChannelRuntime {
     log.info(`${platform} started`);
   }
 
-  /** The home chat's every message, threaded or not, is the head's under the
-   *  chat's key. A refusal is the chat's to see (§5): the adapter only logs. */
-  private toHead(channel: Channel, msg: InboundMessage): void {
+  /** The home chat's every message, threaded or not, is its current chain's head's
+   *  under the chat's key — a tap's, the chain that offered it (`HomeChains.tap`).
+   *  A refusal is the chat's to see (§5): the adapter only logs. */
+  private toHead(channel: Channel, msg: InboundMessage, tapped?: string): void {
     const conversationId = chatOf(msg.key.conversationId);
-    this.chain.send(msg, this.chain.chains.first().id, { channelId: msg.key.channelId, conversationId }).catch((err: unknown) => {
+    this.homeQueue = this.homeQueue.then(async () => {
+      const chainId = tapped ?? (await this.pointed(channel, conversationId)).id;
+      const sent = await this.chain.send(msg, chainId, { channelId: msg.key.channelId, conversationId });
+      if (!sent.switched) return;
+      this.store.setHomeChain(sent.switched.id);
+      await this.tell(channel, conversationId, `↔ chain · ${sent.switched.name}`);
+    }).catch((err: unknown) => {
       this.log(`the conversation did not take a message: ${String(err)}`);
       if (err instanceof Refused) return;
       const text = err instanceof Error ? err.message : String(err);
-      void channel.notify(conversationId, { text, origin: { kind: "error" } })
+      return channel.notify(conversationId, { text, origin: { kind: "error" } })
         .catch((e: unknown) => this.log(`could not report it to ${channel.id}: ${String(e)}`));
     });
+  }
+
+  /** The home chat's chain: its pointer, else the first chain. */
+  private current(): ChainRow {
+    const id = this.store.homeChain();
+    const row = id === undefined ? undefined : this.chain.chains.get(id);
+    return row && row.archivedAt === null ? row : this.chain.chains.first();
+  }
+
+  /** `current`, moving a pointer left on an archived chain (archived from the web) and saying so. */
+  private async pointed(channel: Channel, conversationId: string): Promise<ChainRow> {
+    const current = this.current();
+    const id = this.store.homeChain();
+    if (id === undefined || id === current.id) return current;
+    this.store.setHomeChain(current.id);
+    await this.tell(channel, conversationId, `↔ chain · ${current.name} — ${this.chain.chains.get(id)?.name ?? id} is archived`);
+    return current;
+  }
+
+  /** A switch's note: the chat's own, never the model's context. */
+  private tell(channel: Channel, conversationId: string, text: string): Promise<void> {
+    return channel.notify(conversationId, { text, origin: { kind: "chat-command", command: "chain" } });
+  }
+
+  /** The head that holds the home chat's key is the one a main-flow reply comes from. */
+  private speaker(platform: ChannelPlatform): Speaker | undefined {
+    const home = this.store.home();
+    if (home?.platform !== platform) return undefined;
+    const session = this.router.sessionOf({ channelId: platform, conversationId: home.chatId });
+    const of = session && this.chain.chainOf(session.id);
+    const row = of && this.chain.chains.get(of.chainId);
+    return row && { id: row.id, name: row.name, away: row.id !== this.current().id };
   }
 
   live(platform: ChannelPlatform): boolean {
@@ -165,17 +221,27 @@ export class ChannelRuntime {
       this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`).then(() => false));
   }
 
-  /** The home chat's status message (docs/design/11 §Status), while its adapter
-   *  is live and the head answers there; nothing otherwise — a card left behind
-   *  is reconciled once the chat speaks again. A failure is logged, never thrown. */
-  async openItems(view: OpenItemsView, repost = false): Promise<void> {
+  /** The home chat's status message (docs/design/11 §Status): the current chain's
+   *  view and a line per other chain with something in it, while its adapter is
+   *  live and a head answers there; nothing otherwise — a card left behind is
+   *  reconciled once the chat speaks again. A failure is logged, never thrown. */
+  async openItems(viewOf: (chainId: string) => OpenItemsView, repost = false): Promise<void> {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
     if (!home || !channel) return;
-    const head = this.chain.firstHead() ?? undefined;
-    const on = head === undefined ? undefined : this.router.answersOn(head);
     // A `task:` key says nothing of the surface (main.ts `channelOf`); the durable rule is the home chat.
-    if (on && on.channelId !== "task" && (on.channelId !== home.platform || on.conversationId !== home.chatId)) return;
+    const surfaces = this.chain.heads().flatMap(({ sessionId }) => {
+      const on = this.router.answersOn(sessionId);
+      return on && on.channelId !== "task" ? [on] : [];
+    });
+    if (surfaces.length && !surfaces.some((on) => on.channelId === home.platform && on.conversationId === home.chatId)) return;
+    let view: StatusView;
+    try {
+      const current = this.current();
+      view = { ...viewOf(current.id), others: this.chain.chains.list().filter((c) => c.id !== current.id).flatMap((c) => other(c, viewOf(c.id))) };
+    } catch (err) {
+      return this.log(`status: the open items could not be read: ${String(err)}`);
+    }
     await channel.status(home.chatId, view, repost).catch((err: unknown) =>
       this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
   }

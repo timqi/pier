@@ -6,6 +6,7 @@ import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
 import type { LarkCard, LarkClient, LarkElement, LarkTarget } from "./lark-api.js";
+import type { Speaker } from "./control.js";
 import { noteBody } from "./lines.js";
 import {
   button,
@@ -35,8 +36,9 @@ export class LarkOutbound {
 
   /** An empty turn still posts its footer and says which kind of nothing (§5).
    *  The footer folds into the last chunk's element (a second element renders
-   *  a blank gap); only a bodiless turn gets the standalone one. */
-  async reply(to: LarkTarget, reply: AgentReply): Promise<void> {
+   *  a blank gap); only a bodiless turn gets the standalone one. `speaker` names
+   *  the home main flow's chain. */
+  async reply(to: LarkTarget, reply: AgentReply, speaker?: Speaker): Promise<void> {
     // A local file link is dead in Lark: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
@@ -48,12 +50,12 @@ export class LarkOutbound {
     const root = "root" in to ? to.root : "";
     const row = reply.suggestions.length
       ? buttonRow(reply.suggestions.map((label, index) =>
-        button(label, { key: `${OFFER_PREFIX}${index}`, root, label })))
+        button(label, { key: `${OFFER_PREFIX}${index}`, root, label, ...(speaker ? { chain: speaker.id } : {}) })))
       : undefined;
     const parts = text ? chunk(text, LARK_MAX) : [""];
     for (const [i, part] of parts.entries()) {
       const last = i === parts.length - 1;
-      const elements: LarkElement[] = [];
+      const elements: LarkElement[] = !i && speaker?.away ? [markdown(`<font color='grey'>chain · ${speaker.name}</font>`)] : [];
       if (part) elements.push(last && note ? withFooter(part, note) : markdown(part));
       else if (last && note) elements.push(footer(note));
       if (last && row) elements.push(row);

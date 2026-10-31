@@ -70,6 +70,16 @@ describe("the status message", () => {
     expect(calls).toHaveLength(3);
   });
 
+  // docs/plans/30-multi-chain.md §IM
+  it("stays while another chain has something, though nothing is open in this one", async () => {
+    const { status, calls } = rig();
+    const others = [{ name: "Design", waiting: 1, inProgress: 0, archived: false }];
+    await status.show("D1", { ...view(NOTHING_OPEN), others });
+    expect(await status.answer("D1", NOTHING_OPEN)).toBe(true);
+    await status.show("D1", view(NOTHING_OPEN));
+    expect(calls).toEqual([`post D1 > ${NOTHING_OPEN}`, `post D1 > ${NOTHING_OPEN}`, "delete m1", "delete m2"]);
+  });
+
   it("/status re-posts the answer's snapshot, not the last refresh's", async () => {
     const shown: OpenItemsView[] = [];
     const status = new StatusMessage("slack", db, {

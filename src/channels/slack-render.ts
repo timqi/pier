@@ -4,10 +4,9 @@
 // syntax to literal text rather than rejecting the message.
 
 import { cut } from "../core/reply.js";
-import type { OpenItemsView } from "../core/types.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
-import { statusLayout, type StatusRow } from "./status.js";
+import { statusLayout, type StatusRow, type StatusView } from "./status.js";
 
 /** Slack caps `markdown` blocks at 12,000 cumulative chars per message. */
 export const MARKDOWN_MAX = 11_000;
@@ -121,12 +120,14 @@ const OFFER_PREFIX = "sg:";
 /** Slack refuses a button label over BUTTON_MAX: every button, the panel's too. */
 export const truncate = (label: string): string => cut(label, BUTTON_MAX);
 
-/** Slack wraps buttons on its own, so there is no row packing to budget. */
-export function actions(labels: string[]): SlackBlock | undefined {
+/** Slack wraps buttons on its own, so there is no row packing to budget. `chain`,
+ *  the home main flow's, rides each button's `value`: a click goes to that chain. */
+export function actions(labels: string[], chain?: string): SlackBlock | undefined {
   if (!labels.length) return undefined;
   const elements: SlackButton[] = labels.map((label, index) => ({
     type: "button",
     action_id: `${OFFER_PREFIX}${index}`,
+    ...(chain ? { value: chain } : {}),
     text: { type: "plain_text", text: truncate(label), emoji: true },
   }));
   return { type: "actions", elements };
@@ -162,7 +163,7 @@ function statusRow(r: StatusRow): SlackBlock[] {
 
 /** The open items as the web sidebar lays them out in Block Kit, under the
  *  plain text Slack shows where blocks are not rendered (notifications). */
-export const statusMessage = (view: OpenItemsView): { text: string; blocks: SlackBlock[] } => ({
+export const statusMessage = (view: StatusView): { text: string; blocks: SlackBlock[] } => ({
   text: `${STATUS_LABEL}\n${escapeMrkdwn(cut(view.text, MRKDWN_MAX))}`,
   blocks: [context(STATUS_LABEL), ...statusLayout<SlackBlock>(view, {
     heading: (text) => [context(`*${escapeMrkdwn(text)}*`)],

@@ -13,7 +13,7 @@ import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, Ope
 import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
 import { noteBody, STALE_OPTION } from "./lines.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, Speaker } from "./control.js";
 import { ReceiptLedger } from "./receipts.js";
 import { SlackChannel } from "./slack.js";
 import type {
@@ -165,6 +165,9 @@ let known: Set<string>;
 let working: Set<string>;
 /** The home DM's channel id, when the test made one. */
 let homeChannel: string | undefined;
+/** The chain the runtime would say a main-flow reply is, and the taps it was handed. */
+let speaker: Speaker | undefined;
+let tapped: [string, string][];
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   pins_: ModelMenuEntry[];
@@ -286,8 +289,11 @@ beforeEach(async () => {
   known = new Set();
   working = new Set();
   homeChannel = undefined;
+  speaker = undefined;
+  tapped = [];
   control = fakeControl();
-  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+  const home = { speaker: () => speaker, tap: (m: InboundMessage, chain: string) => void tapped.push([m.text, chain]) };
+  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, home });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -1240,6 +1246,50 @@ describe("the home chat", () => {
     }));
     expect(client.sent.at(-1)).toMatchObject({ channel: HOME, thread_ts: "800.000100", text: "▸ Deploy" });
     expect(inbound.at(-1)).toMatchObject({ key: homeKey, text: expect.stringMatching(/^\[re assistant [^\]]+\]\n> which\?\n\nDeploy$/) });
+  });
+
+  // docs/plans/30-multi-chain.md §IM
+  it("/chain and its arguments are the head's chat commands and wear no 👀; in another channel's thread, prose", async () => {
+    await feed(
+      dm({ text: "/chain", ts: "1805.000100" }),
+      dm({ text: "%chain des", ts: "1805.000200" }),
+      dm({ text: "/chain new Design", ts: "1805.000300" }),
+      dm({ text: "/chain rename Ops", ts: "1805.000400" }),
+      dm({ text: "/chain archive", ts: "1805.000500" }),
+    );
+    expect(inbound.map((m) => [m.key, m.text])).toEqual(
+      ["/chain", "%chain des", "/chain new Design", "/chain rename Ops", "/chain archive"].map((t) => [homeKey, t]),
+    );
+    expect(client.reactions).toEqual([]);
+    openGates();
+    await feed(message({ text: "/chain new x", ts: "1805.000600", thread_ts: "1700.000100" }));
+    expect(inbound.at(-1)).toMatchObject({ key: { channelId: "slack", conversationId: "C100/1700.000100" }, text: "/chain new x" });
+    expect(client.reactions.at(-1)).toMatchObject({ name: "eyes" });
+  });
+
+  it("a reply from a chain the DM switched away from opens on a grey chain line; its buttons name that chain", async () => {
+    speaker = { id: "d", name: "Design", away: true };
+    await channel.send(HOME, { text: "storage is done", suggestions: ["Ship"] });
+    const away = client.sent.at(-1)!;
+    expect(away.blocks?.[0]).toEqual({ type: "context", elements: [{ type: "mrkdwn", text: "chain · Design" }] });
+    expect(JSON.stringify(away.blocks)).toContain('"value":"d"');
+    speaker = { id: "main", name: "Main", away: false };
+    await channel.send(HOME, { text: "hi", suggestions: [] });
+    expect(JSON.stringify(client.sent.at(-1)!.blocks)).not.toContain("chain ·");
+  });
+
+  it("a main-flow button goes to the chain that offered it, not the DM's current one", async () => {
+    speaker = { id: "d", name: "Design", away: true };
+    await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
+    const offer = client.sent.at(-1)!;
+    await feed(interaction({
+      channel: { id: HOME },
+      message: { ts: "900.000400", text: offer.text, blocks: offer.blocks },
+      actions: [{ action_id: "sg:0", value: "d" }],
+    }));
+    expect(client.sent.at(-1)).toMatchObject({ channel: HOME, text: "▸ Deploy" });
+    expect(tapped).toEqual([[expect.stringMatching(/\n\nDeploy$/), "d"]]);
+    expect(inbound).toEqual([]);
   });
 
   it("a panel card left in the DM before it became the home is stale, never a session under the home key", async () => {

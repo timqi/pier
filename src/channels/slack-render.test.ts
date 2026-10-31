@@ -209,6 +209,21 @@ describe("statusMessage", () => {
     expect(sent.blocks.slice(-2)).toEqual([context("*Unmatched done · 1*"), section("*fix &lt;parser&gt;*")]);
   });
 
+  // docs/plans/30-multi-chain.md §IM
+  it("ends on a line per other chain, an archived one tagged", () => {
+    const sent = statusMessage({ ...view([item("Docs", "queued", "")]), others: [
+      { name: "Design", waiting: 1, inProgress: 2, archived: false },
+      { name: "Old", waiting: 1, inProgress: 0, archived: true },
+    ] });
+    expect(sent.blocks.slice(-5)).toEqual([
+      context("*Other chains*"),
+      section("*Design*"),
+      context("1 waiting · 2 in progress"),
+      section("*Old*  `archived`"),
+      context("1 waiting · 0 in progress"),
+    ]);
+  });
+
   it("stays within Slack's 50 blocks", () => {
     const many = statusMessage(view(Array.from({ length: 60 }, (_, i) => item(`item ${String(i)}`, "running", "x".repeat(5000), { metadata: ["elapsed 1m"] }))));
     expect(many.blocks.length).toBeLessThanOrEqual(50);

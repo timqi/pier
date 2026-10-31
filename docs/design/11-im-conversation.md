@@ -48,6 +48,34 @@ for a threaded message in the home chat, and nothing else per message.
   calls `Channel.notify` with `{kind: "error"}`; the web's 4xx is not a surface
   the IM user sees.
 
+## Chains
+
+The home chat speaks to one chain at a time
+([plans/30 §IM](../plans/30-multi-chain.md)): a pointer, never a thread or a
+second DM.
+
+- `home_chain` (`ChannelStore.homeChain`/`setHomeChain`, one row) is the
+  chat's current chain; none is the first chain (`Chains.first()`). A
+  different home (`setHome`), the home chat's removal (`removeChat`) or a bot
+  swap that drops it (`claimBot`) deletes it.
+- Every home-chat message is `MainChain.send(msg, current, <chatId>)`, one at a
+  time in the runtime, so a `/chain <name>` moves the pointer the next message
+  reads; a `switched` answer writes it and posts `↔ chain · <name>`
+  (`chat-command` note, never model context).
+- A pointer on an archived chain (archived from the web) falls back to the
+  first chain on the next message: written, and said as
+  `↔ chain · <first> — <old> is archived`.
+- `/status`, `/new`, `/stop`, `/skills` and `/chain` reach the current chain's
+  head through the same send (§Chat commands).
+- A main-flow reply from a head whose chain is not the current one (it holds
+  the chat's key from before the switch and answers a callback) opens on a
+  grey `chain · <name>` line — Slack a `context` block, Lark a grey markdown
+  line; the current chain's replies carry none (`HomeChains.speaker`,
+  `channels/control.ts`).
+- A main-flow button names the chain whose head offered it — Lark the value's
+  `chain`, Slack the button's `value` — and its click goes to that chain
+  (`HomeChains.tap`), the pointer unmoved.
+
 ## The head's key
 
 - The home key is the head's delivery key: `Router`'s `chatKeyOf(sessionId)`
@@ -129,7 +157,7 @@ thread half only for the home chat; any other is refused.
 | What | Renders as |
 | --- | --- |
 | the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` (a silent main-flow reply: §Status) |
-| next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, the receipt booked on the echo, the row retired (Lark: button value `root: ""` names the home) |
+| next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, the receipt booked on the echo, the row retired (Lark: button value `root: ""` names the home), sent to the chain that offered it (§Chains) |
 | a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; the status message and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
@@ -156,14 +184,15 @@ The home chat's main flow shows the open items in one status message
 final move.
 
 - main.ts coalesces `open-items-changed`, `task-run-changed`,
-  `task-group-changed` and `session-state` on a 1.5 s timer into an
-  `OpenItemsView` (`tasks.openItems()`, `openItemsStatus`: the compact text
-  and snapshot) and hands it to `ChannelRuntime.openItems`, which calls
-  `Channel.status` on the home platform's live adapter while the head answers
-  in the home chat (`Router.answersOn`, §Notifications; a `task:` key or none is
-  the durable rule); nothing otherwise — no post, edit or delete, a design
-  final's re-post included. A card left behind meanwhile is reconciled by the
-  first refresh after the chat speaks again.
+  `task-group-changed`, `session-state` and `chains-changed` on a 1.5 s timer and hands
+  `ChannelRuntime.openItems` a chain's `OpenItemsView` (`tasks.openItems(chain)`,
+  `openItemsStatus`: the compact text and snapshot); the runtime builds the
+  current chain's view plus `Other chains`, and calls `Channel.status` on the
+  home platform's live adapter while any chain's head answers in the home chat
+  (`Router.answersOn`, §Notifications; a `task:` key or none is the durable
+  rule); nothing otherwise — no post, edit or delete, a design final's re-post
+  included. A card left behind meanwhile is reconciled by the first refresh
+  after the chat speaks again.
 - The status message is `▤ open items` in the platform's emphasis over the
   view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
@@ -178,9 +207,12 @@ final move.
   waiting stage quoted, under the compact text as the message's `text` for
   notifications. Each field is cut at a fixed length; items past the budget
   (Lark 7000 chars and 100 elements, Slack 50 blocks) are left out whole behind
-  `… N more`. No run IDs appear, and old text-only `/status` notes retain the
+  `… N more`. Under the groups, `Other chains`: one row per other chain with
+  `N waiting · M in progress` as its metadata — an active chain when either
+  is non-zero, an archived one only while something waits on the user,
+  tagged `archived`; no such chain, no section. No run IDs appear, and old text-only `/status` notes retain the
   legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
-  `Nothing open.` → deleted; otherwise edited in place (posted when there is
+  `Nothing open.` with no other chain listed → deleted; otherwise edited in place (posted when there is
   none). Two things re-post it at the bottom, then delete the old one without
   waiting (on Lark the deleted card leaves a 撤回 placeholder): `/status` in the
   main flow, with the answer's text and snapshot (`StatusMessage.answer`), and
@@ -200,7 +232,8 @@ final move.
 
 ## Chat commands
 
-The one command table for every surface; other docs point here. A command is
+The one command table for every surface; other docs point here. In the home
+chat a head command acts on the chat's current chain (§Chains). A command is
 the whole message `<prefix><word>` (args after the word where a command takes
 them), the prefix `/` or `%`, trimmed and case-insensitive. `%` exists because
 Slack's client eats an unregistered `/`; it is accepted everywhere so one
@@ -216,6 +249,8 @@ empty) is dropped with a log line, never a command.
 | `/new` | the next head now; a streaming head refuses (`the conversation is replying — /stop first`) | prose |
 | `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running` | aborts the thread's session: `⏹ Stopped.` |
 | `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
+| `/chain` | the chains, the current marked `✓`, archived last (`MainChain.send`) | prose |
+| `/chain <name>` · `new <name>` · `rename <name>` · `archive` | switch (unique prefix) · create and switch · rename the current · archive the current, refused with open items; a switch answers `↔ chain · <name>` (§Chains) | prose |
 | `/settings` | prose | the panel on the thread ([04 §The in-chat panel](04-im-channels.md#the-in-chat-panel)) |
 | `/s <text>` | prose | on a thread root, the draft with `<text>` as its question; inside a thread, prose |
 | `/bind <code>` (a DM) | bind | bind |
@@ -303,6 +338,7 @@ through what the head launches (`pier task`), never by a group's message.
   platforms. `PUT /api/channels/:platform` with a `home` row
   clears the other platform's.
 - No `conversations` row, no `main_chain` change.
+- `home_chain(chain_id)`, at most one row: the home chat's current chain (§Chains).
 - `status_messages(platform, chat_id, message_id, text, behind)`, one row per
   home chat (db.ts, migration 37).
 
@@ -338,7 +374,15 @@ through what the head launches (`pier task`), never by a group's message.
   head to the web with no seed card in the chat; a chat `/status` takes it back.
 - `core/reply.test.ts`: `originLabel` for `session-seed` and `chat-command`;
   `channels/lines.test.ts`: a `chat-command` note is quoted whole.
-- `channels/config.test.ts`: one home across platforms.
+- `channels/config.test.ts`: one home across platforms; the chain pointer kept,
+  and dropped with its home.
+- §Chains: `channels/runtime.test.ts` the current chain per message, a switch's
+  pointer and note, the archived fallback, a tap to its chain, the speaker,
+  `Other chains` and the status card while any head answers there;
+  `channels/slack.test.ts` and `lark.test.ts` `/chain`'s five forms in the home
+  and prose in a thread, the grey line and the button's chain;
+  `channels/slack-render.test.ts`, `lark-render.test.ts` and
+  `status.test.ts` the `Other chains` section.
 - `web/push.test.ts`: no push while the head answers a chat; only the browser
   that spoke is notified, nobody when it has no subscription, every device
   when no browser has spoken.

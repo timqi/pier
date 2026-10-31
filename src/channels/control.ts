@@ -11,6 +11,7 @@ import type {
   AgentLaunchOptions,
   AgentSession,
   ConversationKey,
+  InboundMessage,
   ModelRef,
   SessionState,
   ThinkingLevel,
@@ -68,6 +69,23 @@ export interface ChannelControl {
   isHome(key: ConversationKey): boolean;
   /** The thread's session's skills, `[]` when it has none: `/skills` in a thread. */
   skills(key: ConversationKey): Promise<{ name: string; description: string }[]>;
+}
+
+/** A main-flow reply's chain: its buttons carry `id`; `away` — the chat has switched
+ *  from it — puts a grey `chain · <name>` line over the reply. */
+export interface Speaker {
+  id: string;
+  name: string;
+  away: boolean;
+}
+
+/** The home chat's chains as its adapter needs them (docs/plans/30-multi-chain.md §IM),
+ *  wired by runtime.ts, which owns the chat's pointer. */
+export interface HomeChains {
+  /** The chain whose head answers in the main flow now. */
+  speaker(): Speaker | undefined;
+  /** A tap on a main-flow message goes to the chain whose head offered it, not the chat's current one. */
+  tap(msg: InboundMessage, chainId: string): void;
 }
 
 interface ControlDeps {

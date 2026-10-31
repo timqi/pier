@@ -4,6 +4,7 @@
 import type { AgentReply, NoteOrigin, TurnMeta } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
+import type { Speaker } from "./control.js";
 import { noteBody } from "./lines.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
 import {
@@ -29,13 +30,13 @@ export class SlackOutbound {
     private readonly log: (message: string) => void,
   ) {}
 
-  /** No `threadTs` is the home DM's main flow (slack.ts target). */
-  async reply(channel: string, threadTs: string | undefined, reply: AgentReply): Promise<void> {
+  /** No `threadTs` is the home DM's main flow (slack.ts target), where `speaker` names the chain. */
+  async reply(channel: string, threadTs: string | undefined, reply: AgentReply, speaker?: Speaker): Promise<void> {
     // A local file link is dead in Slack: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
     const footer = reply.meta ? footerText(reply.meta) : "";
-    const row = actions(reply.suggestions);
+    const row = actions(reply.suggestions, speaker?.id);
     // An empty turn still posts its footer and says which kind of nothing (§5).
     const quiet = isSilentReply(reply)
       ? `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`
@@ -49,7 +50,7 @@ export class SlackOutbound {
       await this.post(channel, threadTs, part, [
         ...(note ? [context(note)] : []),
         ...(last && row ? [row] : []),
-      ]);
+      ], !i && speaker?.away ? [context(`chain · ${escapeMrkdwn(speaker.name)}`)] : []);
     }
     const lost = await sendAttachments(
       paths,
@@ -92,11 +93,12 @@ export class SlackOutbound {
     threadTs: string | undefined,
     body: string,
     trailing: SlackBlock[],
+    leading: SlackBlock[] = [],
   ): Promise<string | undefined> {
     // `text` is the notification fallback, never shown beside the blocks.
     const notice = body || trailing.length ? body || "…" : "";
     if (this.markdownBlocks) {
-      const blocks = [...(body ? [markdown(body)] : []), ...trailing];
+      const blocks = [...leading, ...(body ? [markdown(body)] : []), ...trailing];
       if (!blocks.length) return undefined;
       try {
         const sent = await this.api.postMessage({ channel, thread_ts: threadTs, text: notice, blocks });
@@ -109,8 +111,8 @@ export class SlackOutbound {
     }
     // The body was chunked against the larger budget, so it may split again.
     let ts: string | undefined;
-    for (const part of body ? chunk(toMrkdwn(body), MRKDWN_MAX) : [""]) {
-      const blocks = [...sections(part), ...trailing];
+    for (const [i, part] of (body ? chunk(toMrkdwn(body), MRKDWN_MAX) : [""]).entries()) {
+      const blocks = [...(i ? [] : leading), ...sections(part), ...trailing];
       if (!blocks.length) continue;
       const sent = await this.api.postMessage({
         channel,

@@ -6,7 +6,6 @@
 // literal text, so there is no translation and no escaping.
 
 import { cut } from "../core/reply.js";
-import type { OpenItemsView } from "../core/types.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type {
   LarkActionValue,
@@ -15,7 +14,7 @@ import type {
   LarkElement,
   LarkFormInput,
 } from "./lark-api.js";
-import { statusLayout, type StatusRow } from "./status.js";
+import { statusLayout, type StatusRow, type StatusView } from "./status.js";
 
 /** The binding limit is the card's 30KB request cap in bytes; a CJK character
  *  spends three, so 7000 chars keeps an all-CJK turn near 21KB plus scaffolding. */
@@ -118,7 +117,7 @@ const statusRow = (r: StatusRow): string => [
 ].filter(Boolean).join("\n");
 
 /** The open items as the web sidebar lays them out, one markdown element per item. */
-export const statusCard = (view: OpenItemsView): LarkCard => card([markdown("*▤ open items*"), ...statusLayout<LarkElement>(view, {
+export const statusCard = (view: StatusView): LarkCard => card([markdown("*▤ open items*"), ...statusLayout<LarkElement>(view, {
   heading: (text) => [markdown(`<font color='grey'>${text}</font>`)],
   row: (r) => [markdown(statusRow(r))],
   more: (n) => [markdown(`<font color='grey'>… ${String(n)} more</font>`)],

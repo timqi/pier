@@ -91,6 +91,10 @@ truth.
     session.
   - `/skills` — one `<name> — <description>` line per skill of the session
     asked, head or thread.
+  - `/chain` — the chains, the current marked; prose in a thread.
+  - `/chain <name>` · `new <name>` · `rename <name>` · `archive` — switch,
+    create and switch, rename or archive the current chain; the home chat
+    answers `↔ chain · <name>` on a switch; prose in a thread.
   - `/settings` — the panel on a thread; prose in the home chat.
   - `/s <text>` — on a thread root, the draft with `<text>` as its question;
     prose inside a thread and in the home chat.

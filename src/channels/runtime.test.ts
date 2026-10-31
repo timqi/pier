@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MainChain } from "../core/chain.js";
 import { type Router, SkillAmbiguous } from "../core/router.js";
-import type { ConversationKey, InboundMessage } from "../core/types.js";
+import type { ConversationKey, InboundMessage, OpenItemPresentation, OpenItemsView } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, HomeChains } from "./control.js";
 import { ChannelRuntime } from "./runtime.js";
+import type { StatusView } from "./status.js";
 
 // Fake adapters: the runtime's contract with them is start/stop only.
 const events: string[] = [];
 /** What the fake Slack adapter's start was handed, so a test can speak through it. */
 let deliver: (msg: InboundMessage) => void = () => {};
+/** What the runtime wired as the fake Slack adapter's home chains. */
+let homeChains: HomeChains | undefined;
+/** Every status view the fake Slack adapter was shown. */
+const views: StatusView[] = [];
 let startGate: Promise<void> = Promise.resolve();
 let generation = 0;
 
@@ -17,6 +22,9 @@ vi.mock("./slack.js", () => ({
   SlackChannel: class {
     readonly id = "slack";
     private readonly n = ++generation;
+    constructor(deps: { home: HomeChains }) {
+      homeChains = deps.home;
+    }
     async start(onMessage: (msg: InboundMessage) => void): Promise<void> {
       deliver = onMessage;
       await startGate;
@@ -41,8 +49,9 @@ vi.mock("./slack.js", () => ({
       if (openFails) throw openFails;
       events.push(`edit ${conversationId}: ${note.text}`);
     }
-    async status(chatId: string, view: { text: string }, repost?: boolean): Promise<void> {
+    async status(chatId: string, view: StatusView, repost?: boolean): Promise<void> {
       if (openFails) throw openFails;
+      views.push(view);
       events.push(`status ${chatId}: ${view.text}${repost ? " (repost)" : ""}`);
     }
   },
@@ -68,6 +77,19 @@ const attached: [ConversationKey, string | undefined][] = [];
 let home: { platform: "slack"; chatId: string } | undefined;
 /** Where the fake router says the head answers; undefined, the durable rule. */
 let headOn: ConversationKey | undefined;
+let designOn: ConversationKey | undefined;
+type Row = { id: string; name: string; createdAt: number; archivedAt: number | null };
+const row = (id: string, name: string, archivedAt: number | null = null): Row => ({ id, name, createdAt: 0, archivedAt });
+/** The fake chain register, its heads by chain, and the chain each `headSent` went to. */
+let rows: Row[] = [row("main", "Main")];
+let heads: Record<string, string> = { main: "head" };
+const sentTo: string[] = [];
+/** A message text the fake chain answers with a switch, as `/chain <name>` does. */
+const switches = new Map<string, Row>();
+/** The home chat's pointer, as the fake store keeps it. */
+let pointer: string | undefined;
+/** The session the fake router says holds the home chat's key. */
+let holder: string | undefined;
 
 function runtime(config: Record<string, unknown>, log: (m: string) => void = () => {}): ChannelRuntime {
   const store = {
@@ -77,6 +99,8 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       return c ?? { enabled: false, token: "" };
     },
     home: () => home,
+    homeChain: () => pointer,
+    setHomeChain: (id: string) => { pointer = id; },
   } as unknown as ChannelStore;
   const router = {
     registerChannel: vi.fn(),
@@ -89,15 +113,27 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       attached.push([key, bound.get(key.conversationId)]);
       return Promise.resolve({ id: bound.get(key.conversationId) ?? key.conversationId });
     },
-    answersOn: (id: string) => (id === "head" ? headOn : undefined),
+    answersOn: (id: string) => (id === "head" ? headOn : id === "head-d" ? designOn : undefined),
+    sessionOf: () => (holder === undefined ? undefined : { id: holder }),
   } as unknown as Router;
   const chain = {
-    send: (msg: InboundMessage, _chainId: string, key?: ConversationKey) => {
+    send: (msg: InboundMessage, chainId: string, key?: ConversationKey) => {
       headSent.push([msg.text, key]);
-      return headFails ? Promise.reject(headFails) : Promise.resolve({ sessionId: "head", chainId: "main" });
+      sentTo.push(chainId);
+      if (headFails) return Promise.reject(headFails);
+      const switched = switches.get(msg.text);
+      return Promise.resolve(switched ? { chainId: switched.id, switched } : { sessionId: heads[chainId] ?? "head", chainId });
     },
-    chains: { first: () => ({ id: "main", name: "Main", createdAt: 0, archivedAt: null }) },
-    firstHead: () => "head",
+    chains: {
+      first: () => rows.find((r) => r.archivedAt === null),
+      get: (id: string) => rows.find((r) => r.id === id),
+      list: () => rows,
+    },
+    chainOf: (sessionId: string) => {
+      const chainId = Object.keys(heads).find((id) => heads[id] === sessionId);
+      return chainId && { chainId, members: [sessionId] };
+    },
+    heads: () => Object.entries(heads).map(([chainId, sessionId]) => ({ chainId, sessionId })),
   } as unknown as MainChain;
   const control = {
     isHome: (key: ConversationKey) => key.conversationId.startsWith("D1"),
@@ -182,6 +218,11 @@ describe("ChannelRuntime", () => {
       headFails = undefined;
       openFails = sendFails = undefined;
       home = { platform: "slack", chatId: "D1" };
+      rows = [row("main", "Main"), row("d", "Design")];
+      heads = { main: "head", d: "head-d" };
+      sentTo.length = 0;
+      switches.clear();
+      pointer = holder = undefined;
       startGate = Promise.resolve();
       const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
       await rt.reload();
@@ -197,7 +238,7 @@ describe("ChannelRuntime", () => {
       deliver(say("C9/1717.2", "elsewhere"));
       deliver(say("D1/1717.3", "to the child"));
       const home = { channelId: "slack", conversationId: "D1" };
-      expect(headSent).toEqual([["hi", home], ["in a thread", home]]);
+      await vi.waitFor(() => expect(headSent).toEqual([["hi", home], ["in a thread", home]]));
       expect(dispatched.map((m) => m.text)).toEqual(["elsewhere", "to the child"]);
       await rt.stop();
       expect(rt.live("slack")).toBe(false);
@@ -212,6 +253,87 @@ describe("ChannelRuntime", () => {
       deliver(say("D1", "/pier- x"));
       await new Promise((r) => setTimeout(r, 5));
       expect(events.filter((e) => e.startsWith("notify"))).toHaveLength(1);
+      await rt.stop();
+    });
+
+    // docs/plans/30-multi-chain.md §IM
+    it("goes to the chat's current chain; a switch moves the pointer the next message reads, and says so", async () => {
+      const rt = await live();
+      switches.set("/chain des", rows[1]!);
+      deliver(say("D1", "first"));
+      deliver(say("D1", "/chain des"));
+      deliver(say("D1", "then"));
+      await vi.waitFor(() => expect(sentTo).toEqual(["main", "main", "d"]));
+      expect(pointer).toBe("d");
+      expect(events.filter((e) => e.startsWith("notify"))).toEqual(["notify D1: ↔ chain · Design"]);
+      await rt.stop();
+    });
+
+    it("a pointer left on an archived chain falls back to the first, and says so", async () => {
+      const rt = await live();
+      rows[1] = row("d", "Design", 5);
+      pointer = "d";
+      deliver(say("D1", "hi"));
+      await vi.waitFor(() => expect(sentTo).toEqual(["main"]));
+      expect(pointer).toBe("main");
+      expect(events.filter((e) => e.startsWith("notify"))).toEqual(["notify D1: ↔ chain · Main — Design is archived"]);
+      await rt.stop();
+    });
+
+    it("a tap goes to the chain that offered it, not the current one", async () => {
+      const rt = await live();
+      pointer = "main";
+      homeChains!.tap(say("D1", "▸ Yes"), "d");
+      await vi.waitFor(() => expect(sentTo).toEqual(["d"]));
+      expect(headSent).toEqual([["▸ Yes", { channelId: "slack", conversationId: "D1" }]]);
+      expect(pointer).toBe("main");
+      await rt.stop();
+    });
+
+    it("names the chain of the head holding the chat, away once the chat switched from it", async () => {
+      const rt = await live();
+      expect(homeChains!.speaker()).toBeUndefined();
+      holder = "head";
+      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: false });
+      pointer = "d";
+      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: true });
+      holder = "head-d";
+      expect(homeChains!.speaker()).toEqual({ id: "d", name: "Design", away: false });
+      holder = "a-thread-session";
+      expect(homeChains!.speaker()).toBeUndefined();
+      await rt.stop();
+    });
+
+    it("the status message is the current chain's, then a line per other chain with something in it", async () => {
+      const rt = await live();
+      views.length = 0;
+      rows = [row("main", "Main"), row("d", "Design"), row("q", "Quiet"), row("o", "Old", 5), row("r", "Ran", 6)];
+      pointer = "d";
+      const item = (status: string) => ({ status }) as OpenItemPresentation;
+      const of: Record<string, string[]> = { main: ["waiting on you", "running", "queued"], d: ["running"], o: ["waiting on you"], r: ["running"] };
+      await rt.openItems((id) => ({ text: id, snapshot: { version: 1, items: (of[id] ?? []).map(item) } }));
+      expect(views).toEqual([expect.objectContaining({
+        text: "d",
+        others: [
+          { name: "Main", waiting: 1, inProgress: 2, archived: false },
+          { name: "Old", waiting: 1, inProgress: 0, archived: true },
+        ],
+      })]);
+      await rt.stop();
+    });
+
+    it("the status message shows while any chain's head answers in the chat", async () => {
+      const rt = await live();
+      views.length = 0;
+      headOn = { channelId: "web", conversationId: "head" };
+      designOn = { channelId: "slack", conversationId: "D1" };
+      const view = (): OpenItemsView => ({ text: "x", snapshot: { version: 1, items: [] } });
+      await rt.openItems(view);
+      expect(views).toHaveLength(1);
+      designOn = { channelId: "web", conversationId: "head-d" };
+      await rt.openItems(view);
+      expect(views).toHaveLength(1);
+      headOn = designOn = undefined;
       await rt.stop();
     });
   });
@@ -286,22 +408,22 @@ describe("ChannelRuntime", () => {
     const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } }, (m) => logged.push(m));
     const view = { text: "storage — running", snapshot: { version: 1 as const, items: [] }, items: [{ problem: "storage", status: "running" }] };
     home = { platform: "slack", chatId: "D1" };
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     expect(events).toEqual([]);
     await rt.reload();
     home = undefined;
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     home = { platform: "slack", chatId: "D1" };
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     expect(events.filter((e) => e.startsWith("status"))).toEqual(["status D1: storage — running"]);
-    await rt.openItems(view, true);
+    await rt.openItems(() => view, true);
     expect(events.filter((e) => e.startsWith("status")).at(-1)).toBe("status D1: storage — running (repost)");
     openFails = new Error("ratelimited");
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     expect(logged.at(-1)).toBe("status: slack did not take the open items: Error: ratelimited");
     openFails = undefined;
     await rt.stop();
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     expect(events.filter((e) => e.startsWith("status"))).toHaveLength(2);
   });
 
@@ -314,16 +436,16 @@ describe("ChannelRuntime", () => {
     await rt.reload();
     const shown = (): string[] => events.filter((e) => e.startsWith("status"));
     headOn = { channelId: "web", conversationId: "head" };
-    await rt.openItems(view);
-    await rt.openItems({ ...view, text: "Nothing open." }, true);
+    await rt.openItems(() => view);
+    await rt.openItems(() => ({ ...view, text: "Nothing open." }), true);
     expect(shown()).toEqual([]);
     headOn = { channelId: "slack", conversationId: "D9" };
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     expect(shown()).toEqual([]);
     headOn = { channelId: "task", conversationId: "head" };
-    await rt.openItems(view);
+    await rt.openItems(() => view);
     headOn = { channelId: "slack", conversationId: "D1" };
-    await rt.openItems(view, true);
+    await rt.openItems(() => view, true);
     expect(shown()).toEqual(["status D1: storage — running", "status D1: storage — running (repost)"]);
     headOn = undefined;
     await rt.stop();

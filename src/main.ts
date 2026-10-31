@@ -201,8 +201,8 @@ const control = createControl({
 });
 const channels = new ChannelRuntime(channelStore, router, chain, control, conversations);
 /** The home chat's status message follows every event that can move an open
- *  item, coalesced: one turn end fires several. */
-const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state"]);
+ *  item or the chat's chain, coalesced: one turn end fires several. */
+const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state", "chains-changed"]);
 const FINAL_REPOST_MS = 5000;
 let statusTimer: NodeJS.Timeout | undefined;
 let statusRepost = false;
@@ -213,26 +213,23 @@ const refreshStatus = (repost = false): void => {
     statusTimer = undefined;
     const bottom = statusRepost;
     statusRepost = false;
-    try {
-      const open = tasks.openItems(chains.first().id);
-      const { text, snapshot } = openItemsStatus(open, Date.now());
-      void channels.openItems({ text, snapshot }, bottom);
-    } catch (err) {
-      log.error("status: the open items could not be read", err);
-    }
+    void channels.openItems((chainId) => {
+      const { text, snapshot } = openItemsStatus(tasks.openItems(chainId), Date.now());
+      return { text, snapshot };
+    }, bottom);
   }, 1500);
 };
 hub.subscribeWorkspace((e) => {
   if (STATUS_EVENTS.has(e.type)) refreshStatus();
 });
 /** Where a session answers until a user speaks (docs/design/11 §Notifications):
- *  the head in the home chat while its adapter runs, else on the web with Web
+ *  every chain's head in the home chat while its adapter runs, else on the web with Web
  *  Push; an older member gets no home key, or an adapter's start would re-key it
  *  over the head. Any other session: its conversations row. */
 function chatKeyOf(sessionId: string): ConversationKey | undefined {
   // home() reads the vault; locked, no adapter can be live anyway.
   const home = secrets.state === "unlocked" ? channelStore.home() : undefined;
-  if (home && channels.live(home.platform) && chain.firstHead() === sessionId) {
+  if (home && channels.live(home.platform) && chain.isHead(sessionId)) {
     return { channelId: home.platform, conversationId: home.chatId };
   }
   return conversations.keyOf(sessionId);

@@ -12,9 +12,8 @@ import type {
   ConversationKey,
   InboundMessage,
   NoteOrigin,
-  OpenItemsView,
 } from "../core/types.js";
-import { isChatCommand } from "../core/types.js";
+import { chatCommand } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
@@ -26,10 +25,10 @@ import { Chains } from "./chains.js";
 import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
-import type { ChannelControl } from "./control.js";
+import type { ChannelControl, HomeChains } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage } from "./status.js";
+import { StatusMessage, type StatusView } from "./status.js";
 import { SlackDirectory } from "./slack-directory.js";
 import {
   SlackApi,
@@ -96,6 +95,8 @@ interface SlackDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `%stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** Wired by runtime.ts: which chain a main-flow reply is, and where its buttons go. */
+  home?: HomeChains;
 }
 
 export class SlackChannel implements Channel {
@@ -276,7 +277,7 @@ export class SlackChannel implements Channel {
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
     // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
-    const answered = home && command && !command.args && isChatCommand(command.name);
+    const answered = home && chatCommand(text) !== undefined;
     if (!answered) this.receipts.mark(here.conversationId, channel, ts);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({
@@ -357,7 +358,9 @@ export class SlackChannel implements Channel {
     const said = message.text?.trim().replace(/^…$/, "") ?? "";
     if (!said || !(at > 0)) this.log(`option message ${message.ts} has no text to quote, pick sent unquoted`);
     const quoted = said && at > 0 ? withQuote({ role: "assistant", at, text: said }, text) : text;
-    await this.deliver(key, channel, echo?.ts, user, quoted, onMessage);
+    // A main-flow button names the chain whose head offered it (slack-render `actions`).
+    const chain = home ? interaction.actions?.[0]?.value : undefined;
+    await this.deliver(key, channel, echo?.ts, user, quoted, onMessage, chain);
   }
 
   /** A click's text as the clicker's message; `ts` is the message that carries the 👀. */
@@ -368,11 +371,14 @@ export class SlackChannel implements Channel {
     user: string,
     text: string,
     onMessage: (msg: InboundMessage) => void,
+    chain?: string,
   ): Promise<void> {
     const sender = { id: user, name: await this.directory.user(this.api, user) };
     // No await between mark and dispatch — see onMessage.
     if (ts) this.receipts.mark(key.conversationId, channel, ts);
-    onMessage({ key, senderId: user, sender, text, mode: "steer" });
+    const msg: InboundMessage = { key, senderId: user, sender, text, mode: "steer" };
+    if (chain && this.deps.home) this.deps.home.tap(msg, chain);
+    else onMessage(msg);
   }
 
   /** Slack will not accept a message with neither text nor blocks, so a turn
@@ -497,11 +503,13 @@ export class SlackChannel implements Channel {
       return;
     }
     const main = !to.threadTs;
+    // Read now, not after the receipts: the head holding the chat is the one answering.
+    const speaker = main ? this.deps.home?.speaker() : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only when it settled a message of the user's.
       if (main && isSilentReply(reply) && !settles) return;
-      await this.out.reply(to.channel, to.threadTs, reply);
+      await this.out.reply(to.channel, to.threadTs, reply, speaker);
     }, reply.meta);
   }
 
@@ -533,7 +541,7 @@ export class SlackChannel implements Channel {
     return conversationId(channel, ts);
   }
 
-  async status(channel: string, view: OpenItemsView, repost?: boolean): Promise<void> {
+  async status(channel: string, view: StatusView, repost?: boolean): Promise<void> {
     if (!this.isHome(channel)) throw new Error(`refusing a status message in ${channel}: not the home DM`);
     await this.statusLine.show(channel, view, repost);
   }
