@@ -137,6 +137,7 @@ const tag = (text: string, title: string): HTMLElement[] => {
 /** The live sessions, less every chain's members, which the bar and the chain list stand for;
  *  a finished lead stays while unread and leaves once viewed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[], chains: ChainInfo[] = []): SessionInfo[] {
+  // Only a new head the next `/api/sessions` has not yet marked `member` needs this set.
   const members = new Set([...chain.map((m) => m.sessionId), ...chains.flatMap((c) => (c.head ? [c.head.sessionId] : []))]);
   return list.filter((s) => isLive(s) && s.member === undefined && !members.has(s.id));
 }
