@@ -1132,4 +1132,20 @@ describe("chains", () => {
     expect(h.views.chainId()).toBe("c2");
     expect(h.itemTurns).toHaveBeenLastCalledWith("/api/continuous/items/c2/auth/turns");
   });
+
+  // Settings keeps the sidebar, whose item row is the way back: another chain's item leaves Settings for it.
+  it("opens another chain's item from Settings, switching there and showing the chat", async () => {
+    const views = await import("./views.js");
+    vi.mocked(views.isChatVisible).mockReturnValue(false);
+    vi.mocked(views.showChat).mockClear();
+    try {
+      await h.drawer.openItem({ problem: "auth", runs: [], status: "running" as const }, "c2");
+      await settled();
+      expect(h.views.chainId()).toBe("c2");
+      expect(views.showChat).toHaveBeenCalled();
+      expect(reads()).toContain("/api/sessions/h2/history");
+    } finally {
+      vi.mocked(views.isChatVisible).mockReturnValue(true);
+    }
+  });
 });

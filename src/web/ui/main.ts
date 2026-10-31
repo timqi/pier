@@ -250,7 +250,8 @@ async function openItem(target: OpenItemTarget, chain?: string): Promise<void> {
   const current = (): boolean => intent === navigation && isChatVisible();
   const { session, topic } = openItemDestination(target);
   if (session && !topic) return select(session, false);
-  if (chain && chain !== chainId && (!(await switchChain(chain)) || !current())) return;
+  // From Settings (a sidebar row) the chat is not shown until `select`: the switch answers to the intent alone.
+  if (chain && chain !== chainId && (!(await switchChain(chain)) || intent !== navigation)) return;
   const head = headId();
   if (!head) return openContinuous(false);
   await select(head, false);
