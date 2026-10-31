@@ -54,7 +54,7 @@ for a few weeks, and is deleted whole if it is not.
   and port; `about:`/`data:` frames aside), a `target=_blank` link to it
   included; every other URL, another Pier's included, opens in the system
   browser, a cross-origin redirect and a foreign iframe too.
-- **IPC**: the instance's three commands are a capability added at mount
+- **IPC**: the instance's four commands (`set_badge`, `notify`, `page_title`, `set_theme`) are a capability added at mount
   for its webview label and its origin alone (`remote` = the origin); the
   tab bar's are local-only (`capabilities/tabs.json`). A foreign page has no
   IPC even if it were loaded.

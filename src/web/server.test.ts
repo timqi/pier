@@ -2342,7 +2342,7 @@ describe("the app shell", () => {
     const svg = readFileSync(new URL("./ui/public/icon.svg", import.meta.url), "utf8");
     // The substitution is by exact string: a re-authored mark has to keep this plate or fail here.
     expect(svg).toContain(`fill="${ICON_PLATE}"`);
-    const teal = instanceManifest(template, "staging box for the team", "teal");
+    const teal = instanceManifest(template, "staging box for the team", "g1", "teal");
     expect(teal.name).toBe("staging box for the team");
     expect((teal.short_name as string).length).toBeLessThanOrEqual(12);
     expect(teal.theme_color).toBe("#037f75");
@@ -2352,15 +2352,17 @@ describe("the app shell", () => {
     const pngs = (m: Record<string, unknown>) => JSON.stringify(m).match(/\/app\/icon-[\w-]+\.png/g) ?? [];
     expect(new Set(pngs(template))).toEqual(new Set(["/app/icon-192.png", "/app/icon-512.png", "/app/icon-maskable-512.png"]));
     for (const name of Object.keys(ACCENTS).filter((n) => n !== "indigo")) {
-      const m = instanceManifest(template, undefined, name);
+      const m = instanceManifest(template, undefined, "", name);
       expect(JSON.stringify(m)).toContain('"/app/icon.svg"');
       expect(new Set(pngs(m))).toEqual(new Set([`/app/icon-192-${name}.png`, `/app/icon-512-${name}.png`, `/app/icon-maskable-512-${name}.png`]));
       for (const src of new Set(pngs(m))) expect(existsSync(new URL(src.slice("/app/".length), pub))).toBe(true);
     }
     expect(withAccentIcon(svg, "teal")).toContain('fill="#037f75"');
     expect(withAccentIcon(svg, "teal")).not.toContain(ICON_PLATE);
-    // Unset: Pier, in the default ramp's blue — the same on both assets.
-    const plain = instanceManifest(template, undefined, "");
+    // Unset: the machine, as the sidebar's head and the shell's tab; Pier when there is none,
+    // in the default ramp's blue — the same on both assets.
+    expect(instanceManifest(template, "  ", "g1", "").name).toBe("g1");
+    const plain = instanceManifest(template, undefined, "", "");
     expect(plain.name).toBe("Pier");
     expect(plain.short_name).toBe("Pier");
     expect(plain.theme_color).toBe("#0066df");
@@ -2412,9 +2414,9 @@ describe("the app shell", () => {
     const head = '<h1 id="rail-title" class="rail-title">Pier</h1>';
     expect(withInstanceName(head, "stag<ing", "g1")).toBe('<h1 id="rail-title" class="rail-title">stag&lt;ing</h1>');
     expect(withInstanceName(head, "  ", "g1")).toBe('<h1 id="rail-title" class="rail-title">g1</h1>');
-    expect(withInstanceName(head, "  ")).toBe(head);
+    expect(withInstanceName(head, "  ", "")).toBe(head);
     // Taken as text, not as a replacement pattern.
-    expect(withInstanceName(head, "a$&b")).toBe('<h1 id="rail-title" class="rail-title">a$&amp;b</h1>');
+    expect(withInstanceName(head, "a$&b", "")).toBe('<h1 id="rail-title" class="rail-title">a$&amp;b</h1>');
   });
 });
 

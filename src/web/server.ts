@@ -80,10 +80,13 @@ const escapeHtml = (text: string): string => text.replace(/&/g, "&amp;").replace
 export const withTabPrefix = (html: string, prefix: string): string =>
   prefix ? html.replace("<title>Pier</title>", `<title>${escapeHtml(prefix)} - Pier</title>`) : html;
 
-/** The sidebar's head names the instance as the tab title leads: `$PIER_TITLE`, the machine when
- *  unset, `Pier` when neither; the native shell names its tab from this head (shell.ts). */
-export const withInstanceName = (html: string, title: string | undefined, host = ""): string => {
-  const label = title?.trim() || host.trim();
+/** The instance's one label, the tab title's lead: `$PIER_TITLE`, the machine when unset. */
+const instanceLabel = (title: string | undefined, host: string): string => title?.trim() || host.trim();
+
+/** The sidebar's head names the instance as the manifest does (`instanceLabel`, `Pier` when
+ *  neither is set); the native shell names its tab from this head (shell.ts). */
+export const withInstanceName = (html: string, title: string | undefined, host: string): string => {
+  const label = instanceLabel(title, host);
   return label ? html.replace('<h1 id="rail-title" class="rail-title">Pier</h1>', () => `<h1 id="rail-title" class="rail-title">${escapeHtml(label)}</h1>`) : html;
 };
 
@@ -103,14 +106,15 @@ export const withAccent = (html: string, accent: string): string =>
     : html;
 
 /** Two Piers on one phone need two names and two colours: the manifest names
- *  the instance (`$PIER_TITLE`) and paints its chrome with the accent's 600
+ *  the instance (`instanceLabel`) and paints its chrome with the accent's 600
  *  step, the same one the icon's plate takes. */
 export const instanceManifest = (
   template: Record<string, unknown>,
   title: string | undefined,
+  host: string,
   accent: string,
 ): Record<string, unknown> => {
-  const name = title?.trim() || "Pier";
+  const name = instanceLabel(title, host) || "Pier";
   const rendered = accent ? JSON.parse(accentPngs(JSON.stringify(template), accent)) as Record<string, unknown> : template;
   return {
     ...rendered,
@@ -961,7 +965,7 @@ export function createServer(
     };
   app.get("/app/manifest.webmanifest", identity(
     "manifest.webmanifest",
-    (text, accent) => JSON.stringify(instanceManifest(JSON.parse(text), process.env.PIER_TITLE, accent)),
+    (text, accent) => JSON.stringify(instanceManifest(JSON.parse(text), process.env.PIER_TITLE, host, accent)),
     "application/manifest+json",
   ));
   app.get("/app/icon.svg", identity("icon.svg", withAccentIcon, "image/svg+xml"));

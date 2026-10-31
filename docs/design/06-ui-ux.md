@@ -21,10 +21,10 @@ updates this document.
 - **Flat chrome + hairline**: navigation, the sidebar and floating controls are
   one solid surface, `--workbench-chrome`, one step off the canvas, edged by a
   neutral hairline (`--line`, light in dark mode) — no blur, no gradient, no
-  shadow. The chrome is neutral grey (`oklch(93.8% 0 none)` light,
-  `oklch(22.5% 0.006 248)` dark): the native shell's tab bar meets it with no
-  line between and paints in the same two literals, in the palette the page
-  reports ([14 §Bridge](14-native-client.md#bridge-srcwebuishellts)). Menus and popovers are solid, hairline-edged and carry the one shadow
+  shadow. The chrome is `oklch(93.8% 0 none)` light and `oklch(22.5% 0.006 248)`
+  dark: the native shell's tab bar meets it with no line between and paints in
+  the same two literals, in the palette the page reports
+  ([14 §Bridge](14-native-client.md#bridge-srcwebuishellts)). Menus and popovers are solid, hairline-edged and carry the one shadow
   (`--shadow-pop`). Radii are 6–10px: 10px for cards, menus and the composer,
   6px for rows and icon buttons. The Console's cards, tabs and dialogs are the
   same material: a hairline card, a flat tab whose open state is the row
