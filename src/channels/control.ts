@@ -21,6 +21,7 @@ import type {
 import type { ModelMenuEntry } from "../settings.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
+import type { OtherChain } from "./status.js";
 import { type ChannelPlatform, chatOf, isChannelPlatform } from "./types.js";
 
 export const NO_SESSION = "No session in this thread yet — start one first (Start in the panel).";
@@ -90,6 +91,8 @@ export interface HomeChains {
   speaker(turn?: TurnMeta): Speaker | undefined;
   /** A tap on a main-flow message goes to the chain whose head offered it, not the chat's current one. */
   tap(msg: InboundMessage, chainId: string): void;
+  /** The chains other than the current one with something in them, for `/status`'s card. */
+  others(): OtherChain[];
 }
 
 interface ControlDeps {

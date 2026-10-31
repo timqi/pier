@@ -43,7 +43,7 @@ import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, cardText, markdown, OFFER_PREFIX, statusCard } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage, type StatusView } from "./status.js";
+import { StatusMessage } from "./status.js";
 
 const REACTION = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
@@ -130,11 +130,7 @@ export class LarkChannel implements Channel {
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),
     );
-    this.statusLine = new StatusMessage("lark", ledger.db, {
-      post: async (chatId, body) => (await this.api.sendCard(chatId, body)).messageId,
-      edit: (_chatId, messageId, body) => this.api.patchCard(messageId, body),
-      delete: (_chatId, messageId) => this.api.deleteMessage(messageId),
-    }, this.log, statusCard);
+    this.statusLine = new StatusMessage((chatId, body) => this.api.sendCard(chatId, body), this.log, statusCard);
     if (deps.control) {
       this.panel = new LarkPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -557,12 +553,14 @@ export class LarkChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
-    // The home's main flow shows task progress in the status message; the web keeps the cards.
+    // The home's main flow leaves task progress to `/status`'s card; the web keeps the cards.
     if ("chatId" in to && shownByStatus(note.origin)) {
       return logger("lark").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
-    // `/status`'s answer is the status message re-posted, never a copy beside it.
-    if ("chatId" in to && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.chatId, note.text, note.origin.statusSnapshot))) return;
+    // `/status`'s answer in the home's main flow is a new status card, the note only when there is none to post.
+    const snapshot = note.origin.kind === "chat-command" && note.origin.command === "status" ? note.origin.statusSnapshot : undefined;
+    if ("chatId" in to && snapshot && this.isHome(to.chatId)
+      && (await this.statusLine.answer(to.chatId, { text: note.text, snapshot, others: this.deps.home?.others() ?? [] }))) return;
     const messageId = await this.out.note(to, note);
     if (messageId && awaitsTurn(note.origin)) {
       this.receipts.mark(conversation, parseConversation(conversation).chatId, messageId, note.at);
@@ -574,11 +572,6 @@ export class LarkChannel implements Channel {
     const messageId = await this.out.note({ chatId }, note);
     if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
     return conversationId(chatId, messageId);
-  }
-
-  async status(chatId: string, view: StatusView, repost?: boolean): Promise<void> {
-    if (!this.isHome(chatId)) throw new Error(`refusing a status message in ${chatId}: not the home chat`);
-    await this.statusLine.show(chatId, view, repost);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

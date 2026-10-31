@@ -400,7 +400,7 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX goals_live ON goals(finished_at) WHERE finished_at IS NULL;
   `,
   // 37 — the home chat's status: a message's reaction per open item (dropped
-  // by 38) and the one status message per chat.
+  // by 38) and the one status message per chat (dropped by 42).
   `
   CREATE TABLE item_receipts (
     platform TEXT NOT NULL,
@@ -474,6 +474,8 @@ const MIGRATIONS: readonly string[] = [
     chain_id TEXT NOT NULL REFERENCES chains(id)
   );
   `,
+  // 42 — `/status` posts a new card each time; nothing keeps the one to edit.
+  "DROP TABLE status_messages;",
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

@@ -1,194 +1,46 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openDb } from "../db.js";
+import { describe, expect, it } from "vitest";
 import { openItemPresentation } from "../core/open-items.js";
-import { NOTHING_OPEN, type OpenItemsView } from "../core/types.js";
-import { StatusMessage } from "./status.js";
+import { NOTHING_OPEN } from "../core/types.js";
+import { StatusMessage, type StatusView } from "./status.js";
 
-let dir: string;
-let db: DatabaseSync;
+const running = (problem: string): StatusView["snapshot"] =>
+  ({ version: 1, items: [openItemPresentation({ problem, stage: "", status: "running", runs: [] }, 0)] });
+const view = (text: string, items = text === NOTHING_OPEN ? [] : [text]): StatusView =>
+  ({ text, snapshot: { version: 1, items: items.flatMap((p) => running(p).items) } });
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "pier-status-"));
-  db = openDb(join(dir, "pier.db"));
-});
-
-afterEach(() => {
-  db.close();
-  rmSync(dir, { recursive: true, force: true });
-});
-
-const view = (text: string): OpenItemsView => ({ text, snapshot: { version: 1, items: [] } });
-
-const rig = (fail: { edit?: boolean; post?: boolean; delete?: boolean } = {}) => {
-  const calls: string[] = [];
+const rig = (fail = false) => {
+  const posted: string[] = [];
   const logged: string[] = [];
-  let next = 0;
-  const status = new StatusMessage("slack", db, {
-    post: (chat, body) => {
-      calls.push(`post ${chat} ${body}`);
-      return fail.post ? Promise.reject(new Error("429")) : Promise.resolve(`m${String(++next)}`);
-    },
-    edit: (chat, id, body) => {
-      calls.push(`edit ${id} ${body}`);
-      return fail.edit ? Promise.reject(new Error("message_not_found")) : Promise.resolve();
-    },
-    delete: (chat, id) => (calls.push(`delete ${id}`), fail.delete ? Promise.reject(new Error("timeout")) : Promise.resolve()),
-  }, (m) => logged.push(m), (v) => `> ${v.text}`);
-  return { status, calls, logged };
+  const status = new StatusMessage<string>((chat, body) => {
+    posted.push(`${chat} ${body}`);
+    return fail ? Promise.reject(new Error("429")) : Promise.resolve();
+  }, (m) => logged.push(m), (v) => `> ${v.text}${v.others?.length ? ` +${String(v.others.length)}` : ""}`);
+  return { status, posted, logged };
 };
 
 // docs/design/11-im-conversation.md §Status
-describe("the status message", () => {
-  it("posts once, edits in place, and says nothing when nothing changed", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a — running"));
-    await status.show("D1", view("a — waiting on you"));
-    await status.show("D1", view("a — waiting on you"));
-    expect(calls).toEqual(["post D1 > a — running", "edit m1 > a — waiting on you"]);
+describe("the status card", () => {
+  it("posts a new card on every answer; the API it is given can do nothing else", async () => {
+    const { status, posted } = rig();
+    expect(await status.answer("D1", view("a"))).toBe(true);
+    expect(await status.answer("D1", view("a"))).toBe(true);
+    expect(await status.answer("D1", view("b"))).toBe(true);
+    expect(posted).toEqual(["D1 > a", "D1 > a", "D1 > b"]);
   });
 
-  it("passes the shared compact text through", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("In progress · 1\n\na\nelapsed <1m"));
-    expect(await status.answer("D1", "In progress · 1\n\na\nelapsed 1m")).toBe(true);
-    expect(calls).toEqual(["post D1 > In progress · 1\n\na\nelapsed <1m", "post D1 > In progress · 1\n\na\nelapsed 1m", "delete m1"]);
-  });
-
-  it("/status re-posts it at the bottom with the answer's text, as the one reply", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a"));
-    expect(await status.answer("D1", "b")).toBe(true);
-    expect(calls).toEqual(["post D1 > a", "post D1 > b", "delete m1"]);
-    // Nothing open, another chat, or no view yet: the note answers.
-    expect(await status.answer("D1", NOTHING_OPEN)).toBe(false);
-    expect(await status.answer("D2", "b")).toBe(false);
-    expect(await rig().status.answer("D1", "b")).toBe(false);
-    expect(calls).toHaveLength(3);
-  });
-
-  // docs/plans/30-multi-chain.md §IM
-  it("stays while another chain has something, though nothing is open in this one", async () => {
-    const { status, calls } = rig();
+  it("leaves nothing open to the note, unless another chain has something", async () => {
+    const { status, posted } = rig();
+    expect(await status.answer("D1", view(NOTHING_OPEN))).toBe(false);
+    expect(await status.answer("D1", { ...view(NOTHING_OPEN), others: [] })).toBe(false);
+    expect(posted).toEqual([]);
     const others = [{ name: "Design", waiting: 1, inProgress: 0, archived: false }];
-    await status.show("D1", { ...view(NOTHING_OPEN), others });
-    expect(await status.answer("D1", NOTHING_OPEN)).toBe(true);
-    await status.show("D1", view(NOTHING_OPEN));
-    expect(calls).toEqual([`post D1 > ${NOTHING_OPEN}`, `post D1 > ${NOTHING_OPEN}`, "delete m1", "delete m2"]);
+    expect(await status.answer("D1", { ...view(NOTHING_OPEN), others })).toBe(true);
+    expect(posted).toEqual([`D1 > ${NOTHING_OPEN} +1`]);
   });
 
-  it("/status re-posts the answer's snapshot, not the last refresh's", async () => {
-    const shown: OpenItemsView[] = [];
-    const status = new StatusMessage("slack", db, {
-      post: () => Promise.resolve(`m${String(shown.length)}`),
-      edit: () => Promise.resolve(),
-      delete: () => Promise.resolve(),
-    }, () => undefined, (v) => (shown.push(v), v.text));
-    await status.show("D1", view("a"));
-    const snapshot = { version: 1 as const, items: [openItemPresentation({ problem: "b", stage: "", status: "running", runs: [] }, 0)] };
-    expect(await status.answer("D1", "b", snapshot)).toBe(true);
-    expect(shown[1]).toMatchObject({ text: "b", snapshot });
-  });
-
-  it("/status naming its chain over nothing open leaves the answer to the note", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a"));
-    expect(await status.answer("D1", NOTHING_OPEN, { version: 1, items: [], chain: "pier" })).toBe(false);
-    expect(calls).toEqual(["post D1 > a"]);
-  });
-
-  it("/status during a running refresh still re-posts at the bottom", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a"));
-    const running = status.show("D1", view("b"));
-    await Promise.resolve();
-    const [, answered] = await Promise.all([running, status.answer("D1", "c"), status.show("D1", view("d"))]);
-    expect(answered).toBe(true);
-    expect(calls).toEqual(["post D1 > a", "edit m1 > b", "post D1 > d", "delete m1"]);
-  });
-
-  it("/status whose re-post fails leaves the answer to the note", async () => {
-    const { status, calls, logged } = rig({ post: true });
-    await status.show("D1", view("a"));
-    expect(await status.answer("D1", "a")).toBe(false);
-    expect(calls).toEqual(["post D1 > a", "post D1 > a"]);
-    expect(logged).toHaveLength(2);
-  });
-
-  it("/status posts the new card before deleting the old, and does not wait for the delete", async () => {
-    const { status, calls, logged } = rig({ delete: true });
-    await status.show("D1", view("a"));
-    expect(await status.answer("D1", "b")).toBe(true);
-    expect(calls).toEqual(["post D1 > a", "post D1 > b", "delete m1"]);
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(logged).toEqual(["status: delete failed: Error: timeout"]);
-    await status.show("D1", view("c"));
-    expect(calls.at(-1)).toBe("edit m2 > c");
-  });
-
-  it("/status whose re-post fails keeps the old card", async () => {
-    let failPost = false;
-    const calls: string[] = [];
-    const status = new StatusMessage("slack", db, {
-      post: (chat, body) => (calls.push(`post ${body}`), failPost ? Promise.reject(new Error("429")) : Promise.resolve("m1")),
-      edit: (chat, id, body) => (calls.push(`edit ${id} ${body}`), Promise.resolve()),
-      delete: (chat, id) => (calls.push(`delete ${id}`), Promise.resolve()),
-    }, () => undefined, (v) => v.text);
-    await status.show("D1", view("a"));
-    failPost = true;
-    expect(await status.answer("D1", "b")).toBe(false);
-    await status.show("D1", view("c"));
-    expect(calls).toEqual(["post a", "post b", "edit m1 c"]);
-  });
-
-  it("is deleted when nothing is open, and not posted for nothing", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view(NOTHING_OPEN));
-    await status.show("D1", view("a"));
-    await status.show("D1", view(NOTHING_OPEN));
-    await status.show("D1", view(NOTHING_OPEN));
-    expect(calls).toEqual(["post D1 > a", "delete m1"]);
-  });
-
-  it("a failed edit posts anew; a failed post is logged and retried next time", async () => {
-    const edits = rig({ edit: true });
-    await edits.status.show("D1", view("a"));
-    await edits.status.show("D1", view("b"));
-    expect(edits.calls).toEqual(["post D1 > a", "edit m1 > b", "post D1 > b", "delete m1"]);
-    expect(edits.logged[0]).toMatch(/^status: edit failed/);
-
-    db.exec("DELETE FROM status_messages");
-    const posts = rig({ post: true });
-    await posts.status.show("D1", view("a"));
-    await posts.status.show("D1", view("a"));
-    expect(posts.calls).toEqual(["post D1 > a", "post D1 > a"]);
-    expect(posts.logged).toHaveLength(2);
-  });
-
-  it("a home moved within the platform loses the old chat's card", async () => {
-    const { status, calls } = rig();
-    await status.show("D1", view("a"));
-    await status.show("D2", view("a"));
-    expect(calls).toEqual(["post D1 > a", "delete m1", "post D2 > a"]);
-  });
-
-  it("a burst runs one refresh at a time and ends on the newest view", async () => {
-    const { status, calls } = rig();
-    await Promise.all([status.show("D1", view("a")), status.show("D1", view("b")), status.show("D1", view("c"))]);
-    expect(calls).toEqual(["post D1 > c"]);
-    const first = status.show("D1", view("d"));
-    await Promise.resolve();
-    await Promise.all([first, status.show("D1", view("e")), status.show("D1", view("f"))]);
-    expect(calls).toEqual(["post D1 > c", "edit m1 > d", "edit m1 > f"]);
-  });
-
-  it("survives a restart: the row is on disk", async () => {
-    await rig().status.show("D1", view("a"));
-    const { status, calls } = rig();
-    await status.show("D1", view("b"));
-    expect(calls).toEqual(["edit m1 > b"]);
+  it("a failed post is logged and leaves the answer to the note", async () => {
+    const { status, logged } = rig(true);
+    expect(await status.answer("D1", view("a"))).toBe(false);
+    expect(logged).toEqual(["status: post failed: Error: 429"]);
   });
 });

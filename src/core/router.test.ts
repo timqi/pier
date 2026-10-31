@@ -43,7 +43,6 @@ function fakeChannel(id: string) {
     },
     openThread: () => Promise.resolve(""),
     editRoot: () => Promise.resolve(),
-    status: () => Promise.resolve(),
     stop: () => Promise.resolve(),
   };
   return { channel, sent, notes };
@@ -121,7 +120,6 @@ describe("channel fan-out", () => {
       notify: () => Promise.resolve(),
       openThread: () => Promise.resolve(""),
       editRoot: () => Promise.resolve(),
-      status: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);
@@ -151,7 +149,6 @@ describe("channel fan-out", () => {
       notify: () => Promise.resolve(),
       openThread: () => Promise.resolve(""),
       editRoot: () => Promise.resolve(),
-      status: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     });
     await router.ensure(KEY);
@@ -532,13 +529,9 @@ describe("opening a session", () => {
     router.registerChannel(im.channel);
     await router.dispatch({ key: WEB, senderId: "web", text: "from the browser", mode: "auto" });
     expect(await router.evictIdle(0)).toBe(1);
-    // Evicted, it still answers where the user spoke: the home chat's status card reads this.
     expect(router.conversationOf("s1")).toBeUndefined();
-    expect(router.answersOn("s1")).toEqual(WEB);
-    expect(router.answersOn("s2")).toBeUndefined();
     await router.ensure({ channelId: "task", conversationId: "s1" });
     expect(router.conversationOf("s1")).toEqual(WEB);
-    expect(router.answersOn("s1")).toEqual(WEB);
     fake.emit({ type: "turn-end", text: "callback answer" });
     expect(im.sent).toEqual([]);
   });

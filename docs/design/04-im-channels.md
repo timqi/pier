@@ -15,7 +15,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as a reply to the message that offered it, in the web's quote (`withQuote`) | shared parse, adapter renders + feeds back | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ |
 | Outbound attachments | A `file://` link in a reply is dead on anyone else's machine, so the file is uploaded to the platform and the link's label stays in the text; over the cap, missing or refused becomes an `[attachment lost: …]` line (shared: `channels/attach.ts`, upload per `*-api.ts`) | shared split/read/report, adapter uploads | ✅ | ✅ |
-| System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers; in the home main flow a delegation or a succeeded callback is the status message's instead ([11 §Status](11-im-conversation.md#status)) | shared (`Channel.notify`) | ✅ | ✅ |
+| System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers; in the home main flow a delegation or a succeeded callback is left to `/status`'s card and the web ([11 §Status](11-im-conversation.md#status)) | shared (`Channel.notify`) | ✅ | ✅ |
 | Failure notices | Any error reaches the conversation, not just the web timeline | shared (`Router.report`) | ✅ | ✅ |
 | Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ |
 | Speaker identity | `[name<id> time place]` above a message (`[name time platform]` where ids are opaque), only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ |
@@ -68,9 +68,6 @@ buttons. Kept apart: the renderers, the user-name memos, the `discovered` sets.
   `system-input` (task delegation, callback, supervisor message) and
   `{kind:"error"}`. Sent *before* the turn it triggers; never rendered as an
   assistant turn; must not retire the receipts.
-- `status(chatId, view)` — the home chat's status message
-  ([11 §Status](11-im-conversation.md#status)); any other chat rejects, and
-  failures inside are logged, never thrown.
 - `stop()` must **drain in-flight work**: `runtime.reload()` starts a
   replacement immediately.
 - `meta` (`TurnMeta`) renders as a footer via `formatTurnMeta()` from

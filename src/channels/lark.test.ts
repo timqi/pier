@@ -32,6 +32,7 @@ import type {
   LarkTarget,
 } from "./lark-api.js";
 import { ReceiptLedger } from "./receipts.js";
+import type { OtherChain } from "./status.js";
 import { chatOf } from "./types.js";
 
 const ME = "ou_bot";
@@ -159,6 +160,8 @@ let homeChat: string | undefined;
 /** The chain the runtime would say a main-flow reply is, and the taps it was handed. */
 let speaker: Speaker | undefined;
 let tapped: [string, string][];
+/** The other chains the fake home lists under `/status`'s card. */
+let others: OtherChain[];
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   sessionState: SessionState;
@@ -300,7 +303,8 @@ beforeEach(async () => {
   speaker = undefined;
   tapped = [];
   control = fakeControl();
-  const home = { speaker: () => speaker, tap: (m: InboundMessage, chain: string) => void tapped.push([m.text, chain]) };
+  others = [];
+  const home = { speaker: () => speaker, tap: (m: InboundMessage, chain: string) => void tapped.push([m.text, chain]), others: () => others };
   channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, home });
   await channel.start((msg) => inbound.push(msg));
 });
@@ -1126,58 +1130,36 @@ describe("the home chat", () => {
     const meta = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 10, model: "m" };
     const snapshot = (items: [string, OpenItemPresentation["status"], string?][]) => ({ version: 1 as const, items: items.map(([problem, status, stage = ""]) =>
       openItemPresentation({ problem, stage, status, runs: [] }, 0)) });
-    const view = (text: string, items: [string, OpenItemPresentation["status"]][] = []) =>
-      ({ text, snapshot: snapshot(items) });
 
-    it("keeps one labelled card, edited in place under later posts, and only in the home chat", async () => {
-      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
-      expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([[HOME, "*▤ open items*\n<font color='grey'>In progress · 1</font>\n**storage**"]]);
-      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
-      expect(client.patched.at(-1)!.messageId).toBe("om_900");
-      expect(bodyText(client.patched.at(-1)!.card)).toBe("*▤ open items*\n<font color='grey'>Waiting on you · 1</font>\n**storage**");
-      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
-      expect(client.patched).toHaveLength(1);
-      // A reply, a note and a topic root never move it: no card after every turn.
-      await channel.send(HOME, { text: "done", suggestions: [] });
-      await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
-      await channel.openThread(HOME, { text: "▷ storage", origin: { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: "lead" } });
-      await channel.status(HOME, view("storage — waiting on you"));
-      await channel.status(HOME, view("storage — merged"));
-      expect(client.deleted).toEqual([]);
-      expect(client.patched.at(-1)!.messageId).toBe("om_900");
-      expect(client.sent.map((p) => bodyText(p.card).split("\n")[0])).toEqual(["*▤ open items*", "done", "*⚠ failed*", "*↩ task callback*"]);
-      await channel.status(HOME, view("Nothing open."));
-      expect(client.deleted).toEqual(["om_900"]);
-      expect(client.reactions).toEqual([]);
-      await expect(channel.status(CHAT, view("x"))).rejects.toThrow(/not the home chat/);
-    });
+    const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
 
-    it("a repost moves the card to the bottom: the old one deleted, a new one posted", async () => {
-      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
-      await channel.send(HOME, { text: "done", suggestions: [] });
-      await channel.status(HOME, view("storage — running", [["storage", "running"]]), true);
-      expect(client.patched).toEqual([]);
-      expect(client.deleted).toEqual(["om_900"]);
-      expect(client.sent.map((p) => bodyText(p.card).split("\n")[0])).toEqual(["*▤ open items*", "done", "*▤ open items*"]);
-    });
-
-    it("/status is answered once: the card re-posted at the bottom, or the note when nothing is open", async () => {
-      const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
+    it("/status posts a new card each time in the home's main flow, never patching or deleting one", async () => {
       const text = "Waiting on you · 1\n\nA & B\n是否合并 <scope>？\n\nIn progress · 1\n\nBuild";
-      await channel.status(HOME, view("a", [["a", "running"]]));
+      await channel.notify(HOME, { text, origin });
       await channel.send(HOME, { text: "done", suggestions: [] });
       await channel.notify(HOME, { text, origin });
-      expect(client.deleted).toEqual(["om_900"]);
-      expect(client.sent.map((p) => bodyText(p.card))).toEqual([
-        "*▤ open items*\n<font color='grey'>In progress · 1</font>\n**a**", "done",
-        "*▤ open items*\n<font color='grey'>Waiting on you · 1</font>\n**A & B**\n<font color='orange'>是否合并 <scope>？</font>\n<font color='grey'>In progress · 1</font>\n**Build**",
-      ]);
-      await channel.status(HOME, view("Nothing open."));
-      await channel.notify(HOME, { text: "Nothing open.", origin });
-      expect(client.sent.map((p) => bodyText(p.card)).slice(3)).toEqual(["*/status*\n> Nothing open."]);
+      const card = "*▤ open items*\n<font color='grey'>Waiting on you · 1</font>\n**A & B**\n<font color='orange'>是否合并 <scope>？</font>\n<font color='grey'>In progress · 1</font>\n**Build**";
+      expect(client.sent.map((p) => [p.chatId, bodyText(p.card)])).toEqual([[HOME, card], [HOME, "done"], [HOME, card]]);
+      expect(client.patched).toEqual([]);
+      expect(client.deleted).toEqual([]);
+      expect(client.reactions).toEqual([]);
       // Another command's answer is its note, as before.
       await channel.notify(HOME, { text: "nothing running", origin: { kind: "chat-command", command: "stop" } });
-      expect(client.sent).toHaveLength(5);
+      expect(client.sent).toHaveLength(4);
+    });
+
+    it("/status is the note when nothing is open and no other chain has anything, and in a topic", async () => {
+      const empty = { ...origin, statusSnapshot: snapshot([]) };
+      await channel.notify(HOME, { text: "Nothing open.", origin: empty });
+      expect(client.sent.map((p) => bodyText(p.card))).toEqual(["*/status*\n> Nothing open."]);
+      others = [{ name: "Design", waiting: 1, inProgress: 0, archived: false }];
+      await channel.notify(HOME, { text: "Nothing open.", origin: empty });
+      expect(bodyText(client.sent.at(-1)!.card)).toContain("Design");
+      await channel.notify(`${HOME}/om_root`, { text: "Build", origin });
+      expect(client.replied.at(-1)!.to).toBe("om_root");
+      expect(bodyText(client.replied.at(-1)!.card)).toBe("*/status*\n> Build");
+      expect(client.patched).toEqual([]);
+      expect(client.deleted).toEqual([]);
     });
 
     it("a silent turn that settled a message says so, <open> marker or not; one a callback began posts nothing", async () => {

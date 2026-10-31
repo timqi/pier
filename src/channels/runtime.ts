@@ -13,7 +13,7 @@ import type { ChannelControl, HomeChains, Speaker } from "./control.js";
 import type { ConversationStore } from "./conversations.js";
 import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
-import type { OtherChain, StatusView } from "./status.js";
+import type { OtherChain } from "./status.js";
 import { type ChannelPlatform, chatOf } from "./types.js";
 
 const ADAPTERS: {
@@ -71,6 +71,8 @@ export class ChannelRuntime {
     private readonly chain: MainChain,
     private readonly control: ChannelControl,
     private readonly conversations: Pick<ConversationStore, "keyOf" | "set">,
+    /** A chain's open items, for the `Other chains` its status card lists. */
+    private readonly viewOf: (chainId: string) => OpenItemsView,
     private readonly log: (message: string) => void = warn,
   ) {}
 
@@ -114,6 +116,7 @@ export class ChannelRuntime {
       home: {
         speaker: (turn) => this.speaker(platform, turn),
         tap: (msg, chainId) => this.toHead(channel, msg, chainId),
+        others: () => this.others(),
       },
     });
     try {
@@ -194,16 +197,15 @@ export class ChannelRuntime {
   /** A design lead waiting on the user gets a thread in the home DM bound to
    *  its session (docs/design/11 §Child threads); its later states edit the
    *  root. No home, its adapter down, or the session already in a chat: nothing
-   *  — the web's needs-you carries it. Every failure is a note in the chat.
-   *  Answers whether a later state edited the root. */
-  async designLead(lead: LeadTurn, state: LeadState): Promise<boolean> {
+   *  — the web's needs-you carries it. Every failure is a note in the chat. */
+  async designLead(lead: LeadTurn, state: LeadState): Promise<void> {
     const home = this.store.home();
     const channel = home && this.running.get(home.platform);
-    if (!home || !channel) return false;
+    if (!home || !channel) return;
     const note = { text: rootLine(lead, state), origin: lead.origin };
     const bound = this.conversations.keyOf(lead.sessionId);
     if (state === "waiting") {
-      if (bound) return false;
+      if (bound) return;
       let thread: string | undefined;
       try {
         thread = await channel.openThread(home.chatId, note);
@@ -216,38 +218,24 @@ export class ChannelRuntime {
         await this.report(channel, thread ?? home.chatId, `"${lead.name}" waits for you on the web; ${
           thread ? "its turn did not reach this thread" : "its thread could not be opened"}: ${String(err)}`);
       }
-      return false;
+      return;
     }
     // Only a thread of the home chat has a root of ours to edit.
-    if (!bound || bound.channelId !== home.platform || chatOf(bound.conversationId) !== home.chatId) return false;
-    return channel.editRoot(bound.conversationId, note).then(() => true, (err: unknown) =>
-      this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`).then(() => false));
+    if (!bound || bound.channelId !== home.platform || chatOf(bound.conversationId) !== home.chatId) return;
+    await channel.editRoot(bound.conversationId, note).catch((err: unknown) =>
+      this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`));
   }
 
-  /** The home chat's status message (docs/design/11 §Status): the current chain's
-   *  view and a line per other chain with something in it, while its adapter is
-   *  live and a head answers there; nothing otherwise — a card left behind is
-   *  reconciled once the chat speaks again. A failure is logged, never thrown. */
-  async openItems(viewOf: (chainId: string) => OpenItemsView, repost = false): Promise<void> {
-    const home = this.store.home();
-    const channel = home && this.running.get(home.platform);
-    if (!home || !channel) return;
-    // A `task:` key says nothing of the surface (main.ts `channelOf`); the durable rule is the home chat.
-    const surfaces = this.chain.heads().flatMap(({ sessionId }) => {
-      const on = this.router.answersOn(sessionId);
-      return on && on.channelId !== "task" ? [on] : [];
-    });
-    if (surfaces.length && !surfaces.some((on) => on.channelId === home.platform && on.conversationId === home.chatId)) return;
-    let view: StatusView;
+  /** The chains other than the home chat's current one with something in them, for its
+   *  status card (docs/design/11 §Status); a failed read is logged and lists none. */
+  private others(): OtherChain[] {
     try {
       const current = this.current();
-      const own = viewOf(current.id);
-      view = { ...own, snapshot: { ...own.snapshot, chain: current.name }, others: this.chain.chains.list().filter((c) => c.id !== current.id).flatMap((c) => other(c, viewOf(c.id))) };
+      return this.chain.chains.list().filter((c) => c.id !== current.id).flatMap((c) => other(c, this.viewOf(c.id)));
     } catch (err) {
-      return this.log(`status: the open items could not be read: ${String(err)}`);
+      this.log(`status: the other chains could not be read: ${String(err)}`);
+      return [];
     }
-    await channel.status(home.chatId, view, repost).catch((err: unknown) =>
-      this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
   }
 
   private async report(channel: Channel, conversationId: string, text: string): Promise<void> {

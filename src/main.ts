@@ -163,10 +163,7 @@ tasks = new TaskService(taskStore, factory, router, hub, {
       name: run.context.definition.name,
       origin: { kind: "task-callback", taskId: run.taskId, runId: run.id, sourceSessionId: run.targetSessionId, source: runSource(run), state: run.state },
       text: state === "failed" ? run.error ?? run.state : runResultText(run),
-    }, state).then((edited) => {
-      // The user reads the root's ✓ first; the card follows to the bottom.
-      if (edited && state === "final") setTimeout(() => refreshStatus(true), FINAL_REPOST_MS);
-    }, (err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
+    }, state).catch((err: unknown) => log.error(`lead ${run.targetSessionId ?? "?"}: its ${state} state did not reach the home chat`, err));
   },
   // Through the ledger: an interruption is recorded while no chat is connected.
   abnormalEnd: (run) => {
@@ -199,29 +196,8 @@ const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
 });
-const channels = new ChannelRuntime(channelStore, router, chain, control, conversations);
-/** The home chat's status message follows every event that can move an open
- *  item or the chat's chain, coalesced: one turn end fires several. */
-const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state", "chains-changed"]);
-const FINAL_REPOST_MS = 5000;
-let statusTimer: NodeJS.Timeout | undefined;
-let statusRepost = false;
-const refreshStatus = (repost = false): void => {
-  statusRepost ||= repost;
-  if (statusTimer) return;
-  statusTimer = setTimeout(() => {
-    statusTimer = undefined;
-    const bottom = statusRepost;
-    statusRepost = false;
-    void channels.openItems((chainId) => {
-      const { text, snapshot } = openItemsStatus(tasks.openItems(chainId), Date.now());
-      return { text, snapshot };
-    }, bottom);
-  }, 1500);
-};
-hub.subscribeWorkspace((e) => {
-  if (STATUS_EVENTS.has(e.type)) refreshStatus();
-});
+const channels = new ChannelRuntime(channelStore, router, chain, control, conversations,
+  (chainId) => openItemsStatus(tasks.openItems(chainId), Date.now()));
 /** Where a session answers until a user speaks (docs/design/11 §Notifications):
  *  every chain's head in the home chat while its adapter runs, else on the web with Web
  *  Push; an older member gets no home key, or an adapter's start would re-key it
@@ -262,8 +238,6 @@ const tellChats = (): Promise<void> =>
 const startChannels = async (): Promise<void> => {
   await channels.reload();
   await tellChats();
-  // The restart note landed above the status message; and a home moved needs its first.
-  refreshStatus();
 };
 /** Adapters re-read their configuration and sessions are let go, so the next
  *  message re-opens them with current skills, extensions, prompts and

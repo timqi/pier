@@ -28,7 +28,7 @@ import type { ChannelStore } from "./config.js";
 import type { ChannelControl, HomeChains } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage, type StatusView } from "./status.js";
+import { StatusMessage } from "./status.js";
 import { SlackDirectory } from "./slack-directory.js";
 import {
   SlackApi,
@@ -139,11 +139,7 @@ export class SlackChannel implements Channel {
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),
     );
-    this.statusLine = new StatusMessage("slack", ledger.db, {
-      post: async (channel, body) => (await this.api.postMessage({ channel, ...body })).ts,
-      edit: (channel, ts, body) => this.api.updateMessage({ channel, ts, ...body }),
-      delete: (channel, ts) => this.api.deleteMessage(channel, ts),
-    }, this.log, statusMessage);
+    this.statusLine = new StatusMessage((channel, body) => this.api.postMessage({ channel, ...body }), this.log, statusMessage);
     if (deps.control) {
       this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -524,12 +520,14 @@ export class SlackChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread in the conversation id`);
       return;
     }
-    // The home's main flow shows task progress in the status message; the web keeps the cards.
+    // The home's main flow leaves task progress to `/status`'s card; the web keeps the cards.
     if (!to.threadTs && shownByStatus(note.origin)) {
       return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
-    // `/status`'s answer is the status message re-posted, never a copy beside it.
-    if (!to.threadTs && note.origin.kind === "chat-command" && note.origin.command === "status" && (await this.statusLine.answer(to.channel, note.text, note.origin.statusSnapshot))) return;
+    // `/status`'s answer in the home's main flow is a new status card, the note only when there is none to post.
+    const snapshot = note.origin.kind === "chat-command" && note.origin.command === "status" ? note.origin.statusSnapshot : undefined;
+    if (!to.threadTs && snapshot && this.isHome(to.channel)
+      && (await this.statusLine.answer(to.channel, { text: note.text, snapshot, others: this.deps.home?.others() ?? [] }))) return;
     const ts = await this.out.note(to.channel, to.threadTs, note);
     if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, to.channel, ts, note.at);
   }
@@ -539,11 +537,6 @@ export class SlackChannel implements Channel {
     const ts = await this.out.note(channel, undefined, note);
     if (!ts) throw new Error(`Slack returned no ts for the root in ${channel}`);
     return conversationId(channel, ts);
-  }
-
-  async status(channel: string, view: StatusView, repost?: boolean): Promise<void> {
-    if (!this.isHome(channel)) throw new Error(`refusing a status message in ${channel}: not the home DM`);
-    await this.statusLine.show(channel, view, repost);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

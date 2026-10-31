@@ -132,8 +132,8 @@ Both platforms, the same rule.
   before, in the main flow.
 - **Then**: the user's replies in the thread are the lead's messages; a button
   tap echoes into the thread; a reply carrying `Design final:` is recorded as
-  today (`designFinal`, `router.onTurnEnd`); the head's callback note is the
-  status message's, not the main flow's (§Status). The thread stays bound after the design closes;
+  today (`designFinal`, `router.onTurnEnd`); the head's callback note is
+  left to `/status` and the web, not posted in the main flow (§Status). The thread stays bound after the design closes;
   it reaches the same session.
 - **The root is edited in place** (`Channel.editRoot(thread, note)`: Slack
   `chat.update`, Lark `message.patch`) on two transitions only: `Design
@@ -141,8 +141,7 @@ Both platforms, the same rule.
   not succeed → `⚠ <run name> · design — <error>`. Any other state the
   thread itself shows. One `designLead(run, state)` hook carries all three
   (`waiting`, `final`, `failed`); a failed edit is an error note in the
-  thread, never silent. 5 s after the `final` edit, the status card is
-  re-posted at the bottom of the main flow once (§Status).
+  thread, never silent.
 - The web: the lead's session lists `channel: <platform>` and takes no unread
   mark or push while bound (a turn delivered to a chat), as any thread session
   opened on the web; the design's needs-you row is the store's and
@@ -163,7 +162,7 @@ thread half only for the home chat; any other is refused.
 | --- | --- |
 | the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded; a silent one `▶ <run name> · <tier>` per run the turn launched (`HomeChains.speaker(meta)`, the ledger from the turn's start; the tier where recorded), else `stayed silent — <reason>` / `no reply` (a silent main-flow reply: §Status) |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, the receipt booked on the echo, the row retired (Lark: button value `root: ""` names the home), sent to the chain that offered it (§Chains) |
-| a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; the status message and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
+| a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; `/status`'s card and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
 | a chat command's answer | `/<command>` label, the text **whole** (bounded: the open-items text, `stopped`, `nothing running`, the skill lines); `originLabel`, `chat-command` |
 | an unmatched `<done>` | `▤ open items` over the digest: the keys that closed nothing and the open keys to resend (`originLabel`, `open-items`) |
@@ -184,21 +183,17 @@ thread half only for the home chat; any other is refused.
 
 ## Status
 
-The home chat's main flow shows the open items in one status message
-(`channels/status.ts`): the whole picture, which only `/status` and a design
-final move.
+`/status` typed in the home chat's main flow is answered by a new status card
+(`channels/status.ts`) posted every time: nothing refreshes, edits or deletes
+a card, and no table keeps one.
 
-- main.ts coalesces `open-items-changed`, `task-run-changed`,
-  `task-group-changed`, `session-state` and `chains-changed` on a 1.5 s timer and hands
-  `ChannelRuntime.openItems` a chain's `OpenItemsView` (`tasks.openItems(chain)`,
-  `openItemsStatus`: the compact text and snapshot); the runtime builds the
-  current chain's view plus `Other chains`, and calls `Channel.status` on the
-  home platform's live adapter while any chain's head answers in the home chat
-  (`Router.answersOn`, §Notifications; a `task:` key or none is the durable
-  rule); nothing otherwise — no post, edit or delete, a design final's re-post
-  included. A card left behind meanwhile is reconciled by the first refresh
-  after the chat speaks again.
-- The status message is `▤ open items · <chain>` — the current chain's name —
+- The `chat-command` note carrying `statusSnapshot` reaches the adapter's
+  `notify`, which posts the card over that snapshot (`StatusMessage.answer`) with
+  `Other chains` from `HomeChains.others()` (the runtime's `viewOf` per chain,
+  the current chain left out); `Nothing open.` with no other chain listed, a
+  thread's `/status` or a failed post is the plain note. A `/status` from the web
+  is answered on the web, so the chat's last card stays where it was.
+- The card is `▤ open items · <chain>` — the current chain's name —
   in the platform's emphasis over the view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
   `Waiting on you · N`, `In progress · N`, `Other open · N`; per item the title in
@@ -217,25 +212,14 @@ final move.
   other chain, its name then `· N waiting · M in progress` — an active chain when either
   is non-zero, an archived one only while something waits on the user,
   tagged `archived`; no such chain, no section. No run IDs appear, and old text-only `/status` notes retain the
-  legacy `withoutRunIds` transform. Same rendered body as last posted → nothing;
-  `Nothing open.` with no other chain listed → deleted; otherwise edited in place (posted when there is
-  none). Two things re-post it at the bottom, then delete the old one without
-  waiting (on Lark the deleted card leaves a 撤回 placeholder): `/status` in the
-  main flow, with the answer's text and snapshot (`StatusMessage.answer`), and
-  once a design final (§Child threads), the refresh 5 s after the root's edit
-  passing `Channel.status(chat, view, repost)`, the flag ORed across the 1.5 s
-  window. A failed re-post keeps the old one; `startChannels` refreshes once,
-  after the restart note. One refresh runs at a time; the newest waiting view replaces
-  the older. A home moved within the platform loses the old chat's card on the
-  next refresh; moved across platforms, the old card stays until that adapter
-  refreshes.
+  legacy `withoutRunIds` transform.
 - A silent main-flow turn that settled a booked message — the user's, or a
   note posted before it — posts its footer, `<open>` marker or not: the runs it
   launched as `▶ <run name> · <tier>` (the dispatch's receipt, since the main
   flow posts no delegation note), else `stayed silent — <reason>`; one with
-  nothing booked, a callback the status message shows, posts nothing.
-- Every platform failure is logged with a `status:` prefix and never thrown
-  into the hub.
+  nothing booked, a callback `/status` and the web show, posts nothing.
+- A failed post or a failed read of the other chains is logged with a
+  `status:` prefix, never thrown into the hub.
 
 ## Chat commands
 
@@ -252,7 +236,7 @@ empty) is dropped with a log line, never a command.
 
 | Command | The head (home chat, web) | A thread of any other chat |
 | --- | --- | --- |
-| `/status` | the head's open items (`MainChain.send`); in the home chat's main flow the status message re-posted at the bottom is the one answer, the note only when nothing is open or the re-post failed | prose |
+| `/status` | the head's open items (`MainChain.send`); in the home chat's main flow a new status card is the one answer, the note only when nothing is open in any chain or the post failed (§Status) | prose |
 | `/new` · `/new <text>` | the next head now, a streaming head stopped first; with `<text>`, that sent to it as its first message (booked as a message, its receipt the turn's) | prose |
 | `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running`, then ` · <N> run(s) still running` while the chain has runs in flight | aborts the thread's session: `⏹ Stopped.` |
 | `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
@@ -313,8 +297,7 @@ through what the head launches (`pier task`), never by a group's message.
   platform, so Web Push sends nothing and the web sets no unread mark (a turn
   delivered to a chat is not notified about again). A message typed on the
   web keys the head to the web until the chat speaks again: nothing is posted
-  in the DM meanwhile, nor is the status message (§Status) posted, edited or
-  deleted, and Web Push goes to the browser that typed it
+  in the DM meanwhile, a `/status` typed there included (§Status), and Web Push goes to the browser that typed it
   ([03 §Notifications](03-web-workbench.md#notifications-srcwebpushts--srcwebwebpushts)).
   A `task:` open never takes the key off a surface a user spoke on, nor does
   an idle eviction's reopen; an adapter's restart does not take the head back
@@ -385,7 +368,7 @@ through what the head launches (`pier task`), never by a group's message.
   and dropped with its home.
 - §Chains: `channels/runtime.test.ts` the current chain per message, a switch's
   pointer and note, the archived fallback, a tap to its chain, the speaker,
-  `Other chains` and the status card while any head answers there;
+  and `HomeChains.others()`, a failed read listing none;
   `channels/slack.test.ts` and `lark.test.ts` `/chain`'s five forms in the home
   and prose in a thread, the grey line and the button's chain;
   `channels/slack-render.test.ts`, `lark-render.test.ts` and
@@ -405,20 +388,19 @@ through what the head launches (`pier task`), never by a group's message.
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `channels/receipts.test.ts` a quiet chat booked, settled and
   periodically swept with no reaction call, cleared by the startup sweep;
-  `channels/status.test.ts` edit, `/status`'s re-post, delete, failures;
+  `channels/status.test.ts` a post on each answer, nothing open, a failed post;
   `channels/lark-render.test.ts` `statusCard` and
   `channels/slack-render.test.ts` `statusMessage` the layout and the budget;
   `channels/slack.test.ts` and `lark.test.ts` no reaction call in the home, a
-  silent turn's footer, notes, `status()` and its repost;
-  `channels/runtime.test.ts` `openItems` to the live home adapter only, with
-  the repost flag, and only while the head answers in the home chat, and `designLead` answering whether it edited the root.
+  silent turn's footer, notes, and `/status` posting a new card each time with
+  nothing edited or deleted, the note when nothing is open or in a thread.
 
 ## Acceptance
 
 - A day of use from the phone: every spoken reply, seed and `/status` answer
   of the head appears in the DM's main flow in order, no message wears a
-  reaction, one status message shows what is open, and a
-  callback shows only as that message changing in place unless a run failed or the head
+  reaction, `/status` posts a card of what is open, and a
+  callback shows nowhere in the main flow unless a run failed or the head
   speaks (§Status); nothing appears twice on the phone (no push beside
   the DM); the web timeline matches.
 - Disabling the platform in the Console returns the head to the web with

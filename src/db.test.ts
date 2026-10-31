@@ -80,6 +80,11 @@ const UNDO_38 =
 /** Winds one back past 40, the open items' record. */
 const UNDO_40 = "ALTER TABLE open_items DROP COLUMN closed_at; ALTER TABLE open_items DROP COLUMN aliases; ALTER TABLE open_items DROP COLUMN sessions;";
 
+/** Winds one back past 42, which dropped the home chat's one status message. */
+const UNDO_42 =
+  "CREATE TABLE status_messages (platform TEXT NOT NULL, chat_id TEXT NOT NULL, message_id TEXT NOT NULL," +
+  " text TEXT NOT NULL, behind INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (platform, chat_id));";
+
 /** Winds one back past 41, the named chains: both rebuilt tables as 40 left them, rows dropped. */
 const UNDO_41 =
   "DROP TABLE home_chain; DROP TABLE main_chain; DROP TABLE open_items; DROP TABLE chains;" +
@@ -103,7 +108,7 @@ const UNDO_33 =
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(tables(db)).toEqual([
       "auth",
       "chains",
@@ -129,7 +134,6 @@ describe("openDb", () => {
       "session_index",
       "session_state",
       "settings",
-      "status_messages",
       "task_groups",
       "task_messages",
       "task_runs",
@@ -158,7 +162,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(41);
+    expect(version(second)).toBe(42);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -171,7 +175,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 41/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 42/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -349,7 +353,7 @@ describe("openDb", () => {
   it("indexes the global run list, on a database that predates it", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 16");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 16");
     const insert = before.prepare("INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?)");
     insert.run("probe", "t", 3, "succeeded", null, JSON.stringify({ matched: false }));
     insert.run("failed", "t", 2, "failed", null, JSON.stringify({ matched: false }));
@@ -357,7 +361,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -379,11 +383,11 @@ describe("openDb", () => {
   it("drops the working set and the closed flag from a database that has them", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + " INSERT INTO session_state(session_id, unread, sort, closed) VALUES ('s1', 1, 0, 1); PRAGMA user_version = 31");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + " INSERT INTO session_state(session_id, unread, sort, closed) VALUES ('s1', 1, 0, 1); PRAGMA user_version = 31");
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT * FROM session_state").get()).toEqual({ session_id: "s1", unread: 1 });
     db.close();
   });
@@ -392,7 +396,7 @@ describe("openDb", () => {
     const path = dbPath();
     const before = openDb(path);
     before.exec(
-      UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 +
+      UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 +
         " INSERT INTO session_state(session_id, unread, cwd, project_sort) VALUES ('s1', 1, '/a', 0);" +
         " INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at) VALUES ('slack', 'C1/1.2', 's1', 5);" +
         " INSERT INTO restart_ledger(channel_id, conversation_id, note, created_at) VALUES ('slack', 'C1/1.2', 'cut', 5);" +
@@ -402,7 +406,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT * FROM session_state").all()).toEqual([{ session_id: "s1", unread: 1 }]);
     expect(db.prepare("SELECT * FROM conversations").all())
       .toEqual([{ channel_id: "slack", conversation_id: "C1/1.2", session_id: "s1", launch: null }]);
@@ -415,11 +419,11 @@ describe("openDb", () => {
   it("indexes runs by their target session, on a database that predates it", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + " PRAGMA user_version = 28");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + " PRAGMA user_version = 28");
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     // A session's role: the fresh run that made it.
     const plan = JSON.stringify(db.prepare("EXPLAIN QUERY PLAN SELECT json FROM task_runs" +
       " WHERE json_extract(json, '$.targetSessionId') = 's' AND json_extract(json, '$.sessionMode') = 'fresh' ORDER BY queued_at LIMIT 1").all());
@@ -436,12 +440,12 @@ describe("openDb", () => {
     before.exec(
       "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
         " DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 14",
+        UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 14",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -463,7 +467,7 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 15",
+        UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 15",
     );
     // Three rows the upgrade has to tell apart: one due, two that never are.
     before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
@@ -475,7 +479,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -508,14 +512,14 @@ describe("openDb", () => {
     // them; what this test is about is the pins.
     const before = openDb(path);
     before.exec(
-      UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 +
+      UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + UNDO_20 +
         "INSERT INTO session_state(session_id, pinned, unread, cwd, sort, project_sort)" +
         " VALUES ('s1', 1, 1, '/a', 2, 0), ('s2', 1, 0, '/b', NULL, 1); PRAGMA user_version = 18",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT session_id, unread FROM session_state ORDER BY session_id").all())
       .toEqual([{ session_id: "s1", unread: 0 }, { session_id: "s2", unread: 0 }]);
     db.close();
@@ -528,13 +532,13 @@ describe("openDb", () => {
     const path = dbPath();
     const before = openDb(path);
     before.exec(
-      UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + "INSERT INTO session_state(session_id, unread, sort) VALUES ('im', 1, NULL), ('own', 1, 0);" +
+      UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + "INSERT INTO session_state(session_id, unread, sort) VALUES ('im', 1, NULL), ('own', 1, 0);" +
         UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + UNDO_23 + UNDO_22 + " PRAGMA user_version = 20",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     // The row itself stays: clearing a mark deletes nothing.
     expect(db.prepare("SELECT session_id, unread FROM session_state ORDER BY session_id").all())
       .toEqual([{ session_id: "im", unread: 0 }, { session_id: "own", unread: 0 }]);
@@ -544,7 +548,7 @@ describe("openDb", () => {
   it("moves channel credentials into the vault verbatim, and a name filed first stays", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 23");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 23");
     const insert = before.prepare("INSERT INTO channels(platform, json) VALUES (?, ?)");
     insert.run("slack", JSON.stringify({ enabled: true, token: "v1:aa:bot", appToken: "v1:aa:app", users: [] }));
     insert.run("lark", JSON.stringify({ enabled: false, token: "v1:aa:id", appToken: "" }));
@@ -552,7 +556,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT name, value FROM vault ORDER BY name").all()).toEqual([
       { name: "LARK_APP_ID", value: "v1:aa:id" },
       { name: "SLACK_APP_TOKEN", value: "v1:aa:app" },
@@ -585,14 +589,14 @@ describe("openDb", () => {
     insert.run("slack", JSON.stringify(slack));
     // A platform never given a chat list has nothing to rewrite.
     insert.run("lark", JSON.stringify({ enabled: false }));
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + " PRAGMA user_version = 34");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + " PRAGMA user_version = 34");
     before.close();
 
     const rows = (db: DatabaseSync): unknown =>
       Object.fromEntries((db.prepare("SELECT platform, json FROM channels").all() as { platform: string; json: string }[])
         .map((r) => [r.platform, JSON.parse(r.json) as unknown]));
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     const expected = {
       lark: { enabled: false },
       slack: {
@@ -607,7 +611,7 @@ describe("openDb", () => {
     };
     expect(rows(db)).toEqual(expected);
     // Idempotent: replaying it leaves the rows as they are.
-    db.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + " PRAGMA user_version = 34");
+    db.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + " PRAGMA user_version = 34");
     db.close();
     const again = openDb(path);
     expect(rows(again)).toEqual(expected);
@@ -617,13 +621,13 @@ describe("openDb", () => {
   it("adds the launch column to the conversations a database already routes", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 25");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 25");
     before.prepare("INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at) VALUES (?, ?, ?, ?)")
       .run("lark", "oc_1/om_7", "s1", 1);
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT session_id, launch FROM conversations").all()).toEqual([{ session_id: "s1", launch: null }]);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'conversations_session'").get()).toBeTruthy();
     db.close();
@@ -634,11 +638,11 @@ describe("openDb", () => {
     const before = openDb(path);
     const insert = before.prepare("INSERT INTO settings(key, value) VALUES (?, ?)");
     for (const [key, value] of [["pagesProject", "pier-g1"], ["pagesUrl", ""], ["publicUrl", "https://x"]] as const) insert.run(key, value);
-    before.exec(UNDO_41 + UNDO_40 + " PRAGMA user_version = 38");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + " PRAGMA user_version = 38");
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT key FROM settings").all()).toEqual([{ key: "publicUrl" }]);
     db.close();
   });
@@ -646,11 +650,11 @@ describe("openDb", () => {
   it("keeps a database's open items open, with no aliases and no sessions", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + " INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES ('fix login', 'testing', '[\"r1\"]', 5); PRAGMA user_version = 39");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + " INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES ('fix login', 'testing', '[\"r1\"]', 5); PRAGMA user_version = 39");
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT * FROM open_items").all())
       .toEqual([{ chain_id: "main", problem: "fix login", stage: "testing", run_ids: '["r1"]', updated_at: 5, closed_at: null, aliases: "[]", sessions: "[]" }]);
     db.close();
@@ -659,7 +663,7 @@ describe("openDb", () => {
   it("puts every head and open item a database has on the one chain it creates", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 +
+    before.exec(UNDO_42 + UNDO_41 +
       " INSERT INTO main_chain VALUES ('s1', 1, 'first'), ('s2', 2, 'idle');" +
       " INSERT INTO open_items(problem, stage, run_ids, updated_at, closed_at, aliases, sessions) VALUES" +
       " ('b', 'later', '[]', 9, NULL, '[]', '[\"s2\"]'), ('a', 'done', '[\"r1\"]', 3, 4, '[\"old a\"]', '[\"s1\"]');" +
@@ -667,7 +671,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT id, name, archived_at FROM chains").all()).toEqual([{ id: "main", name: "Main", archived_at: null }]);
     expect(db.prepare("SELECT session_id, chain_id, started_at, reason FROM main_chain ORDER BY rowid").all()).toEqual([
       { session_id: "s1", chain_id: "main", started_at: 1, reason: "first" },
@@ -701,7 +705,7 @@ describe("openDb", () => {
   it("drops the decision, progress and reply messages a database kept for the mid-run channel", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 24");
+    before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + UNDO_34 + UNDO_33 + UNDO_32 + UNDO_31 + UNDO_30 + UNDO_29 + UNDO_28 + UNDO_27 + UNDO_26 + " PRAGMA user_version = 24");
     const insert = before.prepare("INSERT INTO task_messages(id, run_id, state, created_at, json) VALUES (?, ?, ?, ?, ?)");
     const rows: [string, string, string][] = [["q", "decision", "delivered"], ["p", "progress", "pending"], ["a", "reply", "delivered"], ["s", "steer", "pending"], ["f", "follow_up", "expired"]];
     for (const [id, kind, state] of rows) {
@@ -710,7 +714,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(41);
+    expect(version(db)).toBe(42);
     expect(db.prepare("SELECT id FROM task_messages ORDER BY id").all()).toEqual([{ id: "f" }, { id: "s" }]);
     db.close();
   });
