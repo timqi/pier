@@ -684,7 +684,8 @@ describe("the open items", () => {
     for (const s of sessions.values()) router.attach({ channelId: "web", conversationId: s.id }, s);
     const db = openDb(":memory:");
     db.exec("INSERT INTO chains VALUES ('design', 'design', 1, NULL)");
-    const service = new TaskService(new TaskStore(db), {} as AgentFactory, router, hub, {
+    const store = new TaskStore(db);
+    const service = new TaskService(store, {} as AgentFactory, router, hub, {
       modelMenu: () => [],
       ...fakeChains({ main: ["h0"], design: ["d0"] }),
     });
@@ -696,13 +697,17 @@ describe("the open items", () => {
     expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 1 }]);
     end("h0", "<done>login</done>");
     expect(rows()).toEqual([{ chain_id: "design", problem: "login", open: 1 }, { chain_id: "main", problem: "login", open: 0 }]);
+    // A link naming no chain finds an item only one chain has.
+    expect(store.itemHistoryByProblem("login")).toBeUndefined();
+    end("d0", "<open>signup</open>");
+    expect(store.itemHistoryByProblem("signup")?.chain).toBe("design");
 
     end("d0", "<done>never open</done>");
     expect([service.unmatchedDone("design"), service.unmatchedDone("main")]).toEqual([["never open"], []]);
     end("h0", "<open>deploy</open>");
     const design = { id: "design", name: "design", archived: false };
-    expect(service.openItems().items.map((i) => [i.problem, i.chain])).toEqual([["deploy", { id: "main", name: "Main", archived: false }], ["login", design]]);
-    expect(service.openItems("design").items.map((i) => [i.problem, i.chain])).toEqual([["login", design]]);
+    expect(service.openItems().items.map((i) => [i.problem, i.chain])).toEqual([["deploy", { id: "main", name: "Main", archived: false }], ["login", design], ["signup", design]]);
+    expect(service.openItems("design").items.map((i) => [i.problem, i.chain])).toEqual([["login", design], ["signup", design]]);
   });
 
   it("tells the head when its turn answering a run's result, a steer's included, left that run's item at its old stage", () => {
