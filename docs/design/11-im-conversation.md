@@ -195,7 +195,7 @@ a card, and no table keeps one.
   thread's `/status` or a failed post is the plain note. A `/status` from the web
   is answered on the web, so the chat's last card stays where it was.
 - The card is `▤ open items · <chain>` — the current chain's name —
-  in the platform's emphasis over the view's snapshot, one per home chat, laid out by `statusLayout` in the sidebar's
+  in the platform's emphasis over the view's snapshot, laid out by `statusLayout` in the sidebar's
   groups and words ([10 §Open items](10-continuous-session.md#open-items)):
   `Waiting on you · N`, `In progress · N`, `Other open · N`; per item the title in
   bold with its status label as a tag (`Queued`, `Stopped`, …; none while
@@ -320,8 +320,8 @@ through what the head launches (`pier task`), never by a group's message.
   by a session other than the head — not the head's, a cascade's or a
   first-wins join's), only when its result goes to a lead or nobody: to the
   head, its callback note is posted in the main flow even there — a note whose
-  `origin.state` is not `succeeded`/`skipped` is never left to the status
-  message (`shownByStatus`, `core/reply.ts`). A run that restarts the service
+  `origin.state` is not `succeeded`/`skipped` is never left to `/status`
+  (`shownByStatus`, `core/reply.ts`). A run that restarts the service
   resumes after it; it is not interrupted and needs no exemption.
 
 ## Storage
@@ -331,8 +331,6 @@ through what the head launches (`pier task`), never by a group's message.
   clears the other platform's.
 - No `conversations` row, no `main_chain` change.
 - `home_chain(chain_id)`, at most one row: the home chat's current chain (§Chains).
-- `status_messages(platform, chat_id, message_id, text, behind)`, one row per
-  home chat (db.ts, migration 37).
 
 ## Not built
 
@@ -401,9 +399,9 @@ through what the head launches (`pier task`), never by a group's message.
 ## Acceptance
 
 - A day of use from the phone: every spoken reply, seed and `/status` answer
-  of the head appears in the DM's main flow in order, no message wears a
-  reaction, `/status` posts a card of what is open, and a
-  callback shows nowhere in the main flow unless a run failed or the head
+  of the head appears in the DM's main flow in order, a message wears a
+  reaction only while the head is busy or its answer is late, `/status`
+  posts a card of what is open, and a callback shows nowhere in the main flow unless a run failed or the head
   speaks (§Status); nothing appears twice on the phone (no push beside
   the DM); the web timeline matches.
 - Disabling the platform in the Console returns the head to the web with

@@ -133,8 +133,8 @@ truth.
 
 - IM channels put a 👀 (Lark: "OnIt") on the message that started a turn and
   take it off when the turn settles; a restart and a periodic sweep clear
-  stragglers. The home chat has no reactions, in its main flow or threads. A 👀
-  that never clears means the turn died, not that you are still thinking. A
+  stragglers. The home chat, main flow and threads, shows one only while the
+  head is busy or the answer is past 20 s. A 👀 that never clears means the turn died, not that you are still thinking. A
   dispatch is silent, its run tag showing the launch, unless the head assumed
   something for you or the run is long or needs you; `/status` in the home
   chat posts a new card of what is open each time, and nothing updates it.

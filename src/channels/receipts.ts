@@ -34,15 +34,10 @@ const toReceipt = (row: ReceiptRow): Receipt => ({
 });
 
 export class ReceiptLedger {
-  /** The adapter's other books (channels/status.ts) live beside these. */
-  readonly db: DatabaseSync;
-
   constructor(
     private readonly platform: ChannelPlatform,
-    db: DatabaseSync = pierDb(),
-  ) {
-    this.db = db;
-  }
+    private readonly db: DatabaseSync = pierDb(),
+  ) {}
 
   add(receipt: Receipt, createdAt = Date.now()): void {
     this.db.prepare(`
