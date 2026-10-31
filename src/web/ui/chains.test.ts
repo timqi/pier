@@ -71,6 +71,10 @@ it("lists the active chains in the server's order with their marks, the rail onl
   inRow("ops", ".chain-open").onclick?.();
   expect(go).toHaveBeenCalledWith("ops");
   expect(menu.closeMenu).toHaveBeenCalled();
+  // The current chain's row goes too: it is the way back from Settings or an item view.
+  chains.openChains();
+  inRow("main", ".chain-open").onclick?.();
+  expect(go).toHaveBeenLastCalledWith("main");
   list = { ...list, mode: "session" };
   chains.renderChains();
   expect(rail.hasAttribute("data-on")).toBe(false);
@@ -210,4 +214,27 @@ it("⌘B hides and shows the docked rail, remembered, and opens the floated list
   expect(menu.openPanel).toHaveBeenCalledTimes(1);
   expect(rail.hasAttribute("data-on")).toBe(true);
   docked = true;
+});
+
+// The rail's arrows walk the section the focus is in — Chains, or the Items the drawer fills — never across them.
+it("walks the arrows within the focused rail section, Chains or Items", () => {
+  chains.renderChains();
+  const rail = fake(document.querySelector("#chain-rail"));
+  const items = fake(document.querySelector("#rail-items"));
+  const list = fake(document.createElement("ul"));
+  list.dataset.list = "";
+  const row = (name: string) => { const li = document.createElement("li"); const b = document.createElement("button"); b.textContent = name; li.append(b); return fake(li); };
+  list.append(row("auth"), row("deploy"));
+  items.append(list);
+  const down = () => { const ev = Object.assign(new Event("keydown", { cancelable: true }), { key: "ArrowDown", altKey: false, metaKey: false, shiftKey: false, ctrlKey: false }); rail.dispatchEvent(ev); return ev.defaultPrevented; };
+  // A chain row is its pick and its ⋯, two stops; the walk wraps within the Chains section.
+  rail.querySelector('[data-chain="ops"]')!.querySelector(".chain-more")!.focus();
+  expect(down()).toBe(true);
+  expect(fake(document.activeElement).closest("[data-chain]")!.dataset.chain).toBe("main");
+  expect(fake(document.activeElement).classList.contains("chain-open")).toBe(true);
+  items.querySelectorAll("button")[0]!.focus();
+  expect(down()).toBe(true);
+  expect(fake(document.activeElement).textContent).toBe("deploy");
+  expect(down()).toBe(true);
+  expect(fake(document.activeElement).textContent).toBe("auth");
 });

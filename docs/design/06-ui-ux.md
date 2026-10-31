@@ -18,11 +18,14 @@ updates this document.
 ## Materials
 
 - **Solid**: replies, modal forms, file previews, menus and popovers.
-- **Glass + hairline + shadow**: navigation and floating controls only. One
-  token set — canvas one step darker than the panel, neutral translucent
-  hairline (light in dark mode), top-edge highlight, two-part shadow (wide
-  ambient + tight contact) — shared by the bar, floating controls and menus; the
-  composer takes it one step raised.
+- **Flat chrome + hairline**: navigation, the sidebar and floating controls are
+  one solid surface, `--workbench-chrome`, one step off the canvas, edged by a
+  neutral hairline (`--line`, light in dark mode) — no blur, no gradient, no
+  shadow. Menus and popovers are solid, hairline-edged and carry the one shadow
+  (`--shadow-pop`). Radii are 6–10px: 10px for cards, menus and the composer,
+  6px for rows and icon buttons. The Console's cards, tabs and dialogs are the
+  same material: a hairline card, a flat tab whose open state is the row
+  selection tint, a hairline dialog with the one shadow.
 - Corner radii coordinate with nesting. Reuse the shared palette, controls,
   menus and time labels; no page-specific styles.
 - Canvas: pale neutral page edge, matched by installed-window theme metadata in
@@ -42,14 +45,15 @@ updates this document.
 
 ## Layout
 
-- **One column**: the conversation is a 44rem reading column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred in the pane under the full-width bar; a bubble is 88% of it at most, a reply on a phone the full column; a phone's inset is 0.75rem.
+- **Two columns, one reading column**: from 80rem in chain mode the shell is a 16rem sidebar beside a content column; the sidebar runs the window's full height on the chrome surface with a right hairline, headed by the instance's name (`$PIER_TITLE`, `Pier` when unset) in a row the bar's height, then Chains over Items · N; the content column is the bar, the transcript and the dock. Hidden by ⌘B, below 80rem or in session mode the content column is the window. In it the conversation is a 46rem reading column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred under the bar; a reply is the full column, a user bubble 76% of it at most; a phone's inset is 0.75rem. The sidebar carries the open items from 80rem; below it the status panel does.
+- **Type scale**: the root is 18px below 48rem and 16px from it; the transcript's body is 16px / 1.55 at every width.
 - **Stream rhythm**: two steps, `--turn-gap` (0.75rem) between turns, separator lines (date, `· N background updates`, session divider, load more) and from the bar and composer; `--tight-gap` (0.375rem) within a bubble (chip row, topic tag, quote, files) and between a reply and its continuation.
-- **Bar**: one glass strip at every width; in chain mode the conversation's title is its chain's name with a ▾, opening the chain list; child sessions show ‹, title and phase. Right of the title a `1/N` counter cycling the lead comes first, so it stays put whatever the lead's length; then the status panel's most urgent row leads — topic dot, title, status mark and phrase, truncated — and opens the panel; below md the status glyph and the row count; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left, the item view's `×` one beside its title; nothing is phone-only but the menu primitive's sheets.
-- **Floating buttons**: icon-only glass circles, ⌂ over ↓, right edge on the reading column's, 10px above the dock's top card so they follow its height and clear the send key at every width; 44px on coarse pointers; a hidden one leaves the stack, so the other rests on the dock, and each fades in and out with a short rise.
-- **Status rows**: the panel and `/status` share a topic dot, a two-line title, a second line of a status mark (amber waiting, sky in progress, red failed, neutral queued, green wrapping up) and the stage's short phrase, and useful time/goal/worker metadata; no row reserves a badge column. A row is one control, a 44px target on coarse pointers, its full problem a tooltip when the title is shorter; refresh preserves focus by item identity. In the panel an item's row adds one icon button, its item view, at the row's right, 44px on coarse pointers.
+- **Bar**: one flat strip with a bottom hairline, the content column's width; in chain mode the conversation's title is its chain's name — a plain heading while the sidebar is docked beside it, `<chain> ▾` opening the floated chain list otherwise; child sessions show ‹, title and phase. Right of the title a `1/N` counter cycling the lead comes first, so it stays put whatever the lead's length; then the status panel's most urgent row leads — topic dot, title, status mark and phrase, truncated — and opens the panel; below md the status glyph and the row count; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left, the item view's `×` one beside its title; nothing is phone-only but the menu primitive's sheets.
+- **Floating buttons**: icon-only hairline circles, ⌂ over ↓, right edge on the reading column's, 10px above the dock's top card so they follow its height and clear the send key at every width; 44px on coarse pointers; a hidden one leaves the stack, so the other rests on the dock, and each fades in and out with a short rise.
+- **Status rows**: the panel and `/status` share a topic dot, a two-line title, a second line of a status mark (amber waiting, sky in progress, red failed, neutral queued, green wrapping up) and the stage's short phrase, and useful time/goal/worker metadata; no row reserves a badge column. A row is one control, a 44px target on coarse pointers, its full problem a tooltip when the title is shorter; refresh preserves focus by item identity. In the panel and the sidebar an item's row adds two icon buttons at the row's right, its item view and Close — floated over the row on hover or focus with a fine pointer, always and 44px on a coarse one. The sidebar's row drops the metadata line (its tooltip keeps the full text); the panel's shows it.
 - **Status panel**: one flat waiting-first list under a search field uses the existing popover at ≥640px and sheet below it, dropped from the bar's lead item; on a coarse pointer the first row, not the field, takes focus on open. A row of another chain carries its name as a small neutral chip beside the title (` · archived` included), never a colour of its own.
-- **Chain list**: one set of rows on two surfaces — the popover (≥640px) or sheet dropped from the bar's title, and from 80rem in chain mode a 15rem rail docked left of the column on the canvas, under the bar's height and hidden with the bar. A row is a dot, a two-line name and `N waiting`, the current one a neutral surface and semibold; its ⋯ shows on hover or focus with a fine pointer and always on a coarse one, where rows and ⋯ are 44px targets. Create and rename are inline fields, a refusal a red line under them; archived chains fold under `Archived · N`. Hover, focus and selection use restrained neutral surfaces; `/status` keeps its solid reading card and counted groups.
-- **Settings, Files and System prompt**: Settings is an overlay that returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
+- **Chain list**: one set of rows on two surfaces — the popover (≥640px) or sheet dropped from the bar's title, and the sidebar's Chains section from 80rem in chain mode (**Two columns** above), hidden by ⌘B and remembered. A row is a dot, a two-line name and `N waiting`, the current one an indigo-100 surface with indigo-700 text; hover and focus a neutral step; one vocabulary with the status panel's rows; its ⋯ shows on hover or focus with a fine pointer and always on a coarse one, where rows and ⋯ are 44px targets. Create and rename are inline fields, a refusal a red line under them; archived chains fold under `Archived · N`. Hover, focus and selection use restrained neutral surfaces; `/status` keeps its solid reading card and counted groups.
+- **Settings, Files and System prompt**: Settings is an overlay that replaces the content column — the sidebar stays, and a row of it leaves Settings for the chain or item — and returns to its origin with ✕ or Esc; its head contains the version link and theme toggle. Files and System prompt are modal dialogs over whatever is open, full-screen below md; ✕ or Esc leaves that as it was.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. `+` and send/stop stay on the draft's row at every length, bottom-aligned beside it, while the text grows upward between them; its height is read again when the width changes.
 - **Menus**: labels align without a reserved selection column; only selectable
   options reserve checkmarks; restrained separators; secondary hints truncate;
@@ -81,7 +85,7 @@ updates this document.
 
 - User messages: bounded mist-blue surface, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
-- Transcript type: `text-sm` rounded to a whole pixel (16px at the 18px root) at line-height 1.5, a step under the draft's 1rem; markdown sizes are em that land on whole pixels (headings 1.25em/1.125em, inline code 0.875em).
+- Transcript type: 16px at line-height 1.55 whatever the root, a step under the draft's 1rem; markdown sizes are em that land on whole pixels (headings 1.25em/1.125em, inline code 0.875em).
 - Assistant replies: solid reading surface, comfortable width; on a phone the
   full column. A fenced code block keeps its lines and scrolls sideways in its own box; a table scrolls sideways in its own box, columns as wide as
   their text up to a bounded cell, an edge shade on the side with more; a
@@ -100,7 +104,9 @@ updates this document.
   group and launched run, in arrival order — the text under it, next-step
   buttons at the bottom (an earlier turn's muted, on an open topic's newest
   reply only). A chip is the `.run-label` material in its state colour (a failed
-  callback red, an interrupted one amber, running sky with a still dot)
+  callback red, an interrupted one amber, running sky with a still dot) —
+  outlined, `currentColor` at 28%, filled 10% on hover or while open, so the
+  topic tag's fill is the row's one badge of belonging —
   and the run's name in the bubble's type; the count of chips
   is the count of things that happened, and no chip summarises the others.
   An error or silent body carries the same row on its own material.
@@ -195,7 +201,7 @@ updates this document.
   screenshots alone do not establish correctness.
 - Code checks for implementation changes; content and link checks for docs.
   Isolated mock data only; never real tasks or production services.
-- Report actual browser coverage (glass, dialogs, transforms, native controls).
+- Report actual browser coverage (hairlines, dialogs, transforms, native controls).
   Chromium emulation is not native Safari / iOS. Record gaps and fix them within
   the affected controls.
 

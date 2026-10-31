@@ -39,7 +39,7 @@ export function openAuthFlow(
 ): void {
   const dialog = document.createElement("dialog");
   dialog.className =
-    "m-auto w-[min(32rem,92vw)] rounded-lg border border-neutral-200 bg-white p-0 shadow-xl backdrop:bg-black/30";
+    "m-auto w-[min(32rem,92vw)] rounded-[10px] border border-(--line) bg-white p-0 shadow-(--shadow-pop)";
   const events = h("div", "flex flex-col gap-2");
   const promptPane = h("div", "flex flex-col gap-2");
   const status = h("p", "text-[12.5px] text-neutral-400", "Starting…");

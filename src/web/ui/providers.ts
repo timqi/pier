@@ -29,7 +29,7 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
   add.classList.add("ml-auto");
   const bar = h(
     "div",
-    `flex flex-none items-center gap-3 rounded-t-3xl ${PANEL_HEAD} px-4 py-2`,
+    `flex flex-none items-center gap-3 rounded-t-[10px] ${PANEL_HEAD} px-4 py-2`,
     h("h2", "text-[13px] font-semibold text-neutral-700", "Providers"),
     add,
   );
@@ -236,7 +236,7 @@ function openSetup(
 ): void {
   const dialog = document.createElement("dialog");
   dialog.className =
-    "m-auto w-[min(32rem,92vw)] rounded-lg border border-neutral-200 bg-white p-0 shadow-xl backdrop:bg-black/30";
+    "m-auto w-[min(32rem,92vw)] rounded-[10px] border border-(--line) bg-white p-0 shadow-(--shadow-pop)";
   const providerSelect = document.createElement("select");
   providerSelect.className = `${CONTROL} select`;
   if (!existing) providerOptions(providerSelect, providers);

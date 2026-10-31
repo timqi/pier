@@ -141,7 +141,11 @@ function fill(root: HTMLElement): void {
     parts.push(h("hr", "my-1 border-neutral-200"), fold, ...(archivedOpen ? [h("ul", "", ...old.map(archivedRow))] : []));
   }
   // The rail names its sections; the floated list is the chains alone.
-  if (root === rail) railChains.replaceChildren(h("p", "rail-head", "Chains"), ...parts);
+  if (root === rail) {
+    const head = h("p", "rail-head", "Chains");
+    head.id = "rail-chains-head"; // the section's `aria-labelledby`
+    railChains.replaceChildren(head, ...parts);
+  }
   else root.replaceChildren(...parts);
 }
 
@@ -186,10 +190,11 @@ export function toggleSidebar(): void {
 
 const focusField = (): void => (shown(floated) ? floated : rail).querySelector<HTMLInputElement>("input")?.focus();
 
+/** The current chain too: from Settings or an item view, its row is the way back to the conversation. */
 function choose(id: string): void {
   closeMenu();
   actionsOf = null;
-  if (id !== deps.current()) deps.go(id);
+  deps.go(id);
 }
 
 /** The floated list under the bar's title: a popover, or a sheet on a phone (menu.ts). */
@@ -307,9 +312,12 @@ function cycle(step: 1 | -1): void {
 
 export function initChains(d: ChainsDeps): void {
   deps = d;
-  // The rail walks by the arrows as the floated list does in menu.ts.
+  // The rail walks by the arrows as the floated list does in menu.ts, within the
+  // section the focus is in: Chains or Items (drawer.ts), Tab between them.
   rail.addEventListener("keydown", (ev) => {
-    const list = rail.querySelector<HTMLElement>("[data-list]");
+    const focused = document.activeElement;
+    const section = (rail.contains(focused) ? focused?.closest<HTMLElement>("section") : null) ?? rail;
+    const list = section.querySelector<HTMLElement>("[data-list]");
     const to = listStep(ev);
     if (list && to !== undefined && !typing(rail) && walkRows(list, to)) ev.preventDefault();
   });

@@ -96,8 +96,8 @@
     <nav id="chain-rail" aria-label="Chains and items">
       <h1 id="rail-title" class="rail-title">Pier</h1>
       <div id="rail-body">
-        <div id="rail-chains"></div>
-        <section id="rail-items" aria-label="Items"></section>
+        <section id="rail-chains" aria-labelledby="rail-chains-head"></section>
+        <section id="rail-items" aria-labelledby="rail-items-head"></section>
       </div>
     </nav>
     <!-- The transcript's own type scale, inherited by rows, chips and markdown. -->
@@ -212,7 +212,7 @@
        the chat or Settings. Nearly the viewport at every width, and the whole
        screen below md, where it pays the safe-area insets `main` pays. -->
   <dialog id="files-dialog" aria-label="Files"
-    class="m-auto h-[calc(100dvh-2rem)] max-h-none w-[90rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-(--workbench-canvas) p-0 shadow-xl backdrop:bg-black/40 open:flex max-md:m-0 max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]"></dialog>
+    class="m-auto h-[calc(100dvh-2rem)] max-h-none w-[90rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[10px] border border-(--line) bg-(--workbench-canvas) p-0 shadow-(--shadow-pop) open:flex max-md:m-0 max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]"></dialog>
 
   <!-- Before the bundle, and only until it loads: a module that throws while
        evaluating leaves a blank page, no handler installed and nothing in the

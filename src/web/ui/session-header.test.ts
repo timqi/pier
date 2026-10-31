@@ -160,16 +160,31 @@ it("titles the conversation by its chain in chain mode, the title opening the ch
   expect(title().getAttribute("aria-haspopup")).toBe("dialog");
   title().onclick?.();
   expect(chains.openChains).toHaveBeenCalledOnce();
-  // With the sidebar docked the list is already on screen: a plain heading, no way in from it.
-  chains.sidebarDocked.mockReturnValueOnce(true);
+  // With the sidebar docked the list is already on screen: a plain heading — an <h1>, not a disabled button.
+  const button = title();
+  // Docked by crossing 80rem with the floated list open from it: the list closes, the focus moves to the heading.
+  const { closeMenu } = await import("./menu.js");
+  vi.mocked(closeMenu).mockClear();
+  button.setAttribute("aria-expanded", "true");
+  button.focus();
+  chains.sidebarDocked.mockReturnValue(true);
   header.renderHeader();
+  expect(closeMenu).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(title());
+  expect(title().localName).toBe("h1");
   expect(title().textContent).toBe("Design");
   expect(title().hasAttribute("aria-haspopup")).toBe(false);
   expect(title().onclick).toBeNull();
-  expect(title().disabled).toBe(true);
   chain = { ...chain, archivedAt: 2 };
   header.renderHeader();
   expect(title().textContent).toBe("Design · archived");
+  // Hidden again (⌘B): the button is back, in the bar, with its type.
+  chains.sidebarDocked.mockReturnValue(false);
+  header.renderHeader();
+  expect(title().localName).toBe("button");
+  expect(title().getAttribute("type")).toBe("button");
+  expect(title().className).toBe(button.className);
+  expect(title().getAttribute("aria-haspopup")).toBe("dialog");
   // The item view keeps its problem; a child its own title.
   viewing = "auth";
   header.renderHeader();

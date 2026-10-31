@@ -16,7 +16,7 @@ const estimate = (text: string): string => `~${compact(Math.ceil(text.length / 4
 export function openSystemPrompt(s: { id: string; title?: string; cwd: string }): HTMLDialogElement {
   const dialog = document.createElement("dialog");
   dialog.setAttribute("aria-label", "System prompt");
-  dialog.className = "m-auto h-[calc(100dvh-4rem)] max-h-none w-[48rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white p-0 font-sans shadow-xl backdrop:bg-black/40 open:flex max-md:m-0 max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]";
+  dialog.className = "m-auto h-[calc(100dvh-4rem)] max-h-none w-[48rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[10px] border border-(--line) bg-white p-0 font-sans shadow-(--shadow-pop) open:flex max-md:m-0 max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]";
   let text = "";
   const copy = copyBtn(COPY, () => text);
   copy.setAttribute("aria-label", "Copy system prompt");

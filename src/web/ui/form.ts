@@ -27,13 +27,13 @@ export const pageTitle = (label: string): HTMLElement =>
  *  chrome would read as two levels of one navigation. An option with an icon
  *  shows only that; its label becomes the accessible name and the tooltip. */
 export function segmented<K extends string>(options: [string, K, IconNode?][], value: K, onChange: (key: K) => void): HTMLElement {
-  const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-full bg-neutral-100 p-1");
+  const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-md bg-neutral-100 p-0.5");
   for (const [label, key, glyph] of options) {
     const active = key === value;
     const opt = btn(
       glyph ? "" : label,
-      `cursor-pointer whitespace-nowrap rounded-full text-[12px] transition-colors ${glyph ? "flex h-7 w-7 items-center justify-center" : "px-3 py-1"} ${
-        active ? "bg-white font-medium text-neutral-800 shadow-xs" : "text-neutral-500 hover:text-neutral-700"
+      `cursor-pointer whitespace-nowrap rounded text-[12px] transition-colors ${glyph ? "flex h-7 w-7 items-center justify-center" : "px-3 py-1"} ${
+        active ? "bg-white font-medium text-neutral-800 ring-1 ring-(--line)" : "text-neutral-500 hover:text-neutral-700"
       }`,
     );
     if (glyph) {
@@ -97,15 +97,16 @@ export function swatches(options: [string, string][], value: string, onChange: (
   return group;
 }
 
-/** A pill tab — the topic strips (Settings, Channels platforms).
+/** A tab — the topic strips (Settings, Channels platforms): a flat 6px row on
+ * the head's chrome, the open one the selection tint rows use (06 §Materials).
  * One chrome, so two strips on the same page read as the same control. */
 export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
   const el = btn(
     label,
-    `flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] transition-colors ${
+    `flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] transition-colors ${
       active
-        ? "bg-indigo-50 font-medium text-indigo-700 ring-1 ring-indigo-200/70"
-        : "text-neutral-600 hover:bg-neutral-100"
+        ? "bg-indigo-100 font-medium text-indigo-700"
+        : "text-neutral-600 hover:bg-neutral-200"
     }`,
   );
   el.onclick = onClick;
@@ -114,7 +115,7 @@ export function pill(label: string, active: boolean, onClick: () => void): HTMLB
 
 /** The Console's one panel surface — a card, the providers box, Agent's two
  * panes. Layout stays at the call site; this is what the surface is made of. */
-export const PANEL = "rounded-3xl border border-neutral-200 bg-white shadow-sm";
+export const PANEL = "rounded-[10px] border border-(--line) bg-white";
 /** A panel's title band: the card's header, the providers box's, the file
  * name over Agent's pane. Padding and corners stay at the call site. */
 export const PANEL_HEAD = "border-b border-neutral-200/70 bg-neutral-50/50";
@@ -131,7 +132,7 @@ export const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 // own top corners instead of being clipped into shape by the section.
 export function card(title: string, subtitle: string, ...body: HTMLElement[]): HTMLElement {
   const el = h("section", PANEL);
-  const head = h("div", `rounded-t-3xl ${PANEL_HEAD} px-5 py-4`);
+  const head = h("div", `rounded-t-[10px] ${PANEL_HEAD} px-5 py-4`);
   head.append(h("h2", "text-[14px] font-semibold text-neutral-800", title));
   if (subtitle) head.append(h("p", "mt-1 text-[12px] leading-normal text-neutral-500", subtitle));
   el.append(head, h("div", "flex flex-col gap-4 px-5 py-5", ...body));
@@ -319,7 +320,7 @@ export function helpBadge(title: string, steps: (string | HTMLElement)[]): HTMLE
   );
   const panel = h(
     "span",
-    "flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white p-3.5 text-[12px] font-normal normal-case leading-[1.55] tracking-normal text-neutral-600 shadow-xl",
+    "flex flex-col gap-2 rounded-[10px] border border-(--line) bg-white p-3.5 shadow-(--shadow-pop) text-[12px] font-normal normal-case leading-[1.55] tracking-normal text-neutral-600",
   );
   panel.append(h("span", "text-[12.5px] font-semibold text-neutral-800", title));
   const list = h("ol", "flex list-decimal flex-col gap-1.5 pl-4");

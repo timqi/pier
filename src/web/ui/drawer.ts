@@ -1,6 +1,7 @@
 // The status panel: what needs you and what is running, led in the bar by its
 // most urgent row and listed in the panel that row opens — the open items and
-// the live sessions no item holds, one row each.
+// the live sessions no item holds, one row each — and, from 80rem, the same
+// rows as the sidebar's Items section.
 
 import { getJson, refused } from "./api.js";
 import { $, agoLabel, h } from "./dom.js";
@@ -188,15 +189,19 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
   return { ...openItemPresentation({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" : "running" }, now, `run:${r.runId}`), direct: true };
 }
 
-const rowNodes = new Map<string, HTMLElement>();
-/** The docked rail's Items section (index.html), drawn with the panel's list. */
-const railItems = $("#rail-items");
-/** Items the panel's Close took off the list, until the stream's re-read drops them too. */
+/** The two surfaces a row is drawn on; a Close says which asked, so its refusal lands there. */
+type Surface = "panel" | "rail";
+/** Row nodes by key, one map per surface: a node has one parent, and a row
+ *  is reused across renders so a refresh between mousedown and mouseup keeps the click. */
+const rowNodes: Record<Surface, Map<string, HTMLElement>> = { panel: new Map(), rail: new Map() };
+/** Items a Close took off the list, until the stream's re-read drops them too. Shared: a row closed on one surface leaves both. */
 const closing = new Set<string>();
+/** A render's rows in order, and the chain of each item row by key. */
+interface Listed { ordered: OpenItemPresentation[]; chainOf: Map<string, OpenItem["chain"]> }
 
 /** Items keep their own identity even when they hold the same session; only independent sessions deduplicate.
  *  Waiting on you first, every chain's; then the current chain's rest, then the other chains' (§状态面板). */
-function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentation[]; sessions: SessionInfo[] } {
+function listed(now: number): Listed & { sessions: SessionInfo[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain(), deps.chains());
@@ -212,35 +217,28 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
   ];
   const waits = (r: OpenItemPresentation): boolean => waitsOnYou(r.status);
   const elsewhere = (r: OpenItemPresentation): boolean => chainTag(chainOf.get(r.key)) !== undefined;
-  const keys = new Set(all.map((p) => p.key));
-  for (const [key, node] of rowNodes) if (!keys.has(key)) { node.remove(); rowNodes.delete(key); }
   const rest = all.filter((r) => !waits(r));
-  const ordered = [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)];
-  const rowOf = (p: OpenItemPresentation, existing?: HTMLElement): HTMLElement => {
+  return { ordered: [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)], chainOf, sessions };
+}
+
+/** One surface's row nodes for `ordered`, reused by key; a node whose row left is dropped. */
+function rowsOn(surface: Surface, { ordered, chainOf }: Listed): HTMLElement[] {
+  const nodes = rowNodes[surface];
+  const keys = new Set(ordered.map((p) => p.key));
+  for (const [key, node] of nodes) if (!keys.has(key)) { node.remove(); nodes.delete(key); }
+  return ordered.map((p) => {
     const chain = chainOf.get(p.key);
-    return openItemRow(p, {
+    const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
       panelView: (problem) => toView(problem, chain?.id),
-      ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id) } : {}),
+      ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id, surface) } : {}),
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
-    }, existing);
-  };
-  const rows = ordered.map((p) => {
-    const node = rowOf(p, rowNodes.get(p.key));
-    rowNodes.set(p.key, node);
+    }, nodes.get(p.key));
+    nodes.set(p.key, node);
     return node;
   });
-  // The rail's own nodes: a row is in one list at a time, and the panel's are cached by key.
-  // Filled while laid out, as the chain section is (chains.ts `shown`).
-  if (railItems.getClientRects().length > 0) {
-    const ul = h("ul", "", ...ordered.map((p) => rowOf(p)));
-    ul.dataset.list = "";
-    railItems.replaceChildren(h("p", "rail-head", ordered.length ? `Items \u00b7 ${ordered.length}` : "Items"),
-      ordered.length ? ul : h("p", "px-3 py-1 text-sm text-neutral-500", "Nothing open"));
-  }
-  return { rows, ordered, sessions };
 }
 
 // --- the lead and the panel -------------------------------------------------------------
@@ -249,6 +247,17 @@ function listed(now: number): { rows: HTMLElement[]; ordered: OpenItemPresentati
 let list: HTMLElement | null = null;
 let rows: HTMLElement[] = [];
 let ordered: OpenItemPresentation[] = [];
+/** The sidebar's Items section (index.html): its head, its list and its own copy of the rows,
+ *  filled by every render — hidden below 80rem and in session mode, where the fill is harmless. */
+const railItems = $("#rail-items");
+const railHead = h("p", "rail-head", "Items");
+railHead.id = "rail-items-head"; // the section's `aria-labelledby`
+const railList = h("ul", "");
+railList.dataset.list = ""; // the arrows' walk, by section (chains.ts)
+const railEmpty = h("p", "px-3 py-1 text-sm text-neutral-500", "Nothing open");
+let railRows: HTMLElement[] = [];
+/** The last rail Close's refusal, atop its list until the next Close. */
+let railError: HTMLElement | null = null;
 /** The row the bar leads with: the most urgent until the counter cycles it on,
  *  and again once a different row becomes the most urgent. */
 let shownKey: string | null = null;
@@ -265,19 +274,37 @@ export function renderDrawer(): void {
   const key = renderKey();
   if (key === drawn) return;
   drawn = key;
-  const { sessions, ...got } = listed(Date.now());
-  rows = got.rows;
+  const got = listed(Date.now());
   ordered = got.ordered;
+  const sessions = got.sessions;
+  rows = rowsOn("panel", got);
+  railRows = rowsOn("rail", got);
+  // A refusal stands while its row does: an item closed another way takes its sentence with it.
+  closeError = standing(closeError);
+  railError = standing(railError);
   // The app icon counts a turn to look at — an unread one —
   // plus each chain's unread head reply, which the bar and the chain list stand for instead of a row.
   const heads = deps.chains().length ? deps.chains().filter((c) => c.unread).length : headSession()?.unread ? 1 : 0;
   setUnreadBadge(sessions.filter((s) => needsYou(markOf(s))).length + heads);
   paintLead();
+  fillRail();
   if (list?.isConnected && !list.closest("[inert]")) {
     if (!rows.length) closeMenu();
-    else fill(list);
+    else fillPanel();
   }
 }
+
+const standing = (error: HTMLElement | null): HTMLElement | null =>
+  error && ordered.some((p) => p.key === error.dataset.refused) ? error : null;
+
+/** `Items · N` over the rows, or `Nothing open`; N is the lead's count. */
+function fillRail(): void {
+  railHead.textContent = railRows.length ? `Items \u00b7 ${railRows.length}` : "Items";
+  fill(railList, [...(railError ? [railError] : []), ...railRows]);
+  railItems.replaceChildren(railHead, railRows.length || railError ? railList : railEmpty);
+}
+
+const fillPanel = (): void => { if (list) fill(list, [...(closeError ? [closeError] : []), ...(found ?? rows)]); };
 
 /** Dot, title, status mark and phrase of the shown row; below md the status glyph and the row count only (index.html). */
 function paintLead(): void {
@@ -306,10 +333,9 @@ function cycleLead(): void {
 }
 
 /** Refill keeping the focused control focused: Escape has to find its way back. */
-function fill(into: HTMLElement): void {
+function fill(into: HTMLElement, shown: HTMLElement[]): void {
   const focused = into.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   const top = into.scrollTop;
-  const shown = [...(closeError ? [closeError] : []), ...(found ?? rows)];
   shown.forEach((row, index) => { if (into.children[index] !== row) into.insertBefore(row, into.children[index] ?? null); });
   while (into.children.length > shown.length) into.lastElementChild!.remove();
   if (focused?.isConnected) focused.focus({ preventScroll: true });
@@ -318,30 +344,38 @@ function fill(into: HTMLElement): void {
 
 const toView = (problem: string, chain?: string): void => { closeMenu(); deps.itemView(problem, chain); };
 
-/** The last Close's refusal, atop the list until the next Close or opening. */
+/** The last panel Close's refusal, atop the list until the next Close or opening. */
 let closeError: HTMLElement | null = null;
 
-/** Optimistic: the row leaves at once and `open-items-changed` reconciles; a refusal puts it back
- *  under its sentence, the panel reopened if its last row's leaving closed it. */
-async function closeItem(problem: string, chain: string): Promise<void> {
+/** Optimistic: the row leaves both surfaces at once and `open-items-changed` reconciles; a refusal puts it back
+ *  under its sentence on the surface that asked — the panel reopened if its last row's leaving closed it. */
+async function closeItem(problem: string, chain: string, from: Surface): Promise<void> {
   const key = itemKey(problem, chain);
-  const row = list ? [...list.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
-  const focused = row >= 0 && list!.children[row]!.contains(document.activeElement);
+  const root = from === "rail" ? railList : list;
+  const row = root ? [...root.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
+  const focused = row >= 0 && root!.children[row]!.contains(document.activeElement);
   // The previous refusal atop the list leaves with this Close: the rows below it move up one.
-  const at = closeError && closeError.parentElement === list ? row - 1 : row;
+  const error = from === "rail" ? railError : closeError;
+  const at = error && error.parentElement === root ? row - 1 : row;
   closing.add(key);
-  closeError = null;
+  closeError = railError = null;
   found = found?.filter((r) => r.dataset.rowKey !== key) ?? null;
   renderDrawer();
   // Focus stays in the list for the keys' walk: on the row that took the closed one's place.
-  if (focused && list?.isConnected) (list.children[at] ?? list.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
-  const error = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
-  if (error === undefined) return;
+  if (focused && root?.isConnected) (root.children[at] ?? root.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
+  const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
+  if (refusal === undefined) return;
   closing.delete(key);
   renderDrawer();
+  const said = note(refusal, "text-red-600");
+  said.dataset.refused = key;
+  if (from === "rail") {
+    railError = said;
+    return fillRail();
+  }
   if (!list?.isConnected) openDrawer();
-  closeError = note(error, "text-red-600");
-  if (list) fill(list);
+  closeError = said;
+  fillPanel();
 }
 
 // --- search -------------------------------------------------------------------------------
@@ -370,7 +404,7 @@ async function search(q: string): Promise<void> {
         closedItemRow(i.problem, i.closedAt!, (problem) => toView(problem, i.chain), chainTag(chains.get(i.chain))))] : [])];
     if (!found.length) found = [note("No item matches.")];
   }
-  fill(list);
+  fillPanel();
 }
 
 function searchField(): HTMLInputElement {
@@ -394,7 +428,7 @@ export function openDrawer(): void {
   closeError = null;
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
-  fill(list);
+  fillPanel();
   openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list)).setAttribute("aria-label", "Status");
   // A finger opening the panel is reading it: the field would raise the keyboard over the rows.
   if (matchMedia("(pointer: coarse)").matches) list.querySelector("button")?.focus({ preventScroll: true });

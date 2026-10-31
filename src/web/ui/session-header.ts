@@ -70,7 +70,25 @@ const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘
 const back = $("#bar-back");
 /** The same way back, floating within thumb reach above the composer. */
 const toMain = $("#to-main");
-const chatTitle = $<HTMLButtonElement>("#chat-title");
+/** A button that opens the chain list or Session info; an `<h1>` while the
+ *  docked sidebar makes it a plain heading, so a reader hears a heading, not a disabled button. */
+let chatTitle = $<HTMLElement>("#chat-title");
+
+function titleAs(tag: "button" | "h1"): void {
+  if (chatTitle.localName === tag) return;
+  // The floated chain list hangs off the button: it goes with it, and Esc's focus return lands on the new title.
+  if (chatTitle.hasAttribute("aria-expanded")) closeMenu();
+  const held = chatTitle === document.activeElement;
+  const next = h(tag, chatTitle.className);
+  next.id = chatTitle.id;
+  if (tag === "button") next.setAttribute("type", "button");
+  chatTitle.replaceWith(next);
+  chatTitle = next;
+  if (held) {
+    if (tag === "h1") next.tabIndex = -1;
+    next.focus({ preventScroll: true });
+  }
+}
 const itemClose = $("#item-close");
 const bar = $("#bar");
 const phase = $("#chat-phase");
@@ -129,6 +147,12 @@ export function renderHeader(): void {
   // not the head's title. A detached session not listed yet — a task run's
   // own, opened from its run card — is named by its id.
   const chain = conversation ? deps.chain() : undefined;
+  // The title is what the panel is *about*, so it is also the way in: the chain
+  // list in chain mode — unless the list is already on screen as the docked
+  // sidebar, when the title is a plain heading.
+  const plain = !!chain && !item && sidebarDocked();
+  const list = !!chain && !item && !plain;
+  titleAs(plain ? "h1" : "button");
   chatTitle.textContent = item ?? (conversation
     ? (chain ? `${chain.name}${chain.archivedAt === undefined ? "" : " · archived"}` : "Pier")
     : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session"));
@@ -138,18 +162,14 @@ export function renderHeader(): void {
     chatTitle.prepend(dot);
   }
   itemClose.classList.toggle("hidden", !item);
-  // The title is what the panel is *about*, so it is also the way in: the chain
-  // list in chain mode — unless the list is already on screen as the docked
-  // sidebar, when the title is a plain heading.
-  const plain = !!chain && !item && sidebarDocked();
-  const list = !!chain && !item && !plain;
   if (list) chatTitle.append(icon(ChevronDown, "ml-1 inline-block h-3.5 w-3.5 align-middle text-neutral-500"));
-  chatTitle.disabled = plain || (!s && !list);
+  if (chatTitle.localName === "button") (chatTitle as HTMLButtonElement).disabled = !s && !list;
   chatTitle.classList.toggle("cursor-pointer", !plain && (!!s || list));
   chatTitle.title = list ? "Chains" : s && !plain ? "Session info" : "";
   if (list) chatTitle.setAttribute("aria-haspopup", "dialog");
   else chatTitle.removeAttribute("aria-haspopup");
-  chatTitle.onclick = list ? () => openChains() : s && !plain ? () => sessionInfo(chatTitle, s) : null;
+  const anchor = chatTitle;
+  chatTitle.onclick = list ? () => openChains() : s && !plain ? () => sessionInfo(anchor, s) : null;
   back.classList.toggle("hidden", conversation && !item);
   back.classList.toggle("flex", !conversation || !!item);
   toMain.toggleAttribute("data-show", !conversation || !!item);

@@ -53,9 +53,13 @@ afterEach(() => vi.restoreAllMocks());
 const lead = () => doc.querySelector("#status-item")!;
 const next = () => doc.querySelector("#status-next")!;
 const shown = (sel: string) => doc.querySelector(sel)!.textContent;
-const panelRows = () => doc.querySelectorAll(".session-open");
+/** The panel's own rows: the rail's Items section holds a second copy of each (`railRows` below). */
+const panel = () => fake(menu.panel);
+const panelRows = () => panel().querySelectorAll(".session-open");
 const labels = () => panelRows().map((b) => b.querySelector(".open-item-title")!.textContent);
-const item = (key: string) => doc.querySelector(`[data-row-key='${key}']`)!;
+const item = (key: string) => panel().querySelector(`[data-row-key='${key}']`)!;
+const rail = () => doc.querySelector("#rail-items")!;
+const railRows = () => rail().querySelectorAll(".open-item-title").map((t) => t.textContent);
 
 it("keeps independent session marks and phase tags", () => {
   const dot = (over: Partial<Row>) => fake(drawer.stateDot(row("x", over))[0] ?? null as never);
@@ -152,13 +156,13 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
-  expect(doc.querySelectorAll(".row-status")).toHaveLength(0);
+  expect(panel().querySelectorAll(".row-status")).toHaveLength(0);
   const dot = (key: string) => item(key).querySelector(".open-item-dot")!;
   expect(dot("item:auth").style.background).toBe(topicColour("auth"));
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
-  expect(doc.querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
+  expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
@@ -301,7 +305,7 @@ it("searches every item as the user types, closed ones under Closed with their a
   field.oninput?.(new Event("input"));
   await vi.advanceTimersByTimeAsync(300);
   expect(asked).toEqual(["/api/continuous/items?q=auth"]);
-  const list = doc.querySelector("[data-list]")!;
+  const list = panel().querySelector("[data-list]")!;
   expect(list.children.map((li) => li.textContent)).toEqual([expect.stringContaining("auth"), "Closed", "auth v1closed 3h ago"]);
   expect(list.children[0]).toBe(item("item:auth"));
   item("closed:auth v1").querySelector(".session-open")!.onclick?.();
@@ -416,7 +420,7 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   close("item:a/sign in").onclick?.();
   expect(labels()).toEqual(["solo"]);
   await vi.waitFor(() => expect(labels()).toEqual(["sign in", "solo"]));
-  const list = doc.querySelector("[data-list]")!;
+  const list = panel().querySelector("[data-list]")!;
   expect(list.children[0]!.textContent).toBe("no open item \"sign in\"");
   expect(list.children[0]!.className).toContain("text-red-600");
 
@@ -428,4 +432,71 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   close("item:a/sign in").onclick?.();
   expect(labels()).toEqual(["deploy", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/deploy").querySelector(".session-open"));
+});
+
+// The sidebar's Items section is the panel's list drawn again (§侧边栏): the same rows in the
+// same order, each surface its own nodes, one Close for both, a refusal said where it was asked.
+it("fills the rail's Items section with the panel's rows, closes on both surfaces from either, and refuses on the asking one", async () => {
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  let answer: { ok: boolean; status: number; json: () => Promise<unknown> } = { ok: true, status: 200, json: async () => ({ closed: "auth" }) };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; }));
+  drawer.renderDrawer();
+  expect(rail().getAttribute("aria-labelledby")).toBe("rail-items-head");
+  expect(shown("#rail-items-head")).toBe("Items");
+  expect(rail().textContent).toContain("Nothing open");
+  open = { items: [
+    { problem: "auth", stage: "", status: "running", runs: [], chain: c },
+    { problem: "asks", stage: "", status: "waiting on you", runs: [], chain: { id: "b", name: "Ops", archived: false } },
+  ], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  expect(shown("#rail-items-head")).toBe("Items · 3");
+  expect(railRows()).toEqual(labels());
+  expect(labels()).toEqual(["asks", "auth", "solo"]);
+  expect(rail().querySelector("[data-list]")).not.toBeNull();
+  const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
+  expect(railItem("item:a/auth")).not.toBe(item("item:a/auth"));
+  expect(railItem("item:b/asks").querySelector(".open-item-chain")!.textContent).toBe("Ops");
+  // A refresh keeps each surface's node.
+  const before = [railItem("item:a/auth"), item("item:a/auth")];
+  open = { ...open, items: [{ ...open.items[0]!, stage: "signing in" }, open.items[1]!] };
+  drawer.renderDrawer();
+  expect([railItem("item:a/auth"), item("item:a/auth")]).toEqual(before);
+  // Close from the rail: gone from both at once; focus stays in the rail's list.
+  const close = railItem("item:a/auth").querySelector(".item-close")!;
+  close.focus();
+  close.onclick?.();
+  expect(railRows()).toEqual(["asks", "solo"]);
+  expect(labels()).toEqual(["asks", "solo"]);
+  expect(doc.activeElement).toBe(railItem("session:solo").querySelector(".session-open"));
+  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  // Refused from the rail: the row is back on both, the sentence atop the rail's list, the panel left as it was.
+  menu.closeMenu();
+  answer = { ok: false, status: 409, json: async () => ({ error: "auth is still running" }) };
+  railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  expect(railRows()).toEqual(["solo"]);
+  await vi.waitFor(() => expect(railRows()).toEqual(["asks", "solo"]));
+  const list = rail().querySelector("[data-list]")!;
+  expect(list.children[0]!.textContent).toBe("auth is still running");
+  expect(list.children[0]!.className).toContain("text-red-600");
+  expect(menu.openPanel).toHaveBeenCalledOnce();
+  // The refusal stands while its row does: closed another way, the sentence leaves with it.
+  const kept = open;
+  open = { ...open, items: [open.items[0]!] };
+  drawer.renderDrawer();
+  expect(railRows()).toEqual(["solo"]);
+  expect(rail().textContent).not.toContain("still running");
+  open = kept;
+  drawer.renderDrawer();
+  railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  await vi.waitFor(() => expect(rail().querySelector("[data-list]")!.children[0]!.textContent).toBe("auth is still running"));
+  // The panel's next Close takes the rail's refusal down too.
+  drawer.openDrawer();
+  expect(panel().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
+  answer = { ok: true, status: 200, json: async () => ({ closed: "asks" }) };
+  item("item:b/asks").querySelector(".item-close")!.onclick?.();
+  expect(railRows()).toEqual(["solo"]);
+  expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
 });
