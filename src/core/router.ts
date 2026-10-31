@@ -33,6 +33,8 @@ function keyOf(key: ConversationKey): string {
 const isAlias = (key: ConversationKey): boolean =>
   key.channelId === "web" || key.channelId === "task";
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
+/** The events that reach a surface: only these read where the session answers (`answerKey`). */
+const SURFACED: ReadonlySet<string> = new Set(["state", "error", "system-input", "turn-end"]);
 
 interface Attached {
   session: AgentSession;
@@ -257,7 +259,24 @@ export class Router {
   /** Inverse of `sessionOf`; lets a tool act on "here". A task or subagent
    *  session is attached to nothing and answers undefined. */
   conversationOf(sessionId: string): ConversationKey | undefined {
-    return this.bySession.get(sessionId)?.key;
+    const attached = this.bySession.get(sessionId);
+    return attached && this.answerKey(attached);
+  }
+
+  /** Its key, or for an alias the durable chat while that is live and no user spoke to the
+   *  session on the web (`toChat`'s rule) — without taking the chat's key: every chain's head
+   *  answers in the one home chat, whichever holds its key (docs/design/11 §The head's key). */
+  private answerKey(attached: Attached): ConversationKey {
+    const { key, session } = attached;
+    if (!isAlias(key) || this.spoke.get(session.id)?.channelId === "web") return key;
+    const chat = this.chatKeyOf(session.id);
+    return chat && this.channels.has(chat.channelId) ? chat : key;
+  }
+
+  /** The session whose reply `Channel.send` was just handed for `key`: read before the
+   *  adapter's first await, it names which chain's head is speaking in a shared chat. */
+  replyingOn(key: ConversationKey): string | undefined {
+    return this.replying.get(keyOf(key));
   }
 
   /** Where the session's next turn would be delivered: its live key, else the
@@ -300,7 +319,7 @@ export class Router {
       activeAt: Date.now(),
       touched: 0,
       unsubscribe: session.subscribe((payload) => {
-        const key = attached.key;
+        const key = SURFACED.has(payload.type) ? this.answerKey(attached) : attached.key;
         this.hub.emit(session.id, payload);
         if (payload.type === "state") {
           // Every turn passes here, so it also proves liveness to the sweeper.
@@ -390,11 +409,18 @@ export class Router {
     session: AgentSession; key: ConversationKey; settled: Promise<void>;
   }>();
 
+  /** Per conversation, the session whose reply its adapter's `send` was handed last (`replyingOn`). */
+  private readonly replying = new Map<string, string>();
+
   private deliver(session: AgentSession, key: ConversationKey, send: () => Promise<void>): Promise<void> {
     const id = keyOf(key);
     const pending = this.delivering.get(id)?.settled;
+    const handed = (): Promise<void> => {
+      this.replying.set(id, session.id);
+      return send();
+    };
     // The async wrapper turns a synchronous throw into this reply's rejection.
-    const done = pending ? pending.then(send) : (async () => send())();
+    const done = pending ? pending.then(handed) : (async () => handed())();
     // A rejection is the caller's to report; inherited, it would fail every
     // later reply to this conversation.
     const settled = done.catch(() => {});
@@ -534,7 +560,7 @@ export class Router {
     return [
       ...[...this.bySession.values()]
         .filter((attached) => attached.session.state === "streaming")
-        .map((attached) => ({ session: attached.session, key: attached.key })),
+        .map((attached) => ({ session: attached.session, key: this.answerKey(attached) })),
       ...[...this.delivering.values()]
         .map(({ session, key }) => ({ session, key, sending: true as const })),
     ];
@@ -544,7 +570,7 @@ export class Router {
    *  queue lives only in the runtime, so an idle session's queued messages die
    *  with the process just the same. */
   attachedSessions(): { session: AgentSession; key: ConversationKey }[] {
-    return [...this.bySession.values()].map(({ session, key }) => ({ session, key }));
+    return [...this.bySession.values()].map((attached) => ({ session: attached.session, key: this.answerKey(attached) }));
   }
 
   /** Never creates one: a stop or settings command must not open a session. */

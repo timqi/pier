@@ -536,7 +536,7 @@ export class LarkChannel implements Channel {
       return;
     }
     const main = "chatId" in to;
-    // Read now, not after the receipts: the head holding the chat is the one answering.
+    // Read before any await: the router names the head this reply is from only until the next send.
     const speaker = main ? this.deps.home?.speaker() : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {

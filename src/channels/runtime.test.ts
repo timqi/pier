@@ -88,8 +88,8 @@ const sentTo: string[] = [];
 const switches = new Map<string, Row>();
 /** The home chat's pointer, as the fake store keeps it. */
 let pointer: string | undefined;
-/** The session the fake router says holds the home chat's key. */
-let holder: string | undefined;
+/** The session the fake router says the home chat was last handed a reply from. */
+let replying: string | undefined;
 
 function runtime(config: Record<string, unknown>, log: (m: string) => void = () => {}): ChannelRuntime {
   const store = {
@@ -114,7 +114,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       return Promise.resolve({ id: bound.get(key.conversationId) ?? key.conversationId });
     },
     answersOn: (id: string) => (id === "head" ? headOn : id === "head-d" ? designOn : undefined),
-    sessionOf: () => (holder === undefined ? undefined : { id: holder }),
+    replyingOn: () => replying,
   } as unknown as Router;
   const chain = {
     send: (msg: InboundMessage, chainId: string, key?: ConversationKey) => {
@@ -222,7 +222,7 @@ describe("ChannelRuntime", () => {
       heads = { main: "head", d: "head-d" };
       sentTo.length = 0;
       switches.clear();
-      pointer = holder = undefined;
+      pointer = replying = undefined;
       startGate = Promise.resolve();
       const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
       await rt.reload();
@@ -290,16 +290,16 @@ describe("ChannelRuntime", () => {
       await rt.stop();
     });
 
-    it("names the chain of the head holding the chat, away once the chat switched from it", async () => {
+    it("names the chain of the head whose reply the chat is handed, away once the chat switched from it", async () => {
       const rt = await live();
       expect(homeChains!.speaker()).toBeUndefined();
-      holder = "head";
+      replying = "head";
       expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: false });
       pointer = "d";
       expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: true });
-      holder = "head-d";
+      replying = "head-d";
       expect(homeChains!.speaker()).toEqual({ id: "d", name: "Design", away: false });
-      holder = "a-thread-session";
+      replying = "a-thread-session";
       expect(homeChains!.speaker()).toBeUndefined();
       await rt.stop();
     });

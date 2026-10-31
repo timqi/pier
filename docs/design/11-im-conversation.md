@@ -67,11 +67,12 @@ second DM.
   `↔ chain · <first> — <old> is archived`.
 - `/status`, `/new`, `/stop`, `/skills` and `/chain` reach the current chain's
   head through the same send (§Chat commands).
-- A main-flow reply from a head whose chain is not the current one (it holds
-  the chat's key from before the switch and answers a callback) opens on a
-  grey `chain · <name>` line — Slack a `context` block, Lark a grey markdown
-  line; the current chain's replies carry none (`HomeChains.speaker`,
-  `channels/control.ts`).
+- Every chain's head answers in the home chat (§The head's key), whichever
+  holds its key. A main-flow reply from a head whose chain is not the current
+  one (a callback's answer after the switch) opens on a grey `chain · <name>`
+  line — Slack a `context` block, Lark a grey markdown line; the current
+  chain's replies carry none (`HomeChains.speaker`, `channels/control.ts`,
+  from `Router.replyingOn`: the session whose reply the adapter was handed).
 - A main-flow button names the chain whose head offered it — Lark the value's
   `chain`, Slack the button's `value` — and its click goes to that chain
   (`HomeChains.tap`), the pointer unmoved.
@@ -90,6 +91,10 @@ second DM.
 - A rotation attaches the next head the same way; the previous head keeps
   no delivery (`Router.attach` moves the key: the session that held it goes
   back to its own alias).
+- Each chain's head is a head: one whose key another chain's head took (the
+  chat switched and spoke) still answers in the home chat while no user spoke
+  to it on the web — an alias defers to the durable chat at delivery
+  (`Router.answerKey`) without taking the key back.
 - `conversations` never holds a row for the home key: `Router.ensure(home)`
   is reached only after `MainChain.send` attached the head, so nothing can
   resolve the home key into a new session. `control.knows(home)` is false and

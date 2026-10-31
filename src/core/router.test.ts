@@ -553,6 +553,38 @@ describe("opening a session", () => {
     expect(router.conversationOf("s1")).toEqual(KEY);
   });
 
+  it("two chains' heads answer in one home chat: the one away from its key still does, and the adapter learns which", async () => {
+    const a = fakeSession("a");
+    const b = fakeSession("b");
+    const old = fakeSession("old");
+    const sessions: Record<string, typeof a> = { a, b, old };
+    const heads = new Set(["a", "b"]);
+    router = new Router(hub, (key) => Promise.resolve(sessions[key.conversationId]!), () => undefined, (id) => (heads.has(id) ? KEY : undefined));
+    router.registerChannel(im.channel);
+    const replying: (string | undefined)[] = [];
+    im.channel.send = (conversationId, reply) => {
+      replying.push(router.replyingOn(KEY));
+      im.sent.push([conversationId, reply]);
+      return Promise.resolve();
+    };
+    await router.ensure({ channelId: "web", conversationId: "old" });
+    router.heard(KEY, old);
+    router.heard(KEY, a);
+    router.heard(KEY, b);
+    expect(router.sessionOf(KEY)).toBe(b);
+    // A callback reopens `a` under its task alias: its answer still goes to the chat.
+    await router.ensure({ channelId: "task", conversationId: "a" });
+    expect(router.conversationOf("a")).toEqual(KEY);
+    a.emit({ type: "turn-end", text: "a's callback answer" });
+    b.emit({ type: "turn-end", text: "b's answer" });
+    // A head no longer: a rotated-out member answers on its own stream.
+    old.emit({ type: "turn-end", text: "old" });
+    await settle();
+    expect(im.sent.map(([, r]) => r.text)).toEqual(["a's callback answer", "b's answer"]);
+    expect(replying).toEqual(["a", "b"]);
+    expect(router.sessionOf(KEY)).toBe(b);
+  });
+
   it("no chat key → alias behaviour unchanged", async () => {
     router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => undefined);
     await router.ensure({ channelId: "web", conversationId: "s1" });

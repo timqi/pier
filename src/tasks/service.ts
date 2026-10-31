@@ -213,8 +213,8 @@ export class TaskService {
           const stale = answered.length ? staleItems(store, text, answered, chainId) : [];
           const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
           if (notes.length) {
-            const at = router.conversationOf(sessionId);
-            const head = at && router.sessionOf(at);
+            // By id: two chains' heads share the home chat, whose key names only one of them.
+            const head = router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
             const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
             if (!head) failed("not attached");
             else head.systemInput(notes.join("\n"), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));

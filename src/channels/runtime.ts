@@ -174,12 +174,12 @@ export class ChannelRuntime {
     return channel.notify(conversationId, { text, origin: { kind: "chat-command", command: "chain" } });
   }
 
-  /** The head that holds the home chat's key is the one a main-flow reply comes from. */
+  /** The chain of the head whose reply the home chat's adapter was just handed. */
   private speaker(platform: ChannelPlatform): Speaker | undefined {
     const home = this.store.home();
     if (home?.platform !== platform) return undefined;
-    const session = this.router.sessionOf({ channelId: platform, conversationId: home.chatId });
-    const of = session && this.chain.chainOf(session.id);
+    const session = this.router.replyingOn({ channelId: platform, conversationId: home.chatId });
+    const of = session === undefined ? undefined : this.chain.chainOf(session);
     const row = of && this.chain.chains.get(of.chainId);
     return row && { id: row.id, name: row.name, away: row.id !== this.current().id };
   }
