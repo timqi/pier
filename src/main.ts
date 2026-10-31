@@ -197,8 +197,23 @@ const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
 });
-const channels = new ChannelRuntime(channelStore, router, chain, control, conversations,
-  (chainId) => openItemsStatus(tasks.openItems(chainId), Date.now()));
+const channels = new ChannelRuntime(channelStore, router, chain, control, conversations, (chainId) => {
+  const { text, snapshot } = openItemsStatus(tasks.openItems(chainId), Date.now());
+  return { text, snapshot };
+});
+/** The home chat's status card follows every event that can move an open
+ *  item or the chat's chain, coalesced: one turn end fires several. */
+const STATUS_EVENTS = new Set(["open-items-changed", "task-run-changed", "task-group-changed", "session-state", "chains-changed"]);
+let statusTimer: NodeJS.Timeout | undefined;
+const refreshStatus = (): void => {
+  statusTimer ??= setTimeout(() => {
+    statusTimer = undefined;
+    void channels.openItems();
+  }, 1500);
+};
+hub.subscribeWorkspace((e) => {
+  if (STATUS_EVENTS.has(e.type)) refreshStatus();
+});
 /** Where a session answers until a user speaks (docs/design/11 §Notifications):
  *  every chain's head in the home chat while its adapter runs, else on the web with Web
  *  Push; an older member gets no home key, or an adapter's start would re-key it
@@ -239,6 +254,8 @@ const tellChats = (): Promise<void> =>
 const startChannels = async (): Promise<void> => {
   await channels.reload();
   await tellChats();
+  // A home moved needs its first card; one left behind meanwhile is reconciled.
+  refreshStatus();
 };
 /** Adapters re-read their configuration and sessions are let go, so the next
  *  message re-opens them with current skills, extensions, prompts and

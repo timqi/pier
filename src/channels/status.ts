@@ -1,9 +1,20 @@
-// The home chat's status card (docs/design/11-im-conversation.md §Status): the
-// web sidebar's layout, which each platform renders, posted as `/status`'s answer.
+// Keeping the home chat's one status card current (docs/design/11-im-conversation.md
+// §Status): a refresh edits it in place, `/status` posts a new one, and none is
+// ever deleted. The platform's two calls and its rendering of the sidebar's
+// layout are injected.
 
+import type { DatabaseSync } from "node:sqlite";
+import { pierDb } from "../db.js";
 import { openItemGroups, UNMATCHED_DONE } from "../core/open-items.js";
 import { waitsOnYou } from "../core/reply.js";
-import type { OpenItemsView } from "../core/types.js";
+import { NOTHING_OPEN, type OpenItemsView } from "../core/types.js";
+import type { ChannelPlatform } from "./types.js";
+
+/** One main-flow message; `post` answers its id. */
+export interface StatusApi<B> {
+  post(chatId: string, body: B): Promise<string>;
+  edit(chatId: string, messageId: string, body: B): Promise<void>;
+}
 
 /** One item in the web sidebar's words: `tag` its status label, none under the
  *  waiting group's heading as in the sidebar's grouped list, and `stage` what
@@ -39,11 +50,14 @@ export interface StatusLayout<E> {
   max: number;
 }
 
+const nothingOpen = (view: StatusView): boolean => !view.snapshot.items.length && !view.snapshot.unmatched?.length;
+
 /** The sidebar's groups, waiting first, laid out while they fit the budget; the
  *  items past it are counted, never cut mid-item. */
 export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] {
-  const out: E[] = [];
-  let spent = 0;
+  // A card edited to nothing open says so; it is never deleted.
+  const out: E[] = nothingOpen(view) ? layout.heading(NOTHING_OPEN) : [];
+  let spent = layout.cost(out);
   let left = view.snapshot.items.length;
   for (const group of openItemGroups(view.snapshot.items)) {
     const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
@@ -81,22 +95,76 @@ export const statusLabel = (view: StatusView): string =>
 
 export const otherCounts = (c: OtherChain): string => `${String(c.waiting)} waiting · ${String(c.inProgress)} in progress`;
 
-/** `/status`'s answer in the home chat's main flow: a new card every time, none edited or deleted. */
-export class StatusMessage<B> {
+export class StatusMessage<B = string> {
+  /** `repost` survives a newer view replacing this one: `/status` asked for a new card. */
+  private queued?: { chatId: string; view: StatusView; repost: boolean };
+  private tail: Promise<void> = Promise.resolve();
+
   constructor(
-    private readonly post: (chatId: string, body: B) => Promise<unknown>,
+    private readonly platform: ChannelPlatform,
+    private readonly api: StatusApi<B>,
     private readonly log: (message: string) => void,
     /** The view under the platform's label. */
     private readonly render: (view: StatusView) => B,
+    private readonly db: DatabaseSync = pierDb(),
   ) {}
 
-  /** False — nothing open and no other chain to list, or the post failed — leaves the answer to the note. */
+  /** `/status` in the main flow: a new card at the bottom, the row edited from
+   *  then on, is the one reply; false — nothing open and no other chain to list,
+   *  or the post failed — leaves the answer to the note. */
   async answer(chatId: string, view: StatusView): Promise<boolean> {
-    if (!view.snapshot.items.length && !view.others?.length) return false;
-    return this.post(chatId, this.render(view))
-      .then(() => true, (err: unknown) => {
-        this.log(`status: post failed: ${String(err)}`);
-        return false;
-      });
+    if (nothingOpen(view) && !view.others?.length) return false;
+    const before = this.messageId(chatId);
+    await this.show(chatId, view, true);
+    // A failed post keeps the old row, so only a new id is the one it posted.
+    const after = this.messageId(chatId);
+    return after !== undefined && after !== before;
+  }
+
+  private messageId(chatId: string): string | undefined {
+    const row = this.db.prepare("SELECT message_id FROM status_messages WHERE platform = ? AND chat_id = ?")
+      .get(this.platform, chatId) as { message_id: string } | undefined;
+    return row?.message_id;
+  }
+
+  /** One refresh at a time; one arriving mid-run waits, and a newer view
+   *  replaces the one waiting. Never rejects. */
+  show(chatId: string, view: StatusView, repost = false): Promise<void> {
+    const idle = !this.queued;
+    this.queued = { chatId, view, repost: repost || (this.queued?.chatId === chatId && this.queued.repost) };
+    if (idle) this.tail = this.tail.then(() => {
+      const next = this.queued!;
+      this.queued = undefined;
+      return this.apply(next.chatId, next.view, next.repost).catch((err: unknown) => this.log(`status: refresh failed: ${String(err)}`));
+    });
+    return this.tail;
+  }
+
+  private async apply(chatId: string, view: StatusView, repost: boolean): Promise<void> {
+    // The home moved within the platform: the old chat's card is left as it was, no longer ours.
+    this.db.prepare("DELETE FROM status_messages WHERE platform = ? AND chat_id <> ?").run(this.platform, chatId);
+    const row = this.db.prepare("SELECT message_id, text FROM status_messages WHERE platform = ? AND chat_id = ?")
+      .get(this.platform, chatId) as { message_id: string; text: string } | undefined;
+    const body = this.render(view);
+    // The rendered body, not the text: the snapshot's layout changes without it.
+    const drawn = JSON.stringify(body);
+    if (!repost && (row ? row.text === drawn : nothingOpen(view) && !view.others?.length)) return;
+    if (row && !repost) {
+      const edited = await this.api.edit(chatId, row.message_id, body)
+        .then(() => true, (err: unknown) => void this.log(`status: edit failed, posting anew: ${String(err)}`));
+      if (edited) return this.save(chatId, row.message_id, drawn);
+    }
+    // The card posted before stays as it was: nothing here is ever deleted.
+    const posted = await this.api.post(chatId, body)
+      .catch((err: unknown) => void this.log(`status: post failed: ${String(err)}`));
+    if (posted) this.save(chatId, posted, drawn);
+  }
+
+  private save(chatId: string, messageId: string, text: string): void {
+    this.db.prepare(`
+      INSERT INTO status_messages(platform, chat_id, message_id, text) VALUES (?, ?, ?, ?)
+      ON CONFLICT(platform, chat_id) DO UPDATE SET
+        message_id = excluded.message_id, text = excluded.text
+    `).run(this.platform, chatId, messageId, text);
   }
 }

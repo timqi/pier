@@ -8,6 +8,7 @@
 // its message lives in, so every button value carries the root; delivery is
 // at-least-once and acked when the handler returns, so handlers queue and return.
 
+import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentReply,
   Channel,
@@ -43,7 +44,7 @@ import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, cardText, markdown, OFFER_PREFIX, statusCard } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage } from "./status.js";
+import { StatusMessage, type StatusView } from "./status.js";
 
 const REACTION = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
@@ -82,6 +83,8 @@ interface LarkDeps {
   client?: LarkClient;
   /** Injected in tests. */
   receipts?: ReceiptLedger;
+  /** Injected in tests: the status card's row. */
+  db?: DatabaseSync;
   /** Wired by runtime.ts, so `/stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
   /** Wired by runtime.ts: which chain a main-flow reply is, and where its buttons go. */
@@ -130,7 +133,10 @@ export class LarkChannel implements Channel {
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),
     );
-    this.statusLine = new StatusMessage((chatId, body) => this.api.sendCard(chatId, body), this.log, statusCard);
+    this.statusLine = new StatusMessage("lark", {
+      post: async (chatId, body) => (await this.api.sendCard(chatId, body)).messageId,
+      edit: (_chatId, messageId, body) => this.api.patchCard(messageId, body),
+    }, this.log, statusCard, deps.db);
     if (deps.control) {
       this.panel = new LarkPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -553,7 +559,7 @@ export class LarkChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
-    // The home's main flow leaves task progress to `/status`'s card; the web keeps the cards.
+    // The home's main flow shows task progress in the status card; the web keeps the cards.
     if ("chatId" in to && shownByStatus(note.origin)) {
       return logger("lark").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
@@ -572,6 +578,11 @@ export class LarkChannel implements Channel {
     const messageId = await this.out.note({ chatId }, note);
     if (!messageId) throw new Error(`Lark returned no message id for the root in ${chatId}`);
     return conversationId(chatId, messageId);
+  }
+
+  async status(chatId: string, view: StatusView): Promise<void> {
+    if (!this.isHome(chatId)) throw new Error(`refusing a status card in ${chatId}: not the home chat`);
+    await this.statusLine.show(chatId, view);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

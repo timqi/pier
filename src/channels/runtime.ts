@@ -13,7 +13,7 @@ import type { ChannelControl, HomeChains, Speaker } from "./control.js";
 import type { ConversationStore } from "./conversations.js";
 import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
-import type { OtherChain } from "./status.js";
+import type { OtherChain, StatusView } from "./status.js";
 import { type ChannelPlatform, chatOf } from "./types.js";
 
 const ADAPTERS: {
@@ -71,7 +71,7 @@ export class ChannelRuntime {
     private readonly chain: MainChain,
     private readonly control: ChannelControl,
     private readonly conversations: Pick<ConversationStore, "keyOf" | "set">,
-    /** A chain's open items, for the `Other chains` its status card lists. */
+    /** A chain's open items, the one source of the status card's views. */
     private readonly viewOf: (chainId: string) => OpenItemsView,
     private readonly log: (message: string) => void = warn,
   ) {}
@@ -226,8 +226,36 @@ export class ChannelRuntime {
       this.report(channel, bound.conversationId, `the thread's root could not be updated to "${note.text}": ${String(err)}`));
   }
 
+  /** The home chat's status card (docs/design/11 §Status): the current chain's
+   *  view and a line per other chain with something in it, while its adapter is
+   *  live and the head the user last wrote to answers there; nothing otherwise — a card left behind is
+   *  reconciled once the chat speaks again. A failure is logged, never thrown. */
+  async openItems(): Promise<void> {
+    const home = this.store.home();
+    const channel = home && this.running.get(home.platform);
+    if (!home || !channel) return;
+    // The user's newest message picks the head: one written on the web leaves the chat
+    // untouched until the user speaks there again. A `task:` key says nothing of the
+    // surface (main.ts `channelOf`); it, or no message yet, is the durable rule, the home chat.
+    const at = (chainId: string): number => this.chain.lastUserAt(chainId) ?? -Infinity;
+    const newest = this.chain.heads().reduce<{ chainId: string; sessionId: string } | undefined>(
+      (best, head) => (best && at(best.chainId) >= at(head.chainId) ? best : head), undefined);
+    const on = newest && this.router.answersOn(newest.sessionId);
+    if (on && on.channelId !== "task" && (on.channelId !== home.platform || on.conversationId !== home.chatId)) return;
+    let view: StatusView;
+    try {
+      const current = this.current();
+      const own = this.viewOf(current.id);
+      view = { ...own, snapshot: { ...own.snapshot, chain: current.name }, others: this.others() };
+    } catch (err) {
+      return this.log(`status: the open items could not be read: ${String(err)}`);
+    }
+    await channel.status(home.chatId, view).catch((err: unknown) =>
+      this.log(`status: ${home.platform} did not take the open items: ${String(err)}`));
+  }
+
   /** The chains other than the home chat's current one with something in them, for its
-   *  status card (docs/design/11 §Status); a failed read is logged and lists none. */
+   *  status card, refreshed or `/status`'s; a failed read is logged and lists none. */
   private others(): OtherChain[] {
     try {
       const current = this.current();

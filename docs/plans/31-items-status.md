@@ -1,4 +1,4 @@
-# 31 — Closing items, busy receipts, a quiet status card
+# 31 — Closing items, busy receipts, a status card edited in place
 
 Branch `ux-items-status`. Three independent changes from the UX research run
 (`ctpznw02yr8fjgsm`, items 6 and 9, and the user's own ask on the IM status
@@ -79,52 +79,45 @@ that arrives while the head is mid-turn gets no signal until that turn ends.
   working → added and cleared on settle; quiet + idle → added after `lateMs`,
   not when settled before it; startup sweep unchanged.
 
-## C. The IM status card only answers `/status`
+## C. The IM status card is edited in place, never withdrawn
 
-The user: the card must not refresh with every change, must not move when the
-last message went to the web, and `/status` must not delete the previous card
-(Lark leaves a 撤回 placeholder).
+The user: the card may follow changes on its own, but must not be withdrawn and
+posted again over and over (Lark leaves a 撤回 placeholder for each); a message
+sent on the web pushes nothing to IM — only a message from IM does.
 
-- No automatic refresh: `main.ts` drops `STATUS_EVENTS`, `refreshStatus`,
-  `FINAL_REPOST_MS` and the design-final re-post (line ~168), and
-  `startChannels`' refresh; `ChannelRuntime.openItems` and `Channel.status`
-  (`core/types.ts`, both adapters' `status()`) go; `Router.answersOn` goes if
-  nothing else reads it (its tests too).
-- `/status` typed in the home chat's main flow is the one trigger: the
-  `chat-command` note with `statusSnapshot` reaches the adapter's `notify`;
-  the adapter renders and **posts a new card** every time — nothing edited,
-  nothing deleted, no `status_messages` row. `Nothing open.` with no other
-  chain to list stays the plain note. A `/status` from the web never reaches
-  IM (the head answers where the user last spoke), so the IM card does not
-  move.
-- `Other chains` on the card: the runtime builds it (`other()` stays) from a
-  `viewOf: (chainId) => OpenItemsView` the constructor now takes (main.ts
-  passes `openItemsStatus(tasks.openItems(id), Date.now())`); `HomeChains`
-  gains `others(): OtherChain[]` (the current chain excluded), which the
-  adapters call when answering `/status`.
-- `channels/status.ts` shrinks to the layout (`statusLayout`, `statusLabel`,
-  `otherCounts`, the row/view types) plus a `StatusMessage.answer(chatId, view)`
-  that posts and returns whether it did (false → the note); the DB handle,
-  `show`, `apply`, `forget`, `save`, `last`, queue go. `db.ts` adds a
-  migration dropping `status_messages` (the style of 38; `db.test.ts`'s
-  list follows).
-- Docs: 11 §Status rewritten to the new contract (one paragraph: what
-  triggers it, that nothing edits or deletes, `Other chains`, failures
-  logged with `status:`); 04 §The seam's `status(chatId, view)` bullet and
-  the `Channel` table rows go/are reworded; `core/types.ts`'s `Channel` doc
-  comment follows.
-- Kept as is, flagged to the user: `shownByStatus` (`core/reply.ts`, the
-  other lead's file) still keeps delegation and succeeded-callback notes out
-  of the home main flow; with the card frozen, such a callback shows on IM
-  only through the head's reply.
-- Tests: `channels/status.test.ts` (post on each answer, no edit/delete,
-  nothing-open → false), `channels/runtime.test.ts` (`others()`),
-  `channels/slack.test.ts`/`lark.test.ts` (the `/status` note posts a card and
-  nothing else; a second `/status` posts a second one, the first untouched),
-  `main`'s wiring has no test — `npm run check` covers it.
+- The refresh stays: `main.ts` coalesces `STATUS_EVENTS` on a 1.5 s timer into
+  `ChannelRuntime.openItems()`, and `startChannels` refreshes once; the
+  runtime calls `Channel.status(chatId, view)` on the home adapter.
+- The gate: a refresh reaches the chat only while the head of the chain the
+  user last wrote to (`MainChain.lastUserAt`) answers in the home chat
+  (`Router.answersOn`; a `task:` key or none is the durable rule). After a web
+  message nothing in IM is posted, edited or deleted until the user speaks from
+  IM again; the first refresh then reconciles the card.
+- Nothing is ever deleted: `StatusApi` has no `delete`. A change edits the
+  card in place; `Nothing open.` with no other chain edits it to say so, and a
+  later item edits it back; a failed edit posts a new card and leaves the old
+  one; a home moved within the platform forgets the old chat's row, its card
+  left as it was.
+- `/status` in the main flow posts a **new** card at the bottom, which becomes
+  the `status_messages` row edited from then on; the old card stays as it was.
+  `Nothing open.` with no other chain answers with the note.
+- A design final no longer re-posts the card (`FINAL_REPOST_MS` gone,
+  `designLead` returns nothing): it edits in place as any change does.
+- One view builder: the runtime's `viewOf` (constructor, from main.ts) and its
+  `others()` build both the refresh's view and, through `HomeChains.others()`,
+  `/status`'s `Other chains`; `StatusMessage` keeps no last view.
+- `status_messages` stays (no migration drops it; nothing released one).
+- Docs: 11 §Status, §Child threads and the tests/acceptance bullets; 04 §The
+  seam's `status()` bullet and the System notes row; `core/types.ts`'s
+  `Channel.status` comment; pier-help's `/status` line.
+- Tests: `channels/status.test.ts` (edit in place; `/status` posts anew, the
+  old row untouched; nothing open edits; a failed edit posts anew),
+  `channels/runtime.test.ts` (the view, `others()`, the gate),
+  `channels/slack.test.ts`/`lark.test.ts` (no delete call on the status path),
+  `core/router.test.ts` (`answersOn`), `db.test.ts`.
 
 ## Order
 
 A, B, C each on its own worktree off `ux-items-status` (`items-done`,
-`busy-receipts`, `status-once`), in parallel; integrated here with `git
+`busy-receipts`, `status-once`, then `status-edit`), in parallel; integrated here with `git
 merge`; the merged branch reviewed as a goal before the done milestone.

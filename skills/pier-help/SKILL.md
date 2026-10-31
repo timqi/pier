@@ -136,8 +136,10 @@ truth.
   stragglers. The home chat, main flow and threads, shows one only while the
   head is busy or the answer is past 20 s. A 👀 that never clears means the turn died, not that you are still thinking. A
   dispatch is silent, its run tag showing the launch, unless the head assumed
-  something for you or the run is long or needs you; `/status` in the home
-  chat posts a new card of what is open each time, and nothing updates it.
+  something for you or the run is long or needs you; progress updates edit
+  the home chat's status card in place (never withdrawn), only while your last
+  message came from the chat, not the web; `/status` posts a new card at the
+  bottom, the one updated from then on.
 - Every finished reply carries its cost: elapsed time and the context size at
   completion (`1m14s · 32K tok`) — a running total, not this turn's spend. IM
   shows it as a footer line; the web shows the duration in the reply's activity

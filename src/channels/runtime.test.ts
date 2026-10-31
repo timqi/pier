@@ -5,6 +5,7 @@ import type { ConversationKey, InboundMessage, OpenItemPresentation, OpenItemsVi
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl, HomeChains } from "./control.js";
 import { ChannelRuntime } from "./runtime.js";
+import type { StatusView } from "./status.js";
 
 // Fake adapters: the runtime's contract with them is start/stop only.
 const events: string[] = [];
@@ -12,6 +13,8 @@ const events: string[] = [];
 let deliver: (msg: InboundMessage) => void = () => {};
 /** What the runtime wired as the fake Slack adapter's home chains. */
 let homeChains: HomeChains | undefined;
+/** Every status view the fake Slack adapter was shown. */
+const views: StatusView[] = [];
 let startGate: Promise<void> = Promise.resolve();
 let generation = 0;
 
@@ -46,6 +49,11 @@ vi.mock("./slack.js", () => ({
       if (openFails) throw openFails;
       events.push(`edit ${conversationId}: ${note.text}`);
     }
+    async status(chatId: string, view: StatusView): Promise<void> {
+      if (openFails) throw openFails;
+      views.push(view);
+      events.push(`status ${chatId}: ${view.text}`);
+    }
   },
 }));
 vi.mock("./lark.js", () => ({
@@ -67,8 +75,13 @@ const bound = new Map<string, string>();
 /** The keys the fake router was asked to resolve, with the session the store bound them to. */
 const attached: [ConversationKey, string | undefined][] = [];
 let home: { platform: "slack"; chatId: string } | undefined;
+/** Where the fake router says the head answers; undefined, the durable rule. */
+let headOn: ConversationKey | undefined;
+let designOn: ConversationKey | undefined;
+/** When the user last wrote to each chain, as the fake chain says. */
+let lastAt: Record<string, number> = {};
 /** A chain's open items, as main.ts reads them for the runtime. */
-let viewOf: (chainId: string) => OpenItemsView = () => ({ text: "", snapshot: { version: 1, items: [] } });
+let viewOf: (chainId: string) => OpenItemsView = () => ({ text: "storage — running", snapshot: { version: 1, items: [] } });
 type Row = { id: string; name: string; createdAt: number; archivedAt: number | null };
 const row = (id: string, name: string, archivedAt: number | null = null): Row => ({ id, name, createdAt: 0, archivedAt });
 /** The fake chain register, its heads by chain, and the chain each `headSent` went to. */
@@ -106,6 +119,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       attached.push([key, bound.get(key.conversationId)]);
       return Promise.resolve({ id: bound.get(key.conversationId) ?? key.conversationId });
     },
+    answersOn: (id: string) => (id === "head" ? headOn : id === "head-d" ? designOn : undefined),
     replyingOn: () => replying,
   } as unknown as Router;
   const chain = {
@@ -117,6 +131,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       if (msg.text === "/chain") return Promise.resolve({ chainId, answer: "✓ Main · 0 open · 0 waiting on you" });
       return Promise.resolve(switched ? { chainId: switched.id, switched } : { sessionId: heads[chainId] ?? "head", chainId });
     },
+    lastUserAt: (chainId: string) => lastAt[chainId],
     chains: {
       first: () => rows.find((r) => r.archivedAt === null),
       get: (id: string) => rows.find((r) => r.id === id),
@@ -309,22 +324,58 @@ describe("ChannelRuntime", () => {
       await rt.stop();
     });
 
-    // docs/design/11-im-conversation.md §Status
-    it("lists, for /status's card, every other chain with something in it; a failed read lists none", async () => {
+    // docs/design/11-im-conversation.md §Status: one view builder for the refresh and `/status`.
+    it("the status card is the current chain's, then a line per other chain with something in it; /status lists the same", async () => {
       const rt = await live();
+      views.length = 0;
       rows = [row("main", "Main"), row("d", "Design"), row("q", "Quiet"), row("o", "Old", 5), row("r", "Ran", 6)];
       pointer = "d";
       const item = (status: string) => ({ status }) as OpenItemPresentation;
       const of: Record<string, string[]> = { main: ["waiting on you", "running", "queued"], d: ["running"], o: ["waiting on you"], r: ["running"] };
       viewOf = (id) => ({ text: id, snapshot: { version: 1, items: (of[id] ?? []).map(item) } });
-      expect(homeChains!.others()).toEqual([
+      const others = [
         { name: "Main", waiting: 1, inProgress: 2, archived: false },
         { name: "Old", waiting: 1, inProgress: 0, archived: true },
-      ]);
+      ];
+      await rt.openItems();
+      expect(views).toEqual([expect.objectContaining({ text: "d", snapshot: expect.objectContaining({ chain: "Design" }), others })]);
+      expect(homeChains!.others()).toEqual(others);
       viewOf = () => { throw new Error("database is closed"); };
       expect(homeChains!.others()).toEqual([]);
       expect(logged.at(-1)).toBe("status: the other chains could not be read: Error: database is closed");
-      viewOf = () => ({ text: "", snapshot: { version: 1, items: [] } });
+      await rt.openItems();
+      expect(views).toHaveLength(1);
+      expect(logged.at(-1)).toBe("status: the open items could not be read: Error: database is closed");
+      viewOf = () => ({ text: "storage — running", snapshot: { version: 1, items: [] } });
+      await rt.stop();
+    });
+
+    it("the status card follows while the head the user last wrote to answers in the chat; a web message stops it", async () => {
+      const rt = await live();
+      views.length = 0;
+      headOn = designOn = { channelId: "slack", conversationId: "D1" };
+      lastAt = { main: 1, d: 2 };
+      await rt.openItems();
+      expect(views).toHaveLength(1);
+      // The user wrote from the web: nothing in the chat is posted or edited, though
+      // an older chain's head is still keyed to the chat.
+      designOn = { channelId: "web", conversationId: "head-d" };
+      await rt.openItems();
+      expect(views).toHaveLength(1);
+      // Spoken from the chat again, to any chain: the first refresh reconciles the card.
+      lastAt = { main: 3, d: 2 };
+      await rt.openItems();
+      expect(views).toHaveLength(2);
+      // A `task:` key or none is the durable rule, the chat; another chat is not it.
+      headOn = { channelId: "task", conversationId: "head" };
+      await rt.openItems();
+      headOn = undefined;
+      await rt.openItems();
+      headOn = { channelId: "slack", conversationId: "D9" };
+      await rt.openItems();
+      expect(views).toHaveLength(4);
+      headOn = designOn = undefined;
+      lastAt = {};
       await rt.stop();
     });
   });
@@ -337,10 +388,11 @@ describe("ChannelRuntime", () => {
     async function live(): Promise<ChannelRuntime> {
       events.length = 0; attached.length = 0; bound.clear();
       openFails = sendFails = undefined; home = { platform: "slack", chatId: "D1" }; startGate = Promise.resolve();
-      const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
+      const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } }, (m) => logged.push(m));
       await rt.reload();
       return rt;
     }
+    const logged: string[] = [];
     const posted = (): string[] => events.filter((e) => !e.startsWith("start") && !e.startsWith("stop"));
 
     it("opens under a root in the main flow, binds and attaches the session, and posts the turn that ended nowhere", async () => {
@@ -389,5 +441,28 @@ describe("ChannelRuntime", () => {
       await rt.designLead(lead(), "waiting");
       expect(events).toEqual([]);
     });
+  });
+
+  // docs/design/11-im-conversation.md §Status
+  it("open items go to the live home adapter only; a refusal is logged", async () => {
+    events.length = 0; openFails = undefined; startGate = Promise.resolve();
+    const logged: string[] = [];
+    const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } }, (m) => logged.push(m));
+    home = { platform: "slack", chatId: "D1" };
+    await rt.openItems();
+    expect(events).toEqual([]);
+    await rt.reload();
+    home = undefined;
+    await rt.openItems();
+    home = { platform: "slack", chatId: "D1" };
+    await rt.openItems();
+    expect(events.filter((e) => e.startsWith("status"))).toEqual(["status D1: storage — running"]);
+    openFails = new Error("ratelimited");
+    await rt.openItems();
+    expect(logged.at(-1)).toBe("status: slack did not take the open items: Error: ratelimited");
+    openFails = undefined;
+    await rt.stop();
+    await rt.openItems();
+    expect(events.filter((e) => e.startsWith("status"))).toHaveLength(1);
   });
 });

@@ -97,6 +97,12 @@ export interface Channel {
   openThread(chatId: string, note: { text: string; origin: NoteOrigin }): Promise<string>;
   /** Replace the text of the root `openThread` posted: the thread's state, shown where it was opened. */
   editRoot(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
+  /**
+   * Show the open items in the chat's one status card, edited in place, at
+   * `NOTHING_OPEN` too; never deleted (docs/design/11 §Status). Only the home
+   * chat has one; any other chat rejects.
+   */
+  status(chatId: string, view: OpenItemsView): Promise<void>;
   stop(): Promise<void>;
 }
 

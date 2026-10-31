@@ -6,6 +6,7 @@
 // that arrives; reactions are short names (`reactions.add` rejects 👀 with
 // `invalid_name`); unacked envelopes are redelivered, so `event_id` is deduplicated.
 
+import type { DatabaseSync } from "node:sqlite";
 import type {
   AgentReply,
   Channel,
@@ -28,7 +29,7 @@ import type { ChannelStore } from "./config.js";
 import type { ChannelControl, HomeChains } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
-import { StatusMessage } from "./status.js";
+import { StatusMessage, type StatusView } from "./status.js";
 import { SlackDirectory } from "./slack-directory.js";
 import {
   SlackApi,
@@ -93,6 +94,8 @@ interface SlackDeps {
   client?: SlackClient;
   /** Injected in tests. */
   receipts?: ReceiptLedger;
+  /** Injected in tests: the status card's row. */
+  db?: DatabaseSync;
   /** Wired by runtime.ts, so `%stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
   /** Wired by runtime.ts: which chain a main-flow reply is, and where its buttons go. */
@@ -139,7 +142,10 @@ export class SlackChannel implements Channel {
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
       (chatId) => this.isHome(chatId),
     );
-    this.statusLine = new StatusMessage((channel, body) => this.api.postMessage({ channel, ...body }), this.log, statusMessage);
+    this.statusLine = new StatusMessage("slack", {
+      post: async (channel, body) => (await this.api.postMessage({ channel, ...body })).ts,
+      edit: (channel, ts, body) => this.api.updateMessage({ channel, ts, ...body }),
+    }, this.log, statusMessage, deps.db);
     if (deps.control) {
       this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
@@ -520,7 +526,7 @@ export class SlackChannel implements Channel {
       this.log(`refusing to post a system note to ${conversation}: no thread in the conversation id`);
       return;
     }
-    // The home's main flow leaves task progress to `/status`'s card; the web keeps the cards.
+    // The home's main flow shows task progress in the status card; the web keeps the cards.
     if (!to.threadTs && shownByStatus(note.origin)) {
       return logger("slack").debug(`${note.origin.kind} note not posted to the home main flow ${conversation}`);
     }
@@ -537,6 +543,11 @@ export class SlackChannel implements Channel {
     const ts = await this.out.note(channel, undefined, note);
     if (!ts) throw new Error(`Slack returned no ts for the root in ${channel}`);
     return conversationId(channel, ts);
+  }
+
+  async status(channel: string, view: StatusView): Promise<void> {
+    if (!this.isHome(channel)) throw new Error(`refusing a status card in ${channel}: not the home DM`);
+    await this.statusLine.show(channel, view);
   }
 
   async editRoot(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {

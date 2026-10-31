@@ -297,7 +297,7 @@ beforeEach(async () => {
   control = fakeControl();
   others = [];
   const home = { speaker: () => speaker, tap: (m: InboundMessage, chain: string) => void tapped.push([m.text, chain]), others: () => others };
-  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, home });
+  channel = new SlackChannel({ store, client, receipts, db: openDb(":memory:"), log: (m) => dropped.push(m), control, home });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -1355,38 +1355,69 @@ describe("the home chat", () => {
     const meta = { completedAt: Date.now() + 60_000, durationMs: 1000, tokens: 10, model: "m" };
     const snapshot = (items: [string, OpenItemPresentation["status"], string?][]) => ({ version: 1 as const, items: items.map(([problem, status, stage = ""]) =>
       openItemPresentation({ problem, stage, status, runs: [] }, 0)) });
+    const view = (text: string, items: [string, OpenItemPresentation["status"]][] = []) =>
+      ({ text, snapshot: snapshot(items) });
 
-    const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
+    it("keeps one labelled message, edited in place under later posts, and only in the home chat", async () => {
+      await channel.status(HOME, view("storage — running", [["storage", "running"]]));
+      expect(client.sent.at(-1)).toEqual({ channel: HOME, text: "_▤ open items_\nstorage — running", blocks: [
+        { type: "context", elements: [{ type: "mrkdwn", text: "_▤ open items_" }] },
+        { type: "context", elements: [{ type: "mrkdwn", text: "*In progress · 1*" }] },
+        { type: "section", text: { type: "mrkdwn", text: "*storage*" } },
+      ] });
+      await channel.status(HOME, view("storage — waiting on you", [["storage", "waiting on you"]]));
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — waiting on you" });
+      expect(client.updated.at(-1)!.blocks?.at(-1)).toEqual({ type: "section", text: { type: "mrkdwn", text: "*storage*" } });
+      // A reply or a note never moves it: no status after every turn.
+      await channel.send(HOME, { text: "done", suggestions: [] });
+      await channel.notify(HOME, { text: "Pier restarted", origin: { kind: "error" } });
+      await channel.status(HOME, view("storage — merged"));
+      expect(client.deleted).toEqual([]);
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — merged" });
+      expect(client.sent.map((p) => p.text.split("\n")[0])).toEqual(["_▤ open items_", "done", "_⚠ failed_"]);
+      // Nothing open edits it to say so; a later item edits it back. Never deleted.
+      await channel.status(HOME, view("Nothing open."));
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nNothing open." });
+      expect(client.updated.at(-1)!.blocks?.at(-1)).toEqual({ type: "context", elements: [{ type: "mrkdwn", text: "*Nothing open.*" }] });
+      await channel.status(HOME, view("storage — merged", [["storage", "running"]]));
+      expect(client.updated.at(-1)).toMatchObject({ ts: "900.000100", text: "_▤ open items_\nstorage — merged" });
+      expect(client.sent).toHaveLength(3);
+      expect(client.deleted).toEqual([]);
+      expect(client.reactions).toEqual([]);
+      await expect(channel.status(CHANNEL, view("x"))).rejects.toThrow(/not the home DM/);
+    });
 
-    it("/status posts a new card each time in the home's main flow, never editing or deleting one", async () => {
-      const text = "Waiting on you · 1\n\nA & B\n是否合并 <scope>？\n\nIn progress · 1\n\nBuild";
-      await channel.notify(HOME, { text, origin });
+    it("/status posts a new message at the bottom, edited from then on; the old one is left as it was", async () => {
+      const origin = { kind: "chat-command" as const, command: "status" as const, statusSnapshot: snapshot([["A & B", "waiting on you", "是否合并 <scope>？"], ["Build", "running"]]) };
+      const text = `Waiting on you · 1\n\n${"A & B · run literal12… ".repeat(12)}\n是否合并 <scope>？\nsucceeded 2m ago\n\nIn progress · 1\n\nBuild\nelapsed <1m`;
+      await channel.status(HOME, view("a", [["a", "running"]]));
       await channel.send(HOME, { text: "done", suggestions: [] });
       await channel.notify(HOME, { text, origin });
-      const card = `_▤ open items_\n${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}`;
-      expect(client.sent.map((p) => p.text)).toEqual([card, "done", card]);
-      expect(client.sent[0]!.blocks?.slice(1)).toEqual([
+      expect(client.updated).toEqual([]);
+      expect(client.sent.map((p) => p.text)).toEqual(["_▤ open items_\na", "done", `_▤ open items_\n${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}`]);
+      // The answer's snapshot, not the last refresh's.
+      expect(client.sent[2]!.blocks?.slice(1)).toEqual([
         { type: "context", elements: [{ type: "mrkdwn", text: "*Waiting on you · 1*" }] },
         { type: "section", text: { type: "mrkdwn", text: "*A &amp; B*\n> 是否合并 &lt;scope&gt;？" } },
         { type: "context", elements: [{ type: "mrkdwn", text: "*In progress · 1*" }] },
         { type: "section", text: { type: "mrkdwn", text: "*Build*" } },
       ]);
-      expect(client.updated).toEqual([]);
+      // Edited from then on: the new one, never the old.
+      await channel.status(HOME, view("Build — merged", [["Build", "running"]]));
+      expect(client.updated.map((u) => u.ts)).toEqual(["902.000100"]);
       expect(client.deleted).toEqual([]);
-      expect(client.reactions).toEqual([]);
-    });
-
-    it("/status is the note when nothing is open and no other chain has anything, and in a thread", async () => {
+      // Nothing open and no other chain: the note answers; another chain's line makes a card.
       const empty = { ...origin, statusSnapshot: snapshot([]) };
       await channel.notify(HOME, { text: "Nothing open.", origin: empty });
-      expect(client.sent.map((p) => p.text)).toEqual(["_/status_\n> Nothing open."]);
+      expect(client.sent.map((p) => p.text).slice(3)).toEqual(["_/status_\n> Nothing open."]);
       others = [{ name: "Design", waiting: 1, inProgress: 0, archived: false }];
       await channel.notify(HOME, { text: "Nothing open.", origin: empty });
       expect(client.sent.at(-1)!.text).toBe("_▤ open items_\nNothing open.");
       expect(JSON.stringify(client.sent.at(-1)!.blocks)).toContain("Design");
+      // A thread's `/status` is the note, and the card is not touched.
       await channel.notify(`${HOME}/1900.000100`, { text: "Build", origin });
       expect(client.sent.at(-1)).toMatchObject({ thread_ts: "1900.000100", text: "_/status_\n> Build" });
-      expect(client.updated).toEqual([]);
+      expect(client.updated.map((u) => u.ts)).toEqual(["902.000100"]);
       expect(client.deleted).toEqual([]);
     });
 
