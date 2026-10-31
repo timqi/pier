@@ -10,7 +10,7 @@
 ### Upgrade
 
 - The migration puts every existing session and open item in one chain, `Main`; memory stays where it is and becomes the global layer, and nothing changes until chain mode is turned on.
-- Downgrading to an earlier version is not migrated back and not supported: `main_chain.chain_id` and `open_items.chain_id` have no default, so the older code can read the conversation but fails to start a new head or record an open item.
+- Downgrading is not migrated back: the older code still runs (`chain_id` defaults to `main`, the `chains` table is ignored), but open items of other chains with the same problem collide on its single-column key and their rows read as one conversation.
 
 ## 0.6.0 — 2026-10-26
 
