@@ -24,14 +24,15 @@
 html {
   color-scheme: light;
   --workbench-canvas: #f1f4f3;
-  --workbench-mist: #e6f1f3;
-  --workbench-mint: #e8f3ed;
+  --workbench-mist: #ecf3f3;
+  --workbench-mint: #edf4f0;
   /* Flat chrome: the bar and the rail are one surface a step off the canvas,
      bounded by a hairline; nothing is blurred or lifted. The one shadow is a
      popover's, which has to read as over the page. Dark swaps the hairline for
      a light one, since a dark line disappears against a dark canvas. The
-     chrome's hue is the canvas's, so the sidebar reads as the page's own grey. */
-  --workbench-chrome: oklch(93.8% 0.005 175);
+     chrome is neutral: the native shell's tab bar sits on it with no line
+     between and paints in these two literals, so a tint would show at that edge. */
+  --workbench-chrome: oklch(93.8% 0 none);
   --line: rgb(16 24 40 / 0.1);
   --shadow-pop: 0 4px 14px -2px rgb(16 24 40 / 0.14);
   --color-neutral-50: oklch(98% 0.004 260);
@@ -58,8 +59,8 @@ html {
 html[data-theme="dark"] {
   color-scheme: dark;
   --workbench-canvas: #14171a;
-  --workbench-mist: #1d282d;
-  --workbench-mint: #1d2925;
+  --workbench-mist: #192024;
+  --workbench-mint: #192020;
   --workbench-chrome: oklch(22.5% 0.006 248);
   --line: rgb(255 255 255 / 0.1);
   --shadow-pop: 0 6px 18px -2px rgb(0 0 0 / 0.55);
@@ -650,7 +651,7 @@ main {
   overflow-x: hidden; /* a swiped row (row-gestures.ts) slides past the edge, never scrolls the pane */
   /* A row leaving under the bar's hairline or the dock fades, rather than being
      cut at the edge. */
-  mask-image: linear-gradient(to bottom, transparent var(--head-h), black calc(var(--head-h) + 1.25rem), black calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(to bottom, transparent var(--head-h), black calc(var(--head-h) + 0.75rem), black calc(100% - 2rem), transparent);
 }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
@@ -670,7 +671,9 @@ main {
 #turns > [data-kind="user"] {
   margin-left: auto;
   border-radius: 1rem;
-  background: var(--color-indigo-100);
+  /* Half the accent's tint: a bubble is told from a reply by its edge and its
+     side, and a saturated accent (teal, emerald) must not colour the page. */
+  background: color-mix(in oklab, var(--color-indigo-100) 50%, var(--color-white));
   color: var(--color-neutral-900);
   box-shadow: inset 0 0 0 1px var(--color-indigo-200);
 }

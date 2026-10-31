@@ -2400,15 +2400,18 @@ describe("the app shell", () => {
     expect(tabPrefix("staging", "g1")).toBe("staging - g1");
     expect(tabPrefix("  ", "g1")).toBe("g1");
     expect(tabPrefix("staging", "")).toBe("staging");
+    // An instance named after its machine is not said twice.
+    expect(tabPrefix("g1", "g1")).toBe("g1");
     expect(tabPrefix("x".repeat(80), "g1").length).toBe(60);
     // Neither value is typed here, and neither may open a tag.
     expect(withTabPrefix(html, "a<b&c")).toContain("<title>a&lt;b&amp;c - Pier</title>");
     // Nothing to say, and any shell that does not say Pier: served as built.
     expect(withTabPrefix(html, "")).toBe(html);
     expect(withTabPrefix("<title>Other</title>", "g1")).toBe("<title>Other</title>");
-    // The sidebar's head says the same name, Pier when there is none.
+    // The sidebar's head says the name the title leads with: $PIER_TITLE, else the machine, else Pier.
     const head = '<h1 id="rail-title" class="rail-title">Pier</h1>';
-    expect(withInstanceName(head, "stag<ing")).toBe('<h1 id="rail-title" class="rail-title">stag&lt;ing</h1>');
+    expect(withInstanceName(head, "stag<ing", "g1")).toBe('<h1 id="rail-title" class="rail-title">stag&lt;ing</h1>');
+    expect(withInstanceName(head, "  ", "g1")).toBe('<h1 id="rail-title" class="rail-title">g1</h1>');
     expect(withInstanceName(head, "  ")).toBe(head);
     // Taken as text, not as a replacement pattern.
     expect(withInstanceName(head, "a$&b")).toBe('<h1 id="rail-title" class="rail-title">a$&amp;b</h1>');

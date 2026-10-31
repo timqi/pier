@@ -21,7 +21,10 @@ updates this document.
 - **Flat chrome + hairline**: navigation, the sidebar and floating controls are
   one solid surface, `--workbench-chrome`, one step off the canvas, edged by a
   neutral hairline (`--line`, light in dark mode) — no blur, no gradient, no
-  shadow. Menus and popovers are solid, hairline-edged and carry the one shadow
+  shadow. The chrome is neutral grey (`oklch(93.8% 0 none)` light,
+  `oklch(22.5% 0.006 248)` dark): the native shell's tab bar meets it with no
+  line between and paints in the same two literals, in the palette the page
+  reports ([14 §Bridge](14-native-client.md#bridge-srcwebuishellts)). Menus and popovers are solid, hairline-edged and carry the one shadow
   (`--shadow-pop`). Radii are 6–10px: 10px for cards, menus and the composer,
   6px for rows and icon buttons. The Console's cards, tabs and dialogs are the
   same material: a hairline card, a flat tab whose open state is the row
@@ -30,7 +33,7 @@ updates this document.
   menus and time labels; no page-specific styles.
 - Canvas: pale neutral page edge, matched by installed-window theme metadata in
   both themes including startup (`--workbench-canvas`). Mist-blue and mint
-  accents confined to the lower conversation area.
+  accents confined to the lower conversation area, half a step off the canvas.
 - Accent: the `--color-indigo-*` ramp is the one accent mechanism — every
   primary action, selection, focus ring and user bubble is an `indigo-*`
   utility, never a literal colour. An instance's accent (Settings → Instance)
@@ -45,7 +48,7 @@ updates this document.
 
 ## Layout
 
-- **Two columns, one reading column**: from 64rem in chain mode the shell is a 16rem sidebar beside a content column; the sidebar runs the window's full height on the chrome surface with a right hairline, headed by the instance's name (`$PIER_TITLE`, `Pier` when unset) in a row the bar's height with no line under it, then Chains over Items · N on one gutter — a row's dot 0.5rem in from its plate, its text 1.5rem, the chain rows' line the item rows' too; 64rem is the 46rem reading column, its two 1rem insets and the sidebar, carried by hand in `chains.ts` and `style.css` since a media query reads no custom property; the content column is the bar, the transcript and the dock. Hidden by ⌘B, below 64rem or in session mode the content column is the window. In it the conversation is a 46rem reading column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred under the bar; a reply is the full column, a user bubble 76% of it at most; a phone's inset is 0.75rem. The sidebar carries the open items from 64rem; below it the status panel does.
+- **Two columns, one reading column**: from 64rem in chain mode the shell is a 16rem sidebar beside a content column; the sidebar runs the window's full height on the chrome surface with a right hairline, headed by the instance's name (`$PIER_TITLE`, the host when unset) in a row the bar's height with no line under it, then Chains over Items · N on one gutter — a row's dot 0.5rem in from its plate, its text 1.5rem, the chain rows' line the item rows' too; 64rem is the 46rem reading column, its two 1rem insets and the sidebar, carried by hand in `chains.ts` and `style.css` since a media query reads no custom property; the content column is the bar, the transcript and the dock. Hidden by ⌘B, below 64rem or in session mode the content column is the window. In it the conversation is a 46rem reading column (`--read-w`, inset by `--col-pad`: transcript, queue card, composer share both edges) centred under the bar; a reply is the full column, a user bubble 76% of it at most; a phone's inset is 0.75rem. The sidebar carries the open items from 64rem; below it the status panel does.
 - **Type scale**: the root is 18px below 48rem and 16px from it; the transcript's body is 16px / 1.55 at every width.
 - **Stream rhythm**: two steps, `--turn-gap` (0.75rem) between turns, separator lines (date, `· N background updates`, session divider, load more) and from the bar and composer; `--tight-gap` (0.375rem) within a bubble (chip row, topic tag, quote, files) and between a reply and its continuation.
 - **Bar**: one flat strip with a bottom hairline, the content column's width; in chain mode the conversation's title is its chain's name — a plain heading while the sidebar is docked beside it, `<chain> ▾` opening the floated chain list otherwise; child sessions show ‹, title and phase. Right of the title a `1/N` counter cycling the lead comes first, so it stays put whatever the lead's length; then the status panel's most urgent row leads — topic dot, title, status mark and phrase, truncated — and opens the panel; below md the status glyph and the row count; model, reasoning and context are metadata chips. ⋯ opens the bar menu. On a phone it is the same strip — no hamburger, no drawer toggle — keeping the notch inset, and a child session's ‹ is a 44px target at its left, the item view's `×` one beside its title; nothing is phone-only but the menu primitive's sheets.
@@ -83,7 +86,8 @@ updates this document.
 
 ## Conversation and activity
 
-- User messages: bounded mist-blue surface, dark text, muted dark variant.
+- User messages: bounded surface at half the accent's tint (`indigo-100` mixed
+  even with the card white) under an `indigo-200` edge, dark text, muted dark variant.
   Roles read from alignment, fill and outline before text.
 - Transcript type: 16px at line-height 1.55 whatever the root, a step under the draft's 1rem; markdown sizes are em that land on whole pixels (headings 1.25em/1.125em, inline code 0.875em).
 - Assistant replies: solid reading surface, comfortable width; on a phone the

@@ -25,6 +25,12 @@ export function notify({ title, body, url, tag }: { title: string; body: string;
   invoke("notify", { title, body, url, tag });
 }
 
+/** The palette this page paints in, so the shell's tab bar can follow the
+ *  shown instance rather than the system alone (theme.ts). */
+export function setTheme(theme: "light" | "dark"): void {
+  invoke("set_theme", { theme });
+}
+
 /** The accent as `#rrggbb`: the ramp is authored in oklch (style.css), and a
  *  canvas is the one converter to sRGB the page already has. */
 function accentHex(): string | undefined {
@@ -36,6 +42,8 @@ function accentHex(): string | undefined {
   return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
 }
 
-// The server writes `$PIER_TITLE` into the page title and the accent onto
-// `<html>`; the shell names and colours the instance's tab from them.
-if (tauri) invoke("page_title", { title: document.title, accent: accentHex() });
+// The server writes the instance's label into the sidebar's head and the
+// accent onto `<html>`; the shell names and colours the instance's tab from
+// them. The head, not the page title: every tab in the shell is a Pier, so
+// the title's ` - Pier` would only repeat.
+if (tauri) invoke("page_title", { title: document.getElementById("rail-title")?.textContent ?? document.title, accent: accentHex() });

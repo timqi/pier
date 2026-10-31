@@ -41,8 +41,8 @@ for a few weeks, and is deleted whole if it is not.
   URL or a `pier login` link into the field Add Instance… opens (sets url and signs in
   at once) and opens its tab; Remove and Delete Data removes it with its cookie jar and storage
   (macOS: its WebKit data store; Linux: its data directory), double-click on
-  the name renames, drag reorders. `name` defaults to the instance's `PIER_TITLE`, read from the
-  page title. An error shows as a red toast over the bar for 8s; a click
+  the name renames, drag reorders. `name` defaults to the label the page's sidebar head
+  carries (`PIER_TITLE`, the host when unset), sent by the bridge. An error shows as a red toast over the bar for 8s; a click
   dismisses it.
 - **Origin guard**: before adding, a hidden throwaway webview (no cookie
   jar, no IPC) loads `<origin>/login`, which every Pier serves signed out
@@ -155,6 +155,11 @@ one ~30-line module; in a browser every call is a no-op.
   `preview(reply.text)` the push sends — the topic is in it. Click: the shell focuses the window and
   that instance, reopening its tab if it was closed since, and sets the page's hash from `url` itself; an instance page
   holds no event permission, so no page can hear the tab bar's or another's.
+- **Theme**: the bridge sends `set_theme` with the palette the page paints
+  in (`light` or `dark`, as `theme.ts` resolves it, on load and on every
+  change), so the tab bar can take the shown instance's palette — the web's
+  `--workbench-chrome` literals ([06 §Materials](06-ui-ux.md#materials)) —
+  instead of the system's alone.
 - **Visibility**: a hidden instance's webview must read
   `document.hidden === true`, or the UI acks every turn as seen
   (`main.ts:315`) and nothing is ever unread. The shell hides, not merely

@@ -4,6 +4,7 @@
 import { Monitor, Moon, Sun, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { $ } from "./dom.js";
+import { setTheme } from "./shell.js";
 
 type Theme = "system" | "light" | "dark";
 const KEY = "pier.theme";
@@ -34,9 +35,11 @@ const resolved = (): "light" | "dark" => {
 function apply(): void {
   const mode = resolved();
   document.documentElement.dataset.theme = mode;
-  // Installed window chrome follows the same canvas as the page's outer edge.
+  // Installed window chrome follows the same canvas as the page's outer edge;
+  // the native shell's tab bar follows the palette by name.
   const canvas = getComputedStyle(document.documentElement).getPropertyValue("--workbench-canvas").trim();
   $('meta[name="theme-color"]').setAttribute("content", canvas);
+  setTheme(mode);
 }
 
 export function initTheme(): void {

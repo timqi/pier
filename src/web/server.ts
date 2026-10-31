@@ -70,19 +70,22 @@ const slim = (turn: ChatTurn): ChatTurn =>
     ? { ...turn, steps: turn.steps.map(({ args: _args, output: _output, ...step }) => step) }
     : turn;
 
-/** `$PIER_TITLE`, then the machine: the label leads because a tab is narrow
- *  and "which instance" must survive truncation. */
+/** `$PIER_TITLE`, then the machine, once when they are the same: the label
+ *  leads because a tab is narrow and "which instance" must survive truncation. */
 export const tabPrefix = (title: string | undefined, host: string): string =>
-  [title?.trim(), host.trim()].filter(Boolean).join(" - ").slice(0, 60);
+  [...new Set([title?.trim(), host.trim()].filter(Boolean))].join(" - ").slice(0, 60);
 
 const escapeHtml = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 export const withTabPrefix = (html: string, prefix: string): string =>
   prefix ? html.replace("<title>Pier</title>", `<title>${escapeHtml(prefix)} - Pier</title>`) : html;
 
-/** The sidebar's head names the instance as the manifest does: `$PIER_TITLE`, `Pier` when unset. */
-export const withInstanceName = (html: string, title: string | undefined): string =>
-  title?.trim() ? html.replace('<h1 id="rail-title" class="rail-title">Pier</h1>', () => `<h1 id="rail-title" class="rail-title">${escapeHtml(title.trim())}</h1>`) : html;
+/** The sidebar's head names the instance as the tab title leads: `$PIER_TITLE`, the machine when
+ *  unset, `Pier` when neither; the native shell names its tab from this head (shell.ts). */
+export const withInstanceName = (html: string, title: string | undefined, host = ""): string => {
+  const label = title?.trim() || host.trim();
+  return label ? html.replace('<h1 id="rail-title" class="rail-title">Pier</h1>', () => `<h1 id="rail-title" class="rail-title">${escapeHtml(label)}</h1>`) : html;
+};
 
 /** Safari, the iOS Home Screen, the Dock and launchers take PNG links, never
  *  the served SVG, so every `/app/icon-*.png` reference (shell and manifest)
@@ -913,7 +916,8 @@ export function createServer(
   // The tab says which instance this is: mistaking staging for production is
   // the mistake worth a few lines. Behind the auth guard, so a stranger at
   // /login learns neither fact.
-  const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
+  const host = hostname().split(".")[0] ?? "";
+  const prefix = tabPrefix(process.env.PIER_TITLE, host);
   let shell: string | null = null;
   const serveShell = async (c: Context, next: Next): Promise<Response | void> => {
     // A cached index must not name bundles a release has replaced: the build
@@ -923,7 +927,7 @@ export function createServer(
     c.header("cache-control", "private, no-store");
     if (shell === null) {
       try {
-        shell = withInstanceName(withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix), process.env.PIER_TITLE);
+        shell = withInstanceName(withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix), process.env.PIER_TITLE, host);
       } catch (err) {
         // A workbench that will not load is not worth a nicer tab.
         log.warn(`shell unreadable, serving it unpatched: ${String(err)}`);

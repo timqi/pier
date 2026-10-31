@@ -145,7 +145,8 @@ function fill(root: HTMLElement): void {
     const fold = h("button", `${SMALL} w-full text-left text-xs`, `Archived · ${old.length}`);
     fold.setAttribute("aria-expanded", String(archivedOpen));
     fold.onclick = () => { archivedOpen = !archivedOpen; draw(true); };
-    parts.push(h("hr", "my-1 border-neutral-200"), fold, ...(archivedOpen ? [h("ul", "", ...old.map(archivedRow))] : []));
+    // The rail's Items section opens on a line of its own, so the fold is the list's plain tail there.
+    parts.push(...(root === rail ? [] : [h("hr", "my-1 border-neutral-200")]), fold, ...(archivedOpen ? [h("ul", "", ...old.map(archivedRow))] : []));
   }
   // The rail names its sections, New chain the head's +; the floated list is the chains alone.
   if (root === rail) {
