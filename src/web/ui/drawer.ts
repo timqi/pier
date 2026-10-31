@@ -266,7 +266,7 @@ let topKey: string | null = null;
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${[...closing].join("\0")}\n${deps.currentId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
+  `${[...closing].join("\0")}\n${deps.currentId() ?? ""}\n${deps.chainId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
 let drawn = "";
 

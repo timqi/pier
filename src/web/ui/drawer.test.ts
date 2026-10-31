@@ -536,3 +536,21 @@ it("drops a search's open match whose row the stream took away", async () => {
   expect(panel().querySelector("[data-list]")!.textContent).toBe("No item matches.");
   vi.useRealTimers();
 });
+
+// Which chain is current tags and orders the rows: switching to another chain with the same members redraws both surfaces.
+it("redraws both surfaces' chain tags when only the current chain changes", () => {
+  open = { items: [
+    { problem: "auth", stage: "", status: "running", runs: [], chain: { id: "a", name: "Main", archived: false } },
+    { problem: "deploy", stage: "", status: "running", runs: [], chain: { id: "b", name: "Ops", archived: false } },
+  ], unlisted: [] };
+  chainId = "a";
+  drawer.renderDrawer(); drawer.openDrawer();
+  const tag = (root: ReturnType<typeof rail>, key: string) => root.querySelector(`[data-row-key='${key}']`)!.querySelector(".open-item-chain")!;
+  expect(railRows()).toEqual(["auth", "deploy"]);
+  chainId = "b";
+  drawer.renderDrawer();
+  expect(railRows()).toEqual(["deploy", "auth"]);
+  expect(labels()).toEqual(["deploy", "auth"]);
+  expect([tag(rail(), "item:a/auth").textContent, tag(panel(), "item:a/auth").textContent]).toEqual(["Main", "Main"]);
+  expect(tag(rail(), "item:b/deploy").classList.contains("hidden")).toBe(true);
+});
