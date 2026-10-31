@@ -730,6 +730,11 @@ describe("/chain", () => {
 
   it("creates and switches on `/chain new`, turning chain mode on first", async () => {
     const r = rig();
+    // A refused name in Session mode leaves Session mode.
+    await expect(r.say("/chain new")).rejects.toThrow("chain: name must be 1–40 characters");
+    expect(r.mode.on).toBe(false);
+    expect(r.changed).not.toHaveBeenCalled();
+    r.mode.set.mockClear();
     const sent = await r.say("/chain new  Design ");
     expect(sent).toEqual({ chainId: expect.any(String), switched: expect.objectContaining({ name: "Design" }) });
     expect(r.chains.get(sent.chainId)?.name).toBe("Design");

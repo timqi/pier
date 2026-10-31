@@ -240,9 +240,17 @@ export class MainChain {
     const verb = word.toLowerCase();
     if (!args || verb === "rename") return undefined;
     if (verb === "new") {
-      // Session mode is exactly one active chain: chain mode comes first, so a second never exists without it.
-      if (!this.deps.mode.get()) await this.deps.mode.set(true);
-      const created = this.deps.chains.create(rest.join(" "));
+      // Session mode is exactly one active chain: chain mode comes first, so a second never exists
+      // without it, and goes back off when the name is refused.
+      const was = this.deps.mode.get();
+      if (!was) await this.deps.mode.set(true);
+      let created: ChainRow;
+      try {
+        created = this.deps.chains.create(rest.join(" "));
+      } catch (err) {
+        if (!was) await this.deps.mode.set(false);
+        throw err;
+      }
       this.lastUser.set(created.id, this.now());
       return created;
     }
