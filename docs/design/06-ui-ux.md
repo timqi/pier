@@ -21,7 +21,7 @@ updates this document.
 - **Flat chrome + hairline**: navigation, the sidebar and floating controls are
   one solid surface, `--workbench-chrome`, one step off the canvas, edged by a
   neutral hairline (`--line`, light in dark mode) — no blur, no gradient, no
-  shadow. The chrome is `oklch(93.8% 0 none)` light and `oklch(22.5% 0.006 248)`
+  shadow. The chrome is `oklch(93.8% 0.005 175)` light and `oklch(22.5% 0.006 248)`
   dark: the native shell's tab bar meets it with no line between and paints in
   the same two literals, in the palette the page reports
   ([14 §Bridge](14-native-client.md#bridge-srcwebuishellts)). Menus and popovers are solid, hairline-edged and carry the one shadow

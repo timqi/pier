@@ -32,7 +32,7 @@ html {
      a light one, since a dark line disappears against a dark canvas. The
      chrome is neutral: the native shell's tab bar sits on it with no line
      between and paints in these two literals, so a tint would show at that edge. */
-  --workbench-chrome: oklch(93.8% 0 none);
+  --workbench-chrome: oklch(93.8% 0.005 175);
   --line: rgb(16 24 40 / 0.1);
   --shadow-pop: 0 4px 14px -2px rgb(16 24 40 / 0.14);
   --color-neutral-50: oklch(98% 0.004 260);
