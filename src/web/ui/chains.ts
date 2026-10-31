@@ -166,10 +166,13 @@ function draw(force = false): void {
   }
 }
 
-/** The list changed, or which chain is current did. */
+/** The list changed, or which chain is current did; the rail coming on or going off
+ *  (chain mode, ⌘B) changes the bar title's shape, so it is told here, the one place that flips. */
 export function renderChains(): void {
+  const was = sidebarDocked();
   rail.toggleAttribute("data-on", deps.list()?.mode === "chain" && localStorage.getItem(RAIL) !== "off");
   draw();
+  if (sidebarDocked() !== was) deps.docked();
 }
 
 /** The sidebar is on screen beside the column, so the chain list needs no
@@ -185,7 +188,6 @@ export function toggleSidebar(): void {
   if (localStorage.getItem(RAIL) === "off") localStorage.removeItem(RAIL);
   else localStorage.setItem(RAIL, "off");
   renderChains();
-  deps.docked();
 }
 
 const focusField = (): void => (shown(floated) ? floated : rail).querySelector<HTMLInputElement>("input")?.focus();

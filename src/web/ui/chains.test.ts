@@ -196,18 +196,27 @@ it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode o
 // One key for the sidebar: the docked rail where it is laid out, kept in pier.rail; the floated list below 80rem.
 it("⌘B hides and shows the docked rail, remembered, and opens the floated list where there is no rail", () => {
   const rail = fake(document.querySelector("#chain-rail"));
+  list = { ...list, mode: "session" };
+  chains.renderChains();
+  expect(retitle).not.toHaveBeenCalled();
+  // Chain mode turned on docks the rail: the title is told, whoever re-rendered first (main.ts commitSessions).
+  list = { ...list, mode: "chain" };
   chains.renderChains();
   expect(chains.sidebarDocked()).toBe(true);
+  expect(retitle).toHaveBeenCalledTimes(1);
+  chains.renderChains();
+  expect(retitle).toHaveBeenCalledTimes(1);
   chords.get("b")!();
   expect(rail.hasAttribute("data-on")).toBe(false);
   expect(stored.get("pier.rail")).toBe("off");
   expect(menu.openPanel).not.toHaveBeenCalled();
   // The bar's title turns back into the list's way in (session-header.ts).
-  expect(retitle).toHaveBeenCalledTimes(1);
+  expect(retitle).toHaveBeenCalledTimes(2);
   expect(chains.sidebarDocked()).toBe(false);
   chords.get("b")!();
   expect(rail.hasAttribute("data-on")).toBe(true);
   expect(stored.has("pier.rail")).toBe(false);
+  expect(retitle).toHaveBeenCalledTimes(3);
   docked = false;
   expect(chains.sidebarDocked()).toBe(false);
   chords.get("b")!();
