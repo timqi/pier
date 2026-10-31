@@ -448,7 +448,7 @@ servePier({
     note(`done ${JSON.stringify(result.details)}`);
     return result;
   },
-  search: searchMessages(factory, () => chains.list().flatMap((c) => chain.members(c.id).map((m) => m.sessionId))),
+  search: searchMessages(factory, { chains, members: (id) => chain.members(id).map((m) => m.sessionId) }),
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
   login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,

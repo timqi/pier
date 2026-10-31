@@ -58,7 +58,7 @@ function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolea
       calls.push(`web by ${caller}`);
       return { text: `searched ${JSON.stringify(params)}` };
     },
-    search: searchMessages(index, () => []),
+    search: searchMessages(index, { chains: { list: () => [], resolve: (q) => { throw new Error(`chain: no chain "${q}"`); } }, members: () => [] }),
     knows: async (id) => KNOWN.includes(id),
     login: () => {
       calls.push("login");

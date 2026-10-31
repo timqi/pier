@@ -1,14 +1,21 @@
 // `pier search`: the agent's recall by message — the `/search` route's host,
-// which puts the conversation's messages ahead of every other session's and
+// which puts the caller's chain's messages ahead of every other session's and
 // names each hit's place, and the verb's argv; root keeps only the dispatch, as
 // for `pier task` and `pier web`. The host validates the params and its text
 // reaches the shell verbatim (08 §Failure lines).
 
 import { parseArgs } from "node:util";
 import { readableTitle } from "./identity.js";
+import type { Chains, ChainRow } from "./chains.js";
 import type { AgentFactory, SearchHit, SearchScope } from "./types.js";
 
-type Hit = SearchHit & { place: string; pier: boolean };
+type Hit = SearchHit & { place: string; pier: boolean; chain?: { id: string; name: string } };
+
+/** The chain register and each chain's members, newest first: what `/search` reads of core/chain.ts. */
+export interface SearchChains {
+  chains: Pick<Chains, "list" | "resolve">;
+  members: (chainId: string) => string[];
+}
 
 /** `POST /search` as cli.ts performs it. */
 export type SearchPost = (params: Record<string, unknown>) => Promise<{ status: number; body: { result?: { hits: Hit[] }; error?: string } }>;
@@ -18,8 +25,8 @@ export interface SearchCliIo {
   stderr(line: string): void;
 }
 
-const USAGE = "usage: pier search <q...> [--in main|<sessionId>] [--since <N>h|<N>d|YYYY-MM-DD] [--role user|assistant] [--limit N] [--json]\n"
-  + "       pier search --around \"YYYY-MM-DD HH:MM\" [--in main|<sessionId>] [--limit N] [--json]";
+const USAGE = "usage: pier search <q...> [--in main|chain:<name>|<sessionId>] [--since <N>h|<N>d|YYYY-MM-DD] [--role user|assistant] [--limit N] [--json]\n"
+  + "       pier search --around \"YYYY-MM-DD HH:MM\" [--in main|chain:<name>|<sessionId>] [--limit N] [--json]";
 const ROLES = ["user", "assistant"];
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
 // sv-SE spells local time as YYYY-MM-DD HH:MM.
@@ -30,12 +37,14 @@ const processIo: SearchCliIo = {
   stderr: (line) => process.stderr.write(`${line}\n`),
 };
 
-/** `/search`'s params to hits: Pier's (every `chain()` member) first, then, for
- *  what the limit still allows, every other session's; each named by its place —
- *  `Pier`, or its session's title as it is now, its id when gone from disk.
- *  `around` replays one place instead, the conversation unless `in` names a
- *  session; `pier` is `main`'s older spelling, kept so a memory or script holds. */
-export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, chain: () => string[]) => async (params: unknown): Promise<{ hits: Hit[] }> => {
+/** `/search`'s params to hits: the caller's chain first, then every other
+ *  chain's, then, for what the limit still allows, every other session's; each
+ *  named by its place — its chain's name, or its session's title as it is now,
+ *  its id when gone from disk. `in` narrows to every chain (`main`, or its older
+ *  spelling `pier`), one chain (`chain:<name>`, a unique prefix) or one session.
+ *  `around` replays one place instead: the caller's chain, every chain when the
+ *  caller is in none, unless `in` names one. */
+export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, { chains, members }: SearchChains) => async (params: unknown, callerSessionId?: string): Promise<{ hits: Hit[] }> => {
   const { q, limit = 10, since, role, in: where, around } = (params ?? {}) as Record<string, unknown>;
   const query = typeof q === "string" ? q.trim() : "";
   if (around !== undefined) {
@@ -45,28 +54,51 @@ export const searchMessages = (factory: Pick<AgentFactory, "search" | "find">, c
   if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 50) throw new Error("limit must be an integer from 1 to 50");
   if (since !== undefined && (!Number.isInteger(since) || (since as number) < 0)) throw new Error("since must be a non-negative integer of ms");
   if (role !== undefined && !ROLES.includes(role as string)) throw new Error("role must be user or assistant");
-  if (where !== undefined && (typeof where !== "string" || !where)) throw new Error("in must be main or a session id");
+  if (where !== undefined && (typeof where !== "string" || !where)) throw new Error("in must be main, chain:<name> or a session id");
   const scope: SearchScope = {
     limit: limit as number,
     ...(since === undefined ? {} : { since: since as number }),
     ...(role === undefined ? {} : { role: role as SearchScope["role"] }),
     ...(around === undefined ? {} : { around: around as number }),
   };
-  const members = chain();
+  const groups = chains.list().map((chain) => ({ chain, members: members(chain.id) }));
+  const all = groups.flatMap((g) => g.members);
+  const caller = groups.find((g) => callerSessionId !== undefined && g.members.includes(callerSessionId));
+  const named = typeof where === "string" && where.startsWith("chain:") ? resolveIn(chains, where.slice("chain:".length)) : undefined;
   let hits: SearchHit[];
-  if (where === "main" || where === "pier" || (where === undefined && around !== undefined)) hits = await factory.search(query, { ...scope, sessions: members });
+  if (named) hits = await factory.search(query, { ...scope, sessions: groups.find((g) => g.chain.id === named.id)?.members ?? [] });
+  else if (where === "main" || where === "pier") hits = await factory.search(query, { ...scope, sessions: all });
   else if (where !== undefined) hits = await factory.search(query, { ...scope, sessions: [where as string] });
+  else if (around !== undefined) hits = await factory.search(query, { ...scope, sessions: caller?.members ?? all });
   else {
-    hits = members.length ? await factory.search(query, { ...scope, sessions: members }) : [];
-    if (hits.length < scope.limit) hits = [...hits, ...await factory.search(query, { ...scope, limit: scope.limit - hits.length, exclude: members })];
+    const mine = caller?.members ?? [];
+    const others = all.filter((id) => !mine.includes(id));
+    hits = [];
+    for (const sessions of [mine, others]) {
+      if (sessions.length && hits.length < scope.limit) hits = [...hits, ...await factory.search(query, { ...scope, limit: scope.limit - hits.length, sessions })];
+    }
+    if (hits.length < scope.limit) hits = [...hits, ...await factory.search(query, { ...scope, limit: scope.limit - hits.length, exclude: all })];
   }
-  const pier = new Set(members);
+  const chainOf = new Map(groups.flatMap((g) => g.members.map((id) => [id, g.chain] as const)));
   return {
-    hits: await Promise.all(hits.map(async (hit) => pier.has(hit.sessionId)
-      ? { ...hit, place: "Pier", pier: true }
-      : { ...hit, place: readableTitle((await factory.find(hit.sessionId))?.title) ?? hit.sessionId, pier: false })),
+    hits: await Promise.all(hits.map(async (hit) => {
+      const chain = chainOf.get(hit.sessionId);
+      return chain
+        ? { ...hit, place: chain.name, pier: true, chain: { id: chain.id, name: chain.name } }
+        : { ...hit, place: readableTitle((await factory.find(hit.sessionId))?.title) ?? hit.sessionId, pier: false };
+    })),
   };
 };
+
+/** `chain:<name>`'s chain; an unknown or ambiguous name is the refusal, worded for `--in`. */
+function resolveIn(chains: Pick<Chains, "resolve">, name: string): ChainRow {
+  try {
+    return chains.resolve(name);
+  } catch (err) {
+    // The register words its refusals for `/chain`; here the spelling was `chain:<q>`, under the CLI's `search:`.
+    throw new Error((err instanceof Error ? err.message : String(err)).replace(/^\/chain /, "chain:").replace(/^chain: /, ""));
+  }
+}
 
 /** `YYYY-MM-DD HH:MM` local, the time a hit line prints, or a date's local
  *  midnight, to ms. */
