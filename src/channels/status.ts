@@ -107,8 +107,9 @@ export class StatusMessage<B = string> {
    *  something is open; false — nothing open, no view yet, or the post failed —
    *  leaves the answer to the note. */
   async answer(chatId: string, text: string, snapshot?: OpenItemsSnapshot): Promise<boolean> {
-    // `/status`'s text names its chain, so the snapshot says whether anything is open.
-    if (this.last?.chatId !== chatId || ((snapshot ? !snapshot.items.length : text === NOTHING_OPEN) && !this.last.view.others?.length)) return false;
+    // `/status`'s text names its chain, so the snapshot says whether anything is open; an answer without one is the bare text.
+    const nothingOpen = snapshot ? !snapshot.items.length : text === NOTHING_OPEN;
+    if (this.last?.chatId !== chatId || (nothingOpen && !this.last.view.others?.length)) return false;
     const before = this.messageId(chatId);
     await this.show(chatId, { ...this.last.view, text, ...(snapshot ? { snapshot } : {}) }, true);
     // A failed re-post keeps the old row, so only a new id is the one it posted.

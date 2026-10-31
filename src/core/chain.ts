@@ -238,7 +238,7 @@ export class MainChain {
       return { chainId, answer: this.chainCommand(command.args, chainId) };
     }
     if (chain.archivedAt !== null) throw new ChainArchived(chain.name);
-    if (command) return this.serial(chainId, key, (session, rotated) => this.command(command, chainId, key, session, rotated));
+    if (command) return this.serial(chainId, key, (session, rotated) => this.command(command, chain, key, session, rotated));
     this.lastUser.set(chainId, this.now());
     return this.serial(chainId, key, async (session) => {
       await this.deps.router.dispatch({ ...message, key: key ?? webKey(session.id) });
@@ -278,7 +278,7 @@ export class MainChain {
   /** `status`, `stop`, `skills` and `chain` answer with a card on the head; `new` answers with the
    *  next head's seed card — a head just rotated for its own reason is that answer. */
   private async command(
-    { command, args }: { command: ChatCommand; args: string }, chainId: string, key: ConversationKey | undefined, session: AgentSession, rotated?: ChainReason,
+    { command, args }: { command: ChatCommand; args: string }, { id: chainId, name: chain }: ChainRow, key: ConversationKey | undefined, session: AgentSession, rotated?: ChainReason,
   ): Promise<Head | undefined> {
     const origin = { kind: "chat-command" as const, command };
     if (command === "new") {
@@ -301,7 +301,6 @@ export class MainChain {
       return undefined;
     }
     const { text, sessions, snapshot } = this.status(chainId);
-    const chain = this.deps.chains.get(chainId)?.name ?? chainId;
     await session.systemInput(`Chain: ${chain}\n\n${text}`, { ...origin, sessions, statusSnapshot: { ...snapshot, chain } }, "append");
     return undefined;
   }
