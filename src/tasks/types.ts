@@ -308,7 +308,7 @@ export const GOAL_STEP = "a goal's step, not its end";
 export interface OpenRun extends LedgerRun {
   title?: string;
   workers?: Record<TaskRunState, number>;
-  goal?: Pick<Goal, "step" | "round" | "cap" | "outcome" | "reason">;
+  goal?: Pick<Goal, "step" | "round" | "cap" | "outcome" | "reason" | "createdAt">;
 }
 
 /** Where an open item stands (`openStatus`, tasks/open-items.ts), first match:
@@ -333,6 +333,8 @@ export interface OpenItem {
   /** The first associated design that has not reported Design final, independent of status. */
   designSessionId?: string;
   waitsIn?: string;
+  /** When its first `<open>` was written, kept across stage updates and renames, started again by a reopen; absent on an item older than the record. */
+  openedAt?: number;
   /** The chain the item belongs to: on every row `TaskService.openItems` answers. */
   chain?: ItemChain;
 }

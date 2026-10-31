@@ -68,7 +68,7 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
       tracked.add(own?.targetSessionId ?? id);
       return own ? ledgerRun(newest(own.targetSessionId) ?? own) : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
     }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
-    return { problem: row.problem, stage: row.stage, runs: named };
+    return { problem: row.problem, stage: row.stage, runs: named, ...(row.openedAt === undefined ? {} : { openedAt: row.openedAt }) };
   });
   const unlisted = store.inFlightRuns().filter((r) => members.includes(r.invokedBySessionId ?? "") && !tracked.has(r.targetSessionId ?? r.id)).map(ledgerRun);
   const leads = store.leads();
@@ -89,7 +89,7 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
       ...r,
       ...(titles.get(r.targetSessionId ?? "") ? { title: titles.get(r.targetSessionId!) } : {}),
       ...(workers ? { workers: { ...workers } } : {}),
-      ...(goal ? { goal: { step: goal.step, round: goal.round, cap: goal.cap, outcome: goal.outcome, reason: goal.reason } } : {}),
+      ...(goal ? { goal: { step: goal.step, round: goal.round, cap: goal.cap, outcome: goal.outcome, reason: goal.reason, createdAt: goal.createdAt } } : {}),
     };
   };
   const session = { streaming: (id: string) => router.stateOf(id) === "streaming", designOpen: (id: string) => awaiting.has(id) };

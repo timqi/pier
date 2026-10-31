@@ -474,6 +474,12 @@ const MIGRATIONS: readonly string[] = [
     chain_id TEXT NOT NULL REFERENCES chains(id)
   );
   `,
+  // 42 — when an item's first `<open>` was written (tasks/store.ts `openItem`); an existing row
+  // takes its earliest run's queue time, null when none is in the ledger.
+  `
+  ALTER TABLE open_items ADD COLUMN opened_at INTEGER;
+  UPDATE open_items SET opened_at = (SELECT MIN(queued_at) FROM task_runs WHERE id IN (SELECT value FROM json_each(open_items.run_ids)));
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

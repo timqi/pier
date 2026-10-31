@@ -417,6 +417,9 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 .open-item-phrase { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .open-item-meta:not(.hidden) { display: inline; white-space: nowrap; }
 .open-item-meta::before { content: "·"; margin-inline: 0.25rem 0.375rem; color: var(--color-neutral-400); }
+.open-item-phrase:empty { display: none; }
+/* The age rides the stage line, not the metadata, so the rail, which hides the metadata, keeps it. */
+.open-item-age::before { content: "·"; margin-inline-end: 0.375rem; color: var(--color-neutral-400); }
 /* With a mouse the actions float over the row's right end on hover or focus, on
    the row's own hover plate, so the title has the whole width to read in. */
 @media (hover: hover) and (pointer: fine) {

@@ -138,7 +138,7 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
     { problem: "原始完整问题", title: "稳定标题", stage: "waiting on you: 是否合并？授权只限本分支。", status: "waiting on you", runs: [run("lead", { state: "succeeded", finishedAt: 0 })] },
     { problem: "merged", stage: "restart pending", status: "wrapping up", runs: [] },
     { problem: "gone", stage: "", status: "stopped", runs: [run("missing", { state: NOT_IN_LEDGER, targetSessionId: null })] },
-    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })] },
+    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0 },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(labels()).toEqual(["稳定标题", "free", "merged", "gone", "auth review", "Queued one", "queued"]);
@@ -155,6 +155,9 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(status("item:gone").className).toContain("text-red-600");
   expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");
+  // The age rides the stage line, outside the metadata the sidebar hides; an item with no opening time has none.
+  expect(item("item:auth").querySelector(".open-item-stage")!.querySelector(".open-item-age")!.textContent).toBe("open 10m");
+  expect(item("item:gone").querySelector(".open-item-age")!.classList.contains("hidden")).toBe(true);
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
   expect(panel().querySelectorAll(".row-status")).toHaveLength(0);
   const dot = (key: string) => item(key).querySelector(".open-item-dot")!;
@@ -447,7 +450,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   expect(shown("#rail-items-head")).toBe("Items");
   expect(rail().textContent).toContain("Nothing open");
   open = { items: [
-    { problem: "auth", stage: "", status: "running", runs: [], chain: c },
+    { problem: "auth", stage: "", status: "running", runs: [], chain: c, openedAt: Date.now() - 2 * 3_600_000 },
     { problem: "asks", stage: "", status: "waiting on you", runs: [], chain: { id: "b", name: "Ops", archived: false } },
   ], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
@@ -459,6 +462,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
   expect(railItem("item:a/auth")).not.toBe(item("item:a/auth"));
   expect(railItem("item:b/asks").querySelector(".open-item-chain")!.textContent).toBe("Ops");
+  expect(railItem("item:a/auth").querySelector(".open-item-age")!.textContent).toBe("open 2h");
   // A refresh keeps each surface's node.
   const before = [railItem("item:a/auth"), item("item:a/auth")];
   open = { ...open, items: [{ ...open.items[0]!, stage: "signing in" }, open.items[1]!] };

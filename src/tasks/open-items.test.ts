@@ -211,7 +211,7 @@ describe("the open items", () => {
     const r = rig();
     const now = r.now;
     const ends: [string, Partial<Goal>][] = [
-      ["live", { step: "review", round: 2 }],
+      ["live", { step: "review", round: 2, createdAt: now - 40 * MIN }],
       ["decision", { outcome: "decision", finishedAt: now }],
       ["cap", { step: "review", round: 3, outcome: "cap", finishedAt: now }],
       ["done", { step: "review", round: 1, outcome: "done", finishedAt: now }],
@@ -245,7 +245,8 @@ describe("the open items", () => {
     // An ended goal's ask is the waiting item's second line, not repeated below it.
     expect(status.snapshot.items.map((i) => [i.stage, i.metadata])).toEqual([
       // A waiting item reads how long it has waited, never "succeeded … ago".
-      ["worker building", ["review 3/3"]], ["1m · decision", []],
+      // A live goal's review runs elsewhere: its own time stands beside its wording.
+      ["worker building", ["review 3/3", "elapsed 40m"]], ["1m · decision", []],
       ["1m · review cap reached · findings remain", []], ["worker building", ["succeeded 1m ago", "review clean"]],
       ["worker building", ["succeeded 1m ago", "failed: no verdict"]], ["worker building", ["succeeded 1m ago"]],
       ["worker building", ["succeeded 1m ago", "merged"]],
@@ -263,7 +264,7 @@ describe("the open items", () => {
       saved("failed", { name: "First line\nSecond line", state: "failed", finishedAt: r.now - MIN }),
       saved("queued", { name: "Next work", state: "queued", queuedAt: r.now - MIN }),
     );
-    r.goal("root", { step: "review" });
+    r.goal("root", { step: "review", createdAt: r.now - 7 * MIN });
     r.item("original multi-run question", "Authorized scope", ["root", "failed", "queued"], 1);
     const status = openItemsStatus(r.list(), r.now);
     // The newest run, by queue time, stands for the rest: no line per run.
@@ -273,7 +274,7 @@ describe("the open items", () => {
     // The newest a goal's root under review elsewhere: its finish is not the item's time.
     r.item("root newest", "", ["failed", "root"], 2);
     r.save(saved("root", { name: "Reviewed work", targetSessionId: "root-session", state: "succeeded", queuedAt: r.now, finishedAt: r.now - MIN }));
-    expect(openItemsStatus(r.list(), r.now).snapshot.items[1]!.metadata).toEqual(["2 runs", "review 1/3"]);
+    expect(openItemsStatus(r.list(), r.now).snapshot.items[1]!.metadata).toEqual(["2 runs", "review 1/3", "elapsed 7m"]);
     const reason = "Approval needed\nOnly the current branch is authorized";
     r.goal("root", { outcome: "decision", reason, finishedAt: r.now });
     const decision = openItemsStatus(r.list(), r.now);
@@ -396,6 +397,30 @@ describe("the open items", () => {
     expect(r.store.markOpenItems([open("first", "a"), open("second", "b")], 1, "h1", "main").changed).toEqual([1, 1]);
     expect(r.store.markOpenItems([open("first", "a2"), { op: "done", problem: "never" }], 2, "h1", "main").changed).toEqual([1, 0]);
     expect(r.store.openItems("main").map((i) => [i.problem, i.stage])).toEqual([["first", "a2"], ["second", "b"]]);
+  });
+
+  // An item's age is its first <open>'s: a stage update, Pier's rename and an arrow keep it, a reopen starts it again.
+  it("keeps an item's opening time across updates, renames and arrows, and starts it again on a reopen", () => {
+    const r = rig();
+    const open = (problem: string, ...runIds: string[]) => ({ op: "open" as const, problem, stage: "", runIds });
+    const opened = () => r.store.openItems("main").map((i) => [i.problem, i.openedAt]);
+    r.store.markOpenItems([open("VM pairing", "rt1"), open("parser")], 10, "h1", "main");
+    r.store.markOpenItems([open("parser")], 20, "h1", "main");
+    r.store.markOpenItems([open("VM pairing, also logs", "rt1")], 30, "h1", "main");
+    expect(opened()).toEqual([["VM pairing, also logs", 10], ["parser", 10]]);
+    r.store.markOpenItems([{ op: "done", problem: "parser", to: "parsing" }, open("parsing")], 40, "h1", "main");
+    expect(opened()).toEqual([["VM pairing, also logs", 10], ["parsing", 10]]);
+    r.store.markOpenItems([{ op: "done", problem: "parsing" }], 50, "h1", "main");
+    r.store.markOpenItems([open("parsing"), open("new one")], 60, "h1", "main");
+    expect(opened()).toEqual([["VM pairing, also logs", 10], ["parsing", 60], ["new one", 60]]);
+    const status = openItemsStatus(r.list(), 60 + 2 * 60 * MIN);
+    // In text the age leads the metadata line.
+    expect(status.text).toContain("VM pairing, also logs · Stopped\nopen 2h · not in the ledger");
+    const shown = status.snapshot.items.map((i) => [i.problem, i.age]);
+    expect(shown).toEqual([["VM pairing, also logs", "open 2h"], ["parsing", "open 2h"], ["new one", "open 2h"]]);
+    // A row older than the record reads no age.
+    r.item("undated", "", [], 99);
+    expect(openItemsStatus(r.list(), r.now).snapshot.items.find((i) => i.problem === "undated")).not.toHaveProperty("age");
   });
 
   // The head restates an item's problem with the user's added asks: one run, one item.

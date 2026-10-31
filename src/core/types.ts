@@ -217,6 +217,8 @@ export interface OpenItemPresentation extends OpenItemTarget {
   statusLabel: string;
   stage: string;
   metadata: string[];
+  /** How long ago the item was first opened, `open 2h`; absent on a row with no opening time. */
+  age?: string;
 }
 
 export interface OpenItemsSnapshot {

@@ -63,7 +63,7 @@ export function statusLayout<E>(view: StatusView, layout: StatusLayout<E>): E[] 
     const heading = layout.heading(`${group.title} · ${String(group.items.length)}`);
     for (const [n, item] of group.items.entries()) {
       const row = layout.row({
-        title: item.title, tag: waitsOnYou(item.status) ? "" : item.statusLabel, stage: item.stage, waiting: waitsOnYou(item.status), meta: item.metadata.join(" · "),
+        title: item.title, tag: waitsOnYou(item.status) ? "" : item.statusLabel, stage: item.stage, waiting: waitsOnYou(item.status), meta: [item.age ?? "", ...item.metadata].filter(Boolean).join(" · "),
       });
       const pieces = n ? row : [...heading, ...row];
       const cost = layout.cost(pieces);

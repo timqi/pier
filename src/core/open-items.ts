@@ -11,6 +11,7 @@ interface Goal {
   cap: number;
   outcome: "done" | "decision" | "cap" | "failed" | null;
   reason: string | null;
+  createdAt: number;
 }
 
 type Run = LedgerRun & { workers?: Record<TaskRunState, number>; goal?: Goal };
@@ -22,13 +23,14 @@ interface Item {
   runs: Run[];
   designSessionId?: string;
   waitsIn?: string;
+  openedAt?: number;
 }
 
 const LABELS: Record<Item["status"], string> = {
   running: "", queued: "Queued", "waiting on you": "Needs you", "wrapping up": "Wrapping up", stopped: "Stopped",
 };
 
-export function goalText(g: Goal): string {
+export function goalText(g: Omit<Goal, "createdAt">): string {
   const review = `${Math.min(g.round + 1, g.cap)}/${g.cap}`;
   switch (g.outcome) {
     case "done": return g.step === "merge" ? "merged" : "review clean";
@@ -39,9 +41,11 @@ export function goalText(g: Goal): string {
   }
 }
 
+const since = (ts: number, now: number): string => relTime(ts, now).replace(/^now$/, "<1m");
+
 const time = (r: Run, now: number): string => {
   if (r.state === NOT_IN_LEDGER) return NOT_IN_LEDGER;
-  if (r.state === "queued" || r.state === "running") return `elapsed ${relTime(r.queuedAt, now).replace(/^now$/, "<1m")}`;
+  if (r.state === "queued" || r.state === "running") return `elapsed ${since(r.queuedAt, now)}`;
   return r.finishedAt === null ? r.state : `${r.state} ${agoLabel(r.finishedAt, now)}`;
 };
 
@@ -63,9 +67,9 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
   // A waiting item has waited since its newest run ended; that run's "succeeded … ago" would contradict the ask.
   const newest = runs[0];
   const waited = waiting && newest && newest.state !== NOT_IN_LEDGER && newest.finishedAt !== null
-    ? relTime(newest.finishedAt, now).replace(/^now$/, "<1m") : "";
+    ? since(newest.finishedAt, now) : "";
   const stage = [waiting && i.waitsIn ? "in the design session" : "", waited, asked || question].filter(Boolean).join(" · ");
-  // An ended root's time is no news while its goal's review runs elsewhere.
+  // An ended root's time is no news while its goal's review runs elsewhere: the goal's own elapsed time stands for it.
   const reviewing = (r: Run): boolean => r.goal?.outcome === null && r.state !== "running" && r.state !== "queued";
   const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) || waited ? [] : [time(runs[0]!, now)])] : [];
   for (const r of i.runs) {
@@ -73,12 +77,14 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
     if (i.runs.length === 1 && !reviewing(r) && !waited) metadata.push(time(r, now));
     const moved = !!asked && !!r.goal && goalAsk(r.goal) === asked;
     if (goal && goal !== "waiting on you" && !moved && !metadata.includes(goal)) metadata.push(goal);
+    if (r === runs[0] && reviewing(r) && !waited) metadata.push(`elapsed ${since(r.goal!.createdAt, now)}`);
     if (r.workers) {
       const important = Object.fromEntries(["running", "failed", "interrupted"].map((s) => [s, r.workers![s as TaskRunState]])) as Record<TaskRunState, number>;
       if (Object.values(important).some((n) => n > 0)) metadata.push(`workers: ${workerCounts(important)}`);
     }
   }
   return { key, problem: i.problem, title, status: i.status, statusLabel: LABELS[i.status], stage, metadata,
+    ...(i.openedAt === undefined ? {} : { age: `open ${since(i.openedAt, now)}` }),
     runs: runs.map(({ runId, targetSessionId }) => ({ runId, targetSessionId })),
     ...(i.designSessionId ? { designSessionId: i.designSessionId } : {}), ...(i.waitsIn ? { waitsIn: i.waitsIn } : {}) };
 }
@@ -113,7 +119,7 @@ export const UNMATCHED_DONE = "Unmatched done";
 export function openItemsText(snapshot: OpenItemsSnapshot): string {
   const owed = snapshot.unmatched?.length ? [`${UNMATCHED_DONE} · ${snapshot.unmatched.length}\n\n${snapshot.unmatched.join("\n")}`] : [];
   return openItemGroups(snapshot.items).map((g) => `${g.title} · ${g.items.length}\n\n${g.items.map((i) => [
-    [i.title, waitsOnYou(i.status) ? "" : i.statusLabel].filter(Boolean).join(" · "), i.stage, i.metadata.join(" · "),
+    [i.title, waitsOnYou(i.status) ? "" : i.statusLabel].filter(Boolean).join(" · "), i.stage, [i.age ?? "", ...i.metadata].filter(Boolean).join(" · "),
   ].filter(Boolean).join("\n")).join("\n\n")}`).concat(owed).join("\n\n") || NOTHING_OPEN;
 }
 
@@ -125,7 +131,7 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
   return record(value) && value.version === 1 && (value.unmatched === undefined || strings(value.unmatched)) && optional(value, "chain") && Array.isArray(value.items) && value.items.every((i: unknown) =>
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
-    && optional(i, "designSessionId") && optional(i, "waitsIn") && (i.direct === undefined || typeof i.direct === "boolean")
+    && optional(i, "designSessionId") && optional(i, "waitsIn") && optional(i, "age") && (i.direct === undefined || typeof i.direct === "boolean")
     && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
 }
 

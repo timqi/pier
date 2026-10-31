@@ -493,9 +493,9 @@ export class TaskStore {
 
   /** One chain's open items in creation order — an upsert keeps its place, a
    *  reopened item takes the end as if new (`openItem`); `runIds` as main wrote them. */
-  openItems(chainId: string): { problem: string; stage: string; runIds: string[] }[] {
-    return (this.sql("SELECT problem, stage, run_ids FROM open_items WHERE chain_id = ? AND closed_at IS NULL ORDER BY rowid").all(chainId) as { problem: string; stage: string; run_ids: string }[])
-      .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[] }));
+  openItems(chainId: string): { problem: string; stage: string; runIds: string[]; openedAt?: number }[] {
+    return (this.sql("SELECT problem, stage, run_ids, opened_at FROM open_items WHERE chain_id = ? AND closed_at IS NULL ORDER BY rowid").all(chainId) as { problem: string; stage: string; run_ids: string; opened_at: number | null }[])
+      .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[], ...(r.opened_at === null ? {} : { openedAt: r.opened_at }) }));
   }
 
   /** Items, closed included, of `chainId` or every chain, whose key or one alias holds every
@@ -568,14 +568,14 @@ export class TaskStore {
     this.transact(() => this.closeItem(chainId, key, now, [], new Set()));
   }
 
-  /** An upsert keeps its row's place; a closed key reopens as if new — its row inserted again, so it
-   *  takes the end of the rowid order, with its aliases and sessions. */
+  /** An upsert keeps its row's place and opening time; a closed key reopens as if new — its row inserted
+   *  again, so it takes the end of the rowid order, with its aliases and sessions, its age started again. */
   private openItem(chainId: string, m: { problem: string; stage: string; runIds: string[] }, now: number, touched: Set<string>): number {
     const { changed, absorbed } = this.claimRuns(chainId, m.problem, m.runIds, now);
     const prior = (this.sql("DELETE FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL RETURNING aliases, sessions").all(chainId, m.problem) as { aliases: string; sessions: string }[])[0];
-    const upserted = Number(this.sql(`INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at, aliases, sessions) VALUES (?, ?, ?, ?, ?, ?, ?)
+    const upserted = Number(this.sql(`INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at, aliases, sessions, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chain_id, problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
-      .run(chainId, m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]").changes);
+      .run(chainId, m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]", now).changes);
     // A key an `<open>` writes is its own item: no row, its own included, holds it as an alias — a reopened
     // key or a renamed item's old one — so its later close keeps its history reachable.
     this.sql(`UPDATE open_items SET aliases = (SELECT json_group_array(value) FROM json_each(aliases) WHERE value <> ?)
@@ -602,16 +602,18 @@ export class TaskStore {
     return changed;
   }
 
-  /** `into` takes `from`'s key, aliases and sessions, so its view reads `from`'s rows too. */
+  /** `into` takes `from`'s key, aliases and sessions, so its view reads `from`'s rows too, and the earlier
+   *  opening time of the two, so a renamed item keeps its age. */
   private absorb(chainId: string, into: string, from: string): void {
-    const row = (problem: string) => this.sql("SELECT aliases, sessions FROM open_items WHERE chain_id = ? AND problem = ?").get(chainId, problem) as { aliases: string; sessions: string } | undefined;
+    const row = (problem: string) => this.sql("SELECT aliases, sessions, opened_at FROM open_items WHERE chain_id = ? AND problem = ?").get(chainId, problem) as { aliases: string; sessions: string; opened_at: number | null } | undefined;
     const [to, old] = [row(into), row(from)];
     if (!to || !old) return;
     const union = (...lists: string[][]) => [...new Set(lists.flat())];
     const parsed = (json: string) => JSON.parse(json) as string[];
     const aliases = union(parsed(to.aliases), [from], parsed(old.aliases)).filter((k) => k !== into);
-    this.sql("UPDATE open_items SET aliases = ?, sessions = ? WHERE chain_id = ? AND problem = ?")
-      .run(JSON.stringify(aliases), JSON.stringify(union(parsed(to.sessions), parsed(old.sessions))), chainId, into);
+    const opened = [to.opened_at, old.opened_at].filter((t) => t !== null);
+    this.sql("UPDATE open_items SET aliases = ?, sessions = ?, opened_at = ? WHERE chain_id = ? AND problem = ?")
+      .run(JSON.stringify(aliases), JSON.stringify(union(parsed(to.sessions), parsed(old.sessions))), opened.length ? Math.min(...opened) : null, chainId, into);
   }
 
   /** A session is behind one item, its newest run standing for it as in open-items.ts `openItems`:

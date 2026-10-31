@@ -76,7 +76,8 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const tag = chainChip();
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
-  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase);
+  const age = h("span", "open-item-age flex-none text-neutral-500");
+  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase, age);
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
@@ -106,6 +107,8 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     if (a.reopen) column.append(reopen);
     else reopen.remove();
     reopen.onclick = a.reopen ?? null;
+    age.textContent = item.age ?? "";
+    age.classList.toggle("hidden", !item.age);
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
