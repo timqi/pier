@@ -170,6 +170,8 @@ export function openChains(): void {
   const anchor = deps.anchor();
   if (anchor.getAttribute("aria-expanded") === "true") return closeMenu();
   notice = null;
+  // A row's actions left open on the other surface do not open with this one.
+  actionsOf = null;
   const root = h("div", "chain-list w-[min(20rem,calc(100vw-2rem))] max-sm:w-full font-sans");
   floated = root;
   fill(root);
