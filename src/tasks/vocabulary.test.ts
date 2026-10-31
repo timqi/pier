@@ -41,8 +41,9 @@ const prose = (text: string): string =>
   text.replace(/`[^`]*`/g, " ").replace(/<\/?[a-z]+>/g, " ").replace(/--[a-z-]+/g, " ").replace(/\bHEAD\b/g, " ");
 
 // Banned for one concept, a word in its own right elsewhere: a run's task, an
-// item's stage, a scheduled report, "them" for things rather than the user.
-const OTHER_SENSE = new Set(["task", "stage", "report", "them"]);
+// item's stage, a scheduled report, "them" for things rather than the user, a
+// chain's session.
+const OTHER_SENSE = new Set(["task", "stage", "report", "them", "session"]);
 
 describe("the prompt vocabulary", () => {
   it("reads a banned word for every row that names one", () => {

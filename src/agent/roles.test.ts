@@ -25,11 +25,16 @@ describe("the dispatcher contract", () => {
   });
 
   it("names the markers core/reply.ts strips and the lines the callbacks carry", () => {
-    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<done>old → new</done>", "`[item: <problem>]`", "<topic>problem</topic>", "<note>line</note>", "<silent>"]) {
+    for (const syntax of ["<open>problem — stage (run <id>)</open>", "<done>problem</done>", "<done>old → new</done>", "`[item: <problem>]`", "<topic>problem</topic>", "<note>line</note>", "<note global>line</note>", "<silent>"]) {
       expect(DISPATCHER).toContain(syntax);
     }
     // tasks/open-items.ts reads an item as waiting on the user by this stage word.
     expect(DISPATCHER).toContain("`waiting on you: <question>`");
+    // The two memory layers core/chain.ts seeds and appends to, and the CLI's chain scope.
+    for (const path of ["`chains/<id>/MEMORY.md`", "`chains/<id>/memory/`", "`rg <q> memory chains/*/memory`", "`chains/*/MEMORY.md`", "`## Chains`", "`/chain <name>`", "`pier search --in chain:<name>`"]) {
+      expect(DISPATCHER).toContain(path);
+    }
+    expect(DISPATCHER).toContain("never open its item here");
     expect(DISPATCHER).toContain("A dispatch is `<silent>` beside its `<open>` marker, its run tag the receipt; one line only for a choice made for the user (model, context, scope) or a run that is long or needs them. A callback that only moves the stage is `<silent>`.");
     for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
       expect(DISPATCHER).toContain(line);
@@ -144,7 +149,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_650],
+    ["DISPATCHER", DISPATCHER, 1_780],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],

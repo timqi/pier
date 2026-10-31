@@ -58,7 +58,7 @@ The role contracts, `reviewPrompt`, `fixPrompt` and Pier's `[Pier: …]` notes u
 | --- | --- | --- |
 | user | the human in the conversation | them, the requester |
 | conversation | the continuous conversation: the main session and every session before it (`main_chain`) | series |
-| chain | one continuous conversation of its own: a name, its sessions, memory and items | — |
+| chain | one continuous conversation of its own: a name, its sessions, memory and items | session, topic, channel |
 | main session | the continuous conversation's current session, "you" in `DISPATCHER` | head (code and docs only), dispatcher |
 | supervisor | the session that launched a run and reads its result: the main session or a build lead | the agent that delegated it, parent |
 | run | one `pier task run` and the agent working it; `worker` or `lead` when the role matters | child, job |
