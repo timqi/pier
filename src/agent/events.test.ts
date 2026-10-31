@@ -518,9 +518,14 @@ describe("toChatTurns", () => {
     ])).toEqual([{ role: "system", text: "seed", origin, at: 1 }]);
   });
 
-  it("rebuilds an open-items note", () => {
+  it("rebuilds an open-items note, its snapshot kept or its error named", () => {
     expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items" }, timestamp: 1 }]))
       .toEqual([{ role: "system", text: "[Pier: …]", origin: { kind: "open-items" }, at: 1 }]);
+    const statusSnapshot = { version: 1, items: [] };
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items", statusSnapshot }, timestamp: 1 }]))
+      .toEqual([{ role: "system", text: "[Pier: …]", origin: { kind: "open-items", statusSnapshot }, at: 1 }]);
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items", statusSnapshot: { version: 2 } }, timestamp: 1 }])[0]!.origin)
+      .toEqual({ kind: "open-items", statusSnapshotError: expect.stringContaining("invalid snapshot") });
   });
 
   it("rebuilds a chat command's answer, and drops a command it does not know", () => {

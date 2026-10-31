@@ -19,7 +19,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { doneOld, openItems, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
+import { doneOld, openItems, openItemsStatus, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -232,8 +232,10 @@ export class TaskService {
             // By id: two chains' heads share the home chat, whose key names only one of them.
             const head = router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
             const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
+            // The keys the note lists, as rows for the web card; a stale note alone names no key.
+            const statusSnapshot = unmatched.length && keys.length ? { statusSnapshot: openItemsStatus(this.openItems(chainId), Date.now()).snapshot } : {};
             if (!head) failed("not attached");
-            else head.systemInput(notes.join("\n"), { kind: "open-items" }, "append").catch((err: unknown) => failed(String(err)));
+            else head.systemInput(notes.join("\n"), { kind: "open-items", ...statusSnapshot }, "append").catch((err: unknown) => failed(String(err)));
           }
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);

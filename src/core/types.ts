@@ -180,6 +180,10 @@ export type SystemInputOrigin = {
   /** Pier's answer to the head's own open-item markers — a `<done>` that closed
    *  nothing — appended without a turn, so the head's next prompt carries it. */
   kind: "open-items";
+  /** The chain's items as the note listed their keys; the web card draws them as the status panel's rows. */
+  statusSnapshot?: OpenItemsSnapshot;
+  /** A malformed optional snapshot leaves the original text readable. */
+  statusSnapshotError?: string;
 } | {
   /** The answer to a chat command the conversation took instead of the model
    *  (core/chain.ts), appended without a turn: the transcript shows it, and it

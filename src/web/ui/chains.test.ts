@@ -5,7 +5,13 @@ import { fake, FakeElement, installPage } from "./dom.testkit.js";
 
 const menu = vi.hoisted(() => ({
   panel: null as HTMLElement | null,
+  /** The row menu's items, by label, as the last ⋯ opened it. */
+  items: new Map<string, () => void>(),
   closeMenu: vi.fn(() => { menu.panel?.remove(); menu.panel = null; }),
+  openMenu: vi.fn((anchor: HTMLElement, items: { label: string; onSelect: () => void }[]) => {
+    anchor.setAttribute("aria-expanded", "true");
+    menu.items = new Map(items.map((i) => [i.label, i.onSelect]));
+  }),
   openPanel: vi.fn((_anchor: HTMLElement, content: HTMLElement) => {
     const panel = document.createElement("div");
     panel.append(content);
@@ -29,7 +35,7 @@ const refresh = vi.fn();
 const retitle = vi.fn();
 let chains: typeof import("./chains.js");
 const confirm = vi.fn(() => true);
-/** The sidebar's `pier.rail` and whether the viewport docks it (≥ 80rem). */
+/** The sidebar's `pier.rail` and whether the viewport docks it (≥ 64rem). */
 const stored = new Map<string, string>();
 let docked = true;
 
@@ -109,7 +115,10 @@ it("creates a chain inline, its refusal said under the field, and navigates to i
   input.focus();
   key(input, "Escape");
   expect(rail.querySelector("input")).toBeNull();
-  expect(button(rail, "New chain…")).toBeDefined();
+  // The rail's New chain is its Chains head's +; New chain… is the floated list's last row.
+  expect(button(rail, "New chain…")).toBeUndefined();
+  rail.querySelector("[aria-label='New chain']")!.onclick?.();
+  expect(rail.querySelector("input")).not.toBeNull();
 });
 
 // A row's ⋯: Rename in place; Archive asks with the open count, then forces, the pane leaving an archived current chain.
@@ -117,8 +126,10 @@ it("renames in place and archives after the open count's confirm", async () => {
   chains.openChains();
   const more = () => inRow("main", ".chain-more");
   more().onclick?.();
-  expect(more().getAttribute("aria-expanded")).toBe("true");
-  button(floated(), "Rename").onclick?.();
+  expect(menu.openMenu).toHaveBeenLastCalledWith(more(), expect.anything(), "main");
+  expect([...menu.items.keys()]).toEqual(["Rename…", "Archive"]);
+  // The menu took the floated list's panel; Rename… opens it again with the field in the row.
+  menu.items.get("Rename…")!();
   const input = floated().querySelector("input")!;
   expect(input.value).toBe("main");
   api.sendJson.mockResolvedValueOnce(Response.json(chain("main", { name: "Home" })));
@@ -132,21 +143,22 @@ it("renames in place and archives after the open count's confirm", async () => {
   api.sendJson
     .mockResolvedValueOnce(Response.json({ error: "chain: main has 3 open — /status first", open: 3 }, { status: 409 }))
     .mockResolvedValueOnce(Response.json(chain("main", { archivedAt: 9 })));
-  button(floated(), "Archive").onclick?.();
+  menu.items.get("Archive")!();
   await settled();
   expect(confirm).toHaveBeenCalledWith(expect.stringContaining("3 open items"));
   expect(api.sendJson).toHaveBeenLastCalledWith("/api/chains/main", { archived: true, force: true }, "PATCH");
   expect(go).toHaveBeenCalledWith("ops");
 
-  // Declined: nothing forced. The last active chain's refusal is said in the list.
+  // Declined: nothing forced. The last active chain's refusal is said in the list, opened again for it.
   confirm.mockReturnValueOnce(false);
   api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: ops has 1 open", open: 1 }, { status: 409 }));
+  chains.openChains(); // archiving succeeded with the menu in the list's place; the bar's title says so
   inRow("ops", ".chain-more").onclick?.();
-  button(floated(), "Archive").onclick?.();
+  menu.items.get("Archive")!();
   await settled();
   expect(api.sendJson).toHaveBeenCalledTimes(4);
   api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: ops is the last active chain" }, { status: 400 }));
-  button(floated(), "Archive").onclick?.();
+  menu.items.get("Archive")!();
   await settled();
   expect(floated().textContent).toContain("chain: ops is the last active chain");
 });
@@ -193,7 +205,7 @@ it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode o
   expect(go).toHaveBeenCalledTimes(3);
 });
 
-// One key for the sidebar: the docked rail where it is laid out, kept in pier.rail; the floated list below 80rem.
+// One key for the sidebar: the docked rail where it is laid out, kept in pier.rail; the floated list below 64rem.
 it("⌘B hides and shows the docked rail, remembered, and opens the floated list where there is no rail", () => {
   const rail = fake(document.querySelector("#chain-rail"));
   list = { ...list, mode: "session" };

@@ -80,7 +80,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
-  const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot,
+  const main = h("button", "session-open flex w-full min-w-0 items-start gap-2 text-left", dot,
     h("span", "min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, tag), stage, metadata));
   main.setAttribute("type", "button");
   const column = h("div", "min-w-0 flex-1", main);
@@ -152,7 +152,7 @@ export function closedItemRow(problem: string, closedAt: number, itemView: (prob
   const tag = chainChip();
   tag.textContent = chain ?? "";
   tag.classList.toggle("hidden", !chain);
-  const main = h("button", "session-open flex w-full min-w-0 items-start gap-1.5 text-left", dot, h("span", "min-w-0 flex-1",
+  const main = h("button", "session-open flex w-full min-w-0 items-start gap-2 text-left", dot, h("span", "min-w-0 flex-1",
     h("span", "flex items-start gap-1.5", h("span", "open-item-title block min-w-0 text-sm text-neutral-900", problem), tag),
     h("span", "open-item-meta block text-xs text-neutral-500", `closed ${agoLabel(closedAt)}`)));
   main.setAttribute("type", "button");

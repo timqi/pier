@@ -8,6 +8,7 @@ import { isChatCommand, isModelTier, isThinkingLevel, MAX_STEP_OUTPUT } from "..
 import type {
   ActivityStep,
   ChatTurn,
+  OpenItemsSnapshot,
   SessionEventPayload,
   SystemInputOrigin,
   SystemInputSource,
@@ -71,6 +72,15 @@ export function textOf(content: string | TextPart[] | undefined): string {
 }
 
 
+/** A status snapshot as written, or the error that keeps its card's text when it is malformed. */
+function snapshotOf(statusSnapshot: unknown): { statusSnapshot?: OpenItemsSnapshot; statusSnapshotError?: string } {
+  if (statusSnapshot === undefined) return {};
+  if (isOpenItemsSnapshot(statusSnapshot)) return { statusSnapshot };
+  const statusSnapshotError = "Status details unavailable — invalid snapshot; showing original text.";
+  logger("agent").warn(statusSnapshotError);
+  return { statusSnapshotError };
+}
+
 function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   if (message.role !== "custom" || message.customType !== "pier.system-input") return null;
   const value = message.details;
@@ -90,18 +100,9 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
     const links = sessions && typeof sessions === "object" && !Array.isArray(sessions) && Object.values(sessions).every((v) => typeof v === "string")
       ? { sessions: sessions as Record<string, string> }
       : {};
-    let snapshot = {};
-    if (command === "status" && statusSnapshot !== undefined) {
-      if (isOpenItemsSnapshot(statusSnapshot)) snapshot = { statusSnapshot };
-      else {
-        const statusSnapshotError = "Status details unavailable — invalid snapshot; showing original text.";
-        logger("agent").warn(statusSnapshotError);
-        snapshot = { statusSnapshotError };
-      }
-    }
-    return { kind: "chat-command", command, ...links, ...snapshot };
+    return { kind: "chat-command", command, ...links, ...(command === "status" ? snapshotOf(statusSnapshot) : {}) };
   }
-  if (origin.kind === "open-items") return { kind: "open-items" };
+  if (origin.kind === "open-items") return { kind: "open-items", ...snapshotOf(origin.statusSnapshot) };
   if (origin.kind === "restart") {
     const { at, downMs, taskId, runId, sourceSessionId } = origin;
     if (typeof at !== "number" || typeof downMs !== "number") return null;

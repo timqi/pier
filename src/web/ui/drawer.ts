@@ -1,6 +1,6 @@
 // The status panel: what needs you and what is running, led in the bar by its
 // most urgent row and listed in the panel that row opens — the open items and
-// the live sessions no item holds, one row each — and, from 80rem, the same
+// the live sessions no item holds, one row each — and, from 64rem, the same
 // rows as the sidebar's Items section.
 
 import { getJson, refused } from "./api.js";
@@ -248,13 +248,13 @@ let list: HTMLElement | null = null;
 let rows: HTMLElement[] = [];
 let ordered: OpenItemPresentation[] = [];
 /** The sidebar's Items section (index.html): its head, its list and its own copy of the rows,
- *  filled by every render — hidden below 80rem and in session mode, where the fill is harmless. */
+ *  filled by every render — hidden below 64rem and in session mode, where the fill is harmless. */
 const railItems = $("#rail-items");
 const railHead = h("p", "rail-head", "Items");
 railHead.id = "rail-items-head"; // the section's `aria-labelledby`
 const railList = h("ul", "");
 railList.dataset.list = ""; // the arrows' walk, by section (chains.ts)
-const railEmpty = h("p", "px-3 py-1 text-sm text-neutral-500", "Nothing open");
+const railEmpty = h("p", "rail-empty", "Nothing open");
 let railRows: HTMLElement[] = [];
 /** The last rail Close's refusal, atop its list until the next Close. */
 let railError: HTMLElement | null = null;

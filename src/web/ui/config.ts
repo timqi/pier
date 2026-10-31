@@ -13,6 +13,7 @@ import { consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, BAND, btn, CONTROL, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
+import { commandKey } from "./shortcut.js";
 import { configSyncPane, MANAGED_NOTE } from "./config-sync.js";
 import { createRegistry, isBuiltIn, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
@@ -525,7 +526,7 @@ export function createConfigView(
     view.onclick = () => void showRead();
     save.onclick = () => void doSave();
     editor.onkeydown = (ev) => {
-      if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") {
+      if (commandKey(ev) && ev.key === "s") {
         ev.preventDefault();
         void doSave();
       }

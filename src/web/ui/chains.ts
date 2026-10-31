@@ -1,11 +1,11 @@
 // The chain list (docs/plans/30-multi-chain.md §列表): one set of rows, floated
 // from the bar's title and docked as the wide screen's left rail.
 
-import { Ellipsis } from "lucide";
+import { Ellipsis, Plus } from "lucide";
 import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { icon } from "./icons.js";
-import { closeMenu, listStep, openPanel, walkRows } from "./menu.js";
+import { closeMenu, listStep, openMenu, openPanel, walkRows } from "./menu.js";
 import { chord, modalOpen } from "./shortcut.js";
 import type { ChainInfo, ChainList, ChainOpen } from "../types.js";
 
@@ -34,7 +34,10 @@ const railChains = $("#rail-chains");
 export const SIDEBAR_KEY = "b";
 /** `off` while ⌘B has hidden the docked rail; absent is shown, the default. */
 const RAIL = "pier.rail";
-const DOCKED = "(width >= 80rem)";
+/** Where the reading column and the sidebar both fit: `--read-w` 46rem + two
+ *  `--col-pad` of 1rem + the 16rem rail. A media query reads no custom property,
+ *  so style.css carries the same number; change the three together. */
+const DOCKED = "(width >= 64rem)";
 /** The floated list's root while it is open. */
 let floated: HTMLElement | null = null;
 
@@ -43,8 +46,6 @@ let floated: HTMLElement | null = null;
 let pending: string | null = null;
 let creating: { value: string; error?: string } | null = null;
 let renaming: { id: string; value: string; error?: string } | null = null;
-/** The row whose ⋯ actions are showing. */
-let actionsOf: string | null = null;
 let archivedOpen = false;
 /** A refused archive or unarchive, said where it was asked. */
 let notice: string | null = null;
@@ -60,8 +61,9 @@ function dotOf(c: ChainInfo): HTMLElement {
   return dot;
 }
 
-const ROW = "chain-row group flex items-start gap-1 rounded-md";
-const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left";
+const ROW = "chain-row group flex items-center";
+/** The dot slot stays on an idle row: it puts every name on the items' text line. */
+const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left";
 const SMALL = "cursor-pointer rounded-md px-2 py-1 text-[0.8125rem] text-neutral-600 hover:bg-(--row-hover)";
 
 function field(value: string, label: string, save: (v: string) => void, edit: (v: string) => void, cancel: () => void): HTMLInputElement {
@@ -80,14 +82,15 @@ function field(value: string, label: string, save: (v: string) => void, edit: (v
   return input;
 }
 
-const error = (text: string): HTMLElement => h("p", "px-2.5 pt-1 text-xs text-red-600", text);
+const error = (text: string): HTMLElement => h("p", "px-2 pt-1 text-xs text-red-600", text);
 
-function row(c: ChainInfo): HTMLElement {
+/** A row in `root`; a redraw keeps the ⋯ an open menu is anchored to, so Esc still finds it. */
+function row(c: ChainInfo, root: HTMLElement): HTMLElement {
   const li = h("li", ROW);
   li.dataset.chain = c.id;
   if (renaming?.id === c.id) {
     const r = renaming;
-    li.append(h("div", "min-w-0 flex-1 px-1 py-1",
+    li.append(h("div", "min-w-0 flex-1 px-2 py-0.5",
       // Forced: the focus is still in the field, which an unforced draw leaves alone.
       field(r.value, `Rename ${c.name}`, (name) => void rename(c, name), (v) => { r.value = v; }, () => { renaming = null; draw(true); }),
       ...(r.error ? [error(r.error)] : [])));
@@ -98,41 +101,45 @@ function row(c: ChainInfo): HTMLElement {
   pick.setAttribute("type", "button");
   if (c.id === deps.current()) pick.setAttribute("aria-current", "page");
   pick.onclick = () => choose(c.id);
-  const more = h("button", "chain-more icon-btn h-9 w-9 flex-none text-neutral-500", icon(Ellipsis, "h-3.5 w-3.5"));
+  const more = root.querySelector<HTMLElement>(`[data-chain="${c.id}"]`)?.querySelector<HTMLElement>('.chain-more[aria-expanded="true"]')
+    ?? h("button", "chain-more icon-btn text-neutral-500", icon(Ellipsis, "h-3.5 w-3.5"));
   more.setAttribute("type", "button");
   more.setAttribute("aria-label", `Actions for ${c.name}`);
-  more.setAttribute("aria-expanded", String(actionsOf === c.id));
-  more.onclick = () => { actionsOf = actionsOf === c.id ? null : c.id; draw(true); };
-  const body = h("div", "min-w-0 flex-1", h("div", "flex items-start", pick, more));
-  if (actionsOf === c.id) {
-    const ren = h("button", SMALL, "Rename");
-    ren.onclick = () => { renaming = { id: c.id, value: c.name }; actionsOf = null; draw(true); focusField(); };
-    const arch = h("button", SMALL, "Archive");
-    arch.onclick = () => void archive(c);
-    body.append(h("div", "flex gap-1 px-1.5 pb-1.5", ren, arch));
-  }
-  li.append(body);
+  more.onclick = () => openMenu(more, [
+    { label: "Rename…", onSelect: () => { closeMenu(); renaming = { id: c.id, value: c.name }; reopen(root); focusField(); } },
+    { label: "Archive", onSelect: () => { closeMenu(); void archive(c, root); } },
+  ], c.name);
+  li.append(pick, more);
   return li;
+}
+
+/** The floated list is one panel with the row menu, so what the menu led to is shown by opening it again. */
+function reopen(root: HTMLElement): void {
+  if (root === rail) draw(true);
+  else openChains();
 }
 
 function archivedRow(c: ChainInfo): HTMLElement {
   const back = h("button", SMALL, "Unarchive");
   back.setAttribute("aria-label", `Unarchive ${c.name}`);
   back.onclick = () => void unarchiveRow(c);
-  return h("li", "flex items-center gap-2 px-2.5 py-1", h("span", "chain-name min-w-0 flex-1 text-sm text-neutral-500", c.name), back);
+  return h("li", "flex items-center gap-2 py-1 pl-8 pr-2", h("span", "chain-name min-w-0 flex-1 text-sm text-neutral-500", c.name), back);
 }
 
 /** The list into `root`: active rows by recency, New chain…, then the archived, folded. */
 function fill(root: HTMLElement): void {
-  const rows = h("ul", "", ...active().map(row));
+  const rows = h("ul", "", ...active().map((c) => row(c, root)));
   rows.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   if (pending) rows.prepend(h("li", `${ROW} opacity-60`, h("span", PICK, h("span", "h-2 w-2 flex-none"), h("span", "chain-name text-sm", pending))));
+  // One field for both surfaces, where the pending row is drawn: atop the rail's list, as a row at the floated list's end.
   const create = creating
-    ? h("div", "px-1 py-1", field(creating.value, "New chain name", (name) => void make(name),
+    ? h("div", "px-2 py-0.5", field(creating.value, "New chain name", (name) => void make(name),
       (v) => { if (creating) creating.value = v; }, () => { creating = null; draw(true); }), ...(creating.error ? [error(creating.error)] : []))
-    : h("button", `${SMALL} w-full px-2.5 py-2 text-left text-sm`, "New chain…");
+    : h("button", `${PICK} chain-new w-full text-sm text-neutral-600`,
+      // The dot's slot, the + centred on it, so the label sits on the names' line.
+      h("span", "flex h-2 w-2 flex-none items-center justify-center", icon(Plus, "h-3.5 w-3.5 flex-none")), "New chain…");
   if (!creating) create.onclick = () => startCreate();
-  const parts: HTMLElement[] = [rows, ...(notice ? [error(notice)] : []), create];
+  const parts: HTMLElement[] = [...(root === rail ? [create, rows] : [rows, create]), ...(notice ? [error(notice)] : [])];
   const old = archived();
   if (old.length) {
     const fold = h("button", `${SMALL} w-full text-left text-xs`, `Archived · ${old.length}`);
@@ -140,16 +147,21 @@ function fill(root: HTMLElement): void {
     fold.onclick = () => { archivedOpen = !archivedOpen; draw(true); };
     parts.push(h("hr", "my-1 border-neutral-200"), fold, ...(archivedOpen ? [h("ul", "", ...old.map(archivedRow))] : []));
   }
-  // The rail names its sections; the floated list is the chains alone.
+  // The rail names its sections, New chain the head's +; the floated list is the chains alone.
   if (root === rail) {
-    const head = h("p", "rail-head", "Chains");
-    head.id = "rail-chains-head"; // the section's `aria-labelledby`
-    railChains.replaceChildren(head, ...parts);
+    const label = h("span", "", "Chains");
+    label.id = "rail-chains-head"; // the section's `aria-labelledby`
+    const add = h("button", "icon-btn ml-auto", icon(Plus, "h-3.5 w-3.5"));
+    add.setAttribute("type", "button");
+    add.setAttribute("aria-label", "New chain");
+    add.title = "New chain";
+    add.onclick = () => startCreate();
+    railChains.replaceChildren(h("div", "rail-head", label, add), ...(creating ? parts : parts.slice(1)));
   }
   else root.replaceChildren(...parts);
 }
 
-/** Laid out and not fading: the rail is display:none below 80rem and off in session mode. */
+/** Laid out and not fading: the rail is display:none below 64rem and off in session mode. */
 const shown = (root: HTMLElement | null): root is HTMLElement =>
   !!root?.isConnected && !root.closest("[inert]") && root.getClientRects().length > 0;
 const typing = (root: HTMLElement): boolean => root.contains(document.activeElement) && document.activeElement?.localName === "input";
@@ -181,7 +193,7 @@ export const sidebarDocked = (): boolean => rail.hasAttribute("data-on") && wind
 
 /** ⌘B and the ⋯ menu's Sidebar: one key for "the sidebar" — the docked rail
  *  where it is laid out (its choice kept in `pier.rail`), the floated list below
- *  80rem. Nothing in session mode, which has no chains to list. */
+ *  64rem. Nothing in session mode, which has no chains to list. */
 export function toggleSidebar(): void {
   if (deps.list()?.mode !== "chain") return;
   if (!window.matchMedia(DOCKED).matches) return openChains();
@@ -198,7 +210,6 @@ const focusField = (): void => (shown(floated) ? floated : rail).querySelector<H
 /** The current chain too: from Settings or an item view, its row is the way back to the conversation. */
 function choose(id: string): void {
   closeMenu();
-  actionsOf = null;
   deps.go(id);
 }
 
@@ -207,8 +218,6 @@ export function openChains(): void {
   const anchor = deps.anchor();
   if (anchor.getAttribute("aria-expanded") === "true") return closeMenu();
   notice = null;
-  // A row's actions left open on the other surface do not open with this one.
-  actionsOf = null;
   const root = h("div", "chain-list w-[min(20rem,calc(100vw-2rem))] max-sm:w-full font-sans");
   floated = root;
   fill(root);
@@ -216,7 +225,7 @@ export function openChains(): void {
   root.querySelector<HTMLElement>("[aria-current]")?.focus({ preventScroll: true });
 }
 
-/** New chain…'s field; ⌘⇧O opens the list on it when no list is on screen. */
+/** The field of New chain… and the Chains head's +; ⌘⇧O opens the list on it when no list is on screen. */
 function startCreate(): void {
   creating = { value: "" };
   if (!shown(floated) && !shown(rail)) openChains();
@@ -252,18 +261,18 @@ async function rename(c: ChainInfo, name: string): Promise<void> {
   deps.refresh();
 }
 
-/** Open items ask first (§归档): the server says how many, the confirm repeats it. */
-async function archive(c: ChainInfo): Promise<void> {
+/** Open items ask first (§归档): the server says how many, the confirm repeats it.
+ *  A refusal is said on the surface that asked, the floated list reopened for it. */
+async function archive(c: ChainInfo, root: HTMLElement): Promise<void> {
   notice = null;
   let res = await sendJson(`/api/chains/${c.id}`, { archived: true }, "PATCH");
   if (res.status === 409) {
     const { error: why, open } = (await res.json()) as { error: string; open?: number };
-    if (open === undefined) return say(why);
+    if (open === undefined) return say(why, root);
     if (!window.confirm(`Archive ${c.name}? It has ${open} open item${open === 1 ? "" : "s"}; they stay in the status panel, tagged archived.`)) return;
     res = await sendJson(`/api/chains/${c.id}`, { archived: true, force: true }, "PATCH");
   }
-  if (!res.ok) return say(await failure(res, "Could not archive the chain"));
-  actionsOf = null;
+  if (!res.ok) return say(await failure(res, "Could not archive the chain"), root);
   deps.refresh();
   // The pane leaves an archived chain for the first one, as `/chain archive` does.
   const next = active().filter((x) => x.id !== c.id).sort((a, b) => a.createdAt - b.createdAt)[0];
@@ -284,7 +293,8 @@ async function unarchiveRow(c: ChainInfo): Promise<void> {
   if (why) say(why);
 }
 
-function say(text: string): void {
+function say(text: string, root: HTMLElement = rail): void {
+  if (root !== rail && !shown(floated)) openChains();
   notice = text;
   draw(true);
 }
@@ -330,6 +340,6 @@ export function initChains(d: ChainsDeps): void {
   chord("shift+]", () => cycle(1), modalOpen);
   chord("shift+o", startCreate, modalOpen);
   chord(SIDEBAR_KEY, toggleSidebar, modalOpen);
-  // A window resized across 80rem docks or floats the list; the title follows.
+  // A window resized across 64rem docks or floats the list; the title follows.
   window.matchMedia(DOCKED).addEventListener("change", () => { draw(); deps.docked(); });
 }

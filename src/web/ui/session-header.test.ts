@@ -162,7 +162,7 @@ it("titles the conversation by its chain in chain mode, the title opening the ch
   expect(chains.openChains).toHaveBeenCalledOnce();
   // With the sidebar docked the list is already on screen: a plain heading — an <h1>, not a disabled button.
   const button = title();
-  // Docked by crossing 80rem with the floated list open from it: the list closes, the focus moves to the heading.
+  // Docked by crossing 64rem with the floated list open from it: the list closes, the focus moves to the heading.
   const { closeMenu } = await import("./menu.js");
   vi.mocked(closeMenu).mockClear();
   button.setAttribute("aria-expanded", "true");

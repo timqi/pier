@@ -12,7 +12,7 @@ import { splitItem, splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLang
 import { highlightCode } from "./highlight.js";
 import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, plainText, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { openItemsCard } from "./open-items.js";
-import type { OpenItemTarget } from "../../core/types.js";
+import type { OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
 import { button } from "./form.js";
 import { refreshSuggestions, renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
@@ -547,6 +547,23 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
   return [meta, text.slice(at + 2)];
 }
 
+/** An open-items note is written for the head — `[Pier: …]`, markers as tags, keys as a dash list —
+ *  and is read here without its brackets, the tags as code, and the keys as the status panel's
+ *  rows when the snapshot carries them; without it the list stays as text. */
+function openItemsNote(text: string, snapshot?: OpenItemsSnapshot): HTMLElement {
+  const lines = text.replace(/^\[Pier: /gm, "").replace(/\]$/gm, "").split("\n").filter((l) => !(snapshot && l.startsWith("- ")));
+  const note = runBody("");
+  lines.forEach((line, i) => {
+    if (i) note.append("\n");
+    for (const part of line.split(/(<(?:done|open)>.*?<\/(?:done|open)>|<\/?(?:done|open)>)/)) {
+      if (part) note.append(part.startsWith("<") ? h("code", "rounded bg-neutral-200/60 px-1 text-neutral-700", part) : part);
+    }
+  });
+  const wrap = h("div", "", note);
+  if (snapshot?.items.length) wrap.append(openItemsCard(snapshot, deps));
+  return wrap;
+}
+
 function noteCallbackCwd(cwd: string | undefined): void {
   if (cwd) callbackCwds = [cwd, ...callbackCwds.filter((c) => c !== cwd)];
 }
@@ -566,6 +583,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   // A result is the child's reply, so it reads as one; what was sent stays as sent.
   const content = origin.kind === "chat-command" && origin.statusSnapshot
     ? openItemsCard(origin.statusSnapshot, deps)
+    : origin.kind === "open-items" ? openItemsNote(body, origin.statusSnapshot)
     : origin.kind === "task-callback" ? h("div", "mt-1.5") : runBody(body);
   const glyphEl = (): HTMLElement | SVGElement => (state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`));
   const labelCls = state ? STATE_STYLE[state].label : cls;

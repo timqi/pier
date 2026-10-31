@@ -5,11 +5,15 @@
 
 import { h } from "./dom.js";
 
-// Only the label depends on it; both modifiers are accepted, because a Linux
-// browser on a Mac keyboard is a real thing.
+// The platform's one command key: ⌘ on Apple, Ctrl elsewhere. The other is
+// never a chord here — on a Mac bare ⌃B in the composer is emacs's
+// backward-char, and a global chord taking it would swallow it.
 const APPLE = /Mac|iP(?:hone|ad|od)/.test(navigator.userAgent);
 const MOD = APPLE ? "⌘" : "Ctrl+";
 const SHIFT = APPLE ? "⇧" : "Shift+";
+
+/** Whether the platform's command key, and no other, is held. */
+export const commandKey = (ev: KeyboardEvent): boolean => (APPLE ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey);
 
 // `"k"` or `"shift+o"`.
 const parse = (spec: string): { key: string; shift: boolean } =>
@@ -126,7 +130,7 @@ export function chord(spec: string, run: () => void, unless?: () => boolean): vo
       if (!ev.key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
       const pressed = ev.key.toLowerCase();
       if (pressed !== key && pressed !== shifted) return;
-      if (!ev.metaKey && !ev.ctrlKey) return;
+      if (!commandKey(ev)) return;
       if (unless?.()) return;
       ev.preventDefault();
       ev.stopPropagation();

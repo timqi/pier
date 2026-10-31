@@ -106,7 +106,17 @@ it("shows a /status snapshot's unmatched <done> keys, and an open-items note as 
   chat.appendSystemInput("[Pier: <done>x</done> closed no open item.]", { kind: "open-items" });
   expect(card().dataset.kind).toBe("system");
   expect(card().textContent).toContain("open items");
-  expect(card().textContent).toContain("closed no open item");
+  // Read, not as written for the head: no brackets, the marker as code.
+  expect(card().textContent).toContain("<done>x</done> closed no open item.");
+  expect(card().textContent).not.toContain("[Pier:");
+  expect(card().querySelector("code")!.textContent).toBe("<done>x</done>");
+  // With the snapshot the listed keys are the status panel's rows, the dash list gone.
+  const note = "[Pier: <done>x</done> closed no open item. Resend <done> with one of these keys exactly:\n- fix parser]";
+  chat.appendSystemInput(note, { kind: "open-items" });
+  expect(card().textContent).toContain("- fix parser");
+  chat.appendSystemInput(note, { kind: "open-items", statusSnapshot: { version: 1, items: [openItemPresentation({ problem: "fix parser", title: "fix parser", stage: "", runs: [], status: "running" }, 0)] } });
+  expect(card().textContent).not.toContain("- fix parser");
+  expect(card().querySelector(".open-items-card")!.querySelector(".open-item-title")!.textContent).toBe("fix parser");
 });
 
 it("renders every card of a version-1 snapshot written with per-run details", () => {

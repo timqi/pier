@@ -648,9 +648,9 @@ describe("the open items", () => {
     end("h0", "");
     expect(workspace).toEqual(["open-items-changed"]);
     expect(warn).toHaveBeenCalledWith("open items: <done> named no open item: never open");
-    // The unmatched key reaches the head's next prompt at once, with the keys it may resend, and stays in /status and the seed.
+    // The unmatched key reaches the head's next prompt at once, with the keys it may resend — the web card's rows — and stays in /status and the seed.
     const h0 = sessions.get("h0")!;
-    expect(h0.systemInputs).toEqual([{ mode: "append", origin: { kind: "open-items" },
+    expect(h0.systemInputs).toEqual([{ mode: "append", origin: { kind: "open-items", statusSnapshot: expect.objectContaining({ version: 1, items: [expect.objectContaining({ problem: "open items" })] }) },
       text: "[Pier: <done>never open</done> closed no open item. Resend <done> with one of these keys exactly:\n- open items]" }]);
     expect(service.unmatchedDone("main")).toEqual(["never open"]);
     const owed = openItemsStatus(service.openItems(), 1, service.unmatchedDone("main"));
