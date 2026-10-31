@@ -6,7 +6,7 @@
 import { cut } from "../core/reply.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
-import { otherCounts, statusLabel, statusLayout, type StatusRow, type StatusView } from "./status.js";
+import { otherCounts, statusLabel, statusLayout, type OtherChain, type StatusRow, type StatusView } from "./status.js";
 
 /** Slack caps `markdown` blocks at 12,000 cumulative chars per message. */
 export const MARKDOWN_MAX = 11_000;
@@ -160,15 +160,31 @@ function statusRow(r: StatusRow): SlackBlock[] {
   return [section(`*${field(r.title)}*${tag}${stage}`), ...(meta ? [context(meta)] : [])];
 }
 
+// mrkdwn has no escape for its markers, so a name's own `_`/`*` become lookalikes that cannot close the label's italic.
+const unmarked = (s: string): string => s.replace(/_/g, "\u02cd").replace(/\*/g, "\u2217");
+
+/** One context block, so whole lines up to its 3000 chars and the rest counted: a cut line would leave its `*` open. */
+function otherChains(chains: OtherChain[]): SlackBlock {
+  let text = "Other chains";
+  for (const [n, c] of chains.entries()) {
+    const line = `\n*${field(c.name)}*${c.archived ? "  `archived`" : ""} · ${otherCounts(c)}`;
+    const rest = `\n… ${String(chains.length - n)} more`;
+    if (text.length + line.length + (n < chains.length - 1 ? rest.length : 0) > MRKDWN_MAX) return context(text + rest);
+    text += line;
+  }
+  return context(text);
+}
+
 /** The open items as the web sidebar lays them out in Block Kit, under the
  *  plain text Slack shows where blocks are not rendered (notifications). */
 export const statusMessage = (view: StatusView): { text: string; blocks: SlackBlock[] } => {
-  const label = `_${escapeMrkdwn(statusLabel(view))}_`;
+  const chain = view.snapshot.chain;
+  const label = `_${escapeMrkdwn(statusLabel(chain === undefined ? view : { ...view, snapshot: { ...view.snapshot, chain: unmarked(chain) } }))}_`;
   return { text: `${label}\n${escapeMrkdwn(cut(view.text, MRKDWN_MAX))}`, blocks: [context(label), ...statusLayout<SlackBlock>(view, {
     heading: (text) => [context(`*${escapeMrkdwn(text)}*`)],
     row: statusRow,
     more: (n) => [context(`… ${String(n)} more`)],
-    others: (chains) => [context(["Other chains", ...chains.map((c) => `*${field(c.name)}*${c.archived ? "  `archived`" : ""} · ${otherCounts(c)}`)].join("\n"))],
+    others: (chains) => [otherChains(chains)],
     cost: (blocks) => blocks.length,
     // Slack's 50 blocks, less the label and the closing count.
     max: 48,

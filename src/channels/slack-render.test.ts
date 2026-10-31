@@ -213,6 +213,8 @@ describe("statusMessage", () => {
     const sent = statusMessage({ text: "", snapshot: { version: 1, items: [item("Docs", "queued", "")], chain: "a<b" } });
     expect(sent.blocks.slice(0, 2)).toEqual([context("_▤ open items · a&lt;b_"), context("*In progress · 1*")]);
     expect(sent.text.split("\n")[0]).toBe("_▤ open items · a&lt;b_");
+    const marked = statusMessage({ text: "", snapshot: { version: 1, items: [], chain: "my_chain*" } });
+    expect(marked.blocks[0]).toEqual(context("_▤ open items · my\u02cdchain\u2217_"));
   });
 
   // docs/plans/30-multi-chain.md §IM
@@ -222,6 +224,16 @@ describe("statusMessage", () => {
       { name: "Old", waiting: 1, inProgress: 0, archived: true },
     ] });
     expect(sent.blocks.at(-1)).toEqual(context("Other chains\n*Design* · 1 waiting · 2 in progress\n*Old*  `archived` · 1 waiting · 0 in progress"));
+  });
+
+  it("keeps the other chains' block within Slack's 3000 chars, whole lines and the rest counted", () => {
+    const others = Array.from({ length: 20 }, (_, i) => ({ name: `${String(i)}${"x".repeat(1000)}`, waiting: 1, inProgress: 0, archived: false }));
+    const block = statusMessage({ ...view([]), others }).blocks.at(-1)!;
+    const text = (block as { elements: { text: string }[] }).elements[0]!.text;
+    expect(text.length).toBeLessThanOrEqual(3000);
+    const lines = text.split("\n");
+    expect(lines.at(-1)).toBe(`… ${String(20 - (lines.length - 2))} more`);
+    expect(lines.slice(1, -1).every((l) => /^\*.*\* · 1 waiting · 0 in progress$/.test(l))).toBe(true);
   });
 
   it("stays within Slack's 50 blocks", () => {
