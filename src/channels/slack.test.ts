@@ -1268,18 +1268,18 @@ describe("the home chat", () => {
   });
 
   it("a reply from a chain the DM switched away from opens on a grey chain line; its buttons name that chain", async () => {
-    speaker = { id: "d", name: "Design", away: true };
+    speaker = { id: "d", name: "Design", away: true, launched: [] };
     await channel.send(HOME, { text: "storage is done", suggestions: ["Ship"] });
     const away = client.sent.at(-1)!;
     expect(away.blocks?.[0]).toEqual({ type: "context", elements: [{ type: "mrkdwn", text: "chain · Design" }] });
     expect(JSON.stringify(away.blocks)).toContain('"value":"d"');
-    speaker = { id: "main", name: "Main", away: false };
+    speaker = { id: "main", name: "Main", away: false, launched: [] };
     await channel.send(HOME, { text: "hi", suggestions: [] });
     expect(JSON.stringify(client.sent.at(-1)!.blocks)).not.toContain("chain ·");
   });
 
   it("a main-flow button goes to the chain that offered it, not the DM's current one", async () => {
-    speaker = { id: "d", name: "Design", away: true };
+    speaker = { id: "d", name: "Design", away: true, launched: [] };
     await channel.send(HOME, { text: "which?", suggestions: ["Deploy"] });
     const offer = client.sent.at(-1)!;
     await feed(interaction({
@@ -1411,9 +1411,27 @@ describe("the home chat", () => {
       await channel.send(HOME, splitReply("<silent>dispatched</silent>\n<open>parser — worker running (run r1)</open>", meta));
       expect(client.sent).toHaveLength(1);
       expect(JSON.stringify(client.sent[0]!.blocks)).toContain("stayed silent — dispatched");
+      // A silent turn that started a run is the run's receipt, the name escaped for mrkdwn.
+      speaker = { id: "main", name: "Main", away: false, launched: [{ name: "fix <parser>", tier: "balanced" }] };
+      await feed(dm({ text: "and the lexer", ts: "2002.000101" }));
+      await channel.send(HOME, splitReply("<silent>dispatched</silent>", meta));
+      expect(client.sent).toHaveLength(2);
+      expect(JSON.stringify(client.sent[1]!.blocks)).toContain("_▶ fix &lt;parser&gt; · balanced_");
+      expect(JSON.stringify(client.sent[1]!.blocks)).not.toContain("stayed silent");
+      speaker = undefined;
       // Nothing booked: the turn answered a callback, and the card shows it.
       await channel.send(HOME, splitReply("<silent>stage moved</silent>\n<open>parser — review (run r1)</open>", meta));
       await channel.send(HOME, { text: "", suggestions: [], meta });
+      expect(client.sent).toHaveLength(2);
+      expect(client.reactions).toEqual([]);
+    });
+
+    it("`/new <text>` is booked as the message it carries; a bare `/new` is a command, booked by nothing", async () => {
+      await feed(dm({ text: "/new", ts: "2003.000100" }));
+      await channel.send(HOME, splitReply("<silent>nothing to add</silent>", meta));
+      expect(client.sent).toHaveLength(0);
+      await feed(dm({ text: "/new look at the lexer", ts: "2003.000200" }));
+      await channel.send(HOME, splitReply("<silent>dispatched</silent>", meta));
       expect(client.sent).toHaveLength(1);
       expect(client.reactions).toEqual([]);
     });

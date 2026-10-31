@@ -12,9 +12,11 @@ import type {
   AgentSession,
   ConversationKey,
   InboundMessage,
+  LedgerRun,
   ModelRef,
   SessionState,
   ThinkingLevel,
+  TurnMeta,
 } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
 import type { ChannelStore } from "./config.js";
@@ -72,18 +74,20 @@ export interface ChannelControl {
 }
 
 /** A main-flow reply's chain: its buttons carry `id`; `away` — the chat has switched
- *  from it — puts a grey `chain · <name>` line over the reply. */
+ *  from it — puts a grey `chain · <name>` line over the reply; `launched` the runs the
+ *  head started in the turn being delivered, a silent turn's footer. */
 export interface Speaker {
   id: string;
   name: string;
   away: boolean;
+  launched: Pick<LedgerRun, "name" | "tier">[];
 }
 
 /** The home chat's chains as its adapter needs them (docs/plans/30-multi-chain.md §IM),
  *  wired by runtime.ts, which owns the chat's pointer. */
 export interface HomeChains {
-  /** The chain whose head answers in the main flow now. */
-  speaker(): Speaker | undefined;
+  /** The chain whose head answers in the main flow now, with the runs it launched in `turn`. */
+  speaker(turn?: TurnMeta): Speaker | undefined;
   /** A tap on a main-flow message goes to the chain whose head offered it, not the chat's current one. */
   tap(msg: InboundMessage, chainId: string): void;
 }

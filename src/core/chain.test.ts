@@ -136,6 +136,25 @@ describe("the continuous conversation's chain", () => {
     expect(await r2.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
   });
 
+  it("counts idle from the later of the user's last message and the last reply that reached them", async () => {
+    const meta = (completedAt: number) => ({ completedAt, durationMs: 1000, tokens: 1 });
+    // Asked two hours ago; a callback's answer reached the user half an hour ago: a button pressed on it is the same subject.
+    const r = rig();
+    r.existing("h1", r.clock.now - 5 * IDLE_MS, { history: [
+      { role: "user", text: "ship it", at: r.clock.now - 2 * IDLE_MS },
+      { role: "assistant", text: "merge?\n---\n[Yes] | [No]", meta: meta(r.clock.now - IDLE_MS / 2) },
+    ] });
+    expect(await r.say("\u25b8 Yes")).toEqual({ sessionId: "h1", chainId: "main" });
+
+    // A silent turn reached no one: it does not keep the head.
+    const r2 = rig();
+    r2.existing("h1", r2.clock.now - 5 * IDLE_MS, { history: [
+      { role: "user", text: "ship it", at: r2.clock.now - 2 * IDLE_MS },
+      { role: "assistant", text: "<silent>stage moved</silent>", meta: meta(r2.clock.now - IDLE_MS / 2) },
+    ] });
+    expect(await r2.say("back")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
+  });
+
   it("carries the head's model and effort into the next session with the ledger since its start, not its subject", async () => {
     const runs: LedgerRun[] = [
       { runId: "r1", name: "fix", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: 1, finishedAt: null },
@@ -495,10 +514,27 @@ describe("the chat commands", () => {
     expect(await r.say("/NEW")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
     expect(r.chain.members("main")).toHaveLength(3);
 
-    r.sessions.get("m2")!.setState("streaming");
-    await expect(r.say("/new")).rejects.toThrow("the conversation is replying — /stop first");
-    expect(r.chain.members("main")).toHaveLength(3);
-    expect(r.sessions.get("m2")!.systemInputs.filter((i) => i.origin.kind === "chat-command")).toEqual([]);
+    // A replying head is stopped, then rotated: the reply was the old subject's.
+    const m2 = r.sessions.get("m2")!;
+    m2.setState("streaming");
+    expect(await r.say("/new")).toEqual({ sessionId: "m3", chainId: "main", rotated: "new" });
+    expect(m2.calls).toContain("abort");
+    expect(r.chain.members("main")).toHaveLength(4);
+    expect(m2.systemInputs.filter((i) => i.origin.kind === "chat-command")).toEqual([]);
+  });
+
+  it("rotates on `/new <text>` and sends the text to the next head as its first message", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now, { history: [{ role: "user", text: "earlier", at: r.clock.now }] });
+    r.clock.now += 1;
+    expect(await r.say("/new  what about caching?")).toEqual({ sessionId: "m1", chainId: "main", rotated: "new" });
+    const m1 = r.sessions.get("m1")!;
+    expect(m1.calls.map((c) => c.split(":").slice(0, 2).join(":"))).toEqual(["systemInput:session-seed", expect.stringMatching(/^prompt:/)]);
+    expect(m1.prompts[0]).toContain("what about caching?");
+    expect(m1.prompts[0]).not.toContain("/new");
+    expect(r.sessions.get("h1")!.prompts).toEqual([]);
+    // A message, not a note: it orders the chain list as the user's newest.
+    expect(r.chain.lastUserAt("main")).toBe(r.clock.now);
   });
 
   it("aborts the head's turn on `/stop` and says so, or says nothing was running", async () => {
@@ -513,6 +549,34 @@ describe("the chat commands", () => {
     await r.say("/stop");
     expect(h1.calls.at(-1)).toBe("systemInput:chat-command:append:nothing running");
     expect(h1.calls.filter((c) => c === "abort")).toHaveLength(1);
+  });
+
+  it("`/stop` counts the chain's runs still in flight: the head's turn stopped, not its work", async () => {
+    const run = (runId: string, finishedAt: number | null): LedgerRun => ({ runId, name: runId, state: finishedAt === null ? "running" : "succeeded", targetSessionId: null, cwd: null, queuedAt: 1, finishedAt });
+    const r = rig({ head: "h1", runs: [run("a", null), run("b", null), run("c", 5)] });
+    const h1 = r.existing("h1", r.clock.now, { hold: true });
+    await r.say("go");
+    await r.say("/stop");
+    expect(h1.systemInputs.at(-1)?.text).toBe("stopped \u00b7 2 runs still running");
+    expect(r.ledger.at(-1)).toEqual({ ids: ["h1"], since: r.clock.now });
+    await r.say("/stop");
+    expect(h1.systemInputs.at(-1)?.text).toBe("nothing running \u00b7 2 runs still running");
+
+    const r1 = rig({ head: "h1", runs: [run("a", null)] });
+    const one = r1.existing("h1", r1.clock.now, { hold: true });
+    await r1.say("go");
+    await r1.say("/stop");
+    expect(one.systemInputs.at(-1)?.text).toBe("stopped \u00b7 1 run still running");
+  });
+
+  it("names the runs a head launched in a turn, by the turn's start", async () => {
+    const runs: LedgerRun[] = [
+      { runId: "r1", name: "fix", state: "running", targetSessionId: null, cwd: null, queuedAt: 50, finishedAt: null, tier: "balanced" },
+      { runId: "r0", name: "older", state: "running", targetSessionId: null, cwd: null, queuedAt: 10, finishedAt: null },
+    ];
+    const r = rig({ runs });
+    expect(r.chain.launched("h1", 40)).toEqual([runs[0]]);
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: 40 }]);
   });
 
   it("lists the head's skills on `/skills`, one line each, or says there are none", async () => {

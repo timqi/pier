@@ -239,7 +239,7 @@ export interface OpenItemsStatus {
  *  the composer lists this table. */
 export const CHAT_COMMANDS = {
   status: "what is open — in flight, or waiting on you",
-  new: "start a new session now",
+  new: "start a new session now — or /new <text>, its first message",
   stop: "stop the reply in progress",
   skills: "the skills this session can run, by name",
   chain: "the chains — or /chain <name>, new <name>, rename <name>, archive",
@@ -250,15 +250,19 @@ export type ChatCommand = keyof typeof CHAT_COMMANDS;
 export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
 /** The command `text` is: only the exact word, the composer is not a shell —
- *  `chain` alone takes `args`, the rest of the line. The chain answers it
+ *  `chain` and `new` take `args`, the rest of the line. The chain answers it
  *  without a turn, so the composer paints none. */
 export function chatCommand(text: string): { command: ChatCommand; args: string } | undefined {
   const [, spelled, rest] = /^[/%](\S+)(?:\s+([\s\S]*))?$/.exec(text.trim()) ?? [];
   const command = spelled?.toLowerCase();
   const args = rest?.trim() ?? "";
-  if (!isChatCommand(command) || (args && command !== "chain")) return undefined;
+  if (!isChatCommand(command) || (args && command !== "chain" && command !== "new")) return undefined;
   return { command, args };
 }
+
+/** `/new <text>` is the one command a turn follows: `text` is the new head's first message. */
+export const commandStartsTurn = (command: { command: ChatCommand; args: string }): boolean =>
+  command.command === "new" && command.args !== "";
 
 /** `/<word> <rest>` or `%<word> <rest>` (also `/skill:<word>`), a word of two
  *  characters at least. Groups: `skill:`, word, rest. */
@@ -319,6 +323,8 @@ export interface LedgerRun {
   finishedAt: number | null;
   /** An agent run's context: `peak <n>% of the compaction point, <k> compactions`. */
   context?: string;
+  /** The menu tier the launch resolved its model from, where recorded (`RunModel.tier`). */
+  tier?: ModelTier;
 }
 
 /** The `state` of an open item's run token that names no stored run; its `name` is the id. */

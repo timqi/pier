@@ -43,7 +43,7 @@ export class LarkOutbound {
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
     const meta = reply.meta ? formatTurnMeta(reply.meta) : "";
-    const quiet = isSilentReply(reply) ? quietLabel(reply.silence) : "";
+    const quiet = isSilentReply(reply) ? quietLabel(reply.silence, speaker?.launched) : "";
     const note = [quiet, meta].filter(Boolean).join(" · ");
     if (!(text || reply.suggestions.length || note || paths.length)) return;
     // An empty root is a main-flow button, which only the home chat has (lark.ts onAction).

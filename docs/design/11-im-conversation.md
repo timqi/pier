@@ -43,7 +43,7 @@ for a threaded message in the home chat, and nothing else per message.
   the message's key and dispatches to it (the head is attached under it, below)
   instead of the `web:` alias, so the speaker header carries the place
   (`[qiqi<U…> 14:23 slack:D0…]`) and `pier slack` can reach the DM.
-- A `MainChain.send` that rejects (a refused `/new`, a seed that failed) is
+- A `MainChain.send` that rejects (an archived chain, a seed that failed) is
   posted as an error note in the home chat (§5): the runtime catches it and
   calls `Channel.notify` with `{kind: "error"}`; the web's 4xx is not a surface
   the IM user sees.
@@ -161,7 +161,7 @@ thread half only for the home chat; any other is refused.
 
 | What | Renders as |
 | --- | --- |
-| the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded, `stayed silent — <reason>` / `no reply` (a silent main-flow reply: §Status) |
+| the head's reply | the turn: chunks, footer `45s · 32K tok`, `file://` links uploaded; a silent one `▶ <run name> · <tier>` per run the turn launched (`HomeChains.speaker(meta)`, the ledger from the turn's start; the tier where recorded), else `stayed silent — <reason>` / `no reply` (a silent main-flow reply: §Status) |
 | next-step buttons | the last chunk's row; a click on a main-flow message is the home's message: echo `▸ <label>` top-level, the receipt booked on the echo, the row retired (Lark: button value `root: ""` names the home), sent to the chain that offered it (§Chains) |
 | a task callback / delegation | main flow: nothing (logged at debug) unless the run failed, was cancelled or interrupted, which is posted as in a thread; the status message and the web timeline carry the rest. A thread of the home chat: the system note (`noteBody` digest, `↩ task callback` · `▶ delegated task`, each followed outside the emphasis by the run's `tier · model id · reasoning` where recorded), before the turn it triggers |
 | the seed | `↺ new session · <reason>` over the digest's first lines (`originLabel`, `session-seed`) |
@@ -230,9 +230,10 @@ final move.
   next refresh; moved across platforms, the old card stays until that adapter
   refreshes.
 - A silent main-flow turn that settled a booked message — the user's, or a
-  note posted before it — posts its `stayed silent — <reason>` footer, `<open>`
-  marker or not; one with nothing booked, a callback the status message
-  shows, posts nothing.
+  note posted before it — posts its footer, `<open>` marker or not: the runs it
+  launched as `▶ <run name> · <tier>` (the dispatch's receipt, since the main
+  flow posts no delegation note), else `stayed silent — <reason>`; one with
+  nothing booked, a callback the status message shows, posts nothing.
 - Every platform failure is logged with a `status:` prefix and never thrown
   into the hub.
 
@@ -252,8 +253,8 @@ empty) is dropped with a log line, never a command.
 | Command | The head (home chat, web) | A thread of any other chat |
 | --- | --- | --- |
 | `/status` | the head's open items (`MainChain.send`); in the home chat's main flow the status message re-posted at the bottom is the one answer, the note only when nothing is open or the re-post failed | prose |
-| `/new` | the next head now; a streaming head refuses (`the conversation is replying — /stop first`) | prose |
-| `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running` | aborts the thread's session: `⏹ Stopped.` |
+| `/new` · `/new <text>` | the next head now, a streaming head stopped first; with `<text>`, that sent to it as its first message (booked as a message, its receipt the turn's) | prose |
+| `/stop` | aborts the head's turn, children untouched: `stopped` · `nothing running`, then ` · <N> run(s) still running` while the chain has runs in flight | aborts the thread's session: `⏹ Stopped.` |
 | `/skills` | one `<name> — <description>` line per skill (§Skill commands by prefix) | the same, for the thread's session |
 | `/chain` | the chains, the current marked `✓`, archived last (`MainChain.send`) | prose |
 | `/chain <name>` · `new <name>` · `rename <name>` · `archive` | switch (unique prefix) · create and switch · rename the current · archive the current, refused with open items; a switch answers `↔ chain · <name>` (§Chains) | prose |

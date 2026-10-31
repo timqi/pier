@@ -12,9 +12,9 @@ import { logger } from "../log.js";
 import { day, minute, userLanguage, withLanguage } from "./identity.js";
 import { ChainArchived, type ChainRow, type Chains } from "./chains.js";
 import { chainCounts } from "./open-items.js";
-import { cut, openItemMarkers, replyTopic } from "./reply.js";
+import { cut, isSilentReply, openItemMarkers, replyTopic, splitReply } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand, commandStartsTurn } from "./types.js";
 import type {
   AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItemsStatus,
 } from "./types.js";
@@ -68,10 +68,6 @@ const WHY: Record<ChainReason, string> = {
   new: "you asked for one with /new",
 };
 
-/** A `/new` sent to a head mid-reply: a 409 to the composer, never a card the
- *  head's queue would only deliver after the turn it refuses for. */
-export class ChatCommandRefused extends Error {}
-
 type Head = { session: AgentSession; rotated?: ChainReason };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
@@ -84,6 +80,11 @@ function previousSession(id: string, turns: ChatTurn[]): string {
   if (at === undefined) return `session ${id}, last on ${item}`;
   return `session ${id}, last on ${item} at ${minute(at)}\nreplay: \`pier search --in ${id} --around "${minute(at)}"\``;
 }
+
+/** When the user was last in the exchange: their message's arrival, or the completion of a reply they saw. */
+const exchangedAt = (t: ChatTurn): number | undefined =>
+  t.role === "user" ? t.at
+    : t.role === "assistant" && t.meta && !isSilentReply(splitReply(t.text)) ? t.meta.completedAt : undefined;
 
 const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
@@ -238,11 +239,20 @@ export class MainChain {
       return { chainId, answer: this.chainCommand(command.args, chainId) };
     }
     if (chain.archivedAt !== null) throw new ChainArchived(chain.name);
-    if (command) return this.serial(chainId, key, (session, rotated) => this.command(command, chain, key, session, rotated));
+    if (command && !commandStartsTurn(command)) return this.serial(chainId, key, (session, rotated) => this.command(command, chain, key, session, rotated));
     this.lastUser.set(chainId, this.now());
-    return this.serial(chainId, key, async (session) => {
-      await this.deps.router.dispatch({ ...message, key: key ?? webKey(session.id) });
+    return this.serial(chainId, key, async (session, rotated) => {
+      // `/new <text>`: the next head, then `text` as its first message.
+      const head = command ? await this.command(command, chain, key, session, rotated) : undefined;
+      const next = head?.session ?? session;
+      await this.deps.router.dispatch({ ...message, ...(command ? { text: command.args } : {}), key: key ?? webKey(next.id) });
+      return head;
     });
+  }
+
+  /** The runs `sessionId` launched at or after `since`: what a head's turn started. */
+  launched(sessionId: string, since: number): LedgerRun[] {
+    return this.deps.ledger([sessionId], since).filter((r) => r.queuedAt >= since);
   }
 
   /** `/chain <name>`, `/chain new <name>` and `/chain archive` answer with the chain
@@ -282,8 +292,9 @@ export class MainChain {
   ): Promise<Head | undefined> {
     const origin = { kind: "chat-command" as const, command };
     if (command === "new") {
-      if (session.state === "streaming") throw new ChatCommandRefused("the conversation is replying — /stop first");
       if (rotated) return undefined;
+      // A reply in progress is the old subject's: stopped, not waited for.
+      if (session.state === "streaming") await session.abort();
       return { session: await this.rotate(chainId, "new", key, this.members(chainId)[0], session), rotated: "new" };
     }
     if (command === "chain") {
@@ -297,7 +308,10 @@ export class MainChain {
     if (command === "stop") {
       const running = session.state === "streaming";
       if (running) await session.abort();
-      await session.systemInput(running ? "stopped" : "nothing running", origin, "append");
+      // The chain's runs go on: a stop that looks total would be read as one.
+      const runs = this.deps.ledger(this.members(chainId).map((m) => m.sessionId), this.now()).filter((r) => r.finishedAt === null).length;
+      const still = runs ? ` · ${String(runs)} run${runs === 1 ? "" : "s"} still running` : "";
+      await session.systemInput(running ? `stopped${still}` : `nothing running${still}`, origin, "append");
       return undefined;
     }
     const { text, sessions, snapshot } = this.status(chainId);
@@ -361,8 +375,10 @@ export class MainChain {
       return { session: await this.rotate(chainId, "lost", key, head), rotated: "lost" };
     }
     const session = await this.deps.router.ensure(webKey(head.sessionId));
-    // A head with no user message yet counts from its start: its seed is not the user speaking.
-    const spoke = (await session.history()).reduce((at, t) => (t.role === "user" && t.at ? t.at : at), head.startedAt);
+    // Idle counts from the last exchange the user was in: their message, or a reply
+    // that reached them — a callback's answer too, so a button pressed on it is not a new subject.
+    // A head with neither yet counts from its start: its seed is not the user speaking.
+    const spoke = (await session.history()).reduce((at, t) => Math.max(at, exchangedAt(t) ?? 0), head.startedAt);
     if (session.state === "streaming") return { session };
     if (this.now() - spoke >= CHAIN_IDLE_MS) return { session: await this.rotate(chainId, "idle", key, head, session), rotated: "idle" };
     // Unknown right after a compaction: that head is small again, not full.

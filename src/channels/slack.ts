@@ -13,7 +13,7 @@ import type {
   InboundMessage,
   NoteOrigin,
 } from "../core/types.js";
-import { chatCommand } from "../core/types.js";
+import { chatCommand, commandStartsTurn } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
@@ -277,8 +277,8 @@ export class SlackChannel implements Channel {
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
     // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
-    const answered = home && chatCommand(text) !== undefined;
-    if (!answered) this.receipts.mark(here.conversationId, channel, ts);
+    const chat = home ? chatCommand(text) : undefined;
+    if (!chat || commandStartsTurn(chat)) this.receipts.mark(here.conversationId, channel, ts);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({
       key: here,
@@ -504,7 +504,7 @@ export class SlackChannel implements Channel {
     }
     const main = !to.threadTs;
     // Read before any await: the router names the head this reply is from only until the next send.
-    const speaker = main ? this.deps.home?.speaker() : undefined;
+    const speaker = main ? this.deps.home?.speaker(reply.meta) : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only when it settled a message of the user's.

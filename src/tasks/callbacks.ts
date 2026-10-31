@@ -52,7 +52,8 @@ const handoffLine = (handoff: TaskRun["handoff"]): string[] => handoff ? [`New s
 /** A run as `pier task runs` prints it. */
 export const ledgerRun = (run: TaskRun): LedgerRun => {
   const context = contextNote(run);
-  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt, ...(context ? { context } : {}) };
+  const { tier } = runModel(run);
+  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd: runCwd(run), queuedAt: run.queuedAt, finishedAt: run.finishedAt, ...(context ? { context } : {}), ...(tier ? { tier } : {}) };
 };
 
 /** What a callback's card says about the one run it carries. */

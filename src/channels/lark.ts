@@ -15,7 +15,7 @@ import type {
   InboundMessage,
   NoteOrigin,
 } from "../core/types.js";
-import { chatCommand } from "../core/types.js";
+import { chatCommand, commandStartsTurn } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { skillsText } from "../core/chain.js";
@@ -260,8 +260,8 @@ export class LarkChannel implements Channel {
     const body = [text, ...markers].filter(Boolean).join("\n");
     const said = msg.parentId && !msg.threadId && !/^[/%]/.test(text) ? await this.quoted(msg.parentId, body) : body;
     // The head answers a chat command with a note, not a turn: nothing would settle its receipt.
-    const answered = home && chatCommand(text) !== undefined;
-    if (!answered) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
+    const chat = home ? chatCommand(text) : undefined;
+    if (!chat || commandStartsTurn(chat)) this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
     // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({ key: here, senderId, sender, text: said, mode: "steer" });
   }
@@ -537,7 +537,7 @@ export class LarkChannel implements Channel {
     }
     const main = "chatId" in to;
     // Read before any await: the router names the head this reply is from only until the next send.
-    const speaker = main ? this.deps.home?.speaker() : undefined;
+    const speaker = main ? this.deps.home?.speaker(reply.meta) : undefined;
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, async (settles) => {
       // The home's quiet turn says so only when it settled a message of the user's.

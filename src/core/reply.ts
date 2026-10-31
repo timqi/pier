@@ -83,10 +83,12 @@ function cjkFriendly(markdown: string): string {
   });
 }
 
-/** The reason arrives pre-escaped: each surface escapes for its own markup,
- *  and the label itself contains nothing any of them escape. */
-export const quietLabel = (silence?: string): string =>
-  silence ? `stayed silent — ${silence}` : "no reply";
+/** What a silent turn has to say: the runs it started — `▶ <name> · <tier>` each, a
+ *  dispatch's receipt where no run tag is posted — else which kind of nothing it was.
+ *  The surface escapes the result for its markup; nothing of the label's own is escaped by any. */
+export const quietLabel = (silence?: string, launched: Pick<LedgerRun, "name" | "tier">[] = []): string =>
+  launched.length ? launched.map((r) => `▶ ${[r.name, r.tier].filter(Boolean).join(" · ")}`).join(", ")
+    : silence ? `stayed silent — ${silence}` : "no reply";
 
 /** Options count as a reply: a turn that is only its buttons is not "nothing". */
 export const isSilentReply = (reply: { text: string; suggestions: string[] }): boolean =>

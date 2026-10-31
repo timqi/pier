@@ -1,6 +1,6 @@
 import { goalText } from "./open-items.js";
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, openItemMarkers, originLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
+import { compact, formatTurnMeta, openItemMarkers, originLabel, quietLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -93,6 +93,13 @@ describe("staying silent", () => {
 
   it("leaves an unclosed tag alone rather than eating the reply", () => {
     expect(splitReply("<silent>oops").text).toBe("<silent>oops");
+  });
+
+  it("labels a quiet turn by the runs it started, else by which kind of nothing it was", () => {
+    expect(quietLabel()).toBe("no reply");
+    expect(quietLabel("two humans")).toBe("stayed silent \u2014 two humans");
+    expect(quietLabel("dispatched", [{ name: "fix the parser", tier: "balanced" }])).toBe("\u25b6 fix the parser \u00b7 balanced");
+    expect(quietLabel(undefined, [{ name: "a", tier: "cheap" }, { name: "b" }])).toBe("\u25b6 a \u00b7 cheap, \u25b6 b");
   });
 
   it("still reads a tag the model salted with zero-width characters", () => {

@@ -55,7 +55,8 @@ truth.
 - `/status` alone in the composer answers with the open items — each problem,
   its stage and its runs — with no model call; the web's status panel shows
   the same list under what is running or queued. `/new` starts
-  a fresh session now, `/stop` stops the reply in progress.
+  a fresh session now (`/new <text>` with `<text>` as its first message),
+  `/stop` stops the reply in progress.
 
 ## Files and images the user sends
 
@@ -85,10 +86,10 @@ truth.
   `/word` is a message. The commands (this list mirrors
   `docs/design/11-im-conversation.md` §Chat commands):
   - `/status` — the head's open items; prose in a thread.
-  - `/new` — the next head now; refused while the head is replying; prose in
-    a thread.
-  - `/stop` — aborts the head's turn (children untouched), or the thread's
-    session.
+  - `/new` — the next head now, a replying head stopped first; `/new <text>`
+    sends `<text>` to it as its first message; prose in a thread.
+  - `/stop` — aborts the head's turn (children untouched), saying how many of
+    its runs still run; or the thread's session.
   - `/skills` — one `<name> — <description>` line per skill of the session
     asked, head or thread.
   - `/settings` — the panel on a thread; prose in the home chat.

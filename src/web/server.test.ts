@@ -2634,7 +2634,7 @@ describe("the continuous conversation's routes", () => {
     expect(factory.create).not.toHaveBeenCalled();
   });
 
-  it("answers `/new` with the rotation and a replying head's refusal as a 409", async () => {
+  it("answers `/new` with the rotation, a replying head stopped first, and `/new <text>` with the text sent to the next head", async () => {
     const { sessions, workspace, post } = chainRig();
     await post("/api/continuous/messages", { text: "one" });
     const fresh = await post("/api/continuous/messages", { text: "/new" });
@@ -2642,9 +2642,11 @@ describe("the continuous conversation's routes", () => {
     expect(await fresh.json()).toEqual({ sessionId: "m2", chainId: "main", rotated: "new" });
     expect(workspace).toContain("sessions-changed");
     sessions.get("m2")!.setState("streaming");
-    const refused = await post("/api/continuous/messages", { text: "/new" });
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toEqual({ error: "the conversation is replying \u2014 /stop first" });
+    const stopped = await post("/api/continuous/messages", { text: "/new next subject" });
+    expect(stopped.status).toBe(202);
+    expect(await stopped.json()).toEqual({ sessionId: "m3", chainId: "main", rotated: "new" });
+    expect(sessions.get("m2")!.calls).toContain("abort");
+    expect(sessions.get("m3")!.prompts.map((p) => p.includes("next subject"))).toEqual([true]);
   });
 
   it("reads an earlier session off disk without opening it, and refuses to edit it", async () => {

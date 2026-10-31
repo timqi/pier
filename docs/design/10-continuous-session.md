@@ -171,7 +171,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 | Event | Rule |
 | --- | --- |
-| User message, head ≥ 1h (`CHAIN_IDLE_MS`) since its last user message, or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
+| User message, head ≥ 1h (`CHAIN_IDLE_MS`) since the user was last in the exchange — the later of its last user message and the completion of its last reply that reached them (a non-silent turn, a callback's answer included) — or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the seed pointing at where the previous head left off; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`, at the next send or the next web read of the head; the gone head leaves `main_chain` |
 | Rotation | every new head (`first`, rotation, `/new`) starts on the Settings default model and reasoning, read then; an unset one keeps the previous head's (`first`/`lost`: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn), and joins `main_chain` only once that lands |
@@ -180,7 +180,9 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
   one at a time per chain, so a race rotates once and chains never wait on
-  each other; idle counts from the chain's own last user message, `/new`
+  each other; idle counts from the chain's own last exchange — the user's
+  message or the reply they saw, so a button pressed on a callback's answer
+  hours after the last question stays in the session that asked; `/new`
   rotates the current chain.
 - Compaction, decided at open (`agent/pi.ts`): a
   session in the home at 100K, a worker's at 180K, a lead's at 200K (the
@@ -301,23 +303,25 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 The seam is `/status`'s (`MainChain.send`, exact word, `chat-command` system
 input, mode `append`, no turn, shown at once even while the head replies and
-recorded after that turn; only `/chain` takes words after it, §Chains); an unknown `/word` is a message, never an
+recorded after that turn; only `/chain` and `/new` take words after it, §Chains); an unknown `/word` is a message, never an
 error: the composer is not a shell.
 
 The commands, their spelling (`/` or `%`) and what each answers on the head
 and in a thread are [11 §Chat commands](11-im-conversation.md#chat-commands).
 `/new` rotates with reason `new` (the seed without the previous session's
 line, so it is the user's way to change the subject; the divider names it); a head
-the send already rotated for its own reason is not rotated twice; the answer
-is the new head's seed card, and a streaming head's refusal is
-the send's 409, shown as the composer's error row.
+the send already rotated for its own reason is not rotated twice; a streaming
+head is aborted first, never waited for; the answer is the new head's seed
+card. `/new <text>` is the same rotation with `text` dispatched to the new
+head as its first message — a message, not a command: it carries a receipt
+and orders the chain list (`commandStartsTurn`, `core/types.ts`).
 
 - The word list is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
   composer's completion shows; `chatCommand` (`core/types.ts`), the transcript
   rebuild (`agent/events.ts`) and the completion
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)) all read it.
-- Tests: `core/chain.test.ts` (`/new`, `/stop`), `web/server.test.ts` (the
-  409), `web/ui/composer.test.ts` (the completion).
+- Tests: `core/chain.test.ts` (`/new`, `/new <text>`, `/stop`), `web/server.test.ts` (the
+  route), `web/ui/composer.test.ts` (the completion).
 
 ## Run ledger
 

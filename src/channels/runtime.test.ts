@@ -90,6 +90,8 @@ const switches = new Map<string, Row>();
 let pointer: string | undefined;
 /** The session the fake router says the home chat was last handed a reply from. */
 let replying: string | undefined;
+/** What the runtime asked the fake chain for: the head and the turn's start. */
+const launchedAsked: [string, number][] = [];
 
 function runtime(config: Record<string, unknown>, log: (m: string) => void = () => {}): ChannelRuntime {
   const store = {
@@ -135,6 +137,10 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
       return chainId && { chainId, members: [sessionId] };
     },
     heads: () => Object.entries(heads).map(([chainId, sessionId]) => ({ chainId, sessionId })),
+    launched: (sessionId: string, since: number) => {
+      launchedAsked.push([sessionId, since]);
+      return [{ runId: "r1", name: "fix", state: "running", targetSessionId: null, cwd: null, queuedAt: since, finishedAt: null, tier: "balanced" }];
+    },
   } as unknown as MainChain;
   const control = {
     isHome: (key: ConversationKey) => key.conversationId.startsWith("D1"),
@@ -295,15 +301,18 @@ describe("ChannelRuntime", () => {
       await rt.stop();
     });
 
-    it("names the chain of the head whose reply the chat is handed, away once the chat switched from it", async () => {
+    it("names the chain of the head whose reply the chat is handed, away once the chat switched from it, with the turn's launches", async () => {
       const rt = await live();
       expect(homeChains!.speaker()).toBeUndefined();
       replying = "head";
-      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: false });
+      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: false, launched: [] });
       pointer = "d";
-      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: true });
+      expect(homeChains!.speaker()).toEqual({ id: "main", name: "Main", away: true, launched: [] });
       replying = "head-d";
-      expect(homeChains!.speaker()).toEqual({ id: "d", name: "Design", away: false });
+      expect(homeChains!.speaker()).toEqual({ id: "d", name: "Design", away: false, launched: [] });
+      // The runs the head launched since the turn began, asked of the chain by the turn's own span.
+      expect(homeChains!.speaker({ completedAt: 10_000, durationMs: 4_000, tokens: 1 })).toMatchObject({ launched: [{ name: "fix", tier: "balanced" }] });
+      expect(launchedAsked).toEqual([["head-d", 6_000]]);
       replying = "a-thread-session";
       expect(homeChains!.speaker()).toBeUndefined();
       await rt.stop();

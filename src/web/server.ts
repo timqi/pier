@@ -10,7 +10,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
-import { ChatCommandRefused, type MainChain } from "../core/chain.js";
+import type { MainChain } from "../core/chain.js";
 import { ChainAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainInvalid, type ChainRow } from "../core/chains.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
@@ -727,7 +727,7 @@ export function createServer(
     } catch (err) {
       // A refused `/chain` is the user's to fix, said as the command line would say it.
       if (err instanceof ChainInvalid) return c.json({ error: err.message }, 400);
-      if ([ChatCommandRefused, SkillAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainAmbiguous].some((E) => err instanceof E)) {
+      if ([SkillAmbiguous, ChainArchived, ChainExists, ChainHasOpen, ChainAmbiguous].some((E) => err instanceof E)) {
         return c.json({ error: (err as Error).message }, 409);
       }
       throw err;

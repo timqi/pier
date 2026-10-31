@@ -202,7 +202,7 @@ pier task runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]
 ```
 
 Any session, a delegated run's included (§Two levels, no tree). Receipt: a
-JSON array of `LedgerRun` (`core/types.ts`), an agent run's with its `context` (§Continuing a run), the runs the caller launched —
+JSON array of `LedgerRun` (`core/types.ts`), an agent run's with its `context` (§Continuing a run) and its `tier` where the launch named one, the runs the caller launched —
 every chain member's, for a member of the head; every run, for a delegated
 run's — in
 flight plus finished within `--since` (default 24h), only the `--state`s given,

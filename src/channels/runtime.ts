@@ -6,7 +6,7 @@ import type { ChainRow } from "../core/chains.js";
 import { chainCounts } from "../core/open-items.js";
 import { splitReply } from "../core/reply.js";
 import { Refused, type Router } from "../core/router.js";
-import type { Channel, InboundMessage, NoteOrigin, OpenItemsView } from "../core/types.js";
+import type { Channel, InboundMessage, NoteOrigin, OpenItemsView, TurnMeta } from "../core/types.js";
 import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl, HomeChains, Speaker } from "./control.js";
@@ -112,7 +112,7 @@ export class ChannelRuntime {
       log: (m) => this.log(`${platform}: ${m}`),
       control: this.control,
       home: {
-        speaker: () => this.speaker(platform),
+        speaker: (turn) => this.speaker(platform, turn),
         tap: (msg, chainId) => this.toHead(channel, msg, chainId),
       },
     });
@@ -176,13 +176,15 @@ export class ChannelRuntime {
   }
 
   /** The chain of the head whose reply the home chat's adapter was just handed. */
-  private speaker(platform: ChannelPlatform): Speaker | undefined {
+  private speaker(platform: ChannelPlatform, turn?: TurnMeta): Speaker | undefined {
     const home = this.store.home();
     if (home?.platform !== platform) return undefined;
     const session = this.router.replyingOn({ channelId: platform, conversationId: home.chatId });
     const of = session === undefined ? undefined : this.chain.chainOf(session);
     const row = of && this.chain.chains.get(of.chainId);
-    return row && { id: row.id, name: row.name, away: row.id !== this.current().id };
+    if (!row || !session) return undefined;
+    const launched = turn ? this.chain.launched(session, turn.completedAt - turn.durationMs) : [];
+    return { id: row.id, name: row.name, away: row.id !== this.current().id, launched };
   }
 
   live(platform: ChannelPlatform): boolean {
