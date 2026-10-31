@@ -361,8 +361,13 @@ async function closeItem(problem: string, chain: string, from: Surface): Promise
   closeError = railError = null;
   found = found?.filter((r) => r.dataset.rowKey !== key) ?? null;
   renderDrawer();
-  // Focus stays in the list for the keys' walk: on the row that took the closed one's place.
-  if (focused && root?.isConnected) (root.children[at] ?? root.lastElementChild)?.querySelector("button")?.focus({ preventScroll: true });
+  // Focus stays in the list for the keys' walk: on the row that took the closed one's place. The rail's
+  // last row leaves its list for `Nothing open`, so the current chain's row above takes it.
+  if (focused) {
+    const to = root?.isConnected ? (root.children[at] ?? root.lastElementChild)?.querySelector("button")
+      : from === "rail" ? $("#rail-chains").querySelector<HTMLElement>("[aria-current]") ?? $("#rail-chains").querySelector("button") : null;
+    to?.focus({ preventScroll: true });
+  }
   const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
   if (refusal === undefined) return;
   closing.delete(key);

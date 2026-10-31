@@ -500,3 +500,20 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   expect(railRows()).toEqual(["solo"]);
   expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
 });
+
+// The rail's last row closed leaves `Nothing open` and no list to keep the focus in: the current chain's row above takes it.
+it("moves the focus to the current chain's row when the rail's last item row closes", async () => {
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ closed: "auth" }) })));
+  const chainRow = doc.createElement("button");
+  chainRow.setAttribute("aria-current", "page");
+  doc.querySelector("#rail-chains")!.append(chainRow);
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  drawer.renderDrawer();
+  const close = rail().querySelector("[data-row-key='item:a/auth']")!.querySelector(".item-close")!;
+  close.focus();
+  close.onclick?.();
+  expect(rail().textContent).toContain("Nothing open");
+  expect(doc.activeElement).toBe(chainRow);
+});
