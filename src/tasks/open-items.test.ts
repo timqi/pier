@@ -708,6 +708,20 @@ describe("the open items", () => {
     expect(open()).toEqual(["login v2", "logout"]);
     expect(workspace).toHaveLength(2);
     expect(h0.systemInputs).toHaveLength(2);
+
+    // The panel's Close racing the head's own `<done>`: the key already closed is the answer, nothing told.
+    expect(service.closeItem("main", "deploy", 4, true)).toBe("deploy");
+    expect(workspace).toHaveLength(2);
+    expect(h0.systemInputs).toHaveLength(2);
+    // The head's `<done>` of what the user closed first agrees with them: no resend asked, nothing owed.
+    h0.emit({ type: "turn-end", text: "Done.\n<done>Login</done><done>deploy</done>" });
+    expect(h0.systemInputs).toHaveLength(2);
+    expect(service.unmatchedDone("main")).toEqual([]);
+    // A user's close settles what an ambiguous `<done>` of it owed.
+    h0.emit({ type: "turn-end", text: "<open>dup: a</open><open>dup: b</open><done>dup</done>" });
+    expect(service.unmatchedDone("main")).toEqual(["dup"]);
+    service.closeItem("main", "dup: a", 5);
+    expect(service.unmatchedDone("main")).toEqual([]);
   });
 
   it("writes each chain's head into its own chain: a key matches only there, and the list names each item's chain", () => {

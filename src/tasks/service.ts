@@ -120,6 +120,9 @@ export class TaskService {
   private readonly goals: TaskGoals;
   /** Per chain, the head's `<done>` keys that closed nothing, each until a `<done>` closes the item it names; in memory only. */
   private readonly unmatched = new Map<string, string[]>();
+  /** Per chain, the newest keys the user closed (`closeItem`): a head's `<done>` of one, written before it
+   *  read the note, agrees with the user and is no miss; in memory only. */
+  private readonly userClosed = new Map<string, string[]>();
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
@@ -204,7 +207,9 @@ export class TaskService {
       if (chainId !== undefined && instance.continuous.isHead(sessionId)) {
         try {
           const answered = opened?.kind === "task-callback" ? opened.runIds ?? [opened.runId] : [];
-          const { changed, closed, unmatched } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered);
+          const { changed, closed, unmatched: missed } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered);
+          const mine = this.userClosed.get(chainId) ?? [];
+          const unmatched = missed.filter((u) => !mine.some((k) => namesKey(doneOld(u), k)));
           const keys = store.openItems(chainId).map((i) => i.problem);
           // A head that keeps missing gets its latest few back; nothing open owes no resend.
           const owed = this.unmatchedDone(chainId).filter((u) => !closed.some((k) => namesKey(doneOld(u), k)));
@@ -432,16 +437,23 @@ export class TaskService {
 
   /** The user's close, `/done` and the status panel's Close: the open item of `chainId` that `query` names —
    *  exactly in any case, else as the start of one key; with `exact`, only that key — closed as a `<done>`
-   *  closes it. Its head, attached, is told, or its later `<done>` of it would read as unmatched. */
+   *  closes it. Its head, attached, is told, or its later `<done>` of it would read as unmatched. An exact key
+   *  already closed answers itself: the panel's row raced the head's own `<done>`, and the user's ask holds. */
   closeItem(chainId: string, query: string, now: number, exact = false): string {
     const q = query.trim();
     const keys = this.store.openItems(chainId).map((i) => i.problem);
     const same = keys.filter((k) => (exact ? k === query : k.toLowerCase() === q.toLowerCase()));
     const named = same.length || exact ? same : keys.filter((k) => k.toLowerCase().startsWith(q.toLowerCase()));
+    if (exact && !named.length) {
+      const was = this.store.itemHistory(chainId, query);
+      if (was?.problem === query && was.closedAt !== undefined) return query;
+    }
     if (!q || !named.length) throw new ItemNotFound(`no open item "${q}"`);
     if (named.length > 1) throw new ChatCommandRefused(`/done ${q} matches ${named.join(", ")} — say more`);
     const key = named[0]!;
     this.store.closeOpenItem(chainId, key, now);
+    this.userClosed.set(chainId, [...(this.userClosed.get(chainId) ?? []).filter((k) => k !== key), key].slice(-20));
+    this.unmatched.set(chainId, this.unmatchedDone(chainId).filter((u) => !namesKey(doneOld(u), key)));
     this.hub.emitWorkspace({ type: "open-items-changed" });
     const headId = this.instance.continuous.members(chainId)[0]?.sessionId;
     const head = this.router.attachedSessions().find((a) => a.session.id === headId)?.session;

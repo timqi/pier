@@ -225,7 +225,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   `namesKey`), none when two are; one that still closes nothing is logged, and
   the head's next prompt carries an `open-items` system input, mode `append`, no
   turn, naming it and the open keys. The last 5 such keys stay owed, each until
-  a `<done>` closes the item it names or nothing is open, in memory: the seed's
+  a `<done>` or the user closes the item it names or nothing is open, in memory: the seed's
   `## Open` lists them as `unmatched <done>: <key>`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
 - The user closes an item too: `/done <item>` (§Chat commands) and the status
@@ -234,8 +234,10 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   `/done` resolves its words among the chain's open keys — exact in any case,
   else the one key they start; several are refused `/done <q> matches <a>, <b> —
   say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Close** names its
-  key exactly. The chain's head, when attached, is told with an `open-items`
-  system input, mode `append`, no turn: `[Pier: the user closed <key>]`.
+  key exactly, answering `{closed}` for a key the head's `<done>` closed first.
+  The chain's head, when attached, is told with an `open-items`
+  system input, mode `append`, no turn: `[Pier: the user closed <key>]`; its
+  `<done>` of one of the last 20 keys the user closed is no miss (in memory).
 - A head turn opened by a run's result (the `task-callback` origin of the
   system input right after its `turn-start`, `Router.onTurnEnd`'s `opened`; a
   steer's is the turn it opens on entering) that left an item holding a run of
