@@ -60,8 +60,8 @@ function dotOf(c: ChainInfo): HTMLElement {
   return dot;
 }
 
-const ROW = "chain-row group flex items-start gap-1 rounded-lg";
-const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left";
+const ROW = "chain-row group flex items-start gap-1 rounded-md";
+const PICK = "chain-open flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left";
 const SMALL = "cursor-pointer rounded-md px-2 py-1 text-[0.8125rem] text-neutral-600 hover:bg-(--row-hover)";
 
 function field(value: string, label: string, save: (v: string) => void, edit: (v: string) => void, cancel: () => void): HTMLInputElement {

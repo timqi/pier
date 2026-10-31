@@ -138,7 +138,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElemen
   const sheet = isSheet();
   panel = h(
     "div",
-    `popover fixed z-50 border border-neutral-200 p-2 font-sans leading-6 ${
+    `popover fixed z-50 border border-(--line) p-2 font-sans leading-6 ${
       sheet
         ? "rounded-[10px] inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
         : "rounded-[10px] min-w-60 max-w-[min(42rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto text-[15px]"
