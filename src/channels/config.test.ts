@@ -302,6 +302,32 @@ describe("the home chat", () => {
     expect(store.home()).toEqual({ platform: "lark", chatId: "oc_1" });
   });
 
+  // docs/plans/30-multi-chain.md §IM
+  it("keeps its chain pointer until the home changes or its chat is dropped", () => {
+    for (const id of ["design", "ops"]) db.prepare("INSERT INTO chains(id, name, created_at) VALUES (?, ?, 0)").run(id, id);
+    store.setHome("slack", "D1");
+    expect(store.homeChain()).toBeUndefined();
+    store.setHomeChain("design");
+    store.setHomeChain("ops");
+    expect(store.homeChain()).toBe("ops");
+    expect(new ChannelStore(db, new Vault(secrets, db)).homeChain()).toBe("ops");
+    store.setHome("slack", "D1");
+    expect(store.homeChain()).toBe("ops");
+    store.setHome("slack", "D2");
+    expect(store.homeChain()).toBeUndefined();
+    store.setHomeChain("ops");
+    store.removeChat("slack", "D1");
+    expect(store.homeChain()).toBe("ops");
+    store.removeChat("slack", "D2");
+    expect(store.homeChain()).toBeUndefined();
+    store.setHome("lark", "oc_1");
+    store.setHomeChain("ops");
+    store.claimBot("lark", "B1");
+    expect(store.homeChain()).toBe("ops");
+    store.claimBot("lark", "B2");
+    expect(store.homeChain()).toBeUndefined();
+  });
+
   it("refuses a group or an unknown chat, changing nothing", () => {
     store.setHome("slack", "D1");
     expect(() => store.setHome("slack", "C1")).toThrow(/not a known DM/);

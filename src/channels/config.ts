@@ -4,6 +4,7 @@
 import { randomInt } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { transact } from "../db.js";
 import { PIER_WORKSPACE } from "../paths.js";
 import type { Vault } from "../vault.js";
 import {
@@ -95,11 +96,14 @@ export class ChannelStore {
   }
 
   /** One home instance-wide: setting it clears every other row on both
-   *  platforms. Refuses a chat that is unknown or not a DM; `null` leaves no home anywhere. */
+   *  platforms. Refuses a chat that is unknown or not a DM; `null` leaves no home anywhere.
+   *  A different home starts on the first chain: the pointer was the old chat's. */
   setHome(platform: ChannelPlatform, chatId: string | null): void {
     if (chatId !== null && this.cached(platform).chats.find((c) => c.id === chatId)?.kind !== "dm") {
       throw new Error(`${platform}:${chatId} is not a known DM`);
     }
+    const before = this.home();
+    if (before?.platform !== platform || before.chatId !== chatId) this.forgetHomeChain();
     for (const p of PLATFORMS) {
       const config = this.get(p);
       for (const chat of config.chats) {
@@ -117,6 +121,23 @@ export class ChannelStore {
       if (chat) return { platform, chatId: chat.id };
     }
     return undefined;
+  }
+
+  /** The home chat's current chain (docs/plans/30-multi-chain.md §IM); undefined is the first chain. */
+  homeChain(): string | undefined {
+    return (this.db.prepare("SELECT chain_id FROM home_chain").get() as { chain_id: string } | undefined)?.chain_id;
+  }
+
+  /** The pointer goes with its chat: a home set again later starts on the first chain. */
+  private forgetHomeChain(): void {
+    this.db.prepare("DELETE FROM home_chain").run();
+  }
+
+  setHomeChain(chainId: string): void {
+    transact(this.db, () => {
+      this.db.prepare("DELETE FROM home_chain").run();
+      this.db.prepare("INSERT INTO home_chain(chain_id) VALUES (?)").run(chainId);
+    });
   }
 
   /** No platform reliably lists every chat a bot is in, so discovery is passive
@@ -154,6 +175,7 @@ export class ChannelStore {
     const config = this.get(platform);
     const rest = config.chats.filter((c) => c.id !== chatId);
     if (rest.length === config.chats.length) return false;
+    if (config.chats.some((c) => c.id === chatId && c.home)) this.forgetHomeChain();
     config.chats = rest;
     this.save(platform, config);
     return true;
@@ -182,6 +204,7 @@ export class ChannelStore {
     const config = this.get(platform);
     const keep = (chat: ChatConfig): boolean => !known || chat.kind !== "dm";
     const dropped = config.chats.filter((c) => !keep(c)).map((c) => c.id);
+    if (config.chats.some((c) => c.home && !keep(c))) this.forgetHomeChain();
     config.chats = config.chats.filter(keep);
     config.botId = botId;
     this.save(platform, config);
