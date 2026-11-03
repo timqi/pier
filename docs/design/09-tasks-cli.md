@@ -311,7 +311,7 @@ A session's role is fixed by the run that made it, for the session's life
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session represented in the head's history counts as the one
 that launched it ([10 §Run ledger](10-continuous-session.md#run-ledger)).
-`parentRunId` links only a `task` action's child, which a cancel walks. The run contract is `RUN_RESULT` (`agent/roles.ts`): the result's shape and the status lines `statusLine` parses (`tasks/goals.ts`); what stops a run, and the `Approved:` line that lifts it for one step, is the baseline's Working style (`agent/pi.ts`). A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
+`parentRunId` links only a `task` action's child. A cancel walks it and, from a queued or running run whose session a run made, every queued or running run that session launched — a `--run` handoff's run walks the session it replaced too; a finished run's session, and a user's or the head's, are never walked. The run contract is `RUN_RESULT` (`agent/roles.ts`): the result's shape and the status lines `statusLine` parses (`tasks/goals.ts`); what stops a run, and the `Approved:` line that lifts it for one step, is the baseline's Working style (`agent/pi.ts`). A worker's session carries it in `<pier>/worker.md` for its life, with the refusal of `pier task`; a lead's `<pier>/lead.md` has its own; a role-less session (cron, a user's) hears it on each run's message, after the chat-surface conventions that do not apply. Every run's message opens `[Pier task run <id> — "<name>"]`; a role-less one adds who reads the result (`tasks/agent.ts` `preamble`); a `--run` continuation and a restart resume carry no head.
 
 ## Skill
 
@@ -334,4 +334,4 @@ over a seeded ledger.
 `tasks/continuous.test.ts`: the chain's callbacks, a saved definition's
 default reaching the current head, `none` and a head-less conversation silent, ownership,
 `runs`, a delegated run's `runs` and `stats`, the children's cap. `tasks/lead.test.ts`: roles, depth,
-the milestone flow.
+the milestone flow, a lead run's cancel reaching its workers, a handoff's the replaced session's, a finished run's none.

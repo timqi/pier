@@ -437,6 +437,52 @@ describe("a feature lead", () => {
     })), sessionId: "worker" } });
     expect([...service.taskSessions()]).toEqual(["worker"]);
   });
+
+  it("takes its workers and theirs down with a cancel of its running run, never a user session's runs", async () => {
+    const { service, store, leadRan, bash } = rig();
+    await leadRan("running");
+    // One task each: a second run of a running bash task is skipped as an overlap.
+    const slow = async () => (await bash("sleep 5")).id;
+    const worker = service.run(await slow(), null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    const sibling = service.run(await slow(), null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    const grandchild = service.run(await slow(), null, "task", worker.id);
+    const mains = service.run(await slow(), null, "agent", null, { invokedBySessionId: "main", callbackSessionId: null, background: true });
+    // A run on main's own session: main was made by no run, so its launches are not the run's.
+    store.saveRun({ ...store.getRun("lead-run")!, id: "on-main", targetSessionId: "main", sessionMode: "reuse" });
+    service.cancel("on-main");
+    service.cancel("lead-run");
+    for (const run of [worker, sibling, grandchild]) expect((await service.waitForRun(run.id)).state).toBe("cancelled");
+    expect(service.getRun(mains.id).state).toBe("running");
+    service.cancel(mains.id);
+    await service.waitForRun(mains.id);
+    service.stop();
+  });
+
+  it("leaves its session's workers running when the run cancelled has already ended", async () => {
+    const { service, leadRan, bash } = rig();
+    await leadRan();
+    const worker = service.run((await bash("sleep 5")).id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    await vi.waitFor(() => expect(service.getRun(worker.id).state).toBe("running"));
+    service.cancel("lead-run");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(service.getRun(worker.id).state).toBe("running");
+    service.cancel(worker.id);
+    await service.waitForRun(worker.id);
+    service.stop();
+  });
+
+  it("takes the replaced session's workers down with a cancel of a --run handoff's run", async () => {
+    const { service, store, leadRan, bash } = rig();
+    await leadRan();
+    store.saveRun({
+      ...store.getRun("lead-run")!, id: "handoff-run", state: "running", targetSessionId: "lead2", resumedFromRunId: "lead-run",
+      handoff: { fromSessionId: "lead", reason: "worn out", prompt: "go on" }, queuedAt: 2, finishedAt: null,
+    });
+    const worker = service.run((await bash("sleep 5")).id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    service.cancel("handoff-run");
+    expect((await service.waitForRun(worker.id)).state).toBe("cancelled");
+    service.stop();
+  });
 });
 
 describe("a session's role, kept for its life", () => {

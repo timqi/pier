@@ -544,8 +544,8 @@ export class TaskService {
     });
   }
 
-  /** Cascades down a `task` action's chain: a child must not outlive the run
-   *  that waits on it. `by` is the asking session: the head asks for the user,
+  /** Cascades to every descendant (`descendants`): a child must not outlive the
+   *  run that launched it. `by` is the asking session: the head asks for the user,
    *  any other session did not, so that run's end is noticed; the cascade is not. */
   cancel(id: string, by?: string): TaskRun {
     const run = this.getRun(id);
@@ -582,16 +582,27 @@ export class TaskService {
     return this.groups.runAll(definitions, join, callerSessionId, callbackSessionId, callbackMode);
   }
 
+  /** A `task` action's children, and the runs in flight that a run's session
+   *  launched — a lead's workers, a cron run's — while that run is in flight; a
+   *  `--run` handoff's session counts the one it replaced as its own. A finished
+   *  run's session has moved on to other runs, and a user's session (no run made
+   *  it) launches the user's own runs: neither is walked. */
   private descendants(run: TaskRun): TaskRun[] {
-    const collected: TaskRun[] = [];
-    const queue = [run.id];
+    const collected = new Map<string, TaskRun>();
+    const queue = [run];
     while (queue.length > 0) {
-      for (const child of this.store.listChildRuns(queue.shift()!)) {
-        collected.push(child);
-        queue.push(child.id);
+      const parent = queue.shift()!;
+      const inFlight = !isTerminal(parent.state);
+      const sessions = [parent.targetSessionId, parent.handoff?.fromSessionId ?? null];
+      const walked = sessions.filter((session): session is string => inFlight && session !== null && this.store.creatorOf(session) !== undefined);
+      const launched = walked.length > 0 ? this.store.ledgerRuns(walked, 0, ["queued", "running"]) : [];
+      for (const child of [...this.store.listChildRuns(parent.id), ...launched]) {
+        if (child.id === run.id || collected.has(child.id)) continue;
+        collected.set(child.id, child);
+        queue.push(child);
       }
     }
-    return collected;
+    return [...collected.values()];
   }
 
   async control(id: string, fromSessionId: string, mode: "steer" | "follow_up", message: string): Promise<TaskMessage> {
