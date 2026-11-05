@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 1.0.0
+
+### Added
+
+- Chains: split the continuous conversation into named chains, each with its own head, open items and memory; manage chains on the web or in the home chat, search within a chain, and keep global notes separate from chain notes.
+- Web: a chain-aware sidebar and routes, with chain switching and management, item status, session context and a command palette adapted to desktop and mobile.
+- Open items: close an item from chat with `/done` or from the status panel; item age and live task elapsed time are visible where work is tracked.
+
+### Changed
+
+- Workbench: a flatter, more consistent layout with a docked sidebar, clearer session and chain navigation, and keyboard and focus behavior that follows the active surface.
+- Home chat and status: status is chain-specific and refreshed on demand; busy and quiet conversations show their state, and status cards track open items in place.
+- Commands and task reporting: `/chain` and `/done` match names naturally; `/new`, `/stop`, idle detection and task cancellation report their effects across the session and its launched runs.
+- Instance identity: the web manifest, shell tab and sidebar use the instance label, with host validation at the web boundary.
+
+### Fixed
+
+- Keep chain, item and session views aligned with the active chain and live event stream, including links to older items and changes made on another surface.
+- Preserve focus and editing state across sidebar, drawer and item actions, including refusals and closing the last row.
+- Report silent dispatches, late replies, failed reads and task outcomes instead of leaving the conversation or workbench appearing idle.
+
+
 ### Added
 
 - Chains: Pier's conversation can be split by hand into named chains, each with its own head, open items and memory (`chains/<id>/`) beside the global `MEMORY.md` and `memory/`; the "Chain mode" switch (off by default) shows the list, and `/chain` lists, switches, creates, renames and archives on the web and in the home chat. `<note global>` writes the global notes, `<note>` the chain's.
