@@ -49,6 +49,7 @@ import { initPush, isIOS } from "./notifications.js";
 import { initReport, report } from "./report.js";
 import { initChains, renderChains, unarchive } from "./chains.js";
 import { notify } from "./shell.js";
+import { noteDownloads } from "./dom.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
 import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
@@ -869,6 +870,7 @@ void initPush();
 // The last of the three saying "the workbench does not zoom" (index.html,
 // style.css): on a pinch, Safari's own gesture events overrule both.
 document.addEventListener("gesturestart", (ev) => ev.preventDefault());
+noteDownloads();
 
 // Coming back to a hidden tab — or to an unfocused window — is the other way
 // turns get seen.

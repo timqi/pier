@@ -488,6 +488,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   stays put, flashing green or red in place and swallowing the click it would
   have been. A press that moves is a selection, and on a touch screen the hold
   is ours (no native callout or selection handles over inline code).
+- **Download**: every download link (an attachment card's, Files' Download)
+  shows `Download started: <name>` for 2.5 s in a solid hairline note under
+  the bar, inside the open dialog when it was clicked in one; it never says
+  the download finished — the page cannot know — and disables nothing.
 - **Lightbox**: click magnifies about the point, second click fits; drag pans
   (mouse and finger); scrim, ✕, Esc close; ‹ › and ← / → page the gallery the
   image came from (transcript or strip, never across), hidden for one image.

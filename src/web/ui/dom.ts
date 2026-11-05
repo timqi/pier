@@ -205,6 +205,33 @@ export function copyBtn(cls: string, text: () => string): HTMLElement {
   return btn;
 }
 
+const NOTE_MS = 2500;
+let note: HTMLElement | undefined;
+let noteTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Every `a[download]` says it started, so a download with no visible sign is
+ *  not clicked twice; the page never learns how one ends, so it says no more. */
+export function noteDownloads(): void {
+  document.addEventListener("click", (ev) => {
+    const link = (ev.target as Partial<Element> | null)?.closest?.<HTMLAnchorElement>("a[download]");
+    if (!link || ev.defaultPrevented) return;
+    note ??= h(
+      "div",
+      "popover pointer-events-none fixed left-1/2 top-[calc(4rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 truncate rounded-[10px] border border-(--line) px-3 py-1.5 font-sans text-[13px] text-neutral-700",
+    );
+    note.setAttribute("role", "status");
+    note.textContent = `Download started: ${link.download}`;
+    delete note.dataset.closing;
+    // A modal <dialog> is the top layer: a note on body would paint under Files.
+    (link.closest("dialog[open]") ?? document.body).append(note);
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => {
+      note!.dataset.closing = "";
+      noteTimer = setTimeout(() => note!.remove(), 200);
+    }, NOTE_MS);
+  });
+}
+
 /** Wrap each fenced block so a copy button can sit in its corner without
  *  scrolling away with the code, and copy the source text, not the tokens. */
 export function addCodeCopy(root: HTMLElement): void {
