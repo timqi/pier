@@ -404,12 +404,13 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   divider naming the rotation. **Earlier session**, or scrolling to the top,
   pages one more in whole, keeping the reader's position, the pane as it is until
   the head's snapshot is back, and keyboard focus on the pager; the trim cap
-  stands down meanwhile. Paging keeps the current event stream active until both reads complete;
+  stands down meanwhile. A head opened with fewer than six user and assistant
+  messages is drawn in one paint with the two sessions before it, read while its loading state shows. Paging keeps the current event stream active until its reads complete;
   a newer navigation or session load cancels the page before history changes or redraw.
   Each of a page's two reads gives up after 10s; a head read that failed or gave up is redone as a plain load with its loading state.
   Sends take the alias route with the pane's `chain`; a 202 with `switched` moves the pane to that chain; a send whose 202 names
   another head, or a rotation seen on `sessions-changed`, moves the pane to
-  the new head, the session just left paged in above, painted once when both reads land with the old pane kept until then; a move in progress never holds a later re-list, a failed re-list retries itself (1s doubling to 30s) until one succeeds, reported once per distinct failure meanwhile, and a head snapshot answered `readonly` — rotated past since the chain was read — re-lists and follows instead of drawing, an error row in the pane while the chain cannot name the new head yet; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
+  the new head, the session just left and the one before it paged in above, painted once when the reads land with the old pane kept until then; a move in progress never holds a later re-list, a failed re-list retries itself (1s doubling to 30s) until one succeeds, reported once per distinct failure meanwhile, and a head snapshot answered `readonly` — rotated past since the chain was read — re-lists and follows instead of drawing, an error row in the pane while the chain cannot name the new head yet; a rotation while Settings is open keeps that route, and returning to the conversation selects the latest head. A seed is a system input card linking the previous session,
   folded into the divider above it (`folds.ts` `foldSeed`; the divider's own words where there is none), trimmed with it;
   a `/status` answer uses the same solid card material and shared open-item rows,
   its chip `/status · <chain>` (its snapshot's `chain`, as the IM note's label), grouped with counts under `Waiting on you`, `In progress` and `Other open`.

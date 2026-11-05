@@ -310,38 +310,51 @@ async function followHead(head: string): Promise<void> {
   earlier = [];
   unstarted = false;
   if (chain.length === 1) return select(head, false);
-  // No skeleton: the old pane stays up until page() paints both reads at once. Its stream is
+  // No skeleton: the old pane stays up until page() paints its reads at once. Its stream is
   // dropped too, so a select() meanwhile draws the head instead of taking it for loaded.
   setSessionHash(head);
   choose(head);
   source?.close();
   source = null;
-  if (!(await page())) await loadSession(head);
+  // A head just rotated to holds little more than the message that started it.
+  if (!(await page(AUTO_PAGES))) await loadSession(head);
 }
 
 /** A page keeps the old pane up with no stream while it reads: a read that never answers must not hold it there. */
 const PAGE_READ_MS = 10_000;
 
-/** One earlier session in above the rest; the head is re-read with it, and the
+/** A head with fewer messages than this opens with up to `AUTO_PAGES` earlier sessions above it. */
+const SHORT_HEAD = 6;
+const AUTO_PAGES = 2;
+const shortHead = (turns: ChatTurn[]): boolean => turns.filter((t) => t.role === "user" || t.role === "assistant").length < SHORT_HEAD;
+
+/** Earlier members' reads, oldest first as `earlier` holds them; a failed read is its entry's `error`. */
+async function readEarlier(members: ChainMember[]): Promise<typeof earlier> {
+  const reads = await Promise.all(members.map((m) => getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
+    `/api/sessions/${m.sessionId}/history`, "Could not load the earlier session", { signal: AbortSignal.timeout(PAGE_READ_MS) })));
+  return reads.map((got, i) => {
+    const member = members[i]!;
+    return got.ok ? { member, turns: got.value.turns, runs: got.value.backgroundRuns } : { member, turns: [], runs: [], error: got.error };
+  }).reverse();
+}
+
+/** `count` earlier sessions in above the rest; the head is re-read with them, and the
  *  reader stays where they were. False when it did not start. */
-async function page(): Promise<boolean> {
+async function page(count = 1): Promise<boolean> {
   const head = headId();
-  const member = chain[earlier.length + 1];
-  if (paging || !head || !member || currentId !== head || !isChatVisible() || paneItem) return false;
+  const members = chain.slice(earlier.length + 1, earlier.length + 1 + count);
+  if (paging || !head || !members.length || currentId !== head || !isChatVisible() || paneItem) return false;
   const intent = navigation;
   const generation = loadSeq;
   const current = (): boolean => intent === navigation && generation === loadSeq && currentId === head && headId() === head && isChatVisible();
   paging = true;
   try {
-    const got = await getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
-      `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session", { signal: AbortSignal.timeout(PAGE_READ_MS) });
+    const reads = await readEarlier(members);
     if (!current()) return true;
-    // Both reads belong to this navigation; keep the pane and its stream live until they can commit together.
+    // The reads belong to this navigation; keep the pane and its stream live until they can commit together.
     const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session", { signal: AbortSignal.timeout(PAGE_READ_MS) });
     if (!current()) return true;
-    earlier.unshift(got.ok
-      ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
-      : { member, turns: [], runs: [], error: got.error });
+    earlier.unshift(...reads);
     // A head read that failed is read again as a plain load, its loading state on screen instead of the old pane.
     await loadSession(head, snapshot.ok ? snapshot : undefined);
     if (intent === navigation) pagedAt = Date.now();
@@ -701,6 +714,13 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   if (currentId !== id || generation !== loadSeq) return;
   const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
+  // A near-empty head opens with the sessions before it, read before the one paint; `loading` holds off a scroll's page meanwhile.
+  const before = chain.slice(1, 1 + AUTO_PAGES);
+  if (!keep && !view && got.ok && !("readonly" in got.value) && continuousOpen() && !earlier.length && before.length && shortHead(got.value.turns)) {
+    const read = await readEarlier(before);
+    if (currentId !== id || generation !== loadSeq) return;
+    earlier = read;
+  }
   loading = false;
   // Measured here, not before the fetch: the reader may scroll, an image load or a resize move the pane meanwhile.
   const fromBottom = keep ? turnsPane.scrollHeight - turnsPane.scrollTop : 0;

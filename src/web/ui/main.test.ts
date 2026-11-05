@@ -109,7 +109,7 @@ beforeEach(async () => {
   h.content = [];
   h.history.mockReset().mockImplementation(() => Promise.resolve(snapshot("loaded")));
   h.revealTopic.mockReset().mockReturnValue(true);
-  h.renderSnapshot.mockImplementation((turns: ChatTurn[]) => { h.content.push(...turns.map((t) => t.text)); });
+  h.renderSnapshot.mockImplementation((turns: ChatTurn[]) => { h.content.push(...turns.flatMap((t) => t.text ? [t.text] : [])); });
   h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
   vi.stubGlobal("EventSource", Stream);
   Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
@@ -485,9 +485,14 @@ describe("the continuous conversation", () => {
   const member = (sessionId: string, reason = "idle", startedAt = 1) => ({ sessionId, startedAt, reason });
   let chain: ReturnType<typeof member>[] = [];
   const earlier = (id: string) => Response.json({ turns: [{ role: "user", text: `said in ${id}` }], backgroundRuns: [], readonly: true });
+  /** A head of six messages, long enough to open without the sessions before it. */
+  const long = async (text: string) => {
+    const body = (await snapshot(text).json()) as { turns: ChatTurn[] };
+    return Response.json({ ...body, turns: [...body.turns, ...Array.from({ length: 5 }, (_, i) => ({ role: i % 2 ? "user" : "assistant", text: "" }))] });
+  };
 
   let chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
-  async function boot(members: ReturnType<typeof member>[]) {
+  async function boot(members: ReturnType<typeof member>[], head: (text: string) => Promise<Response> = long) {
     chain = members;
     chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
     vi.resetModules();
@@ -507,7 +512,7 @@ describe("the continuous conversation", () => {
     vi.stubGlobal("history", { replaceState: vi.fn() });
     h.history.mockReset();
     h.history.mockImplementation((url: string) =>
-      Promise.resolve(url.includes("/h2/") || (chain[0]?.sessionId === "h1" && url.includes("/h1/")) ? snapshot("head") : earlier(url.split("/")[3]!)));
+      url.includes("/h2/") || (chain[0]?.sessionId === "h1" && url.includes("/h1/")) ? head("head") : Promise.resolve(earlier(url.split("/")[3]!)));
     await import("./main.js");
     await settled();
   }
@@ -591,7 +596,8 @@ describe("the continuous conversation", () => {
     h.header.openContinuous();
     await settled();
     expect(h.header.continuousOpen()).toBe(true);
-    expect(historyCalls().at(-1)).toBe("/api/sessions/h1/history");
+    // A head this short brings the session before it into the same paint.
+    expect(historyCalls().slice(-2)).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history"]);
   });
 
   it("pages an earlier session in read-only above the head, closed by the rotation's divider", async () => {
@@ -604,6 +610,27 @@ describe("the continuous conversation", () => {
     expect(h.appendDivider).toHaveBeenCalledWith("idle", 5);
     // Everything is paged in: no pager is drawn over the first session.
     expect(h.appendPager).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a head of fewer than six messages with the two sessions before it in one paint, the rest left to the pager", async () => {
+    await boot([member("h2", "idle", 5), member("h1", "idle", 3), member("h0", "first"), member("hx", "first")], async (text) => snapshot(text));
+    expect(historyCalls()).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h0/history"]);
+    expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
+    expect(h.renderSnapshot).toHaveBeenCalledTimes(3);
+    expect(h.appendDivider.mock.calls).toEqual([["idle", 3], ["idle", 5]]);
+    // hx is still above: one pager, from the one paint.
+    expect(h.appendPager).toHaveBeenCalledOnce();
+    (h.appendPager.mock.calls[0]![0] as () => void)();
+    await settled();
+    expect(historyCalls().slice(3)).toEqual(["/api/sessions/hx/history", "/api/sessions/h2/history"]);
+    expect(h.content).toEqual(["said in hx", "said in h0", "said in h1", "head"]);
+  });
+
+  it("opens a short head with the one session there is before it", async () => {
+    await boot([member("h1", "idle", 5), member("h0", "first")], async (text) => snapshot(text));
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history"]);
+    expect(h.content).toEqual(["said in h0", "head"]);
+    expect(h.appendPager).not.toHaveBeenCalled();
   });
 
   it("pages from the top on scroll, but not right after a page", async () => {
@@ -626,7 +653,7 @@ describe("the continuous conversation", () => {
   // A status panel row lands on its topic in the conversation, from wherever the reader is.
   it("opens the conversation at a topic's latest reply, and says when none is on screen", async () => {
     await boot([member("h1"), member("h0", "first")]);
-    h.history.mockImplementation((url: string) => Promise.resolve(snapshot(url.includes("/h1/") ? "head" : "child")));
+    h.history.mockImplementation((url: string) => url.includes("/h1/") ? long("head") : Promise.resolve(snapshot("child")));
     h.views.select("other");
     await settled();
     await h.drawer.openItem({ problem: "auth", runs: [], status: "waiting on you" as const });
@@ -775,7 +802,8 @@ describe("the continuous conversation", () => {
     h.composer.headMoved?.();
     await settled();
     await settled();
-    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history"]);
+    // The new head holds one message: the two sessions before it come in with the page.
+    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h2/history"]);
     expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true, { sessionId: "h1" });
   });
 
@@ -783,7 +811,7 @@ describe("the continuous conversation", () => {
     await boot([member("h1"), member("h0", "first")]);
     const left = latest();
     const head = deferred();
-    h.history.mockImplementation((url) => url.includes("/h2/") ? head.promise : Promise.resolve(earlier("h1")));
+    h.history.mockImplementation((url) => url.includes("/h2/") ? head.promise : Promise.resolve(earlier(url.split("/")[3]!)));
     const paints = h.resetChat.mock.calls.length;
     const loadings = vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length;
     chain = [member("h2", "new", 7), member("h1"), member("h0", "first")];
@@ -797,7 +825,7 @@ describe("the continuous conversation", () => {
     left.message(2, "stale", "h1");
     expect(h.resetChat).toHaveBeenCalledTimes(paints + 1);
     expect(vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length).toBe(loadings);
-    expect(h.content).toEqual(["said in h1", "new head"]);
+    expect(h.content).toEqual(["said in h0", "said in h1", "new head"]);
     expect(h.appendDivider).toHaveBeenLastCalledWith("new", 7);
     expect(latest().url).toContain("/h2/");
   });
@@ -809,7 +837,8 @@ describe("the continuous conversation", () => {
 
   it("follows a second rotation while the first one's head read hangs", async () => {
     await boot([member("h1"), member("h0", "first")]);
-    h.history.mockImplementation((url, init) => url.includes("/h2/") ? hung(init)
+    let h2Reads = 0;
+    h.history.mockImplementation((url, init) => url.includes("/h2/") && !h2Reads++ ? hung(init)
       : Promise.resolve(url.includes("/h3/") ? snapshot("newest head") : earlier(url.split("/")[3]!)));
     chain = [member("h2"), member("h1"), member("h0", "first")];
     h.composer.headMoved?.();
@@ -819,7 +848,8 @@ describe("the continuous conversation", () => {
     h.composer.headMoved?.();
     await settled(); await settled();
     expect(h.header.currentId()).toBe("h3");
-    expect(h.content).toEqual(["newest head"]);
+    // The hung page still holds paging: the new head is a plain load, its two sessions before it read with it.
+    expect(h.content).toEqual(["said in h1", "said in h2", "newest head"]);
     expect(latest().url).toContain("/h3/");
   });
 
@@ -834,15 +864,15 @@ describe("the continuous conversation", () => {
     });
     try {
       let headReads = 0;
-      h.history.mockImplementation((url, init) => !url.includes("/h2/") ? Promise.resolve(earlier("h1"))
+      h.history.mockImplementation((url, init) => !url.includes("/h2/") ? Promise.resolve(earlier(url.split("/")[3]!))
         : ++headReads === 1 ? hung(init) : Promise.resolve(snapshot("new head")));
       chain = [member("h2"), member("h1"), member("h0", "first")];
       h.composer.headMoved?.();
       await vi.advanceTimersByTimeAsync(9_999);
       expect(h.content).toEqual(["head"]);
       await vi.advanceTimersByTimeAsync(1);
-      expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h2/history", "/api/sessions/h2/history"]);
-      expect(h.content).toEqual(["said in h1", "new head"]);
+      expect(historyCalls().slice(1)).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h2/history", "/api/sessions/h2/history"]);
+      expect(h.content).toEqual(["said in h0", "said in h1", "new head"]);
       expect(latest().url).toContain("/h2/");
     } finally {
       timeout.mockRestore();
@@ -892,7 +922,7 @@ describe("the continuous conversation", () => {
       expect(h.header.currentId()).toBe("h1");
       await vi.advanceTimersByTimeAsync(1000);
       expect(h.header.currentId()).toBe("h2");
-      expect(h.content).toEqual(["said in h1", "head"]);
+      expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
     });
   });
 
@@ -912,7 +942,7 @@ describe("the continuous conversation", () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(h.header.currentId()).toBe("h2");
       expect(latest().url).toContain("/h2/");
-      expect(h.content).toEqual(["said in h1", "head"]);
+      expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
     });
   });
 
@@ -928,7 +958,7 @@ describe("the continuous conversation", () => {
     for (let i = 0; i < 3; i++) await settled();
     expect(h.header.currentId()).toBe("h3");
     expect(latest().url).toContain("/h3/");
-    expect(h.content).toEqual(["said in h2", "newest head"]);
+    expect(h.content).toEqual(["said in h1", "said in h2", "newest head"]);
   });
 
   it("leaves Settings open across head rotation and cancels delayed rotation paging after newer navigation", async () => {
@@ -974,7 +1004,8 @@ describe("the continuous conversation", () => {
     let headReads = 0;
     h.history.mockImplementation((url) => {
       if (url.includes("/h1/")) return pending === "earlier" ? old.promise : Promise.resolve(earlier("h1"));
-      return ++headReads === 1 && pending === "head" ? old.promise : Promise.resolve(snapshot("navigated head"));
+      // Long enough that the navigation's own load reads no earlier session.
+      return ++headReads === 1 && pending === "head" ? old.promise : long("navigated head");
     });
     chain = [member("h2"), member("h1")];
     h.composer.headMoved?.();
