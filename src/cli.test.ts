@@ -52,7 +52,9 @@ describe("pier CLI", () => {
 
   it("backs up explicitly instead of mutating state while only checking an update", async () => {
     const home = mkdtempSync(join(tmpdir(), "pier-cli-backup-"));
-    const result = await run(["backup"], { env: { ...process.env, HOME: home } });
+    // Its own PIER_HOME: the suite's shared one holds a db once another file has opened it.
+    const env = { ...process.env, HOME: home, PIER_HOME: join(home, ".pier") };
+    const result = await run(["backup"], { env });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("no database yet");
   });
