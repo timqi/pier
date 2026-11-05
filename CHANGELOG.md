@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.1
+
+### Fixed
+
+- Web: show a download-started note only when a download actually begins, without intercepting modified clicks.
+- Tests: run the backup test in an isolated `PIER_HOME`.
+- Dependencies: update Pi to 1.5.0 and `@hono/node-server` to 2.1.6, resolving the production npm audit findings.
+
 ## 1.0.0
 
 ### Added
