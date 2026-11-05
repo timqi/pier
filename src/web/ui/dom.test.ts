@@ -3,8 +3,8 @@
 // chat markdown — CJK strong emphasis and the plain text an excerpt shows.
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { agoLabel, markdownBox, plainText, stampTime } from "./dom.js";
-import { installDom } from "./dom.testkit.js";
+import { agoLabel, markdownBox, noteDownloads, plainText, stampTime } from "./dom.js";
+import { FakeElement, installDom } from "./dom.testkit.js";
 
 // The sanitizer wants a real DOM; what is under test is the parse in front of it.
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
@@ -84,5 +84,41 @@ describe("plainText", () => {
     expect(plainText("| a | b |\n|---|---|\n| **1** | 2 |")).toBe("a · b\n1 · 2");
     expect(plainText("![图](/tmp/x.png) \\*not\\*")).toBe("图 *not*");
     expect(plainText("```\n**x**\n```")).toBe("**x**");
+  });
+});
+
+describe("noteDownloads", () => {
+  it("names the file on a plain click, reuses one note, and leaves a handled or modified click alone", () => {
+    vi.useFakeTimers();
+    const doc = installDom();
+    vi.stubGlobal("Element", FakeElement);
+    let onClick: (ev: Partial<MouseEvent>) => void = () => {};
+    vi.spyOn(doc, "addEventListener").mockImplementation((_type, listener) => { onClick = listener as typeof onClick; });
+    noteDownloads();
+    const link = (name: string): FakeElement => {
+      const a = doc.createElement("a");
+      a.setAttribute("download", name);
+      Object.assign(a, { download: name });
+      const icon = doc.createElement("span");
+      a.append(icon);
+      doc.body.append(a);
+      return icon; // the click lands on the link's glyph, not the link
+    };
+    const click = (target: FakeElement, ev: Partial<MouseEvent> = {}): void =>
+      onClick({ target: target as unknown as EventTarget, button: 0, defaultPrevented: false, ...ev });
+    const notes = (): FakeElement[] => doc.querySelectorAll("[role=status]");
+
+    click(link("a.pdf"));
+    click(link("b.txt"));
+    expect(notes().map((n) => n.textContent)).toEqual(["Download started: b.txt"]);
+    for (const ev of [{ defaultPrevented: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) {
+      click(link("no.bin"), ev);
+    }
+    expect(notes().map((n) => n.textContent)).toEqual(["Download started: b.txt"]);
+    click(doc.body); // not a download
+    vi.advanceTimersByTime(2500 + 200);
+    expect(notes()).toEqual([]);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 });

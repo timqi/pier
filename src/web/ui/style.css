@@ -607,8 +607,8 @@ main {
   background: color-mix(in oklab, var(--color-amber-50) 55%, var(--color-white));
 }
 /* A popover is the one thing over the page: solid, a hairline, and the one
-   shadow the workbench keeps. */
-.popover {
+   shadow the workbench keeps. A download's note (dom.ts) is the same material. */
+:is(.popover, .download-note) {
   background: var(--color-white);
   box-shadow: var(--shadow-pop);
 }
@@ -885,7 +885,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   to { outline: 3px solid transparent; outline-offset: 3px; }
 }
 #turns > [data-reveal] { animation: turn-reveal 1.2s ease-out; }
-.popover {
+:is(.popover, .download-note) {
   --menu-shift: translateY(-4px) scale(0.97);
   transform-origin: top center;
   opacity: 1;
@@ -896,14 +896,14 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   --menu-shift: translateY(1.25rem);
   transform-origin: bottom center;
 }
-.popover[data-closing] {
+:is(.popover, .download-note)[data-closing] {
   opacity: 0;
   transform: var(--menu-shift);
   pointer-events: none;
   transition-duration: 120ms;
 }
 @starting-style {
-  .popover { opacity: 0; transform: var(--menu-shift); }
+  :is(.popover, .download-note) { opacity: 0; transform: var(--menu-shift); }
 }
 /* Native disclosure state stays authoritative, including keyboard activation.
    Engines without details-content/interpolate-size retain instant expansion. */
@@ -921,7 +921,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button, #fabs button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-contrast: more) {
-  :is(.popover, #bar, #queue-panel, .pagehead, #chain-rail, #composer > div) {
+  :is(.popover, .download-note, #bar, #queue-panel, .pagehead, #chain-rail, #composer > div) {
     border-color: var(--color-neutral-900);
     box-shadow: none;
   }
@@ -963,7 +963,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .chip { transition: none; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
   #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
-  .popover, .popover[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
+  .popover, .popover[data-presentation="sheet"], .download-note { --menu-shift: none; transition-duration: 120ms; }
   :is(#turns, #files-dialog) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button, #fabs button):active:not(:disabled) { transform: none; }
   .fab:not([data-show]) { transform: none; }

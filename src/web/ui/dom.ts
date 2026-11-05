@@ -213,21 +213,23 @@ let noteTimer: ReturnType<typeof setTimeout> | undefined;
  *  not clicked twice; the page never learns how one ends, so it says no more. */
 export function noteDownloads(): void {
   document.addEventListener("click", (ev) => {
-    const link = (ev.target as Partial<Element> | null)?.closest?.<HTMLAnchorElement>("a[download]");
-    if (!link || ev.defaultPrevented) return;
-    note ??= h(
+    // A modified click opens a tab or window, or saves through the browser's own UI.
+    if (ev.defaultPrevented || ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const link = ev.target instanceof Element ? ev.target.closest<HTMLAnchorElement>("a[download]") : null;
+    if (!link) return;
+    const shown = (note ??= h(
       "div",
-      "popover pointer-events-none fixed left-1/2 top-[calc(4rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 truncate rounded-[10px] border border-(--line) px-3 py-1.5 font-sans text-[13px] text-neutral-700",
-    );
-    note.setAttribute("role", "status");
-    note.textContent = `Download started: ${link.download}`;
-    delete note.dataset.closing;
+      "download-note pointer-events-none fixed left-1/2 top-[calc(4rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 truncate rounded-[10px] border border-(--line) px-3 py-1.5 font-sans text-[13px] text-neutral-700",
+    ));
+    shown.setAttribute("role", "status");
+    shown.textContent = `Download started: ${link.download}`;
+    delete shown.dataset.closing;
     // A modal <dialog> is the top layer: a note on body would paint under Files.
-    (link.closest("dialog[open]") ?? document.body).append(note);
+    (link.closest("dialog[open]") ?? document.body).append(shown);
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => {
-      note!.dataset.closing = "";
-      noteTimer = setTimeout(() => note!.remove(), 200);
+      shown.dataset.closing = "";
+      noteTimer = setTimeout(() => shown.remove(), 200);
     }, NOTE_MS);
   });
 }
