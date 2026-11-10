@@ -26,16 +26,24 @@
 
 - **S1 `namesKey`**：`KEY_END = /^(?:\s*[。:：]|\s+[-–]\s)/u`——`-`、`–` 要前后空白，`—` 删掉（P3 之后 key 里的 em dash 是 head 有意写的）。`<done>gpu</done>` 不关 `gpu-speed3 …`。（B3）
 - **S2 `<open>` 不带 run 保留原 run_ids**：upsert 一个开着的事项时，marker 的 `runIds` 为空则 `run_ids` 不变（用户决定）。重开已关闭的 key 仍按 marker 写。（B6）
-- **S3 `<done>` 的匹配顺序**（`closeItem`），`keys` = 本 chain 开着的 key：
-  1. 无箭头：`problem` 是开着的 key，或 `namesKey` 唯一命中 → 关闭。
-  2. 无箭头且没命中：`problem` 正是本 chain 一个已关闭行的 key 或已关闭行的 alias，并且不是任何开着事项的 alias → **已了结**（no-op，不算 unmatched）。是开着事项的 alias（改过名）→ unmatched，提示里有现 key。（A4、A2）
+- **S3 `<done>` 的匹配顺序**（`closeItem`），`keys` = 本 chain 开着的 key，每组里先命中的生效：
+  1. 无箭头（`whole` 只有裸 `—` 切过 key 的 `<done>` 才带）：
+     a. `whole` 正是开着的 key → 关闭它。
+     b. `whole` 是本 chain 某一行的 key 或 alias → 按规则 2 读 `whole`，切出的 `problem` 不再试。
+     c. `problem` 是开着的 key，或 `namesKey` 唯一命中 → 关闭。
+  2. 无箭头且没命中：这个名字是本 chain 已关闭行的 key 或 alias，并且不是任何开着事项的 alias → **已了结**（no-op，不算 unmatched）；是开着事项的 alias（改过名）或哪一行都不是 → unmatched，提示里有现 key。（A4、A2）
   3. 有箭头（仍然排在所有其它 marker 之后处理）：
      a. `whole` 正是开着的 key → 当普通 `<done>` 关掉它。（A1）
-     b. `old` 命中开着的事项（规则 1 的读法）且 `to` 是另一个开着的 key → 关 `old` 并入 `to`（现状）。
-     c. `old` 没开着、`to` 开着：`to` 的 aliases 含 `old` → 已了结；本 chain 有 key 为 `old` 的已关闭行 → `absorb(to, old)`，已了结。（A3、B2）
-     d. 其余 unmatched。
-  `markOpenItems` 的返回要能区分“已了结”和“什么都没命中”（形状由实现定，最朴素的即可）；“已了结”不算行变化、不发 `open-items-changed`、不进 unmatched。
-- **S4 `<open>` 的 key 里带箭头**：`arrowOf(problem)` 有值、整段不是开着的 key、`old` 正是开着的 key（精确）且 `to !== old` → 当作 `<open>to — stage (runs)</open>` 加 `<done>old → to</done>`。否则 key 原样存（`迁移 v1 → v2`），之后靠 S3.3a 关得掉。（A1、B1）
+     b. `to` 开着且 aliases 含 `whole`（S4 记下的原文 key）→ 关 `to`；本回合另有 marker 点了 `to` → 已了结。
+     c. `to` 开着，`old` 命中另一个开着的事项（1c 的读法，`namesKey` 的候选不含 `to`）→ 关 `old` 并入 `to`；`to` 没有 run 时接过 `old` 的 `run_ids`（改名的 `<open>` 不带 run token）。
+     d. `to` 开着，`old` 没命中：`to` 的 aliases 含 `old` → 已了结；本 chain 有 key 为 `old` 的已关闭行 → `absorb(to, old)`，已了结。（A3、B2）
+     e. 其余：`whole` 按规则 2 读是已了结 → 已了结；否则 unmatched。
+  `markOpenItems` 的返回区分“已了结”和“什么都没命中”（`changed` 里 `0` 和 `null`）；“已了结”不算行变化、不发 `open-items-changed`、不进 unmatched。
+- **S4 `<open>` 的 key 里带箭头**（`markOpenItems`），`arrowOf(problem)` 有值、整段不是开着的 key、`to !== old` 时：
+  1. `old` 正是开着的 key（精确）→ 当作 `<open>to — stage (runs)</open>` 加 `<done>old → to</done>`。
+  2. 否则 `to` 是开着的 key 且 aliases 含 `old`（已经改过名）→ 当作 `<open>to — stage (runs)</open>`。
+  3. 这两种情况下 `to` 都把整段原文 key 记进 aliases，之后原样重复它的 `<done>` 走 S3.3b。
+  4. 其余 key 原样存（`迁移 v1 → v2`），之后靠 S3.3a 关得掉。（A1、B1）
 - **S5 `userClosed` 删除**：S3.2 之后 head 对已关闭 key 的 `<done>` 本来就是 no-op，记录在 DB 里，重启不丢；带箭头、`old` 被用户关过的 `<done>` 不再被吞（走 S3.3）。（A2）
 - **S6 owed 的 unmatched**：head 回合结束时——这条回复关掉了至少一个事项 → owed = 本回合的 unmatched；否则 owed = 去重(旧 owed + 本回合 unmatched) 取最新 5 条；没有开着的事项 → 空。用户关闭时按现状滤掉指向该 key 的。（A4）
 - **S7 回合中被用户关闭后不复活**：`closedMidTurn` 记 `{ key, runIds }`（关闭前读）。回合结束、写完 marker 后，把这些事项再关掉：key 相同的；或者这条回复之前没开着、且（aliases 含那个 key，或与它共享一个 run——按 `getRun(id)?.targetSessionId ?? id` 比）的。（A9）
