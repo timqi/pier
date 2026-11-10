@@ -637,6 +637,20 @@ describe("outbound shapes", () => {
     expect(bodyText(client.replied.at(-1)!.card)).toContain("> it broke");
     expect(client.reactions).toEqual([]);
   });
+
+  it("marks an open-items note that opens a turn, until that turn's reply; one appended without a turn stays unmarked", async () => {
+    openGates();
+    await feed(message({ text: "go", messageId: "om_o" }));
+    await channel.send(`${CHAT}/om_o`, { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    await channel.notify(`${CHAT}/om_o`, { text: "[Pier: the user closed x]", origin: { kind: "open-items" } });
+    expect(client.reactions).toEqual([]);
+    await channel.notify(`${CHAT}/om_o`, { text: "[Pier: <done>x</done> closed no open item.]", origin: { kind: "open-items", turn: true } });
+    const noteId = [...client.cards.keys()].at(-1)!;
+    expect(client.reactions).toEqual([{ messageId: noteId, emoji: "OnIt", add: true }]);
+    await channel.send(`${CHAT}/om_o`, { text: "<silent>fixed</silent>", suggestions: [] });
+    expect(client.reactions.at(-1)).toEqual({ messageId: noteId, emoji: "OnIt", add: false });
+  });
 });
 
 describe("next-step buttons", () => {
