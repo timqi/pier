@@ -538,13 +538,10 @@ export class TaskStore {
     return chain === undefined ? undefined : this.itemHistory(chain, problem);
   }
 
-  /** Main's markers, in reply order, as one write into `chainId`'s items; answers the rows each marker
-   *  changed — `null` for a `<done>` that named nothing, `0` for one already settled — and the keys its
-   *  `<done>`s closed. A `<done>` closes and nothing deletes. Every item a marker
-   *  touches, the item `answered.topic` names (as `itemHistory` finds it) and every item holding one of
-   *  `answered.runIds` record `sessionId`, the writing head's, once. Arrows go last, so
-   *  `<done>old → new</done>` finds `new` wherever in the reply it was opened. An `<open>old → new — …</open>`
-   *  of an open `old` is `<open>new — …</open>` and that arrow. */
+  /** Main's markers, in reply order, as one write into `chainId`'s items (docs/design/10-continuous-session.md
+   *  §Open items); answers the rows each marker changed — `null` for a `<done>` that named nothing, `0` for one
+   *  already settled — and the keys its `<done>`s closed. Every item a marker touches, `answered.topic` names or
+   *  holding one of `answered.runIds` records `sessionId`, the writing head's, once. Arrows go last. */
   markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: (number | null)[]; closed: string[] } {
     const closed: string[] = [];
     const touched = new Set<string>();
@@ -558,9 +555,13 @@ export class TaskStore {
         }
         const keys = this.openItems(chainId).map((r) => r.problem);
         const arrow = arrowOf(m.problem);
-        if (!arrow || keys.includes(m.problem) || !keys.includes(arrow.old) || arrow.to === arrow.old) return this.openItem(chainId, m, now, touched);
-        arrows.push([i, { problem: arrow.old, to: arrow.to }]);
-        return this.openItem(chainId, { ...m, problem: arrow.to }, now, touched);
+        if (!arrow || keys.includes(m.problem) || arrow.to === arrow.old) return this.openItem(chainId, m, now, touched);
+        if (keys.includes(arrow.old)) arrows.push([i, { problem: arrow.old, to: arrow.to }]);
+        else if (!keys.includes(arrow.to) || !this.itemHistory(chainId, arrow.to)!.aliases.includes(arrow.old)) return this.openItem(chainId, m, now, touched);
+        const opened = this.openItem(chainId, { ...m, problem: arrow.to }, now, touched);
+        this.sql("UPDATE open_items SET aliases = json_insert(aliases, '$[#]', ?) WHERE chain_id = ? AND problem = ? AND NOT EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?)")
+          .run(m.problem, chainId, arrow.to, m.problem);
+        return opened;
       });
       for (const [i, m] of arrows) {
         const n = this.closeItem(chainId, m, now, closed, touched);
@@ -604,10 +605,9 @@ export class TaskStore {
     return changed + upserted;
   }
 
-  /** The exact key, else the one item of the chain `namesKey` finds — an `<open>` written without ` — `
-   *  keyed the whole line; two such items close neither. An arrow's `whole` that is an open key closes it,
-   *  else only into another open item. `0` when the `<done>` is already settled: its key closed and no open
-   *  item's old name, or its arrow's `old` closed and `to` holding it; `null` when it names nothing. */
+  /** One `<done>`, in the order docs/design/10-continuous-session.md §Open items gives: `whole` before the cut
+   *  key, the exact key before the one item `namesKey` finds, an arrow only into another open item. Answers
+   *  the rows closed, `0` when the `<done>` is already settled, `null` when it names nothing. */
   private closeItem(chainId: string, m: { problem: string; to?: string; whole?: string }, now: number, closed: string[], touched: Set<string>): number | null {
     const keys = this.openItems(chainId).map((r) => r.problem);
     const close = (key: string): number => {
@@ -616,15 +616,21 @@ export class TaskStore {
       return Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, key).changes);
     };
     if (m.whole !== undefined && keys.includes(m.whole)) return close(m.whole);
-    const named = keys.includes(m.problem) ? [m.problem] : keys.filter((key) => namesKey(m.problem, key));
+    if (m.to !== undefined && m.whole !== undefined && keys.includes(m.to) && this.itemHistory(chainId, m.to)!.aliases.includes(m.whole)) return touched.has(m.to) ? 0 : close(m.to);
+    const named = keys.includes(m.problem) ? [m.problem] : keys.filter((key) => key !== m.to && namesKey(m.problem, key));
     const key = named.length === 1 ? named[0]! : undefined;
-    if (m.to === undefined) {
-      if (key !== undefined) return close(key);
+    const settled = (name: string): 0 | null | undefined => {
       const rows = this.sql("SELECT closed_at IS NULL AS open FROM open_items WHERE chain_id = ? AND (problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?))")
-        .all(chainId, m.problem, m.problem) as { open: number }[];
-      return rows.length > 0 && !rows.some((r) => r.open) ? 0 : null;
+        .all(chainId, name, name) as { open: number }[];
+      return rows.length ? (rows.some((r) => r.open) ? null : 0) : undefined;
+    };
+    const whole = m.whole === undefined ? undefined : settled(m.whole);
+    if (m.to === undefined) {
+      // A `whole` that was ever an item's key is that item's, never the key its bare dash cuts.
+      if (whole !== undefined) return whole;
+      return key !== undefined ? close(key) : settled(m.problem) ?? null;
     }
-    if (!keys.includes(m.to) || key === m.to) return null;
+    if (!keys.includes(m.to) || key === m.to) return whole ?? null;
     if (key !== undefined) {
       touched.add(m.to);
       const changed = close(key);
@@ -638,7 +644,7 @@ export class TaskStore {
       touched.add(m.to);
       return 0;
     }
-    if (!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL").get(chainId, m.problem)) return null;
+    if (!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL").get(chainId, m.problem)) return whole ?? null;
     touched.add(m.to);
     this.absorb(chainId, m.to, m.problem);
     return 0;

@@ -115,7 +115,7 @@ export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: s
   for (const marker of [...before.dropped, ...after.dropped]) log.warn(`open items: dropped a marker with no text: ${marker}`);
   for (const marker of [...before.unclosed, ...after.unclosed]) log.warn(`open items: read a marker with no closing tag: ${marker}`);
   const { changed, closed } = store.markOpenItems(markers, now, sessionId, chainId, { topic: replyTopic(text), runIds });
-  const unmatched = markers.flatMap((m, i) => (m.op === "done" && changed[i] === null ? [m.to === undefined ? m.problem : `${m.problem}${ARROW}${m.to}`] : []));
+  const unmatched = markers.flatMap((m, i) => (m.op === "done" && changed[i] === null ? [m.to === undefined ? m.whole ?? m.problem : `${m.problem}${ARROW}${m.to}`] : []));
   for (const problem of unmatched) log.warn(`open items: <done> named no open item: ${problem}`);
   return { changed: changed.some((n) => (n ?? 0) > 0), closed, unmatched };
 }
@@ -135,7 +135,7 @@ export const unmatchedNote = (unmatched: readonly string[], keys: readonly strin
 /** The items a turn answering `runIds`' results left as they were: one holding a run of a
  *  result's session, no run of its sessions still live, its exact key in none of the turn's markers, `earlier`'s included. */
 export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[], chainId: string, earlier = ""): { runId: string; problem: string }[] {
-  const named = new Set([earlier, text].flatMap((t) => openItemMarkers(t).markers).flatMap((m) => (m.op === "done" && m.to !== undefined ? [m.problem, m.to, ...(m.whole === undefined ? [] : [m.whole])] : [m.problem])));
+  const named = new Set([earlier, text].flatMap((t) => openItemMarkers(t).markers).flatMap((m) => (m.op === "done" ? [m.problem, m.to, m.whole].filter((k) => k !== undefined) : [m.problem])));
   const sessionOf = (id: string) => store.getRun(id)?.targetSessionId ?? id;
   const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(id)) ?? store.getRun(id))?.state ?? "") === "live";
   return store.openItems(chainId).flatMap((item) => {

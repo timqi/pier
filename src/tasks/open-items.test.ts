@@ -617,8 +617,46 @@ describe("the open items", () => {
       recordOpenItems(r.store, `<open>发 1.0.0 版本 — 已发${runs}</open>`, 1, "h1", "main");
       expect(recordOpenItems(r.store, "<open>发 1.0.0 版本 → 发 1.0.1 版本 — x (run r)</open>\n<done>发 1.0.0 版本 → 发 1.0.1 版本</done>", 2, "h1", "main").unmatched).toEqual([]);
       expect(r.store.openItems("main")).toEqual([{ problem: "发 1.0.1 版本", stage: "x", runIds: ["r"], openedAt: 1 }]);
-      expect(r.store.itemHistory("main", "发 1.0.1 版本")?.aliases).toEqual(["发 1.0.0 版本"]);
+      expect(r.store.itemHistory("main", "发 1.0.1 版本")?.aliases.sort()).toEqual(["发 1.0.0 版本", "发 1.0.0 版本 → 发 1.0.1 版本"]);
     }
+  });
+
+  it("keeps one item through an <open> with an arrow written again, and closes it by the <done> of that key", () => {
+    const renames = ["<open>old — a (run r1)</open>|<open>old → new — b (run r1)</open>", "<open>old — a</open>|<open>old → new — b</open>", "<open>old — a (run r1)</open>|<done>old → new</done><open>new — b (run r1)</open>"];
+    for (const [first, rename] of renames.map((r) => r.split("|") as [string, string])) {
+      const r = rig();
+      recordOpenItems(r.store, first, 1, "h1", "main");
+      recordOpenItems(r.store, rename, 2, "h1", "main");
+      expect(recordOpenItems(r.store, "<open>old → new — c</open>", 3, "h1", "main")).toEqual({ changed: true, closed: [], unmatched: [] });
+      expect(r.store.openItems("main").map((i) => [i.problem, i.stage])).toEqual([["new", "c"]]);
+      // Alone, the arrow is the key the head wrote, not the rename already made.
+      expect(recordOpenItems(r.store, "<done>old → new</done>", 4, "h1", "main")).toEqual({ changed: true, closed: ["new"], unmatched: [] });
+      expect(r.store.openItems("main")).toEqual([]);
+      // Said again, it is settled as any closed key is, a key written with an arrow and closed included.
+      recordOpenItems(r.store, "<open>v1 → v2 — x</open>", 5, "h1", "main");
+      recordOpenItems(r.store, "<done>v1 → v2</done>", 6, "h1", "main");
+      expect(recordOpenItems(r.store, "<done>old → new</done><done>v1 → v2</done><done>v1 → v3</done>", 7, "h1", "main")).toEqual({ changed: false, closed: [], unmatched: ["v1 → v3"] });
+    }
+  });
+
+  it("settles a rename's arrow when its old key only abbreviates the new one", () => {
+    const r = rig();
+    recordOpenItems(r.store, "<open>fix — a (run r1)</open>", 1, "h1", "main");
+    expect(recordOpenItems(r.store, "<done>fix → fix: part 2</done><open>fix: part 2 — b (run r1)</open>", 2, "h1", "main")).toEqual({ changed: true, closed: [], unmatched: [] });
+    expect(r.store.itemHistory("main", "fix: part 2")).toMatchObject({ problem: "fix: part 2", aliases: ["fix"] });
+    // With no such old item the arrow still names nothing: the new key is not its own old one.
+    expect(recordOpenItems(r.store, "<done>fi → fix: part 2</done><done>fix: part 2 → fix: part 2</done>", 3, "h1", "main").unmatched).toEqual(["fi → fix: part 2", "fix: part 2 → fix: part 2"]);
+  });
+
+  it("closes a key that holds a bare em dash by the <done> of the key alone", () => {
+    const r = rig();
+    recordOpenItems(r.store, "<open>修复登录——web 端 — 进行中</open><open>修复登录 — 另一件</open>", 1, "h1", "main");
+    expect(recordOpenItems(r.store, "<done>修复登录——web 端</done>", 2, "h1", "main")).toEqual({ changed: true, closed: ["修复登录——web 端"], unmatched: [] });
+    expect(recordOpenItems(r.store, "<done>修复登录——web 端</done>", 3, "h1", "main")).toEqual({ changed: false, closed: [], unmatched: [] });
+    expect(recordOpenItems(r.store, "<done>别的——东西</done>", 4, "h1", "main").unmatched).toEqual(["别的——东西"]);
+    expect(r.store.openItems("main").map((i) => i.problem)).toEqual(["修复登录"]);
+    // With no such key the bare dash is the cut it always was.
+    expect(recordOpenItems(r.store, "<done>修复登录——完成</done>", 5, "h1", "main").closed).toEqual(["修复登录"]);
   });
 
   // The documented rename: Pier's run claim renames `old` in place, and the arrow finds it done.

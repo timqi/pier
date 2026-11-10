@@ -222,7 +222,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   wrong closer dropped, and logged; one left open on an earlier line is text.
 - The arrow is ` → ` alone (`ARROW`, `arrowOf`), split at its first
   occurrence with both sides non-empty: `<done>old → new</done>` is the marker
-  `{problem: old, to: new, whole}`, `whole` the body read as one key.
+  `{problem: old, to: new, whole}`, `whole` the body read as one key. A
+  `<done>` whose key only a bare `—` cut carries the uncut body as `whole` too.
 - A turn's markers are its answer's and its `earlier`'s, `earlier` first:
   the text of the turn's tool-calling assistant messages before the answer
   (`turn-end`'s `earlier`, gathered by `PiSession.subscribe`;
@@ -246,20 +247,28 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   takes those of the open `old` an arrow closes into it. A closed key reopens with
   the marker's runs. An `<open>` whose key holds an arrow, the whole key not
   open, its `old` exactly an open key and its `to` another, is
-  `<open>to — stage (runs)</open>` with `<done>old → to</done>`; any other
-  key with an arrow is stored as written.
+  `<open>to — stage (runs)</open>` with `<done>old → to</done>`, and one whose
+  `to` is an open key holding `old` as an alias is `<open>to — stage (runs)</open>`;
+  `to` then holds the key as written as an alias. Any other key with an arrow
+  is stored as written.
 - `<done>` without an arrow closes the open item keyed by it, else the one
   open item whose key is it followed by `。` `:` `：` or a spaced `-` or `–`
   (`namesKey`; an `<open>` written without ` — ` keyed the whole line), none
   when two are. One that closes nothing is already settled — no change, no
   miss — when it is the key or an alias of a closed item of the chain and an
-  alias of no open one.
+  alias of no open one. Its `whole` goes first: an open key closes, and one
+  that is any item's key or alias is settled or a miss by the same rule, the
+  cut key not tried.
 - `<done>old → new</done>` whose `whole` is an open key closes that item. Else,
-  `old` read as above and `new` another open key, `old` closes into `new`
+  `new` an open key holding `whole` as an alias, it closes `new` — the head
+  repeating the key it wrote — and is already settled when another marker of
+  the turn names `new`. Else, `old` read as above, `new` not among its
+  candidates, and `new` another open key, `old` closes into `new`
   (its key, aliases and sessions, [15](15-item-view.md#items-keep-their-record)).
   Else, `old` not open and `new` open, it is already settled when `new`'s
   aliases hold `old`, or when `old` is a closed key of the chain, which `new`
-  then absorbs.
+  then absorbs. Else it is already settled when `whole` is the key or an alias
+  of a closed item and of no open one.
 - Any other `<done>` is a miss, logged. While an item is open, a turn with a
   miss gets the note `[Pier: <done>X</done> closed no open item. If it meant
   one of these, resend <done> with that key exactly; if its item is already
