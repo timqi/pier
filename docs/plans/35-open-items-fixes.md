@@ -9,7 +9,7 @@
 ### P — 解析（`core/reply.ts`、`core/inbound-file.ts`）
 
 - **P1 箭头只认 ` → `**：`ARROW` 去掉 ` -> `。`reply.ts` 导出 `ARROW = " \u2192 "` 和 `arrowOf(key): { old: string; to: string } | undefined`（按第一个 ` → ` 切，两边 trim，任一为空则 `undefined`）；`tasks/open-items.ts` 自己那份 `ARROW` 删掉改用它。（B1）
-- **P2 `<done>` 带整段原文**：done marker 变为 `{ op: "done"; problem: string; to?: string; whole?: string }`。`whole` 只在切出了箭头时给，值是整段正文按 `<open>` 行读出的 key（`openLine(body).problem`）；`problem`/`to` 的读法不变（箭头两边各自 `openLine`）。（A1、B1）
+- **P2 `<done>` 带整段原文**：done marker 变为 `{ op: "done"; problem: string; to?: string; whole?: string }`。`whole` 在切出了箭头、或裸 `—` 切过 key 时给（S3.1），值是整段正文不按箭头也不按裸 `—` 切读出的 key（`openLine(body, false).problem`：run token 剥掉，两侧有空格的 em dash 照切）；`problem`/`to` 的读法不变（箭头两边各自 `openLine`）。（A1、B1）
 - **P3 key 的切分**：先按第一个 ` —+ `（两侧有空格的一串 em dash）切；没有才退回第一个裸 `—+`。`修复登录——web 端 — 进行中` 的 key 是 `修复登录——web 端`；`a—b` 仍是 key `a`、stage `b`。（B7）
 - **P4 `(run <id>)` 任意位置**：正文里所有 `(run <id>)` 和 `(runs <id>, <id>)` 都收进 `runIds`（按出现顺序）并从正文剥掉，然后才切 key/stage；id 是不含空白、括号、逗号的一个词，所以 `(run the tests)` 不是 token。`<open>a (run r1) — b</open>` 的 key 是 `a`。`<topic>`、`<done>` 两边同样读。（A6）
 - **P5 标记不吞同名开标签**：一个标记的正文里不能再出现同名开标签（`<done> … <done>c</done>` 只认后一个）；`<open>a — say <done>b</done> later</open>` 照旧是一个 `<open>`。（A5 inlineUnclosed）
