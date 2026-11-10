@@ -427,19 +427,33 @@ describe("open-item markers", () => {
     expect(openItemMarkers("<done>a \u2192 b——c</done>").markers).toEqual([{ op: "done", problem: "a", to: "b", whole: "a \u2192 b——c" }]);
   });
 
-  it("takes every run token out of the body, wherever it sits, before the key is cut", () => {
-    expect(openItemMarkers("<open>sync — review running (run g7twwpfasjjcdbmk); waiting on you: x</open>").markers).toEqual([
-      { op: "open", problem: "sync", stage: "review running; waiting on you: x", runIds: ["g7twwpfasjjcdbmk"] },
+  it("takes out the run tokens that end the body, and before them only one of ledger ids, before the key is cut", () => {
+    const id = "g7twwpfasjjcdbmk";
+    expect(openItemMarkers(`<open>sync — review running (run ${id}); waiting on you: x</open>`).markers).toEqual([
+      { op: "open", problem: "sync", stage: "review running; waiting on you: x", runIds: [id] },
     ]);
     expect(openItemMarkers("<open>a — b (runs r1, r2) (run r3)</open>").markers).toEqual([
       { op: "open", problem: "a", stage: "b", runIds: ["r1", "r2", "r3"] },
     ]);
-    expect(openItemMarkers("<open>a (run r1) — b</open>").markers).toEqual([{ op: "open", problem: "a", stage: "b", runIds: ["r1"] }]);
+    expect(openItemMarkers(`<open>a (run ${id}) — b (runs ${id}, 0123456789abcdef), c (run r1)</open>`).markers).toEqual([
+      { op: "open", problem: "a", stage: "b, c", runIds: [id, id, "0123456789abcdef", "r1"] },
+    ]);
     expect(openItemMarkers("<done>a (run r1)</done>").markers).toEqual([{ op: "done", problem: "a" }]);
-    expect(replyTopic("<topic>a (run r1) — b</topic>")).toBe("a");
+    expect(replyTopic(`<topic>a (run ${id}) — b</topic>`)).toBe("a");
+    // A stage's own words: no id's shape, and not where the body ends.
+    expect(openItemMarkers("<open>backup job — cron set up (runs nightly), waiting on you: confirm</open>").markers).toEqual([
+      { op: "open", problem: "backup job", stage: "cron set up (runs nightly), waiting on you: confirm", runIds: [] },
+    ]);
+    expect(openItemMarkers(`<open>ci — passes (run locally), (runs ${id}, nightly) too (run r1)</open>`).markers).toEqual([
+      { op: "open", problem: "ci", stage: `passes (run locally), (runs ${id}, nightly) too`, runIds: ["r1"] },
+    ]);
     expect(openItemMarkers("<open>ci — waiting (run the tests)</open>").markers).toEqual([
       { op: "open", problem: "ci", stage: "waiting (run the tests)", runIds: [] },
     ]);
+    // 14 000 tokens, at the end or before it, are read once each.
+    const started = performance.now();
+    for (const end of ["", " x"]) expect(openItemMarkers(`<open>a — b${" (run r1)".repeat(14_000)}${end}</open>`).markers[0]).toMatchObject({ runIds: { length: end ? 0 : 14_000 } });
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it("never lets a body hold its own opening tag: a stray opener stays prose", () => {

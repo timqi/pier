@@ -199,6 +199,8 @@ function unclosedBody(line: string): string {
 }
 // An id is one word with no comma, so `(run the tests)` is prose.
 const RUN_TOKEN = /\s*\(runs?\s+([^\s(),]+(?:\s*,\s*[^\s(),]+)*)\)/gi;
+// A ledger id as tasks/definitions.ts `newId` mints it: before the body's end, only a token of these is one — `(runs nightly)` is a stage's words.
+const LEDGER_ID = /^[0-9a-z]{16}$/;
 
 /** `open` adds or replaces the item keyed by `problem`; `done` closes it, `to`
  *  the open item it continues as (`<done>old → new</done>`), `whole` — given
@@ -209,14 +211,22 @@ export type OpenItemMarker =
   | { op: "done"; problem: string; to?: string; whole?: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-/** An `<open>` line read apart: every `(run <id>)` / `(runs <id>, <id>)` token taken out, then
- *  the `problem` key before the first spaced em-dash run, else — unless `bare` is off — the first
- *  bare one, and the stage after it — a `<topic>` written the same way keys the same. */
+/** An `<open>` line read apart: the `(run <id>)` / `(runs <id>, <id>)` tokens that end it, and each one
+ *  of ledger ids before them, taken out, then the `problem` key before the first spaced em-dash run,
+ *  else — unless `bare` is off — the first bare one, and the stage after it — a `<topic>` written the same way keys the same. */
 function openLine(text: string, bare = true): { problem: string; stage: string; runIds: string[] } {
   const runIds: string[] = [];
   // Blanks collapsed first: `RUN_TOKEN` would rescan a long run of them from every offset.
-  const rest = oneLine(oneLine(text).replace(RUN_TOKEN, (_, ids: string) => {
-    runIds.push(...ids.split(",").map((id) => id.trim()));
+  const line = oneLine(text);
+  let tail = line.length;
+  for (const token of [...line.matchAll(RUN_TOKEN)].reverse()) {
+    if (token.index + token[0].length !== tail) break;
+    tail = token.index;
+  }
+  const rest = oneLine(line.replace(RUN_TOKEN, (token, list: string, at: number) => {
+    const ids = list.split(",").map((id) => id.trim());
+    if (at < tail && !ids.every((id) => LEDGER_ID.test(id))) return token;
+    runIds.push(...ids);
     return "";
   }));
   const dash = / \u2014+ /.exec(rest) ?? (bare ? /\u2014+/.exec(rest) : null);

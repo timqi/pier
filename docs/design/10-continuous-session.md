@@ -210,11 +210,14 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   adds, replaces or reopens the item keyed by `problem`, `<done>problem</done>` closes it;
   both are stripped beside `<silent>` and never read inside a code span or a fence,
   indented or not (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
-- A marker's body is read apart (`openLine`): every `(run <id>)` and
-  `(runs <id>, <id>)` in it, anywhere, is taken out as its run ids in order —
-  an id is one word with no whitespace, parenthesis or comma, so `(run the tests)`
-  is text; then the key is the text before the first spaced em-dash run
-  (` — `, ` —— `), else before the first bare `—`, and the stage the text after it.
+- A marker's body is read apart (`openLine`): the `(run <id>)` and
+  `(runs <id>, <id>)` tokens that end it are its run ids, in order — an id is
+  one word with no whitespace, parenthesis or comma, so `(run the tests)` is
+  text. One before them is a token only when every id in it has a ledger id's
+  shape, sixteen of `[0-9a-z]` (`LEDGER_ID`): `(runs nightly)` in a stage is
+  the stage's words. With the tokens out, the key is the text before the first
+  spaced em-dash run (` — `, ` —— `), else before the first bare `—`, and the
+  stage the text after it.
   `<topic>` and each side of a `<done>` arrow are read the same way.
 - A marker's body never holds its own tag's opener: in `<done>a <done>b</done>`
   only `<done>b</done>` is a marker. A marker whose opener starts the reply's
