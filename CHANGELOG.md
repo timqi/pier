@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.1.0
+
+### Changed
+
+- Web: short conversation heads include the two preceding sessions when opened or after a rotation.
+- Open items: related messages reuse their existing item, with names and stages updated as the work changes.
+
+### Fixed
+
+- Web: refresh open items when returning to a tab, prevent stale reads from overwriting newer state, and keep topics scoped to the chain on screen.
+- Open items: preserve tracking across compaction and tool calls, handle renamed items and run references consistently, and ignore unfinished markers in interrupted replies.
+- Open items: keep items closed when the user closes them during a reply, and accept repeated completion of an already closed item.
+- Tasks: give unmatched completions and stale open items a follow-up turn so the agent can reconcile them without waiting for another user message.
+
 ## 1.0.1
 
 ### Fixed
