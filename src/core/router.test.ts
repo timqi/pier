@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { EventHub } from "./hub.js";
+import { openItemMarkers } from "./reply.js";
 import { Router, SkillAmbiguous } from "./router.js";
 import { fakeSession as sharedFake } from "./session.testkit.js";
 import type {
@@ -225,6 +226,40 @@ describe("channel fan-out", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(heard).toEqual([["Done.", "<note>n</note>"], ["Next.", ""]]);
     expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Done.", "Next."]);
+  });
+
+  it("hands turn-end listeners a cut answer up to the marker it stops inside, opener and all, and the chat the whole of it", async () => {
+    const heard: string[] = [];
+    router.onTurnEnd((_id, text) => heard.push(text));
+    await router.ensure(KEY);
+    const cut = [
+      ["Merged.\n<done>fix parser", "Merged.\n"],
+      ["<open>a \u2014 b</open>\nNext.\n<open>new it  \n", "<open>a \u2014 b</open>\nNext.\n"],
+      ["Merged. <done>", "Merged. "],
+      // The cut may not leave an earlier opener as the last line's: a finished answer reads that one as text.
+      ["<done>login\n<done>fix pars", ""],
+      ["Write <done> to close one: <done>fix pars", "Write "],
+      ["Stopped in a tag.\n<don", "Stopped in a tag.\n<don"],
+    ] as const;
+    for (const [text] of cut) fake.emit({ type: "turn-end", text, partial: true });
+    // A finished answer's last line is the store's to read without its closer.
+    fake.emit({ type: "turn-end", text: "Merged.\n<done>fix parser" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heard).toEqual([...cut.map(([, read]) => read), "Merged.\n<done>fix parser"]);
+    expect(heard.slice(0, -1).flatMap((text) => openItemMarkers(text).unclosed)).toEqual([]);
+    expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Merged.", "Next.", "Merged.", "<done>login", "Write <done> to close one:", "Stopped in a tag.\n<don", "Merged."]);
+  });
+
+  it("hands turn-end listeners the turn's earlier text without a marker it leaves open", async () => {
+    const heard: string[] = [];
+    router.onTurnEnd((_id, _text, _opened, earlier) => heard.push(earlier));
+    await router.ensure(KEY);
+    // Work in progress says a tag's name; only the answer's last line is a marker without its closer.
+    for (const earlier of ["Checking how <open> is parsed", "<done>a</done>\nNow the <done> case", "<open>a — b</open>\n<done>login\n<done>fix"]) {
+      fake.emit({ type: "turn-end", text: "Done.", earlier });
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heard).toEqual(["Checking how ", "<done>a</done>\nNow the ", "<open>a — b</open>\n"]);
   });
 
   it("hands an answer the input that opened it, a follow-up Pi answers in the same run included", async () => {

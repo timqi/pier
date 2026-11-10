@@ -386,7 +386,9 @@ export type SessionEventPayload =
   // with nothing to say is never mistaken for one that chose to say nothing.
   // `earlier`: the text of the turn's tool-calling assistant messages before
   // it, `\n`-joined, absent when none had any; never shown, read for markers.
-  | { type: "turn-end"; text: string; meta?: TurnMeta; error?: string; earlier?: string }
+  // `partial`: `text` was cut short — an abort, the provider's length cap —
+  // and may stop inside a marker.
+  | { type: "turn-end"; text: string; meta?: TurnMeta; error?: string; earlier?: string; partial?: true }
   // The context was summarized away and replaced by that summary: the token
   // counts either side of it. Not a `system-input` — nothing entered the
   // model's context, the opposite happened — and the only trace compaction

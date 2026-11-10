@@ -13,13 +13,13 @@
 - **P3 key 的切分**：先按第一个 ` —+ `（两侧有空格的一串 em dash）切；没有才退回第一个裸 `—+`。`修复登录——web 端 — 进行中` 的 key 是 `修复登录——web 端`；`a—b` 仍是 key `a`、stage `b`。（B7）
 - **P4 `(run <id>)` 任意位置**：正文里所有 `(run <id>)` 和 `(runs <id>, <id>)` 都收进 `runIds`（按出现顺序）并从正文剥掉，然后才切 key/stage；id 是不含空白、括号、逗号的一个词，所以 `(run the tests)` 不是 token。`<open>a (run r1) — b</open>` 的 key 是 `a`。`<topic>`、`<done>` 两边同样读。（A6）
 - **P5 标记不吞同名开标签**：一个标记的正文里不能再出现同名开标签（`<done> … <done>c</done>` 只认后一个）；`<open>a — say <done>b</done> later</open>` 照旧是一个 `<open>`。（A5 inlineUnclosed）
-- **P6 回复最后一行的未闭合标记**：`<open|done|note|topic|note global>` 开在回复最后一个非空行、到文末没有正确闭合标签的（缺失，或写成别的 `</…>`），正文取到行尾（错的闭合标签一并剥掉），按正常标记解析并从可见文本剥离。`openItemMarkers` 多返回 `unclosed: string[]`（这类标记的原文），`recordOpenItems` 逐条 `log.warn`。不在最后一行的未闭合开标签照旧是正文。（A5）
+- **P6 回复最后一行的未闭合标记**：`<open|done|note|topic|note global>` 开在回复最后一个非空行、到文末没有正确闭合标签的（缺失，或写成别的 `</…>`），正文取到行尾（错的闭合标签一并剥掉），按正常标记解析并从可见文本剥离。`openItemMarkers` 多返回 `unclosed: string[]`（这类标记的原文），`recordOpenItems` 逐条 `log.warn`。不在最后一行的未闭合开标签照旧是正文。（A5）被截断的答复（abort，或 provider 的 length 上限：`turn-end` 带 `partial: true`，`agent/events.ts` 在 `agent_end` 上设）不算：`Router` 交给 `onTurnEnd` 的 `text` 从这个未闭合标记的开标签处截断，截断后若前面的开标签成了最后一行的未闭合标记就再截，直到没有，所以半个 key 既不开也不关事项，前面没闭合的开标签照旧是正文；显示上照旧剥掉。
 - **P7 任意缩进的围栏**：`FENCE_RE` 认任意空白缩进的 ``` / `~~~`（列表里 4 格缩进的代码块）。（B4）
 
 ### T — 整轮文本与压缩（`agent/`、`core/types.ts`、`core/router.ts`、`core/chain.ts`）
 
 - **T1 `turn-end` 带 `earlier`**：`{ type: "turn-end"; text; meta?; error?; earlier?: string }`。`earlier` 是这一轮里答复之前、带工具调用的 assistant 消息的文本（非空的，按顺序 `\n` 连接），没有就不带。`PiSession.subscribe` 在闭包里攒（Pi 的 `turn_end`：assistant、有 tool call、`stopReason` 不是 error/aborted、文本非空），发出任何 `turn-end` 时带上并清空。`toSessionEvents` 保持无状态。（B5）
-- **T2 `Router.onTurnEnd` 第四个参数 `earlier: string`**（没有则 `""`）。`MainChain` 的 `<note>`/`<note global>` 从 `earlier` 和 `text` 都读。`tasks/service.ts` 的消费归 S。可见回复、`autoTitle`、`DESIGN_FINAL`、silent 判定只看 `text`。
+- **T2 `Router.onTurnEnd` 第四个参数 `earlier: string`**（没有则 `""`）。`earlier` 里最后一行的未闭合标记不算标记（P6 只认答复的），`Router` 按 P6 的截法截掉再交出去。`MainChain` 的 `<note>`/`<note global>` 从 `earlier` 和 `text` 都读。`tasks/service.ts` 的消费归 S。可见回复、`autoTitle`、`DESIGN_FINAL`、silent 判定只看 `text`。
 - **T3 压缩后重注入**：`Router.onCompacted(listener: (sessionId: string) => void)`，在 `context-compacted` 事件上调用。`MainChain` 注册：session 是某 chain 的 head 且 `status(chainId).seed` 不以 `NOTHING_OPEN` 开头（只有 N3 的 run 段也算没有开着的事项）时，`systemInput("[Pier: the context was compacted. The open items as they stand, keys exact:]\n" + seed, { kind: "open-items", statusSnapshot }, "append")`；发不出去走 `router.reportTo`。（B 推测项，已核实：全仓只有 `tasks/agent.ts` 读 `context-compacted`，head 压缩后没有任何重注入）
 
 ### S — 存储与 head 回合（`tasks/store.ts`、`tasks/service.ts`、`tasks/open-items.ts`）

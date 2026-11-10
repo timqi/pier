@@ -1134,4 +1134,23 @@ describe("the open items", () => {
     expect(h0.systemInputs).toEqual([]);
     expect(store.openItems("main").map((i) => i.problem)).toEqual(["login"]);
   });
+
+  it("reads no marker a cut answer stops inside, and the ones it finished", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    const keys = () => store.openItems("main").map((i) => i.problem);
+    h0.emit({ type: "turn-end", text: "<open>fix parser — x</open><open>fix parser tests — y</open><open>login — z</open>" });
+    // Stopped inside `<done>fix parser tests</done>`: the item its first words name stays open, and no item is opened by half a key.
+    h0.emit({ type: "turn-end", text: "<done>login</done>\nMerged.\n<done>fix parser", partial: true });
+    h0.emit({ type: "turn-end", text: "Next.\n<open>new it", partial: true });
+    expect(keys()).toEqual(["fix parser", "fix parser tests"]);
+    expect(h0.systemInputs).toEqual([]);
+    // A finished answer's last line is still read without its closer.
+    h0.emit({ type: "turn-end", text: "Merged.\n<done>fix parser" });
+    expect(keys()).toEqual(["fix parser tests"]);
+  });
 });

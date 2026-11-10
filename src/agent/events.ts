@@ -333,8 +333,9 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
         : final?.stopReason === "toolUse" && !hasToolCalls(final)
         ? "the provider stopped on tool_use but sent no tool call"
         : undefined;
+      const partial = !hasToolCalls(final) && (final?.stopReason === "aborted" || final?.stopReason === "length");
       const out: SessionEventPayload[] = [
-        { type: "turn-end", text: hasToolCalls(final) ? "" : textOf(final?.content), ...(failure ? { error: failure } : {}) },
+        { type: "turn-end", text: hasToolCalls(final) ? "" : textOf(final?.content), ...(failure ? { error: failure } : {}), ...(partial ? { partial: true } : {}) },
       ];
       if (failure) out.push({ type: "error", message: failure });
       return out;

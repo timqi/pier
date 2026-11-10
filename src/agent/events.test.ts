@@ -325,6 +325,11 @@ describe("toSessionEvents", () => {
       ] },
     ];
     expect(toSessionEvents({ type: "agent_end", messages })).toEqual([{ type: "turn-end", text: "" }]);
+    // An answer cut short says so: its text may stop inside a marker.
+    for (const stopReason of ["aborted", "length"]) {
+      const cut: PiMessage = { role: "assistant", stopReason, content: [{ type: "text", text: "Merged.\n<done>fix pars" }] };
+      expect(toSessionEvents({ type: "agent_end", messages: [cut] })).toEqual([{ type: "turn-end", text: "Merged.\n<done>fix pars", partial: true }]);
+    }
     const turn = toChatTurns(messages)[1]!;
     expect(turn.text).toBe("");
     expect(turn.steps?.[0]).toEqual({ kind: "progress", text: "Reading the file." });

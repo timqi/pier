@@ -5,7 +5,7 @@ import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
 import { SenderPrefix, withoutLanguage, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
-import { cut, splitReply } from "./reply.js";
+import { cut, openItemMarkers, splitReply } from "./reply.js";
 import { COMMAND_SHAPE, isChatCommand, skillsNamed } from "./types.js";
 import type {
   AgentSession,
@@ -395,10 +395,17 @@ export class Router {
           );
           if (this.stopped) return;
           if (!payload.error) {
+            // A marker a cut answer stops inside, or the turn's earlier text leaves open, is not one its writer
+            // finished: read as none, as is one the cut leaves last.
+            const cut = (text: string): string => {
+              for (let open; (open = openItemMarkers(text).unclosed[0]) !== undefined;) text = text.slice(0, text.lastIndexOf(open));
+              return text;
+            };
+            const [text, earlier] = [payload.partial ? cut(payload.text) : payload.text, cut(payload.earlier ?? "")];
             // One listener's throw may not cost the rest, or the chat its reply.
             for (const ended of this.turnEnded) {
               try {
-                ended(session.id, payload.text, attached.opened ?? undefined, payload.earlier ?? "");
+                ended(session.id, text, attached.opened ?? undefined, earlier);
               } catch (err) {
                 this.report(session.id, key, `turn-end listener failed: ${String(err)}`);
               }
