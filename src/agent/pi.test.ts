@@ -533,6 +533,28 @@ describe("a turn's text before its answer", () => {
     fake.emit({ type: "agent_settled" });
     expect(turnEnds(seen)).toMatchObject([{ text: "", earlier: "<note>kept</note>" }]);
   });
+
+  it("spans a retried request, once, for each subscriber", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[][] = [[], []];
+    s.subscribe((event) => seen[0]!.push(event));
+    s.subscribe((event) => seen[1]!.push(event));
+    // Pi's order: the failed attempt ends its run, the retry is a run of its own with no input.
+    fake.emit({ type: "turn_end", message: working("<open>a — b</open>") });
+    const attempt = working("<done>lost</done>", "error");
+    fake.emit({ type: "turn_end", message: attempt });
+    fake.emit({ type: "agent_end", willRetry: true, messages: [attempt] });
+    fake.emit({ type: "agent_start" });
+    fake.emit({ type: "turn_end", message: working("<note>n</note>") });
+    fake.emit({ type: "turn_end", message: answer("Done.") });
+    fake.emit({ type: "agent_end", messages: [answer("Done.")] });
+    fake.emit({ type: "turn_end", message: answer("Next.") });
+    for (const events of seen) {
+      expect(turnEnds(events)).toMatchObject([{ text: "Done.", earlier: "<open>a — b</open>\n<note>n</note>" }, { text: "Next." }]);
+      expect(turnEnds(events)[1]).not.toHaveProperty("earlier");
+    }
+  });
 });
 
 describe("a session naming itself after its first exchange", () => {
