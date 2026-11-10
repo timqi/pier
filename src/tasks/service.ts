@@ -244,7 +244,7 @@ export class TaskService {
             const statusSnapshot = unmatched.length && keys.length ? { statusSnapshot: openItemsStatus(this.openItems(chainId), Date.now()).snapshot } : {};
             if (!head) failed("not attached");
             else head.systemInput(note, { kind: "open-items", ...(turn ? { turn: true as const } : {}), ...statusSnapshot }, turn ? "followUp" : "append").catch((err: unknown) => failed(String(err)));
-          }
+          } else this.lastNote.delete(chainId); // A turn that owes no note ends the repeat: the same miss after it is news.
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
         }

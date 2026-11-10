@@ -1120,6 +1120,36 @@ describe("the open items", () => {
       text: `[Pier: run r1 ended; open item "login" still has its old stage. Close it with <done>, or <open> it again with a stage saying waiting on you.]` });
   });
 
+  it("gives the same miss a turn again once a head turn ended owing no note", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    const end = (text: string) => h0.emit({ type: "turn-end", text });
+    const user = (text: string) => { h0.emit({ type: "turn-start" }); h0.emit({ type: "user-message", text }); };
+    const drained = () => {
+      h0.emit({ type: "turn-start" });
+      h0.emit({ type: "system-input", text: h0.systemInputs.at(-1)!.text, origin: h0.systemInputs.at(-1)!.origin });
+    };
+    end("<open>login — x</open>");
+    user("go");
+    end("<done>logn</done>");
+    // The note's own turn settles nothing and misses nothing: the chain's last note is forgotten.
+    drained();
+    end("<silent>nothing to resend</silent>");
+    user("days later");
+    end("<done>logn</done>");
+    // No loop: the turn that second note opened, and the same note running, are appended.
+    drained();
+    end("<done>logn</done>");
+    user("and?");
+    end("<done>logn</done>");
+    expect(h0.systemInputs.map((i) => [i.mode, i.origin.kind === "open-items" && i.origin.turn])).toEqual([["followUp", true], ["followUp", true], ["append", undefined], ["append", undefined]]);
+    expect(new Set(h0.systemInputs.map((i) => i.text)).size).toBe(1);
+  });
+
   it("reads no marker and sends no note for a failed turn or once the router is stopping", () => {
     const hub = new EventHub();
     const h0 = fakeSession("h0", { scripted: true });

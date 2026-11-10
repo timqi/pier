@@ -290,7 +290,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   `followUp`: the head answers it in a turn of its own, at once or after the
   running one. It is mode `append` without `turn` when the turn itself was
   opened by an `open-items` input, or when its text equals the last note sent
-  to that chain (one per chain, in memory).
+  to that chain (one per chain, in memory, forgotten when a head turn of the
+  chain ends owing no note).
 - Pi answers a follow-up queued at a turn's end in the same run; the note
   enters it with a `turn-start` of its own, so it is that answer's `opened`.
 - The misses stay owed, in memory: a reply that closed an item owes only its

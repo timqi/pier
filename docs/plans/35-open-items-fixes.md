@@ -52,7 +52,7 @@
 
 ### N — 提示与 seed（`tasks/service.ts`、`tasks/open-items.ts`、`core/`、`agent/roles.ts`、文档）
 
-- **N1 unmatched / stale 提示触发 head 一轮**：这条 `systemInput` 用 `followUp`（空闲即起一轮，回合中则排在其后），origin `{ kind: "open-items", turn: true, … }`。防循环两条，命中任一就退回 `append`、不带 `turn`：这一轮本身是 `open-items` 提示开的（`opened?.kind === "open-items"`）；提示全文与本 chain 上一条发出的提示相同（内存里每 chain 记一条）。`awaitsTurn` 对带 `turn` 的 `open-items` 为 true；`agent/events.ts` 的 `systemOrigin` 把 `turn` 读回来；`core/types.ts` 的 origin 文档改写。`[Pier: the user closed …]` 和 T3 仍是 `append`。（B8）
+- **N1 unmatched / stale 提示触发 head 一轮**：这条 `systemInput` 用 `followUp`（空闲即起一轮，回合中则排在其后），origin `{ kind: "open-items", turn: true, … }`。防循环两条，命中任一就退回 `append`、不带 `turn`：这一轮本身是 `open-items` 提示开的（`opened?.kind === "open-items"`）；提示全文与本 chain 上一条发出的提示相同（内存里每 chain 记一条，该 chain 的 head 一轮结束而没有提示要发时清掉，之后同样的 miss 重新起一轮）。`awaitsTurn` 对带 `turn` 的 `open-items` 为 true；`agent/events.ts` 的 `systemOrigin` 把 `turn` 读回来；`core/types.ts` 的 origin 文档改写。`[Pier: the user closed …]` 和 T3 仍是 `append`。（B8）
 - **N2 unmatched 提示措辞**：`[Pier: <done>X</done> closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n- k1\n- k2]`；箭头指向没开着的 `to` 的括注保留。seed 行：`- unmatched <done>: X (closed nothing; if it meant an item above, <done> that item's key)`。（A4）
 - **N3 seed 里的 unlisted run 不再长得像事项**：事项行（和 owed 行）之后单独一段：
   ```
