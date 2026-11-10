@@ -1,6 +1,6 @@
 import { goalText } from "./open-items.js";
 import { describe, expect, it } from "vitest";
-import { arrowOf, awaitsTurn, compact, formatTurnMeta, openItemMarkers, originLabel, quietLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
+import { arrowOf, awaitsTurn, compact, cutUnclosed, formatTurnMeta, openItemMarkers, originLabel, quietLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -505,6 +505,21 @@ describe("open-item markers", () => {
     const hostile = ["<open>".repeat(17_000), "<open><done><note><topic><note global>".repeat(2_800), `<open>a${blanks}x`, `<done>a${blanks}x\nmore`, `<open>a${blanks}x</open>`, `<note>a${"</".repeat(50_000)}`];
     // A quadratic reading of any of these takes seconds.
     for (const raw of hostile) expect(timed(raw)).toBeLessThan(500);
+  });
+
+  it("cuts a text before the marker its last line leaves unclosed and each one that leaves last, 84 KB of them in one pass", () => {
+    expect(cutUnclosed("Merged.\n<done>fix parser")).toBe("Merged.\n");
+    expect(cutUnclosed("<open>a — b</open>\n<done>login\n\n  <done>fix pars\n")).toBe("<open>a — b</open>\n");
+    // A line of prose, a fence or a closed marker ends the run, whatever opener a line inside it starts with.
+    for (const kept of ["<done>login\nNext.\n", "```\n<done>a\n```\n", "<note>x\n<done>y</note>\n", "Should I <done> gpu prover", "<done>a</done>"]) {
+      expect(cutUnclosed(kept)).toBe(kept);
+      if (kept.endsWith("\n")) expect(cutUnclosed(`${kept}<open>z`)).toBe(kept);
+    }
+    const lines = "<open>item — a stage\n".repeat(4_000);
+    const started = performance.now();
+    expect(cutUnclosed(`Kept.\n${lines}`)).toBe("Kept.\n");
+    // Reading the text again after each cut takes seconds here.
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it("neither reads nor strips a marker in a fence indented inside a list", () => {

@@ -177,17 +177,21 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
  *  closed body, then the rest of the reply's last line after one that starts it and is left unclosed or wrongly closed.
  *  A body never holds its own opener, so a stray one cannot swallow the marker after it. */
 const MARKER_TAGS = ["open", "done", "note", "topic", "note global"] as const;
-const MARKER = new RegExp(
+const markerRe = (last: boolean): RegExp => new RegExp(
   MARKER_TAGS.map((t, i) => {
     const opener = tag(`<${t}>`);
     const body = (char: string): string => `(?:(?!${opener})${char})`;
     const closed = `(${body("[\\s\\S]")}*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
     // Taken in a lookahead and matched by reference, so a failed match never retries a shorter line: linear in the reply.
-    const unclosed = `(?<=(?:^|\\n)[^\\S\\n]*${opener})(?=(${body("[^\\n]")}*))\\${String(2 * i + 2)}(?=\\s*$)`;
+    const rest = `\\${String(2 * i + 2)}`;
+    const unclosed = `(?<=(?:^|\\n)[^\\S\\n]*${opener})(?=(${body("[^\\n]")}*))${last ? `${rest}(?=\\s*$)` : `(?=${rest}(?:\\n|$))`}`;
     return `${opener}(?:${closed}|${unclosed})`;
   }).join("|"),
   "gi",
 );
+const MARKER = markerRe(true);
+// Every line `MARKER` would read unclosed were it the last, its opener alone: the scan goes on inside the line as `MARKER`'s does.
+const UNCLOSED_LINE = markerRe(false);
 /** An unclosed marker's line without the wrong closer it ends on. */
 function unclosedBody(line: string): string {
   const at = line.lastIndexOf("</");
@@ -277,6 +281,20 @@ export function openItemMarkers(markdown: string): {
     return "";
   });
   return { markers, notes, globalNotes, ...(topic ? { topic } : {}), dropped, unclosed };
+}
+
+/** `text` up to the marker its last line leaves unclosed, and up to each one that cut leaves last in turn:
+ *  what its writer did not finish is no marker. One pass, where reading again after every cut is quadratic. */
+export function cutUnclosed(text: string): string {
+  const lines: [opener: number, end: number][] = [];
+  replaceOutsideCode(text, UNCLOSED_LINE, (m) => {
+    const rest = m.find((g, i) => i > 0 && i % 2 === 0 && g !== undefined);
+    if (rest !== undefined) lines.push([m.index!, m.index! + m[0].length + rest.length]);
+    return m[0];
+  });
+  let end = text.length;
+  for (let i = lines.length - 1; i >= 0 && !text.slice(lines[i]![1], end).trim(); i--) end = lines[i]![0];
+  return text.slice(0, end);
 }
 
 /** The open item a reply is about, by its `problem` key: the `<topic>` body,

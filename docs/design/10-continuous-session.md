@@ -224,8 +224,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   neither read nor stripped: markers are taken out before `<silent>` is.
   An answer cut short — an abort, the provider's length cap (`turn-end`'s
   `partial`) — has that last marker read as none: stripped, never recorded,
-  and no opener before it read as the last line's in its place; so has the
-  turn's `earlier` text, always.
+  and no opener before it read as the last line's in its place (`cutUnclosed`);
+  so has the turn's `earlier` text, always.
 - The arrow is ` → ` alone (`ARROW`, `arrowOf`), split at its first
   occurrence with both sides non-empty: `<done>old → new</done>` is the marker
   `{problem: old, to: new, whole}`, `whole` the body read as one key. A
