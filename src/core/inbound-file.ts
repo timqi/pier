@@ -36,8 +36,8 @@ export const fileMarker = (path: string): string =>
 export const lostMarker = (name: string, reason: string): string =>
   `[attachment lost: ${name} — ${reason}]`;
 
-/** A fenced block's opening or closing line. */
-const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+/** A fenced block's opening or closing line, at any indent: a list item's fence sits past four spaces. */
+const FENCE_RE = /^[ \t]*(`{3,}|~{3,})/;
 
 /** Code ranges: fenced blocks and inline spans. Spans are paired within a line,
  *  which keeps this a scan instead of a parser. */

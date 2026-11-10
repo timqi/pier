@@ -172,77 +172,100 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 
 /** Main's markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back on the head's turn end. Code is content, so a
- *  marker inside a fence or a code span is neither. Group 1 is an `<open>`
- *  body, group 2 a `<done>` body, group 3 a `<note>` body, group 4 a
- *  `<topic>` body, group 5 a `<note global>` body. */
+ *  marker inside a fence or a code span is neither. Each tag holds two groups: its
+ *  closed body, then one left unclosed or wrongly closed on the reply's last line.
+ *  A body never holds its own opener, so a stray one cannot swallow the marker after it. */
+const MARKER_TAGS = ["open", "done", "note", "topic", "note global"] as const;
 const MARKER = new RegExp(
-  ["open", "done", "note", "topic", "note global"]
-    .map((t) => `${tag(`<${t}>`)}([\\s\\S]*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`).join("|"),
+  MARKER_TAGS.map((t) => {
+    const opener = tag(`<${t}>`);
+    const body = (char: string): string => `((?:(?!${opener})${char})*?)`;
+    const closed = `${body("[\\s\\S]")}${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
+    const unclosed = `${body("[^\\n]")}(?:<\\/[^>\\n]*>)?[ \\t]*(?=\\s*$)`;
+    return `${opener}(?:${closed}|${unclosed})`;
+  }).join("|"),
   "gi",
 );
-const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
+// An id is one word with no comma, so `(run the tests)` is prose.
+const RUN_TOKEN = /\s*\(runs?\s+([^\s(),]+(?:\s*,\s*[^\s(),]+)*)\)/gi;
 
 /** `open` adds or replaces the item keyed by `problem`; `done` closes it, `to`
- *  the open item it continues as (`<done>old → new</done>`). */
+ *  the open item it continues as (`<done>old → new</done>`), `whole` — given
+ *  only with `to` — the key the body reads as without the arrow split. */
 export type OpenItemMarker =
   | { op: "open"; problem: string; stage: string; runIds: string[] }
-  | { op: "done"; problem: string; to?: string };
+  | { op: "done"; problem: string; to?: string; whole?: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-/** An `<open>` line read apart: the `problem` key before the ` — stage`, the
- *  `(run <id>)` tokens off its end — a `<topic>` written the same way keys the same. */
+/** An `<open>` line read apart: every `(run <id>)` / `(runs <id>, <id>)` token taken out, then
+ *  the `problem` key before the first spaced em-dash run, else the first bare one, and the stage
+ *  after it — a `<topic>` written the same way keys the same. */
 function openLine(text: string): { problem: string; stage: string; runIds: string[] } {
-  let rest = oneLine(text);
   const runIds: string[] = [];
-  for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
-    runIds.unshift(run[1]!);
-    rest = rest.slice(0, run.index);
-  }
-  const dash = rest.indexOf("\u2014");
-  return { problem: (dash < 0 ? rest : rest.slice(0, dash)).trim(), stage: dash < 0 ? "" : rest.slice(dash + 1).trim(), runIds };
+  const rest = oneLine(text.replace(RUN_TOKEN, (_, ids: string) => {
+    runIds.push(...ids.split(",").map((id) => id.trim()));
+    return "";
+  }));
+  const dash = / \u2014+ /.exec(rest) ?? /\u2014+/.exec(rest);
+  if (!dash) return { problem: rest, stage: "", runIds };
+  return { problem: rest.slice(0, dash.index).trim(), stage: rest.slice(dash.index + dash[0].length).trim(), runIds };
 }
 
-/** The first ` → ` (or ` -> `) splits a `<done>` body into the key it closes and the one it continues as. */
-const ARROW = / (?:\u2192|->) /;
-function doneLine(text: string): { problem: string; to?: string } {
+/** The arrow of `<done>old → new</done>`; ` -> ` is a key's own text. */
+export const ARROW = " \u2192 ";
+/** `key` split on its first arrow, both sides trimmed; none when either side is empty. */
+export function arrowOf(key: string): { old: string; to: string } | undefined {
+  const at = key.indexOf(ARROW);
+  if (at < 0) return undefined;
+  const old = key.slice(0, at).trim();
+  const to = key.slice(at + ARROW.length).trim();
+  return old && to ? { old, to } : undefined;
+}
+
+function doneLine(text: string): { problem: string } | { problem: string; to: string; whole: string } {
   const body = oneLine(text);
-  const arrow = ARROW.exec(body);
-  const to = arrow ? openLine(body.slice(arrow.index + arrow[0].length)).problem : "";
-  if (!arrow || !to) return { problem: openLine(body).problem };
-  return { problem: openLine(body.slice(0, arrow.index)).problem, to };
+  const whole = openLine(body).problem;
+  const arrow = arrowOf(body);
+  const to = arrow ? openLine(arrow.to).problem : "";
+  if (!arrow || !to) return { problem: whole };
+  return { problem: openLine(arrow.old).problem, to, whole };
 }
 
 /** The markers in reply order, `notes` the chain's daily-note lines and `globalNotes`
  *  the `<note global>` ones, `topic` the `<topic>` body; `dropped` holds the ones with
- *  no text, for the caller to log. */
-export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; notes: string[]; globalNotes: string[]; topic?: string; dropped: string[] } {
+ *  no text and `unclosed` the ones read without their closer, for the caller to log. */
+export function openItemMarkers(markdown: string): {
+  markers: OpenItemMarker[]; notes: string[]; globalNotes: string[]; topic?: string; dropped: string[]; unclosed: string[];
+} {
   const markers: OpenItemMarker[] = [];
   const notes: string[] = [];
   const globalNotes: string[] = [];
   const dropped: string[] = [];
+  const unclosed: string[] = [];
   let topic: string | undefined;
   replaceOutsideCode(markdown, MARKER, (m) => {
-    if (m[5] !== undefined) {
-      const body = oneLine(m[5]);
-      if (body) globalNotes.push(body);
+    const group = m.findIndex((g, i) => i > 0 && g !== undefined);
+    const kind = MARKER_TAGS[Math.floor((group - 1) / 2)]!;
+    const text = m[group] ?? "";
+    if ((group - 1) % 2 === 1) unclosed.push(m[0].trim());
+    if (kind === "open") {
+      const { problem, stage, runIds } = openLine(text);
+      if (problem) markers.push({ op: "open", problem, stage, runIds });
       else dropped.push(m[0].trim());
-      return "";
-    }
-    if (m[1] === undefined) {
-      const done = m[2] !== undefined ? doneLine(m[2]) : undefined;
-      const body = done?.problem ?? (m[3] !== undefined ? oneLine(m[3]) : openLine(m[4] ?? "").problem);
+    } else if (kind === "done") {
+      const done = doneLine(text);
+      if (done.problem) markers.push({ op: "done", ...done });
+      else dropped.push(m[0].trim());
+    } else {
+      const body = kind === "topic" ? openLine(text).problem : oneLine(text);
       if (!body) dropped.push(m[0].trim());
-      else if (m[4] !== undefined) topic ??= body;
-      else if (!done) notes.push(body);
-      else markers.push({ op: "done", problem: body, ...(done.to ? { to: done.to } : {}) });
-      return "";
+      else if (kind === "topic") topic ??= body;
+      else if (kind === "note") notes.push(body);
+      else globalNotes.push(body);
     }
-    const { problem, stage, runIds } = openLine(m[1]);
-    if (problem) markers.push({ op: "open", problem, stage, runIds });
-    else dropped.push(m[0].trim());
     return "";
   });
-  return { markers, notes, globalNotes, ...(topic ? { topic } : {}), dropped };
+  return { markers, notes, globalNotes, ...(topic ? { topic } : {}), dropped, unclosed };
 }
 
 /** The open item a reply is about, by its `problem` key: the `<topic>` body,

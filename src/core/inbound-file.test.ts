@@ -83,6 +83,9 @@ describe("replaceOutsideCode", () => {
     expect(hit("~~~md\nLINK\n~~~")).toBe("~~~md\nLINK\n~~~");
     // Indented fence, and a fence closed only by its own character.
     expect(hit("  ```\nLINK\n  ```")).toBe("  ```\nLINK\n  ```");
+    // A list item's fence sits past four spaces.
+    expect(hit("- a\n\n    ```\n    LINK\n    ```\nLINK")).toBe("- a\n\n    ```\n    LINK\n    ```\nX");
+    expect(hit("\t~~~\nLINK\n\t~~~")).toBe("\t~~~\nLINK\n\t~~~");
     expect(hit("~~~\nLINK\n```\nLINK\n~~~")).toBe("~~~\nLINK\n```\nLINK\n~~~");
   });
 
