@@ -235,10 +235,10 @@ describe("channel fan-out", () => {
     const cut = [
       ["Merged.\n<done>fix parser", "Merged.\n"],
       ["<open>a \u2014 b</open>\nNext.\n<open>new it  \n", "<open>a \u2014 b</open>\nNext.\n"],
-      ["Merged. <done>", "Merged. "],
       // The cut may not leave an earlier opener as the last line's: a finished answer reads that one as text.
       ["<done>login\n<done>fix pars", ""],
-      ["Write <done> to close one: <done>fix pars", "Write "],
+      // A tag the line does not start with is text, cut or not: half a key there is no marker either.
+      ["Merged. <done>fix pars", "Merged. <done>fix pars"],
       ["Stopped in a tag.\n<don", "Stopped in a tag.\n<don"],
     ] as const;
     for (const [text] of cut) fake.emit({ type: "turn-end", text, partial: true });
@@ -247,7 +247,8 @@ describe("channel fan-out", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(heard).toEqual([...cut.map(([, read]) => read), "Merged.\n<done>fix parser"]);
     expect(heard.slice(0, -1).flatMap((text) => openItemMarkers(text).unclosed)).toEqual([]);
-    expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Merged.", "Next.", "Merged.", "<done>login", "Write <done> to close one:", "Stopped in a tag.\n<don", "Merged."]);
+    expect(heard.slice(0, -1).flatMap((text) => openItemMarkers(text).markers)).toEqual([{ op: "open", problem: "a", stage: "b", runIds: [] }]);
+    expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Merged.", "Next.", "<done>login", "Merged. <done>fix pars", "Stopped in a tag.\n<don", "Merged."]);
   });
 
   it("hands turn-end listeners the turn's earlier text without a marker it leaves open", async () => {
@@ -259,7 +260,7 @@ describe("channel fan-out", () => {
       fake.emit({ type: "turn-end", text: "Done.", earlier });
     }
     await new Promise((r) => setTimeout(r, 0));
-    expect(heard).toEqual(["Checking how ", "<done>a</done>\nNow the ", "<open>a — b</open>\n"]);
+    expect(heard).toEqual(["Checking how <open> is parsed", "<done>a</done>\nNow the <done> case", "<open>a — b</open>\n"]);
   });
 
   it("hands an answer the input that opened it, a follow-up Pi answers in the same run included", async () => {

@@ -472,6 +472,26 @@ describe("open-item markers", () => {
     expect(openItemMarkers("<done>a </b> c</x> ").markers).toEqual([{ op: "done", problem: "a </b> c" }]);
   });
 
+  it("reads the last line's unclosed marker only where its opener starts the line: a tag named in prose is text", () => {
+    const prose = ["On it.\nShould I <done> gpu prover", "- parsing of <note> is fixed now.", "<done>a</done> <open>b — c", "<done>a <done>b"];
+    for (const raw of prose) {
+      expect(openItemMarkers(raw)).toMatchObject({ markers: raw.startsWith("<done>a</done>") ? [{ op: "done", problem: "a" }] : [], notes: [], unclosed: [] });
+      expect(splitReply(raw).text).toBe(raw.replace("<done>a</done> ", ""));
+      expect(saidText(raw)).toBe(raw.replace("<done>a</done> ", ""));
+    }
+    // What is not read is not hidden either, a `<silent>` before or after it on the way out included.
+    for (const raw of ["<silent>dispatched</silent> <open>key — stage", "<open>key — stage\n<silent>dispatched</silent>"]) {
+      expect(openItemMarkers(raw)).toMatchObject({ markers: [], unclosed: [] });
+      expect(splitReply(raw).text).toBe("<open>key — stage");
+    }
+    // Indented or not, a line the opener starts is still read.
+    expect(openItemMarkers("Dispatched.\n<open>key — stage (run r)")).toMatchObject({
+      markers: [{ op: "open", problem: "key", stage: "stage", runIds: ["r"] }], unclosed: ["<open>key — stage (run r)"],
+    });
+    expect(openItemMarkers("Merged.\n  <done>key</closed>\n")).toMatchObject({ markers: [{ op: "done", problem: "key" }], unclosed: ["<done>key</closed>"] });
+    expect(splitReply("Merged.\n  <done>key</closed>\n").text).toBe("Merged.");
+  });
+
   it("reads 100 KB of openers, or of blanks after one, in linear time", () => {
     const timed = (raw: string): number => {
       const started = performance.now();

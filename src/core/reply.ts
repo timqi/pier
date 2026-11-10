@@ -174,7 +174,7 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 /** Main's markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back on the head's turn end. Code is content, so a
  *  marker inside a fence or a code span is neither. Each tag holds two groups: its
- *  closed body, then the rest of the reply's last line after one left unclosed or wrongly closed.
+ *  closed body, then the rest of the reply's last line after one that starts it and is left unclosed or wrongly closed.
  *  A body never holds its own opener, so a stray one cannot swallow the marker after it. */
 const MARKER_TAGS = ["open", "done", "note", "topic", "note global"] as const;
 const MARKER = new RegExp(
@@ -183,7 +183,7 @@ const MARKER = new RegExp(
     const body = (char: string): string => `(?:(?!${opener})${char})`;
     const closed = `(${body("[\\s\\S]")}*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
     // Taken in a lookahead and matched by reference, so a failed match never retries a shorter line: linear in the reply.
-    const unclosed = `(?=(${body("[^\\n]")}*))\\${String(2 * i + 2)}(?=\\s*$)`;
+    const unclosed = `(?<=(?:^|\\n)[^\\S\\n]*${opener})(?=(${body("[^\\n]")}*))\\${String(2 * i + 2)}(?=\\s*$)`;
     return `${opener}(?:${closed}|${unclosed})`;
   }).join("|"),
   "gi",
@@ -333,8 +333,9 @@ export function streamTail(markdown: string): string {
   return hidden ? markdown.slice(0, openAt) : markdown;
 }
 
+// Markers first, on the text `openItemMarkers` reads: a `<silent>` taken out before may not turn the line after it into a marker's.
 const unmarked = (markdown: string): string =>
-  replaceOutsideCode(markdown.replace(SILENT, ""), MARKER, () => "").trim();
+  replaceOutsideCode(markdown, MARKER, () => "").replace(SILENT, "").trim();
 
 /** What a message says with Pier's markup off — `<silent>`, the open-item
  *  markers, the next-step block — and otherwise untouched: search cuts a

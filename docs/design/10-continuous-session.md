@@ -217,9 +217,11 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   (` — `, ` —— `), else before the first bare `—`, and the stage the text after it.
   `<topic>` and each side of a `<done>` arrow are read the same way.
 - A marker's body never holds its own tag's opener: in `<done>a <done>b</done>`
-  only `<done>b</done>` is a marker. A marker opened on the reply's last
-  non-empty line and not closed by its own closer is read to the line's end, a
-  wrong closer dropped, and logged; one left open on an earlier line is text.
+  only `<done>b</done>` is a marker. A marker whose opener starts the reply's
+  last non-empty line — only whitespace before it — and that its own closer
+  does not close is read to the line's end, a wrong closer dropped, and logged;
+  one left open on an earlier line or after other text on its line is text,
+  neither read nor stripped: markers are taken out before `<silent>` is.
   An answer cut short — an abort, the provider's length cap (`turn-end`'s
   `partial`) — has that last marker read as none: stripped, never recorded,
   and no opener before it read as the last line's in its place; so has the
