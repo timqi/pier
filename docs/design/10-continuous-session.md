@@ -309,7 +309,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   closed again when the reply reopened its key, or opened an item not open
   before it that holds that key as an alias or shares a run's session with it
   (`closedMidTurn`, the turn's only).
-- A head whose context is compacted, its seed not `Nothing open.`, gets
+- A head whose context is compacted while an item is open — a run in no item
+  is none — gets
   `[Pier: the context was compacted. The open items as they stand, keys exact:]`
   and the seed, an `open-items` system input, mode `append`, no turn, with the
   chain's `statusSnapshot` (`MainChain`, `Router.onCompacted`); a send that

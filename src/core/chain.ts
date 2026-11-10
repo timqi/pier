@@ -139,7 +139,8 @@ export class MainChain {
     const chain = this.chainOf(sessionId);
     if (chain?.members[0] !== sessionId) return;
     const { seed, snapshot } = this.status(chain.chainId);
-    if (seed === NOTHING_OPEN) return;
+    // Runs in no item follow `Nothing open.` in the seed: no key to hand back.
+    if (seed.startsWith(NOTHING_OPEN)) return;
     const name = this.deps.chains.get(chain.chainId)?.name ?? chain.chainId;
     const failed = (why: string) => this.deps.router.reportTo(sessionId, `open items: the note to the compacted head could not reach it: ${why}`);
     const head = this.deps.router.attachedSessions().find((a) => a.session.id === sessionId)?.session;

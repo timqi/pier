@@ -20,7 +20,7 @@
 
 - **T1 `turn-end` 带 `earlier`**：`{ type: "turn-end"; text; meta?; error?; earlier?: string }`。`earlier` 是这一轮里答复之前、带工具调用的 assistant 消息的文本（非空的，按顺序 `\n` 连接），没有就不带。`PiSession.subscribe` 在闭包里攒（Pi 的 `turn_end`：assistant、有 tool call、`stopReason` 不是 error/aborted、文本非空），发出任何 `turn-end` 时带上并清空。`toSessionEvents` 保持无状态。（B5）
 - **T2 `Router.onTurnEnd` 第四个参数 `earlier: string`**（没有则 `""`）。`MainChain` 的 `<note>`/`<note global>` 从 `earlier` 和 `text` 都读。`tasks/service.ts` 的消费归 S。可见回复、`autoTitle`、`DESIGN_FINAL`、silent 判定只看 `text`。
-- **T3 压缩后重注入**：`Router.onCompacted(listener: (sessionId: string) => void)`，在 `context-compacted` 事件上调用。`MainChain` 注册：session 是某 chain 的 head 且 `status(chainId).seed !== NOTHING_OPEN` 时，`systemInput("[Pier: the context was compacted. The open items as they stand, keys exact:]\n" + seed, { kind: "open-items", statusSnapshot }, "append")`；发不出去走 `router.reportTo`。（B 推测项，已核实：全仓只有 `tasks/agent.ts` 读 `context-compacted`，head 压缩后没有任何重注入）
+- **T3 压缩后重注入**：`Router.onCompacted(listener: (sessionId: string) => void)`，在 `context-compacted` 事件上调用。`MainChain` 注册：session 是某 chain 的 head 且 `status(chainId).seed` 不以 `NOTHING_OPEN` 开头（只有 N3 的 run 段也算没有开着的事项）时，`systemInput("[Pier: the context was compacted. The open items as they stand, keys exact:]\n" + seed, { kind: "open-items", statusSnapshot }, "append")`；发不出去走 `router.reportTo`。（B 推测项，已核实：全仓只有 `tasks/agent.ts` 读 `context-compacted`，head 压缩后没有任何重注入）
 
 ### S — 存储与 head 回合（`tasks/store.ts`、`tasks/service.ts`、`tasks/open-items.ts`）
 

@@ -372,6 +372,9 @@ describe("the continuous conversation's chain", () => {
     await r.router.ensure({ channelId: "web", conversationId: "h1" });
     await r.router.ensure({ channelId: "web", conversationId: "h0" });
     head.emit({ type: "context-compacted", before: 100, after: 10 });
+    // A run in no item is no open item: the seed still opens on `Nothing open.`.
+    r.status.seed = "Nothing open.\n\nRuns in no item — not keys, never <done> one; <open> an item naming a run that is tracked work:\n- run u1 · build · running";
+    head.emit({ type: "context-compacted", before: 100, after: 10 });
     expect(head.systemInputs).toEqual([]);
     r.status.seed = "Open\n- p0 — merged";
     r.status.items.main = ["running"];
