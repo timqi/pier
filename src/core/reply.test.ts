@@ -422,6 +422,11 @@ describe("open-item markers", () => {
     expect(openItemMarkers("<done>修复登录——web 端 — 完成</done>").markers).toEqual([{ op: "done", problem: "修复登录——web 端" }]);
   });
 
+  it("gives a `<done>` a bare em dash cut the uncut key too, since an `<open>` may have kept it", () => {
+    expect(openItemMarkers("<done>修复登录——web 端</done>").markers).toEqual([{ op: "done", problem: "修复登录", whole: "修复登录——web 端" }]);
+    expect(openItemMarkers("<done>a \u2192 b——c</done>").markers).toEqual([{ op: "done", problem: "a", to: "b", whole: "a \u2192 b——c" }]);
+  });
+
   it("takes every run token out of the body, wherever it sits, before the key is cut", () => {
     expect(openItemMarkers("<open>sync — review running (run g7twwpfasjjcdbmk); waiting on you: x</open>").markers).toEqual([
       { op: "open", problem: "sync", stage: "review running; waiting on you: x", runIds: ["g7twwpfasjjcdbmk"] },
@@ -463,6 +468,23 @@ describe("open-item markers", () => {
     const early = "<open>a — b\nmore text";
     expect(openItemMarkers(early)).toMatchObject({ markers: [], unclosed: [] });
     expect(splitReply(early).text).toBe(early);
+    // Only a closer that ends the line is the marker's.
+    expect(openItemMarkers("<done>a </b> c</x> ").markers).toEqual([{ op: "done", problem: "a </b> c" }]);
+  });
+
+  it("reads 100 KB of openers, or of blanks after one, in linear time", () => {
+    const timed = (raw: string): number => {
+      const started = performance.now();
+      expect(openItemMarkers(raw).markers.length).toBeLessThan(2);
+      for (const read of [splitReply, streamBody, streamTail, stableBlockEnd]) read(raw);
+      return performance.now() - started;
+    };
+    // A cubic reading takes seconds at 3 KB of blanks: caught here, before the 100 KB below would take it hours.
+    expect(timed(`<open>a${" ".repeat(3_000)}x`)).toBeLessThan(500);
+    const blanks = " ".repeat(100_000);
+    const hostile = ["<open>".repeat(17_000), "<open><done><note><topic><note global>".repeat(2_800), `<open>a${blanks}x`, `<done>a${blanks}x\nmore`, `<open>a${blanks}x</open>`, `<note>a${"</".repeat(50_000)}`];
+    // A quadratic reading of any of these takes seconds.
+    for (const raw of hostile) expect(timed(raw)).toBeLessThan(500);
   });
 
   it("neither reads nor strips a marker in a fence indented inside a list", () => {

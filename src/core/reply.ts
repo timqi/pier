@@ -174,40 +174,48 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 /** Main's markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back on the head's turn end. Code is content, so a
  *  marker inside a fence or a code span is neither. Each tag holds two groups: its
- *  closed body, then one left unclosed or wrongly closed on the reply's last line.
+ *  closed body, then the rest of the reply's last line after one left unclosed or wrongly closed.
  *  A body never holds its own opener, so a stray one cannot swallow the marker after it. */
 const MARKER_TAGS = ["open", "done", "note", "topic", "note global"] as const;
 const MARKER = new RegExp(
-  MARKER_TAGS.map((t) => {
+  MARKER_TAGS.map((t, i) => {
     const opener = tag(`<${t}>`);
-    const body = (char: string): string => `((?:(?!${opener})${char})*?)`;
-    const closed = `${body("[\\s\\S]")}${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
-    const unclosed = `${body("[^\\n]")}(?:<\\/[^>\\n]*>)?[ \\t]*(?=\\s*$)`;
+    const body = (char: string): string => `(?:(?!${opener})${char})`;
+    const closed = `(${body("[\\s\\S]")}*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
+    // Taken in a lookahead and matched by reference, so a failed match never retries a shorter line: linear in the reply.
+    const unclosed = `(?=(${body("[^\\n]")}*))\\${String(2 * i + 2)}(?=\\s*$)`;
     return `${opener}(?:${closed}|${unclosed})`;
   }).join("|"),
   "gi",
 );
+/** An unclosed marker's line without the wrong closer it ends on. */
+function unclosedBody(line: string): string {
+  const at = line.lastIndexOf("</");
+  return at >= 0 && /^<\/[^>\n]*>\s*$/.test(line.slice(at)) ? line.slice(0, at) : line;
+}
 // An id is one word with no comma, so `(run the tests)` is prose.
 const RUN_TOKEN = /\s*\(runs?\s+([^\s(),]+(?:\s*,\s*[^\s(),]+)*)\)/gi;
 
 /** `open` adds or replaces the item keyed by `problem`; `done` closes it, `to`
  *  the open item it continues as (`<done>old → new</done>`), `whole` — given
- *  only with `to` — the key the body reads as without the arrow split. */
+ *  with `to`, or when a bare em dash cut `problem` — the key the body reads as
+ *  split at neither: a key may hold an arrow or a bare em dash. */
 export type OpenItemMarker =
   | { op: "open"; problem: string; stage: string; runIds: string[] }
   | { op: "done"; problem: string; to?: string; whole?: string };
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 /** An `<open>` line read apart: every `(run <id>)` / `(runs <id>, <id>)` token taken out, then
- *  the `problem` key before the first spaced em-dash run, else the first bare one, and the stage
- *  after it — a `<topic>` written the same way keys the same. */
-function openLine(text: string): { problem: string; stage: string; runIds: string[] } {
+ *  the `problem` key before the first spaced em-dash run, else — unless `bare` is off — the first
+ *  bare one, and the stage after it — a `<topic>` written the same way keys the same. */
+function openLine(text: string, bare = true): { problem: string; stage: string; runIds: string[] } {
   const runIds: string[] = [];
-  const rest = oneLine(text.replace(RUN_TOKEN, (_, ids: string) => {
+  // Blanks collapsed first: `RUN_TOKEN` would rescan a long run of them from every offset.
+  const rest = oneLine(oneLine(text).replace(RUN_TOKEN, (_, ids: string) => {
     runIds.push(...ids.split(",").map((id) => id.trim()));
     return "";
   }));
-  const dash = / \u2014+ /.exec(rest) ?? /\u2014+/.exec(rest);
+  const dash = / \u2014+ /.exec(rest) ?? (bare ? /\u2014+/.exec(rest) : null);
   if (!dash) return { problem: rest, stage: "", runIds };
   return { problem: rest.slice(0, dash.index).trim(), stage: rest.slice(dash.index + dash[0].length).trim(), runIds };
 }
@@ -223,13 +231,14 @@ export function arrowOf(key: string): { old: string; to: string } | undefined {
   return old && to ? { old, to } : undefined;
 }
 
-function doneLine(text: string): { problem: string } | { problem: string; to: string; whole: string } {
+function doneLine(text: string): { problem: string; to?: string; whole?: string } {
   const body = oneLine(text);
-  const whole = openLine(body).problem;
+  const whole = openLine(body, false).problem;
   const arrow = arrowOf(body);
   const to = arrow ? openLine(arrow.to).problem : "";
-  if (!arrow || !to) return { problem: whole };
-  return { problem: openLine(arrow.old).problem, to, whole };
+  if (arrow && to) return { problem: openLine(arrow.old).problem, to, whole };
+  const problem = openLine(body).problem;
+  return whole === problem ? { problem } : { problem, whole };
 }
 
 /** The markers in reply order, `notes` the chain's daily-note lines and `globalNotes`
@@ -247,8 +256,9 @@ export function openItemMarkers(markdown: string): {
   replaceOutsideCode(markdown, MARKER, (m) => {
     const group = m.findIndex((g, i) => i > 0 && g !== undefined);
     const kind = MARKER_TAGS[Math.floor((group - 1) / 2)]!;
-    const text = m[group] ?? "";
-    if ((group - 1) % 2 === 1) unclosed.push(m[0].trim());
+    const open = (group - 1) % 2 === 1;
+    const text = open ? unclosedBody(m[group] ?? "") : m[group] ?? "";
+    if (open) unclosed.push(m[0].trim());
     if (kind === "open") {
       const { problem, stage, runIds } = openLine(text);
       if (problem) markers.push({ op: "open", problem, stage, runIds });
