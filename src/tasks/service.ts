@@ -124,6 +124,8 @@ export class TaskService {
   /** Per chain, the items the user closed while its head was mid-turn, each with its runs as they were:
    *  that reply, written before the note, does not bring them back. Until its turn ends; in memory only. */
   private readonly closedMidTurn = new Map<string, { key: string; runIds: string[] }[]>();
+  /** Per chain, the last note on the head's markers: the same note again opens no turn. In memory only. */
+  private readonly lastNote = new Map<string, string>();
   /** Seams a test replaces: git and wt are never run by one. */
   worktree = worktree;
   addWorktree = addWorktree;
@@ -231,13 +233,17 @@ export class TaskService {
           const stale = answered.length ? staleItems(store, text, answered, chainId, earlier) : [];
           const notes = [...(unmatched.length && keys.length ? [unmatchedNote(unmatched, keys)] : []), ...(stale.length ? [staleNote(stale)] : [])];
           if (notes.length) {
+            const note = notes.join("\n");
+            // A head that cannot settle a miss would loop: the turn a note opened, or the same note again, gets it appended.
+            const turn = opened?.kind !== "open-items" && this.lastNote.get(chainId) !== note;
+            this.lastNote.set(chainId, note);
             // By id: two chains' heads share the home chat, whose key names only one of them.
             const head = router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
             const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
             // The keys the note lists, as rows for the web card; a stale note alone names no key.
             const statusSnapshot = unmatched.length && keys.length ? { statusSnapshot: openItemsStatus(this.openItems(chainId), Date.now()).snapshot } : {};
             if (!head) failed("not attached");
-            else head.systemInput(notes.join("\n"), { kind: "open-items", ...statusSnapshot }, "append").catch((err: unknown) => failed(String(err)));
+            else head.systemInput(note, { kind: "open-items", ...(turn ? { turn: true as const } : {}), ...statusSnapshot }, turn ? "followUp" : "append").catch((err: unknown) => failed(String(err)));
           }
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);

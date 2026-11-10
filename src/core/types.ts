@@ -32,6 +32,8 @@ export interface AgentReply {
 
 /** What `openItemsStatus` answers when nothing is open or running. */
 export const NOTHING_OPEN = "Nothing open.";
+/** Opens the seed's list of runs in no item, which a card drawn from the snapshot leaves out. */
+export const RUNS_IN_NO_ITEM = "Runs in no item";
 
 /** The continuous conversation's open items as a chat's status message shows
  *  them: `text` is `/status`'s one string (`NOTHING_OPEN` when empty) and the
@@ -177,9 +179,12 @@ export type SystemInputOrigin = {
   sourceSessionId?: string | null;
   source?: SystemInputSource;
 } | {
-  /** Pier's answer to the head's own open-item markers — a `<done>` that closed
-   *  nothing — appended without a turn, so the head's next prompt carries it. */
+  /** Pier's note on the head's open items: a `<done>` that closed nothing or an
+   *  answered run's item left stale, the user closing an item, a compaction's
+   *  list; appended without a turn unless `turn`. */
   kind: "open-items";
+  /** Sent as a follow-up that opens a head turn of its own (tasks/service.ts). */
+  turn?: true;
   /** The chain's items as the note listed their keys; the web card draws them as the status panel's rows. */
   statusSnapshot?: OpenItemsSnapshot;
   /** A malformed optional snapshot leaves the original text readable. */

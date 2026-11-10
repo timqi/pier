@@ -598,7 +598,7 @@ describe("the open items", () => {
     const told = recordOpenItems(r.store, "<done>login → auth</done>", 2, "h1", "main");
     expect(told).toEqual({ changed: false, closed: [], unmatched: ["login → auth"] });
     expect(unmatchedNote(told.unmatched, ["login"]))
-      .toBe("[Pier: <done>login → auth</done> (\"auth\" is not open) closed no open item. Resend <done> with one of these keys exactly:\n- login]");
+      .toBe("[Pier: <done>login → auth</done> (\"auth\" is not open) closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n- login]");
     r.save(saved("rt1", { state: "succeeded" }));
     expect(staleItems(r.store, "Done.", ["rt1"], "main")).toEqual([{ runId: "rt1", problem: "login" }]);
     expect(staleItems(r.store, "<done>x → login</done>", ["rt1"], "main")).toEqual([]);
@@ -751,6 +751,16 @@ describe("the open items", () => {
     expect(fallback.seed).toBe("- original (run missing) · stopped");
   });
 
+  it("seeds a run in no item apart from the keys, with items and without", () => {
+    const loose = { items: [], unlisted: [run("u1", { name: "build the parser", targetSessionId: "s-u" }), run("u2", { name: "queued one", state: "queued" })] };
+    const runs = "Runs in no item — not keys, never <done> one; <open> an item naming a run that is tracked work:\n- run u1 · session s-u · build the parser · running\n- run u2 · queued one · queued";
+    expect(openItemsStatus(loose, 1).seed).toBe(`Nothing open.\n\n${runs}`);
+    const both = openItemsStatus({ ...loose, items: [{ problem: "login", stage: "x", status: "running", runs: [run("r1")] }] }, 1, ["logn"]);
+    expect(both.seed).toBe(`- login — x (run r1) · running\n- unmatched <done>: logn (closed nothing; if it meant an item above, <done> that item's key)\n\n${runs}`);
+    // `/status` and its snapshot still show the runs as rows.
+    expect(both.snapshot.items.map((i) => i.key)).toEqual(["item:login", "run:u1", "run:u2"]);
+  });
+
   it("writes the head's markers on its turn end and says so once, a restart's head and a new head alike", () => {
     const hub = new EventHub();
     const workspace: string[] = [];
@@ -780,14 +790,14 @@ describe("the open items", () => {
     end("h0", "");
     expect(workspace).toEqual(["open-items-changed"]);
     expect(warn).toHaveBeenCalledWith("open items: <done> named no open item: never open");
-    // The unmatched key reaches the head's next prompt at once, with the keys it may resend — the web card's rows — and stays in /status and the seed.
+    // The unmatched key reaches the head at once in a turn of its own, with the keys it may resend — the web card's rows — and stays in /status and the seed.
     const h0 = sessions.get("h0")!;
-    expect(h0.systemInputs).toEqual([{ mode: "append", origin: { kind: "open-items", statusSnapshot: expect.objectContaining({ version: 1, items: [expect.objectContaining({ problem: "open items" })] }) },
-      text: "[Pier: <done>never open</done> closed no open item. Resend <done> with one of these keys exactly:\n- open items]" }]);
+    expect(h0.systemInputs).toEqual([{ mode: "followUp", origin: { kind: "open-items", turn: true, statusSnapshot: expect.objectContaining({ version: 1, items: [expect.objectContaining({ problem: "open items" })] }) },
+      text: "[Pier: <done>never open</done> closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n- open items]" }]);
     expect(service.unmatchedDone("main")).toEqual(["never open"]);
     const owed = openItemsStatus(service.openItems(), 1, service.unmatchedDone("main"));
     expect(owed.seed.split("\n"))
-      .toEqual(["- open items — worker running (run r1) · stopped", "- unmatched <done>: never open (closed nothing: resend <done> with an item's full key above)"]);
+      .toEqual(["- open items — worker running (run r1) · stopped", "- unmatched <done>: never open (closed nothing; if it meant an item above, <done> that item's key)"]);
     expect(owed.snapshot.unmatched).toEqual(["never open"]);
     expect(owed.text).toMatch(/\n\nUnmatched done · 1\n\nnever open$/);
 
@@ -980,7 +990,7 @@ describe("the open items", () => {
       ...fakeChains({ main: ["h0"] }),
     });
     const end = (text: string) => h0.emit({ type: "turn-end", text });
-    const notes = () => h0.systemInputs.filter((i) => i.mode === "append").map((i) => i.text);
+    const notes = () => h0.systemInputs.map((i) => i.text);
     // As agent/events.ts reports an input entering the context: a turn-start, then the input.
     const user = (text: string) => { h0.emit({ type: "turn-start" }); h0.emit({ type: "user-message", text }); };
     const result = (...runIds: string[]) => {
@@ -1026,5 +1036,49 @@ describe("the open items", () => {
     result("r4");
     end("<done>fix parser</done>");
     expect(notes()).toHaveLength(2);
+  });
+
+  it("gives a miss or a stale item a turn of its own, and appends the note to the turn a note opened or when it repeats", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    const end = (text: string) => h0.emit({ type: "turn-end", text });
+    const user = (text: string) => { h0.emit({ type: "turn-start" }); h0.emit({ type: "user-message", text }); };
+    const sent = () => h0.systemInputs.map((i) => [i.mode, i.origin.kind === "open-items" ? i.origin.turn : "?", i.text.split(" closed")[0]]);
+    // Pi answers the follow-up in the run it was queued in: the note enters with its own turn-start, no agent_start's.
+    const drained = () => {
+      h0.emit({ type: "turn-start" });
+      h0.emit({ type: "system-input", text: h0.systemInputs.at(-1)!.text, origin: h0.systemInputs.at(-1)!.origin });
+    };
+    store.saveRun(saved("r1", { targetSessionId: "s1", state: "succeeded", finishedAt: 1 }));
+    end("<open>login — x (run r1)</open><open>deploy — y</open>");
+
+    user("go");
+    end("<done>logn</done>");
+    expect(h0.systemInputs[0]).toMatchObject({ mode: "followUp", origin: { kind: "open-items", turn: true, statusSnapshot: { version: 1 } } });
+    // The turn that note opened misses again: told, but no turn of its own.
+    drained();
+    end("<done>dploy</done>");
+    // The same note on a later user's turn opens none either; a different one does.
+    user("and?");
+    end("<done>dploy</done>");
+    user("again");
+    end("<done>logn</done>");
+    expect(sent()).toEqual([
+      ["followUp", true, "[Pier: <done>logn</done>"],
+      ["append", undefined, "[Pier: <done>dploy</done>"],
+      ["append", undefined, "[Pier: <done>dploy</done>"],
+      ["followUp", true, "[Pier: <done>logn</done>"],
+    ]);
+
+    // A result answered without touching its item: the stale note opens a turn too, and names no key.
+    h0.emit({ type: "turn-start" });
+    h0.emit({ type: "system-input", text: "Task finished", origin: { kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: null } });
+    end("Merged.");
+    expect(h0.systemInputs.at(-1)).toEqual({ mode: "followUp", origin: { kind: "open-items", turn: true },
+      text: `[Pier: run r1 ended; open item "login" still has its old stage. Close it with <done>, or <open> it again with a stage saying waiting on you.]` });
   });
 });

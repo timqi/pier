@@ -102,7 +102,7 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
       : {};
     return { kind: "chat-command", command, ...links, ...(command === "status" ? snapshotOf(statusSnapshot) : {}) };
   }
-  if (origin.kind === "open-items") return { kind: "open-items", ...snapshotOf(origin.statusSnapshot) };
+  if (origin.kind === "open-items") return { kind: "open-items", ...(origin.turn === true ? { turn: true } : {}), ...snapshotOf(origin.statusSnapshot) };
   if (origin.kind === "restart") {
     const { at, downMs, taskId, runId, sourceSessionId } = origin;
     if (typeof at !== "number" || typeof downMs !== "number") return null;

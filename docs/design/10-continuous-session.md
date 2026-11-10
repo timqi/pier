@@ -107,7 +107,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - A head reply's `<note>line</note>` is stripped like the open-item markers
   and appended as `- line` to today's `chains/<id>/memory/YYYY-MM-DD.md` of its
   chain, `<note global>line</note>` to today's `memory/YYYY-MM-DD.md`, on its
-  `turn-end` (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a
+  `turn-end`, from the answer and the turn's `earlier` text alike
+  (`MainChain`'s `Router.onTurnEnd` listener, `core/chain.ts`); a
   failed write is reported to the head's conversation with the lost lines.
 - A note keeps a decision and its why, a user preference, an external fact or
   live check, a step the user owes; research is its conclusion and run id. It
@@ -207,8 +208,26 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 - The head keeps the list inside its replies: `<open>problem — stage (run <id>)</open>`
   adds, replaces or reopens the item keyed by `problem`, `<done>problem</done>` closes it;
-  both are stripped beside `<silent>` and never read inside a fence
-  (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
+  both are stripped beside `<silent>` and never read inside a code span or a fence,
+  indented or not (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
+- A marker's body is read apart (`openLine`): every `(run <id>)` and
+  `(runs <id>, <id>)` in it, anywhere, is taken out as its run ids in order —
+  an id is one word with no whitespace, parenthesis or comma, so `(run the tests)`
+  is text; then the key is the text before the first spaced em-dash run
+  (` — `, ` —— `), else before the first bare `—`, and the stage the text after it.
+  `<topic>` and each side of a `<done>` arrow are read the same way.
+- A marker's body never holds its own tag's opener: in `<done>a <done>b</done>`
+  only `<done>b</done>` is a marker. A marker opened on the reply's last
+  non-empty line and not closed by its own closer is read to the line's end, a
+  wrong closer dropped, and logged; one left open on an earlier line is text.
+- The arrow is ` → ` alone (`ARROW`, `arrowOf`), split at its first
+  occurrence with both sides non-empty: `<done>old → new</done>` is the marker
+  `{problem: old, to: new, whole}`, `whole` the body read as one key.
+- A turn's markers are its answer's and its `earlier`'s, `earlier` first:
+  the text of the turn's tool-calling assistant messages before the answer
+  (`turn-end`'s `earlier`, gathered by `PiSession.subscribe`;
+  `Router.onTurnEnd`'s fourth argument). `<topic>`, the visible reply, the
+  title and the silent reading take the answer alone.
 - A dispatch is a silent reply beside its `<open>` marker, the chat's run tag
   its receipt; it speaks one line only for a choice made for the user or
   a run that is long or needs them.
@@ -219,15 +238,53 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   ([03 §Chat pane](03-web-workbench.md#chat-pane-chatts-composerts)); IM shows
   nothing of it.
 - The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`
-  listener, when the session is `members()[0]`) and broadcasts
-  `open-items-changed` when a row changed; a marker with no problem is logged
-  and dropped. A `<done>` matching no key exactly closes the one item whose key
-  is it followed by `。` `:` `：` `-` `–` `—` (an `<open>` written without ` — `;
-  `namesKey`), none when two are; one that still closes nothing is logged, and
-  the head's next prompt carries an `open-items` system input, mode `append`, no
-  turn, naming it and the open keys. The last 5 such keys stay owed, each until
-  a `<done>` or the user closes the item it names or nothing is open, in memory: the seed's
-  `## Open` lists them as `unmatched <done>: <key>`, `/status` under
+  listener, when the session is `members()[0]`; `TaskStore.markOpenItems`),
+  arrows after every other marker, and broadcasts `open-items-changed` when a
+  row changed; a marker with no problem is logged and dropped.
+- `<open>` of an open key replaces its stage, and its runs only when it names
+  any: one with no run token keeps the item's runs, and a key holding none
+  takes those of the open `old` an arrow closes into it. A closed key reopens with
+  the marker's runs. An `<open>` whose key holds an arrow, the whole key not
+  open, its `old` exactly an open key and its `to` another, is
+  `<open>to — stage (runs)</open>` with `<done>old → to</done>`; any other
+  key with an arrow is stored as written.
+- `<done>` without an arrow closes the open item keyed by it, else the one
+  open item whose key is it followed by `。` `:` `：` or a spaced `-` or `–`
+  (`namesKey`; an `<open>` written without ` — ` keyed the whole line), none
+  when two are. One that closes nothing is already settled — no change, no
+  miss — when it is the key or an alias of a closed item of the chain and an
+  alias of no open one.
+- `<done>old → new</done>` whose `whole` is an open key closes that item. Else,
+  `old` read as above and `new` another open key, `old` closes into `new`
+  (its key, aliases and sessions, [15](15-item-view.md#items-keep-their-record)).
+  Else, `old` not open and `new` open, it is already settled when `new`'s
+  aliases hold `old`, or when `old` is a closed key of the chain, which `new`
+  then absorbs.
+- Any other `<done>` is a miss, logged. While an item is open, a turn with a
+  miss gets the note `[Pier: <done>X</done> closed no open item. If it meant
+  one of these, resend <done> with that key exactly; if its item is already
+  closed, send nothing:` and the open keys as a `- key` list, an arrow into no
+  open item adding `("new" is not open)` (`unmatchedNote`); its origin carries
+  the list as `statusSnapshot`.
+- A head turn opened by a run's result (the `task-callback` origin of the
+  input that opened it, `Router.onTurnEnd`'s `opened`; a steer's is the
+  answer it opens on entering) that left an item holding a run of that run's
+  session with no live run, its exact key — or an arrow's `whole` — in none of
+  the turn's markers, gets the note `[Pier: run <id> ended; open item "<key>"
+  still has its old stage. Close it with <done>, or <open> it again with a
+  stage saying waiting on you.]` (`staleNote`).
+- A turn's notes go as one `open-items` system input with `turn: true`, mode
+  `followUp`: the head answers it in a turn of its own, at once or after the
+  running one. It is mode `append` without `turn` when the turn itself was
+  opened by an `open-items` input, or when its text equals the last note sent
+  to that chain (one per chain, in memory).
+- Pi answers a follow-up queued at a turn's end in the same run; the note
+  enters it with a `turn-start` of its own, so it is that answer's `opened`.
+- The misses stay owed, in memory: a reply that closed an item owes only its
+  own, one that closed none the newest 5 of the owed and its own, deduplicated;
+  nothing open owes none, and a user's close drops those naming its key. The
+  seed's `## Open` lists them as `- unmatched <done>: X (closed nothing; if it
+  meant an item above, <done> that item's key)`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
 - The user closes an item too: `/done <item>` (§Chat commands) and the status
   panel's **Close** both call `TaskService.closeItem`, which closes it as a
@@ -237,15 +294,19 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Close** names its
   key exactly, answering `{closed}` for a key the head's `<done>` closed first.
   The chain's head, when attached, is told with an `open-items`
-  system input, mode `append`, no turn: `[Pier: the user closed <key>]`; its
-  `<done>` of one of the last 20 keys the user closed is no miss (in memory),
-  and the reply it was writing when the user closed one does not reopen it.
-- A head turn opened by a run's result (the `task-callback` origin of the
-  system input right after its `turn-start`, `Router.onTurnEnd`'s `opened`; a
-  steer's is the turn it opens on entering) that left an item holding a run of
-  that run's session with no live run, its exact key in none of the reply's
-  markers, gets the same `append` input naming the run and the key: close it,
-  or `<open>` it again as waiting on you.
+  system input, mode `append`, no turn: `[Pier: the user closed <key>]`.
+- The reply the head was writing when the user closed an item does not bring
+  it back: once its markers are written, each item closed during the turn is
+  closed again when the reply reopened its key, or opened an item not open
+  before it that holds that key as an alias or shares a run's session with it
+  (`closedMidTurn`, the turn's only).
+- A head whose context is compacted, its seed not `Nothing open.`, gets
+  `[Pier: the context was compacted. The open items as they stand, keys exact:]`
+  and the seed, an `open-items` system input, mode `append`, no turn, with the
+  chain's `statusSnapshot` (`MainChain`, `Router.onCompacted`); a send that
+  fails is reported to the conversation.
+- The owed misses, the mid-turn closes and the last note live in memory: a
+  restart loses a reminder, never an item.
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
 - A session is behind one item: an `<open>` takes its run tokens, and every
@@ -301,7 +362,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 - An item reads `open <age>` from its first `<open>` (`opened_at`), kept across stage updates, and a rename (the earlier of the two), started again by a reopen; it leads the metadata line in text and IM, and rides the second line on the web, the sidebar's included. A row written before the record takes its earliest run's queue time, else reads none.
 - Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker metadata names only running, failed and interrupted workers.
 - `openItemsStatus` returns compact `text`, a `seed` and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.
-- The seed is one line per item, the full problem kept as the `<done>` key: `- <problem> — <stage> (run <id> · session <id>, run …) · <status>`; an empty stage drops ` — <stage>`, a run with no session drops `· session`.
+- The seed is one line per item, the full problem kept as the `<done>` key: `- <problem> — <stage> (run <id> · session <id>, run …) · <status>`; an empty stage drops ` — <stage>`, a run with no session drops `· session`; the owed misses follow, `Nothing open.` standing for no item.
+- The chain's runs in no item follow apart, after a blank line, never in a key's place: `Runs in no item — not keys, never <done> one; <open> an item naming a run that is tracked work:`, then `- run <id> · session <id> · <name> · <running|queued>` each; `/status` and the snapshot draw them as rows.
 - Compact text and command cards group waiting rows under `Waiting on you`, running/queued under `In progress`, and wrapping up/stopped under `Other open`, with counts and no empty groups; IM separates title/status, stage and metadata by lines, with no non-clickable run IDs.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the

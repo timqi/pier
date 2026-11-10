@@ -942,6 +942,20 @@ describe("outbound", () => {
     expect(client.sent.at(-1)!.text).toContain("> it broke");
     expect(client.reactions).toEqual([]);
   });
+
+  it("marks an open-items note that opens a turn, until that turn's reply; one appended without a turn stays unmarked", async () => {
+    openGates();
+    await feed(message({ text: "go", ts: "1707.000100" }));
+    await channel.send("C100/1707.000100", { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    await channel.notify("C100/1707.000100", { text: "[Pier: the user closed x]", origin: { kind: "open-items" } });
+    expect(client.reactions).toEqual([]);
+    const noteTs = `${client.nextTs}.000100`;
+    await channel.notify("C100/1707.000100", { text: "[Pier: <done>x</done> closed no open item.]", origin: { kind: "open-items", turn: true } });
+    expect(client.reactions).toEqual([{ channel: CHANNEL, ts: noteTs, name: "eyes", add: true }]);
+    await channel.send("C100/1707.000100", { text: "<silent>fixed</silent>", suggestions: [] });
+    expect(client.reactions.at(-1)).toEqual({ channel: CHANNEL, ts: noteTs, name: "eyes", add: false });
+  });
 });
 
 describe("noteBody — the note both platforms post", () => {

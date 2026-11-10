@@ -526,6 +526,11 @@ describe("toChatTurns", () => {
       .toEqual([{ role: "system", text: "[Pier: …]", origin: { kind: "open-items", statusSnapshot }, at: 1 }]);
     expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items", statusSnapshot: { version: 2 } }, timestamp: 1 }])[0]!.origin)
       .toEqual({ kind: "open-items", statusSnapshotError: expect.stringContaining("invalid snapshot") });
+    // A note that opened a turn reads back as one; any other `turn` is dropped.
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items", turn: true, statusSnapshot }, timestamp: 1 }])[0]!.origin)
+      .toEqual({ kind: "open-items", turn: true, statusSnapshot });
+    expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "[Pier: …]", details: { kind: "open-items", turn: "yes" }, timestamp: 1 }])[0]!.origin)
+      .toEqual({ kind: "open-items" });
   });
 
   it("rebuilds a chat command's answer, and drops a command it does not know", () => {

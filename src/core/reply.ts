@@ -47,9 +47,10 @@ export const runModelLabel = ({ tier, model, thinking }: RunModel): string =>
 /** Is a turn coming once this note is posted? On IM the note is the only
  *  message that turn has to carry its receipt; a receipt on any other would hang
  *  until the stale sweep: an error reports a turn that already ended, a chat
- *  command's answer and an open-items note start none, and the message that made a seed carries its own. */
+ *  command's answer and an open-items note without `turn` start none, and the message that made a seed carries its own. */
 export const awaitsTurn = (origin: NoteOrigin): boolean =>
-  origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed" && origin.kind !== "open-items";
+  origin.kind === "open-items" ? origin.turn === true
+    : origin.kind !== "error" && origin.kind !== "chat-command" && origin.kind !== "session-seed";
 
 /** Is this note progress the home main flow leaves to `/status` and the head's reply? A run
  *  that failed is not: its trace must not depend on the head choosing to speak. */

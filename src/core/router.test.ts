@@ -227,6 +227,20 @@ describe("channel fan-out", () => {
     expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Done.", "Next."]);
   });
 
+  it("hands an answer the input that opened it, a follow-up Pi answers in the same run included", async () => {
+    const heard: (SystemInputOrigin | undefined)[] = [];
+    router.onTurnEnd((_id, _text, opened) => heard.push(opened));
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-start" });
+    fake.emit({ type: "user-message", text: "hi" });
+    fake.emit({ type: "turn-end", text: "one" });
+    // As agent/events.ts reads a message Pi drains mid-run: its own turn-start, no agent_start's.
+    fake.emit({ type: "turn-start" });
+    fake.emit({ type: "system-input", text: "note", origin: { kind: "open-items", turn: true } });
+    fake.emit({ type: "turn-end", text: "two" });
+    expect(heard).toEqual([undefined, { kind: "open-items", turn: true }]);
+  });
+
   it("tells compaction listeners which session compacted, a throwing one reported", async () => {
     const errors: string[] = [];
     hub.subscribe("s1", (e) => {

@@ -3,7 +3,7 @@
 import { ARROW, openItemMarkers, replyTopic } from "../core/reply.js";
 import { openItemPresentation, openItemsText } from "../core/open-items.js";
 import type { Router } from "../core/router.js";
-import { NOT_IN_LEDGER, NOTHING_OPEN, TASK_RUN_STATES, type OpenItemsStatus, type TaskRunState } from "../core/types.js";
+import { NOT_IN_LEDGER, NOTHING_OPEN, RUNS_IN_NO_ITEM, TASK_RUN_STATES, type OpenItemsStatus, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
 import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
@@ -123,13 +123,13 @@ export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: s
 /** The key an unmatched `<done>` body names, an arrow's `old`. */
 export const doneOld = (unmatched: string): string => unmatched.split(ARROW)[0]!;
 
-/** The note the head's next prompt carries after a `<done>` closed nothing; an arrow into no open item says so. */
+/** The note to the head after a `<done>` closed nothing; an arrow into no open item says so. */
 export const unmatchedNote = (unmatched: readonly string[], keys: readonly string[]): string => {
   const named = (p: string) => {
     const to = p.split(ARROW).slice(1).join(ARROW);
     return `<done>${p}</done>${to && !keys.includes(to) ? ` ("${to}" is not open)` : ""}`;
   };
-  return `[Pier: ${unmatched.map(named).join(", ")} closed no open item. Resend <done> with one of these keys exactly:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
+  return `[Pier: ${unmatched.map(named).join(", ")} closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
 };
 
 /** The items a turn answering `runIds`' results left as they were: one holding a run of a
@@ -144,7 +144,7 @@ export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget
   });
 }
 
-/** The note the head's next prompt carries after it answered a result without updating its item. */
+/** The note to the head after it answered a result without updating its item. */
 export const staleNote = (stale: readonly { runId: string; problem: string }[]): string =>
   `[Pier: ${stale.map((s) => `run ${s.runId} ended; open item "${s.problem}" still has its old stage`).join("; ")}. Close it with <done>, or <open> it again with a stage saying waiting on you.]`;
 
@@ -154,15 +154,19 @@ export function openItemsStatus(open: OpenItems, now: number, unmatched: readonl
   const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted];
   const sessions = Object.fromEntries(runs.flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
   const unlisted = open.unlisted.map((r) => ({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" as const : "running" as const }));
+  const runLabel = (r: OpenRun) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`;
   const owed = open.items.length ? unmatched : [];
   const snapshot = { version: 1 as const, items: [
     ...open.items.map((i) => openItemPresentation(i, now)),
     ...unlisted.map((i) => ({ ...openItemPresentation(i, now, `run:${i.runs[0]!.runId}`), direct: true })),
   ], ...(owed.length ? { unmatched: [...owed] } : {}) };
-  // The full problem is the key the head's `<done>` names.
-  const seed = [...open.items, ...unlisted].map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.length
-    ? ` (${i.runs.map((r) => `run ${r.runId}${r.targetSessionId ? ` · session ${r.targetSessionId}` : ""}`).join(", ")})` : ""} · ${i.status}`)
-    .concat(owed.map((p) => `- unmatched <done>: ${p} (closed nothing: resend <done> with an item's full key above)`))
+  // The full problem is the key the head's `<done>` names; a run in no item is listed apart, never in a key's place.
+  const listed = open.items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.length
+    ? ` (${i.runs.map(runLabel).join(", ")})` : ""} · ${i.status}`)
+    .concat(owed.map((p) => `- unmatched <done>: ${p} (closed nothing; if it meant an item above, <done> that item's key)`))
     .join("\n") || NOTHING_OPEN;
+  const seed = unlisted.length
+    ? `${listed}\n\n${RUNS_IN_NO_ITEM} — not keys, never <done> one; <open> an item naming a run that is tracked work:\n${unlisted.map((i) => `- ${runLabel(i.runs[0]!)} · ${i.problem} · ${i.status}`).join("\n")}`
+    : listed;
   return { text: openItemsText(snapshot), seed, snapshot, sessions };
 }

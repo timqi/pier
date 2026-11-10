@@ -3,7 +3,7 @@
 // opening in place to its detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isOpenItemsSnapshot, openItemPresentation } from "../../core/open-items.js";
-import type { OpenItemsSnapshot, SystemInputOrigin } from "../../core/types.js";
+import { RUNS_IN_NO_ITEM, type OpenItemsSnapshot, type SystemInputOrigin } from "../../core/types.js";
 import { STREAM_PAINT_MS } from "./dom.js";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
@@ -117,6 +117,12 @@ it("shows a /status snapshot's unmatched <done> keys, and an open-items note as 
   chat.appendSystemInput(note, { kind: "open-items", statusSnapshot: { version: 1, items: [openItemPresentation({ problem: "fix parser", title: "fix parser", stage: "", runs: [], status: "running" }, 0)] } });
   expect(card().textContent).not.toContain("- fix parser");
   expect(card().querySelector(".open-items-card")!.querySelector(".open-item-title")!.textContent).toBe("fix parser");
+  // A compacted head's note carries the seed: the heading of its runs in no item goes with their lines.
+  const rows = ["fix parser", "build"].map((problem) => openItemPresentation({ problem, title: problem, stage: "", runs: [], status: "running" }, 0));
+  chat.appendSystemInput(`[Pier: the context was compacted. The open items as they stand, keys exact:]\n- fix parser · running\n\n${RUNS_IN_NO_ITEM} — not keys:\n- run u1 · build · running`, { kind: "open-items", statusSnapshot: { version: 1, items: rows } });
+  expect(card().textContent).toContain("keys exact:");
+  expect(card().textContent).not.toContain(RUNS_IN_NO_ITEM);
+  expect(card().querySelectorAll(".open-item-title").length).toBe(2);
 });
 
 it("renders every card of a version-1 snapshot written with per-run details", () => {
@@ -1175,6 +1181,29 @@ describe("the turn's bubble", () => {
     expect(stepsChip().getAttribute("aria-expanded")).toBe("false");
     expect(details().map((d) => d.hidden)).toEqual([true, true]);
     expect(bubble().dataset.topic).toBe("deploy");
+  });
+
+  it("draws an open-items note that opens a turn as its card, then that turn's reply in a bubble of its own, live and on replay", () => {
+    const note = "[Pier: <done>x</done> closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n- fix parser]";
+    const origin: SystemInputOrigin = { kind: "open-items", turn: true };
+    // Pi answers the note in the run that queued it: the first reply's end, the note, the second reply.
+    chat.appendDelta("Done.\n<done>x</done>");
+    chat.completeTurn("Done.\n<done>x</done>", { completedAt: 5, durationMs: 1000, tokens: 1 });
+    chat.finalizeStreaming();
+    chat.appendSystemInput(note, origin);
+    chat.appendDelta("Fixed.");
+    chat.completeTurn("Fixed.\n<done>fix parser</done>", { completedAt: 6, durationMs: 1000, tokens: 1 });
+    expect(kinds()).toEqual(["assistant", "system", "assistant"]);
+    expect(pane().children[1]!.textContent).toContain("<done>x</done> closed no open item.");
+    expect(bubble().textContent).toContain("Fixed.");
+    chat.resetChat();
+    chat.renderSnapshot([
+      { role: "assistant", text: "Done.\n<done>x</done>", meta: { completedAt: 5, durationMs: 1000, tokens: 1 } },
+      { role: "system", text: note, origin, at: 5 },
+      { role: "assistant", text: "Fixed.\n<done>fix parser</done>", meta: { completedAt: 6, durationMs: 1000, tokens: 1 } },
+    ], "idle", []);
+    expect(kinds()).toEqual(["assistant", "system", "assistant"]);
+    expect(bubble().textContent).toContain("Fixed.");
   });
 
   it("streams the reply's text under the chip row, and moves it to the log at a tool boundary", () => {

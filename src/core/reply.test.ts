@@ -1,6 +1,6 @@
 import { goalText } from "./open-items.js";
 import { describe, expect, it } from "vitest";
-import { arrowOf, compact, formatTurnMeta, openItemMarkers, originLabel, quietLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
+import { arrowOf, awaitsTurn, compact, formatTurnMeta, openItemMarkers, originLabel, quietLabel, replyTopic, runModelLabel, silentReason, splitReply, saidText, stableBlockEnd, streamBody, streamTail, withoutRunIds } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -503,6 +503,16 @@ describe("originLabel", () => {
     expect(runModelLabel({ model, thinking: "high" })).toBe("gpt-5 · high");
     expect(runModelLabel({})).toBe("");
     expect(runModelLabel({ thinking: "low" })).toBe("low");
+  });
+});
+
+describe("awaitsTurn", () => {
+  it("books a receipt on a note that opens a turn: an open-items note only with `turn`", () => {
+    expect(awaitsTurn({ kind: "open-items", turn: true })).toBe(true);
+    expect(awaitsTurn({ kind: "open-items" })).toBe(false);
+    expect(awaitsTurn({ kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null })).toBe(true);
+    expect(awaitsTurn({ kind: "chat-command", command: "status" })).toBe(false);
+    expect(awaitsTurn({ kind: "error" })).toBe(false);
   });
 });
 

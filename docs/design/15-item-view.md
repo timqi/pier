@@ -68,14 +68,12 @@ hand; what it needs from before is one fetch, never a seeded transcript.
   and sessions kept, its place in the list the reopening's time.
 - Any key an `<open>` writes — a reopened one, a renamed item's old key — is
   taken off every item's aliases, so it is its own item again.
-- `<done>old → new</done>` (` → ` or ` -> `, the first one in the body)
+- `<done>old → new</done>` (` → `, the first one in the body)
   closes `old` and records `old` and `old`'s aliases on `new`'s aliases and
   `old`'s sessions on `new`'s, when `new` is open once the reply's markers are applied (opened in this
-  reply or already open); otherwise nothing closes and the marker is
-  unmatched, told on the head's next prompt with the existing
-  `open-items` input, the line naming the arrow (`unmatchedNote`). The seed
-  and `/status` show it under `unmatched <done>` as today.
-  `OpenItemMarker` gains `to?: string` (`openItemMarkers`, `core/reply.ts`);
+  reply or already open); the rest of its reading, the already-settled cases
+  and the note on a miss are [10 §Open items](10-continuous-session.md#open-items).
+  `OpenItemMarker` carries `to?` and `whole?` (`openItemMarkers`, `core/reply.ts`);
   `replyTopic` of such a reply is `new`.
 - Pier's own rename — an `<open>` carrying a run of another item
   (`TaskStore.markOpenItems`) — records the old key as an alias. The items it
@@ -222,7 +220,7 @@ the item view, never typed by the sender.
   user repeats nothing, and the seed has no transcript of the other item.
 - A reworded item (`<done>old → new</done>`) keeps its earlier rows in the
   view; a closed item is found by a word of its old key and read whole.
-- A `<done>` whose arrow names nothing open closes nothing and is named on
-  the head's next prompt.
+- A `<done>` whose arrow names nothing open closes nothing and is named to
+  the head in a turn of its own.
 - The head's transcript over a week shows no reply that summarizes an item
   other than the one its message or callback was about.
