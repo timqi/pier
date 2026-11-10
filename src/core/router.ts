@@ -206,6 +206,15 @@ export class Router {
     else this.hub.emit(sessionId, { type: "error", message });
   }
 
+  /** A system input to an attached session, found by id: two chains' heads share the home chat, whose key
+   *  names only one of them. One it could not reach, unattached included, is reported: `<failure>: <why>`. */
+  systemInputTo(sessionId: string, text: string, origin: SystemInputOrigin, mode: "followUp" | "append", failure: string): void {
+    const failed = (why: string) => this.reportTo(sessionId, `${failure}: ${why}`);
+    const session = this.bySession.get(sessionId)?.session;
+    if (!session) failed("not attached");
+    else session.systemInput(text, origin, mode).catch((err: unknown) => failed(String(err)));
+  }
+
   /** Only the in-memory attachment goes; the durable mapping
    *  (channels/conversations.ts) resumes the same transcript on the next message.
    *  `includeWatched` is for config a session reads only at open: the session

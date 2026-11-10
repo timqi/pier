@@ -142,14 +142,8 @@ export class MainChain {
     // Runs in no item follow `Nothing open.` in the seed: no key to hand back.
     if (seed.startsWith(NOTHING_OPEN)) return;
     const name = this.deps.chains.get(chain.chainId)?.name ?? chain.chainId;
-    const failed = (why: string) => this.deps.router.reportTo(sessionId, `open items: the note to the compacted head could not reach it: ${why}`);
-    const head = this.deps.router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
-    if (!head) return failed("not attached");
-    head.systemInput(
-      `[Pier: the context was compacted. The open items as they stand, keys exact:]\n${seed}`,
-      { kind: "open-items", statusSnapshot: { ...snapshot, chain: name } },
-      "append",
-    ).catch((err: unknown) => failed(String(err)));
+    const text = `[Pier: the context was compacted. The open items as they stand, keys exact:]\n${seed}`;
+    this.deps.router.systemInputTo(sessionId, text, { kind: "open-items", statusSnapshot: { ...snapshot, chain: name } }, "append", "open items: the note to the compacted head could not reach it");
   }
 
   private append(sessionId: string, dir: string, notes: string[]): void {

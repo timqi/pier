@@ -237,13 +237,9 @@ export class TaskService {
             // A head that cannot settle a miss would loop: the turn a note opened, or the same note again, gets it appended.
             const turn = opened?.kind !== "open-items" && this.lastNote.get(chainId) !== note;
             this.lastNote.set(chainId, note);
-            // By id: two chains' heads share the home chat, whose key names only one of them.
-            const head = router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
-            const failed = (why: string) => router.reportTo(sessionId, `open items: the note to the head could not reach it: ${why}`);
             // The keys the note lists, as rows for the web card; a stale note alone names no key.
             const statusSnapshot = unmatched.length && keys.length ? { statusSnapshot: openItemsStatus(this.openItems(chainId), Date.now()).snapshot } : {};
-            if (!head) failed("not attached");
-            else head.systemInput(note, { kind: "open-items", ...(turn ? { turn: true as const } : {}), ...statusSnapshot }, turn ? "followUp" : "append").catch((err: unknown) => failed(String(err)));
+            router.systemInputTo(sessionId, note, { kind: "open-items", ...(turn ? { turn: true as const } : {}), ...statusSnapshot }, turn ? "followUp" : "append", "open items: the note to the head could not reach it");
           } else this.lastNote.delete(chainId); // A turn that owes no note ends the repeat: the same miss after it is news.
         } catch (err) {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
@@ -479,18 +475,20 @@ export class TaskService {
     this.unmatched.set(chainId, this.unmatchedDone(chainId).filter((u) => !namesKey(doneOld(u), key)));
     this.hub.emitWorkspace({ type: "open-items-changed" });
     const headId = this.instance.continuous.members(chainId)[0]?.sessionId;
-    const head = this.router.attachedSessions().find((a) => a.session.id === headId)?.session;
-    if (head?.state === "streaming") {
+    const state = headId === undefined ? undefined : this.router.stateOf(headId);
+    // Only an attached head is told: one opened later reads the list as it stands.
+    if (headId === undefined || state === undefined) return key;
+    if (state === "streaming") {
       this.closedMidTurn.set(chainId, [...(this.closedMidTurn.get(chainId) ?? []), { key, runIds }]);
       // `onTurnEnd` is not called for a turn that failed or a router that is stopping: the entry would meet the next turn's reply.
-      const off = this.hub.subscribe(head.id, (e) => {
+      const off = this.hub.subscribe(headId, (e) => {
         if (e.type !== "turn-end") return;
         off();
         if (e.error || this.router.isStopping()) this.closedMidTurn.delete(chainId);
       });
     }
-    head?.systemInput(`[Pier: the user closed ${key}]`, { kind: "open-items" }, "append").catch((err: unknown) =>
-      this.router.reportTo(head.id, `open items: the note that the user closed "${key}" could not reach the head: ${String(err)}`));
+    const note = `[Pier: the user closed ${key}]`;
+    this.router.systemInputTo(headId, note, { kind: "open-items" }, "append", `open items: the note that the user closed "${key}" could not reach the head`);
     return key;
   }
 
