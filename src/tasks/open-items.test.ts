@@ -1119,4 +1119,19 @@ describe("the open items", () => {
     expect(h0.systemInputs.at(-1)).toEqual({ mode: "followUp", origin: { kind: "open-items", turn: true },
       text: `[Pier: run r1 ended; open item "login" still has its old stage. Close it with <done>, or <open> it again with a stage saying waiting on you.]` });
   });
+
+  it("reads no marker and sends no note for a failed turn or once the router is stopping", () => {
+    const hub = new EventHub();
+    const h0 = fakeSession("h0", { scripted: true });
+    const router = new Router(hub, () => Promise.resolve(h0));
+    router.attach({ channelId: "web", conversationId: "h0" }, h0);
+    const store = new TaskStore(openDb(":memory:"));
+    new TaskService(store, {} as AgentFactory, router, hub, { modelMenu: () => [], ...fakeChains({ main: ["h0"] }) });
+    h0.emit({ type: "turn-end", text: "<open>login — x</open>" });
+    h0.emit({ type: "turn-end", text: "<done>logn</done><done>login</done>", error: "503" });
+    router.stopping();
+    h0.emit({ type: "turn-end", text: "<done>logn</done><done>login</done>" });
+    expect(h0.systemInputs).toEqual([]);
+    expect(store.openItems("main").map((i) => i.problem)).toEqual(["login"]);
+  });
 });
