@@ -122,7 +122,7 @@ export class TaskService {
    *  one that closes none adds its own to the newest five. In memory only: a restart loses a reminder, not an item. */
   private readonly unmatched = new Map<string, string[]>();
   /** Per chain, the items the user closed while its head was mid-turn, each with its runs as they were:
-   *  that reply, written before the note, does not bring them back. Until its turn ends; in memory only. */
+   *  that reply, written before the note, does not bring them back. Until its turn ends, answered or not; in memory only. */
   private readonly closedMidTurn = new Map<string, { key: string; runIds: string[] }[]>();
   /** Per chain, the last note on the head's markers: the same note again opens no turn. In memory only. */
   private readonly lastNote = new Map<string, string>();
@@ -480,7 +480,15 @@ export class TaskService {
     this.hub.emitWorkspace({ type: "open-items-changed" });
     const headId = this.instance.continuous.members(chainId)[0]?.sessionId;
     const head = this.router.attachedSessions().find((a) => a.session.id === headId)?.session;
-    if (head?.state === "streaming") this.closedMidTurn.set(chainId, [...(this.closedMidTurn.get(chainId) ?? []), { key, runIds }]);
+    if (head?.state === "streaming") {
+      this.closedMidTurn.set(chainId, [...(this.closedMidTurn.get(chainId) ?? []), { key, runIds }]);
+      // `onTurnEnd` is not called for a turn that failed or a router that is stopping: the entry would meet the next turn's reply.
+      const off = this.hub.subscribe(head.id, (e) => {
+        if (e.type !== "turn-end") return;
+        off();
+        if (e.error || this.router.isStopping()) this.closedMidTurn.delete(chainId);
+      });
+    }
     head?.systemInput(`[Pier: the user closed ${key}]`, { kind: "open-items" }, "append").catch((err: unknown) =>
       this.router.reportTo(head.id, `open items: the note that the user closed "${key}" could not reach the head: ${String(err)}`));
     return key;

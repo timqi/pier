@@ -315,7 +315,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   it back: once its markers are written, each item closed during the turn is
   closed again when the reply reopened its key, or opened an item not open
   before it that holds that key as an alias or shares a run's session with it
-  (`closedMidTurn`, the turn's only).
+  (`closedMidTurn`, the turn's only: a turn that fails takes its closes with
+  it, read off the session's event stream).
 - A head whose context is compacted while an item is open — a run in no item
   is none — gets
   `[Pier: the context was compacted. The open items as they stand, keys exact:]`

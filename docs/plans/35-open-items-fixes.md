@@ -46,7 +46,7 @@
   4. 其余 key 原样存（`迁移 v1 → v2`），之后靠 S3.3a 关得掉。（A1、B1）
 - **S5 `userClosed` 删除**：S3.2 之后 head 对已关闭 key 的 `<done>` 本来就是 no-op，记录在 DB 里，重启不丢；带箭头、`old` 被用户关过的 `<done>` 不再被吞（走 S3.3）。（A2）
 - **S6 owed 的 unmatched**：head 回合结束时——这条回复关掉了至少一个事项 → owed = 本回合的 unmatched；否则 owed = 去重(旧 owed + 本回合 unmatched) 取最新 5 条；没有开着的事项 → 空。用户关闭时按现状滤掉指向该 key 的。（A4）
-- **S7 回合中被用户关闭后不复活**：`closedMidTurn` 记 `{ key, runIds }`（关闭前读）。回合结束、写完 marker 后，把这些事项再关掉：key 相同的；或者这条回复之前没开着、且（aliases 含那个 key，或与它共享一个 run——按 `getRun(id)?.targetSessionId ?? id` 比）的。（A9）
+- **S7 回合中被用户关闭后不复活**：`closedMidTurn` 记 `{ key, runIds }`（关闭前读）。回合结束、写完 marker 后，把这些事项再关掉：key 相同的；或者这条回复之前没开着、且（aliases 含那个 key，或与它共享一个 run——按 `getRun(id)?.targetSessionId ?? id` 比）的。这一轮失败（`turn-end` 带 `error`，`onTurnEnd` 不被调用）或 router 在停时，记录随这一轮丢掉（`hub.subscribe` 读 head 的 `turn-end`），不留给下一轮的回复。（A9）
 - **S8 整轮标记**：`recordOpenItems(…, earlier = "")` 的 marker 是 `earlier` 的在前、`text` 的在后；`topic` 只读 `text`。`staleItems` 的“回复点了名的 key”两段都算，并加上 `whole`。（B5）
 - **S9 内存状态不持久化**（A4 的评估）：`userClosed` 已删（DB 的已关闭行就是记录）；`closedMidTurn` 只活一个回合，重启本来就切断这个回合，续上的回合上下文里有 `[Pier: the user closed …]`；owed 丢的只是 `/status` 和下一个 seed 的一行提醒，head 当时已收到提示并（N1 之后）立刻有一轮去处理——不值得一张表。
 

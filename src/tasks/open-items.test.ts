@@ -965,6 +965,17 @@ describe("the open items", () => {
     expect(r.store.openItems("main")).toMatchObject([{ problem: "other", runIds: ["r1"] }]);
   });
 
+  it("forgets what the user closed while the head wrote a turn that failed: the next turn's item on that run stays open", () => {
+    const r = head();
+    r.end("<open>logout — x (run r1)</open>");
+    r.h0.setState("streaming");
+    r.service.closeItem("main", "logout", 2);
+    r.h0.emit({ type: "turn-end", text: "", error: "provider down" });
+    r.h0.setState("idle");
+    r.end("<open>logout, also SSO — asked for again (run r1)</open>");
+    expect(r.open()).toEqual(["logout, also SSO"]);
+  });
+
   it("closes by words anywhere in a key, in any order and case, and refuses several or none", () => {
     const hub = new EventHub();
     const h0 = fakeSession("h0");
