@@ -19,7 +19,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { doneOld, openItems, openItemsStatus, recordOpenItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
+import { doneOld, openItems, openItemsStatus, recordOpenItems, revivedItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -214,12 +214,7 @@ export class TaskService {
           this.closedMidTurn.delete(chainId);
           const before = new Set(store.openItems(chainId).map((i) => i.problem));
           const { changed: marked, closed, unmatched } = recordOpenItems(store, text, Date.now(), sessionId, chainId, answered, earlier);
-          // The reply may bring a closed item back under its key, or as a new one holding its old key or a run of its sessions.
-          const sessionOf = (id: string) => store.getRun(id)?.targetSessionId ?? id;
-          const sharesRun = (a: string[], b: string[]) => a.some((id) => b.some((r) => sessionOf(r) === sessionOf(id)));
-          const revived = (item: { problem: string; runIds: string[] }) => midTurn.some((c) => c.key === item.problem
-            || (!before.has(item.problem) && (store.itemHistory(chainId, item.problem)!.aliases.includes(c.key) || sharesRun(item.runIds, c.runIds))));
-          const reopened = midTurn.length ? store.openItems(chainId).filter(revived).map((i) => i.problem) : [];
+          const reopened = midTurn.length ? revivedItems(store, chainId, midTurn, before) : [];
           for (const key of reopened) {
             log.info(`open items: ${sessionId}'s reply reopened ${key}, which the user closed while it was written; closed again`);
             store.closeOpenItem(chainId, key, Date.now());
