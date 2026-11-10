@@ -222,7 +222,8 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 - A marker's body never holds its own tag's opener: in `<done>a <done>b</done>`
   only `<done>b</done>` is a marker. A marker whose opener starts the reply's
   last non-empty line — only whitespace before it — and that its own closer
-  does not close is read to the line's end, a wrong closer dropped, and logged;
+  does not close is read to the line's end or a `<silent>` on it, a wrong
+  closer dropped, and logged;
   one left open on an earlier line or after other text on its line is text,
   neither read nor stripped: markers are taken out before `<silent>` is.
   An answer cut short — an abort, the provider's length cap (`turn-end`'s

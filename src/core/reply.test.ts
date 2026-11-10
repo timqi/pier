@@ -516,9 +516,19 @@ describe("open-item markers", () => {
     // A cubic reading takes seconds at 3 KB of blanks: caught here, before the 100 KB below would take it hours.
     expect(timed(`<open>a${" ".repeat(3_000)}x`)).toBeLessThan(500);
     const blanks = " ".repeat(100_000);
-    const hostile = ["<open>".repeat(17_000), "<open><done><note><topic><note global>".repeat(2_800), `<open>a${blanks}x`, `<done>a${blanks}x\nmore`, `<open>a${blanks}x</open>`, `<note>a${"</".repeat(50_000)}`];
+    const hostile = ["<open>".repeat(17_000), "<open><done><note><topic><note global>".repeat(2_800), `<open>a${blanks}x`, `<done>a${blanks}x\nmore`, `<open>a${blanks}x</open>`, `<note>a${"</".repeat(50_000)}`, `<done>a<silent>${blanks}x\nmore`];
     // A quadratic reading of any of these takes seconds.
     for (const raw of hostile) expect(timed(raw)).toBeLessThan(500);
+  });
+
+  it("ends the last line's unclosed marker at a `<silent>` on that line, which stays the reply's own", () => {
+    const raw = "<done>key<silent>only markers</silent>";
+    expect(openItemMarkers(raw)).toMatchObject({ markers: [{ op: "done", problem: "key" }], unclosed: ["<done>key"] });
+    expect(splitReply(raw)).toMatchObject({ text: "", silence: "only markers" });
+    expect(openItemMarkers("Merged.\n<open>k — s (run r1) <silent>moved</silent>").markers).toEqual([{ op: "open", problem: "k", stage: "s", runIds: ["r1"] }]);
+    expect(openItemMarkers("<done>key</x><silent>a</silent>").markers).toEqual([{ op: "done", problem: "key" }]);
+    // A cut answer's is unfinished all the same.
+    expect(cutUnclosed(`Merged.\n${raw}`)).toBe("Merged.\n");
   });
 
   it("cuts a text before the marker its last line leaves unclosed and each one that leaves last, 84 KB of them in one pass", () => {

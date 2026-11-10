@@ -166,7 +166,8 @@ const MAX_SUGGESTIONS = 5;
 // the tag, which would post the literal tag to a channel instead of silence.
 const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
 const tag = (literal: string): string => literal.split("").join(ZW);
-const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");
+const SILENT_OPENER = tag("<silent>");
+const SILENT = new RegExp(`${SILENT_OPENER}([\\s\\S]*?)${tag("</silent>")}`, "gi");
 /** A tag that hides what it wraps: a streaming renderer never cuts inside one. */
 const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done", "note", "topic"].map(tag).join("|")})(?: global)?${ZW}>`, "gi");
 const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
@@ -174,7 +175,7 @@ const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
 /** Main's markers (docs/design/10-continuous-session.md): stripped like
  *  `<silent>`, and read back on the head's turn end. Code is content, so a
  *  marker inside a fence or a code span is neither. Each tag holds two groups: its
- *  closed body, then the rest of the reply's last line after one that starts it and is left unclosed or wrongly closed.
+ *  closed body, then the rest of the reply's last line, up to a `<silent>` on it, after one that starts it and is left unclosed or wrongly closed.
  *  A body never holds its own opener, so a stray one cannot swallow the marker after it. */
 const MARKER_TAGS = ["open", "done", "note", "topic", "note global"] as const;
 const markerRe = (last: boolean): RegExp => new RegExp(
@@ -183,8 +184,8 @@ const markerRe = (last: boolean): RegExp => new RegExp(
     const body = (char: string): string => `(?:(?!${opener})${char})`;
     const closed = `(${body("[\\s\\S]")}*?)${tag(`</${t.split(" ")[0]!}>`)}[ \\t]*\\n?`;
     // Taken in a lookahead and matched by reference, so a failed match never retries a shorter line: linear in the reply.
-    const rest = `\\${String(2 * i + 2)}`;
-    const unclosed = `(?<=(?:^|\\n)[^\\S\\n]*${opener})(?=(${body("[^\\n]")}*))${last ? `${rest}(?=\\s*$)` : `(?=${rest}(?:\\n|$))`}`;
+    const rest = `\\${String(2 * i + 2)}(?:${SILENT_OPENER}[^\\n]*(?![^\\n]))?`;
+    const unclosed = `(?<=(?:^|\\n)[^\\S\\n]*${opener})(?=((?:(?!${SILENT_OPENER})${body("[^\\n]")})*))${last ? `(?=${rest}\\s*$)\\${String(2 * i + 2)}` : `(?=${rest}(?:\\n|$))`}`;
     return `${opener}(?:${closed}|${unclosed})`;
   }).join("|"),
   "gi",
@@ -296,14 +297,17 @@ export function openItemMarkers(markdown: string): {
 /** `text` up to the marker its last line leaves unclosed, and up to each one that cut leaves last in turn:
  *  what its writer did not finish is no marker. One pass, where reading again after every cut is quadratic. */
 export function cutUnclosed(text: string): string {
-  const lines: [opener: number, end: number][] = [];
+  const openers: number[] = [];
   replaceOutsideCode(text, UNCLOSED_LINE, (m) => {
-    const rest = m.find((g, i) => i > 0 && i % 2 === 0 && g !== undefined);
-    if (rest !== undefined) lines.push([m.index!, m.index! + m[0].length + rest.length]);
+    if (m.some((g, i) => i > 0 && i % 2 === 0 && g !== undefined)) openers.push(m.index!);
     return m[0];
   });
   let end = text.length;
-  for (let i = lines.length - 1; i >= 0 && !text.slice(lines[i]![1], end).trim(); i--) end = lines[i]![0];
+  for (let i = openers.length - 1; i >= 0; i--) {
+    const eol = text.indexOf("\n", openers[i]);
+    if (eol >= 0 && text.slice(eol, end).trim()) break;
+    end = openers[i]!;
+  }
   return text.slice(0, end);
 }
 
