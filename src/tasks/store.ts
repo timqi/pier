@@ -33,6 +33,10 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
  *  surface lists of a probe that found nothing. */
 const KEPT_PROBES = 50;
 
+/** What a `<done>` that closes no row answers: its item is closed already, or it names none. */
+const SETTLED = 0;
+const UNMATCHED = null;
+
 /** The separators an `<open>` written without ` — ` puts after its key (`key。stage`, `key: stage`). */
 const KEY_END = /^(?:\s*[。:：]|\s+[-–]\s)/u;
 /** Does a `<done>` name this key: it exactly, or it and then one of those separators. */
@@ -607,7 +611,7 @@ export class TaskStore {
 
   /** One `<done>`, in the order docs/design/10-continuous-session.md §Open items gives: `whole` before the cut
    *  key, the exact key before the one item `namesKey` finds, an arrow only into another open item. Answers
-   *  the rows closed, `0` when the `<done>` is already settled, `null` when it names nothing. */
+   *  the rows closed, `SETTLED` when the `<done>`'s item is closed already, `UNMATCHED` when it names nothing. */
   private closeItem(chainId: string, m: { problem: string; to?: string; whole?: string }, now: number, closed: string[], touched: Set<string>): number | null {
     const keys = this.openItems(chainId).map((r) => r.problem);
     const close = (key: string): number => {
@@ -616,21 +620,22 @@ export class TaskStore {
       return Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, key).changes);
     };
     if (m.whole !== undefined && keys.includes(m.whole)) return close(m.whole);
-    if (m.to !== undefined && m.whole !== undefined && keys.includes(m.to) && this.itemHistory(chainId, m.to)!.aliases.includes(m.whole)) return touched.has(m.to) ? 0 : close(m.to);
+    if (m.to !== undefined && m.whole !== undefined && keys.includes(m.to) && this.itemHistory(chainId, m.to)!.aliases.includes(m.whole)) return touched.has(m.to) ? SETTLED : close(m.to);
     const named = keys.includes(m.problem) ? [m.problem] : keys.filter((key) => key !== m.to && namesKey(m.problem, key));
     const key = named.length === 1 ? named[0]! : undefined;
-    const settled = (name: string): 0 | null | undefined => {
+    // A name that is no open key: settled when only closed items hold it, as key or alias; unmatched when an open item holds it as an alias; undefined when no row does.
+    const was = (name: string): typeof SETTLED | typeof UNMATCHED | undefined => {
       const rows = this.sql("SELECT closed_at IS NULL AS open FROM open_items WHERE chain_id = ? AND (problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?))")
         .all(chainId, name, name) as { open: number }[];
-      return rows.length ? (rows.some((r) => r.open) ? null : 0) : undefined;
+      return rows.length ? (rows.some((r) => r.open) ? UNMATCHED : SETTLED) : undefined;
     };
-    const whole = m.whole === undefined ? undefined : settled(m.whole);
+    const whole = m.whole === undefined ? undefined : was(m.whole);
     if (m.to === undefined) {
       // A `whole` that was ever an item's key is that item's, never the key its bare dash cuts.
       if (whole !== undefined) return whole;
-      return key !== undefined ? close(key) : settled(m.problem) ?? null;
+      return key !== undefined ? close(key) : was(m.problem) ?? UNMATCHED;
     }
-    if (!keys.includes(m.to) || key === m.to) return whole ?? null;
+    if (!keys.includes(m.to) || key === m.to) return whole ?? UNMATCHED;
     if (key !== undefined) {
       touched.add(m.to);
       const changed = close(key);
@@ -642,12 +647,12 @@ export class TaskStore {
     }
     if (this.itemHistory(chainId, m.to)!.aliases.includes(m.problem)) {
       touched.add(m.to);
-      return 0;
+      return SETTLED;
     }
-    if (!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL").get(chainId, m.problem)) return whole ?? null;
+    if (!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL").get(chainId, m.problem)) return whole ?? UNMATCHED;
     touched.add(m.to);
     this.absorb(chainId, m.to, m.problem);
-    return 0;
+    return SETTLED;
   }
 
   /** `into` takes `from`'s key, aliases and sessions, so its view reads `from`'s rows too, and the earlier
