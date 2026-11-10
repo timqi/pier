@@ -485,6 +485,56 @@ describe("the moment the seam calls a session idle", () => {
   });
 });
 
+describe("a turn's text before its answer", () => {
+  const working = (text: string, stopReason = "toolUse"): PiMessage => ({
+    role: "assistant",
+    content: [{ type: "text", text }, { type: "toolCall", id: "t1", name: "bash", arguments: {} }],
+    stopReason,
+    timestamp: 1,
+  });
+  const answer = (text: string): PiMessage => ({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 2 });
+  const turnEnds = (seen: SessionEventPayload[]) => seen.filter((e) => e.type === "turn-end");
+
+  it("rides on the turn's one turn-end, and only on that turn's", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    fake.emit({ type: "turn_end", message: working("<open>a — b</open>") });
+    fake.emit({ type: "turn_end", message: working("   ") });
+    fake.emit({ type: "turn_end", message: working("<note>n</note>") });
+    fake.emit({ type: "turn_end", message: answer("Done.") });
+    fake.emit({ type: "turn_end", message: answer("Next.") });
+    expect(turnEnds(seen)).toMatchObject([{ text: "Done.", earlier: "<open>a — b</open>\n<note>n</note>" }, { text: "Next." }]);
+    expect(turnEnds(seen)[1]).not.toHaveProperty("earlier");
+  });
+
+  it("never carries an errored or aborted attempt's text", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const failed = working("<done>x</done>", "error");
+    fake.emit({ type: "turn_end", message: failed });
+    fake.emit({ type: "turn_end", message: working("<done>y</done>", "aborted") });
+    fake.emit({ type: "agent_end", messages: [working("<done>y</done>", "aborted")] });
+    expect(turnEnds(seen)).toHaveLength(1);
+    expect(turnEnds(seen)[0]).not.toHaveProperty("earlier");
+  });
+
+  it("rides on the turn-end of a retry cancelled in its backoff", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    fake.emit({ type: "turn_end", message: working("<note>kept</note>") });
+    const attempt: PiMessage = { role: "assistant", content: [], stopReason: "error", errorMessage: "503" };
+    fake.emit({ type: "agent_end", willRetry: true, messages: [attempt] });
+    fake.emit({ type: "agent_settled" });
+    expect(turnEnds(seen)).toMatchObject([{ text: "", earlier: "<note>kept</note>" }]);
+  });
+});
+
 describe("a session naming itself after its first exchange", () => {
   const exchange = (fake: ReturnType<typeof fakePi>, users = 1): void => {
     for (let i = 0; i < users; i++) {

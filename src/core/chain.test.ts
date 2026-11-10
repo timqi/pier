@@ -357,6 +357,46 @@ describe("the continuous conversation's chain", () => {
     expect(readFileSync(file, "utf8")).toBe("- edited by hand\n- one\n- two\n");
   });
 
+  it("appends a <note> the head wrote beside a tool call, before its answer's", async () => {
+    const r = rig();
+    const head = r.existing("h1", r.clock.now - 60_000);
+    await r.router.ensure({ channelId: "web", conversationId: "h1" });
+    head.emit({ type: "turn-end", text: "Merged.\n<note>after</note>", earlier: "Checking.\n<note>before</note>" });
+    expect(readFileSync(join(r.home, "chains", "main", "memory", `${day(new Date(r.clock.now))}.md`), "utf8")).toBe("- before\n- after\n");
+  });
+
+  it("hands a compacted head its open items again, and no one else", async () => {
+    const r = rig();
+    const head = r.existing("h1", r.clock.now - 60_000);
+    const older = r.existing("h0", r.clock.now - 120_000);
+    await r.router.ensure({ channelId: "web", conversationId: "h1" });
+    await r.router.ensure({ channelId: "web", conversationId: "h0" });
+    head.emit({ type: "context-compacted", before: 100, after: 10 });
+    expect(head.systemInputs).toEqual([]);
+    r.status.seed = "Open\n- p0 — merged";
+    r.status.items.main = ["running"];
+    older.emit({ type: "context-compacted", before: 100, after: 10 });
+    expect(older.systemInputs).toEqual([]);
+    head.emit({ type: "context-compacted", before: 100, after: 10 });
+    expect(head.systemInputs).toEqual([{
+      text: "[Pier: the context was compacted. The open items as they stand, keys exact:]\nOpen\n- p0 — merged",
+      origin: { kind: "open-items", statusSnapshot: { version: 1, items: [expect.objectContaining({ problem: "p0" })], chain: "Main" } },
+      mode: "append",
+    }]);
+  });
+
+  it("tells the head's conversation when its compaction note could not land", async () => {
+    const r = rig();
+    const head = r.existing("h1", r.clock.now - 60_000);
+    await r.router.ensure({ channelId: "web", conversationId: "h1" });
+    r.status.seed = "Open\n- p0 — merged";
+    head.systemInput = () => Promise.reject(new Error("disk full"));
+    const told = vi.spyOn(r.router, "reportTo");
+    head.emit({ type: "context-compacted", before: 100, after: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(told).toHaveBeenCalledWith("h1", "open items: the note to the compacted head could not reach it: Error: disk full");
+  });
+
   it("appends a head's <note global> to the instance's daily note, whichever chain it heads", async () => {
     const r = rig();
     const design = r.chains.create("Design");

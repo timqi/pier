@@ -14,7 +14,7 @@ import { ChainArchived, type ChainRow, type Chains } from "./chains.js";
 import { chainCounts } from "./open-items.js";
 import { cut, isSilentReply, openItemMarkers, replyTopic, splitReply } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand, commandStartsTurn } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, chatCommand, commandStartsTurn, NOTHING_OPEN } from "./types.js";
 import type {
   AgentFactory, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItemsStatus,
 } from "./types.js";
@@ -118,19 +118,37 @@ export class MainChain {
   private readonly lastUser = new Map<string, number>();
 
   constructor(private readonly db: DatabaseSync, private readonly deps: ChainDeps) {
-    deps.router.onTurnEnd((sessionId, text) => {
+    deps.router.onTurnEnd((sessionId, text, _opened, earlier) => {
       const chain = this.chainOf(sessionId);
-      if (chain?.members[0] === sessionId) this.note(sessionId, chain.chainId, text);
+      if (chain?.members[0] === sessionId) this.note(sessionId, chain.chainId, [earlier, text]);
     });
+    deps.router.onCompacted((sessionId) => this.compacted(sessionId));
     void this.warm();
   }
 
   /** The head's `<note>` lines go to its chain's daily note, `<note global>` to the
    *  instance's: a note costs the head no tool call. */
-  private note(sessionId: string, chainId: string, text: string): void {
-    const { notes, globalNotes } = openItemMarkers(text);
-    this.append(sessionId, join("chains", chainId, "memory"), notes);
-    this.append(sessionId, "memory", globalNotes);
+  private note(sessionId: string, chainId: string, texts: string[]): void {
+    const markers = texts.map((t) => openItemMarkers(t));
+    this.append(sessionId, join("chains", chainId, "memory"), markers.flatMap((m) => m.notes));
+    this.append(sessionId, "memory", markers.flatMap((m) => m.globalNotes));
+  }
+
+  /** A compacted head's summary may have dropped the keys its `<done>` must name exactly. */
+  private compacted(sessionId: string): void {
+    const chain = this.chainOf(sessionId);
+    if (chain?.members[0] !== sessionId) return;
+    const { seed, snapshot } = this.status(chain.chainId);
+    if (seed === NOTHING_OPEN) return;
+    const name = this.deps.chains.get(chain.chainId)?.name ?? chain.chainId;
+    const failed = (why: string) => this.deps.router.reportTo(sessionId, `open items: the note to the compacted head could not reach it: ${why}`);
+    const head = this.deps.router.attachedSessions().find((a) => a.session.id === sessionId)?.session;
+    if (!head) return failed("not attached");
+    head.systemInput(
+      `[Pier: the context was compacted. The open items as they stand, keys exact:]\n${seed}`,
+      { kind: "open-items", statusSnapshot: { ...snapshot, chain: name } },
+      "append",
+    ).catch((err: unknown) => failed(String(err)));
   }
 
   private append(sessionId: string, dir: string, notes: string[]): void {

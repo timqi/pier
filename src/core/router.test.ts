@@ -216,6 +216,31 @@ describe("channel fan-out", () => {
     expect(im.sent).toHaveLength(1);
   });
 
+  it("hands turn-end listeners the turn's earlier text apart from its answer", async () => {
+    const heard: [string, string][] = [];
+    router.onTurnEnd((_id, text, _opened, earlier) => heard.push([text, earlier]));
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "Done.", earlier: "<note>n</note>" });
+    fake.emit({ type: "turn-end", text: "Next." });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heard).toEqual([["Done.", "<note>n</note>"], ["Next.", ""]]);
+    expect(im.sent.map(([, reply]) => reply.text)).toEqual(["Done.", "Next."]);
+  });
+
+  it("tells compaction listeners which session compacted, a throwing one reported", async () => {
+    const errors: string[] = [];
+    hub.subscribe("s1", (e) => {
+      if (e.type === "error") errors.push(e.message);
+    });
+    const heard: string[] = [];
+    router.onCompacted(() => { throw new Error("boom"); });
+    router.onCompacted((id) => heard.push(id));
+    await router.ensure(KEY);
+    fake.emit({ type: "context-compacted", before: 100, after: 10 });
+    expect(heard).toEqual(["s1"]);
+    expect(errors).toEqual(["compaction listener failed: Error: boom"]);
+  });
+
   it("re-lists every surface when the session names itself", async () => {
     await router.ensure(KEY);
     const workspace: string[] = [];

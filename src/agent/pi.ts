@@ -50,6 +50,7 @@ import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
 import { DISPATCHER, lead, toolCalls, WORKER } from "./roles.js";
 import {
+  hasToolCalls,
   lastAssistant,
   textOf,
   toChatTurns,
@@ -487,9 +488,21 @@ export class PiSession implements AgentSession {
 
   subscribe(fn: (e: SessionEventPayload) => void): () => void {
     let retryPending = false;
+    // A marker in a message that also calls a tool belongs to the turn's reply, not to its work.
+    let earlier: string[] = [];
+    const ended = (payload: Extract<SessionEventPayload, { type: "turn-end" }>): SessionEventPayload => {
+      const carried = earlier.length ? { earlier: earlier.join("\n") } : {};
+      earlier = [];
+      return { ...payload, meta: this.lastTurnMeta(), ...carried };
+    };
     this.listeners.add(fn);
     const unsubscribe = this.pi.subscribe((event) => {
       const piEvent = event as PiEvent;
+      const m = piEvent.message;
+      if (piEvent.type === "turn_end" && m?.role === "assistant" && hasToolCalls(m) && m.stopReason !== "error" && m.stopReason !== "aborted") {
+        const text = textOf(m.content);
+        if (text.trim()) earlier.push(text);
+      }
       if (piEvent.type === "agent_end") {
         // Pi's backoff is otherwise silent: a timed-out request reads as a hung reply (§5).
         if (piEvent.willRetry && !retryPending) fn({ type: "error", message: `model request failed (${lastAssistant(piEvent.messages)?.errorMessage || "unknown error"}) — retrying` });
@@ -498,11 +511,11 @@ export class PiSession implements AgentSession {
       if (piEvent.type === "agent_settled" && retryPending) {
         // Aborting Pi during retry backoff produces no final agent_end.
         retryPending = false;
-        fn({ type: "turn-end", text: "", meta: this.lastTurnMeta() });
+        fn(ended({ type: "turn-end", text: "" }));
       }
       if (piEvent.type === "message_start" && this.shownEarly.has(piEvent.message?.details as object)) return;
       for (const payload of toSessionEvents(piEvent)) {
-        fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
+        fn(payload.type === "turn-end" ? ended(payload) : payload);
         if (payload.type === "turn-end" && !payload.error) this.autoTitle(payload.text, fn);
       }
     });

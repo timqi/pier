@@ -92,7 +92,8 @@ export class Router {
    *  here on — the boot's resume owns every turn that was running. */
   private stopped = false;
   private turnStarted?: (sessionId: string, key: ConversationKey) => void;
-  private readonly turnEnded: ((sessionId: string, text: string, opened?: SystemInputOrigin) => void)[] = [];
+  private readonly turnEnded: ((sessionId: string, text: string, opened: SystemInputOrigin | undefined, earlier: string) => void)[] = [];
+  private readonly compacted: ((sessionId: string) => void)[] = [];
 
   constructor(
     private readonly hub: EventHub,
@@ -150,10 +151,18 @@ export class Router {
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
    *  turn is not one. `opened`: the system input the turn answers, absent for a
-   *  user's. Registered by the task service (tasks/service.ts) and the chain
+   *  user's. `text` is the answer; `earlier` the text of the turn's tool-calling
+   *  messages before it, `""` when none had any — read for markers, never shown.
+   *  Registered by the task service (tasks/service.ts) and the chain
    *  (core/chain.ts); a listener's throw is reported, never fatal to the others. */
-  onTurnEnd(listener: (sessionId: string, text: string, opened?: SystemInputOrigin) => void): void {
+  onTurnEnd(listener: (sessionId: string, text: string, opened: SystemInputOrigin | undefined, earlier: string) => void): void {
     this.turnEnded.push(listener);
+  }
+
+  /** Every attached session's context compaction, after it; a listener's throw
+   *  is reported as `onTurnEnd`'s is. Registered by the chain (core/chain.ts). */
+  onCompacted(listener: (sessionId: string) => void): void {
+    this.compacted.push(listener);
   }
 
   /** Every attached session's turn as it begins, with the key it will answer
@@ -333,6 +342,15 @@ export class Router {
           if (payload.state === "streaming") this.turnStarted?.(session.id, key);
         }
         if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
+        if (payload.type === "context-compacted") {
+          for (const listener of this.compacted) {
+            try {
+              listener(session.id);
+            } catch (err) {
+              this.report(session.id, key, `compaction listener failed: ${String(err)}`);
+            }
+          }
+        }
         // The input right after a turn-start opened it; an `append` shown mid-turn did not.
         if (payload.type === "turn-start") attached.opened = null;
         else if (attached.opened === null && payload.type === "system-input") attached.opened = payload.origin;
@@ -380,7 +398,7 @@ export class Router {
             // One listener's throw may not cost the rest, or the chat its reply.
             for (const ended of this.turnEnded) {
               try {
-                ended(session.id, payload.text, attached.opened ?? undefined);
+                ended(session.id, payload.text, attached.opened ?? undefined, payload.earlier ?? "");
               } catch (err) {
                 this.report(session.id, key, `turn-end listener failed: ${String(err)}`);
               }

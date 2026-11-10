@@ -379,7 +379,9 @@ export type SessionEventPayload =
   // Full assistant text of the turn, plus how the turn ended: `error` is set
   // when the last assistant message stopped on a provider failure, so a turn
   // with nothing to say is never mistaken for one that chose to say nothing.
-  | { type: "turn-end"; text: string; meta?: TurnMeta; error?: string }
+  // `earlier`: the text of the turn's tool-calling assistant messages before
+  // it, `\n`-joined, absent when none had any; never shown, read for markers.
+  | { type: "turn-end"; text: string; meta?: TurnMeta; error?: string; earlier?: string }
   // The context was summarized away and replaced by that summary: the token
   // counts either side of it. Not a `system-input` — nothing entered the
   // model's context, the opposite happened — and the only trace compaction
