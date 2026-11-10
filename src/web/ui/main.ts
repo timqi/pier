@@ -192,6 +192,7 @@ async function chainHolding(problem: string): Promise<string | null> {
 /** Make `id` the pane's chain and read its sessions; false when a later switch took over or the read failed, said in the pane. */
 async function switchChain(id: string): Promise<boolean> {
   chainId = id;
+  paintTopics();
   chain = [];
   earlier = [];
   unstarted = false;
@@ -221,10 +222,15 @@ async function openChain(id: string | null, problem: string | null = null, user 
   else openContinuous(false);
 }
 
-async function loadOpenItems(): Promise<OpenItems> {
+/** Each read numbered as it starts: two coalescers read the items, and an earlier read may answer last. */
+let openReads = 0;
+let openCommitted = 0;
+
+async function loadOpenItems(): Promise<{ seq: number; open: OpenItems }> {
+  const seq = ++openReads;
   const res = await fetch("/api/continuous/open");
   if (!res.ok) throw new Error(await failure(res, "Could not load the open items"));
-  return (await res.json()) as OpenItems;
+  return { seq, open: (await res.json()) as OpenItems };
 }
 
 // Thrown like refreshSessions', for the same reason.
@@ -233,12 +239,16 @@ const refreshOpenItems = coalesce(async () => {
   renderDrawer();
 });
 
-/** The panel's rows, the chat's tags and its earlier options read the same items. */
-function commitOpenItems(open: OpenItems): void {
-  openItems = open;
-  setOpenTopics(open.items);
+/** The panel's rows, the chat's tags and its earlier options read the same items; a read older than the one on hand is dropped,
+ *  the chat repainted all the same for the chain a first read just named. */
+function commitOpenItems({ seq, open }: { seq: number; open: OpenItems }): void {
+  if (seq > openCommitted) [openCommitted, openItems] = [seq, open];
+  paintTopics();
   refreshSuggestions();
 }
+
+/** The chat's tags read only the chain on screen: the same key may be open in another chain. */
+const paintTopics = (): void => setOpenTopics(openItems?.items.filter((i) => i.chain?.id === chainId) ?? []);
 
 let navigation = 0;
 let snapshotReady = false;
@@ -899,6 +909,8 @@ document.addEventListener("visibilitychange", () => {
   // page back with no `focus` event, and with no other app beside it.
   windowFocused = document.visibilityState === "visible" && (windowFocused || isIOS());
   maybeAckRead();
+  // A hidden tab may have missed `open-items-changed` and the rest of the stream.
+  if (document.visibilityState === "visible") void refreshSessions();
 });
 window.addEventListener("focus", () => { windowFocused = true; maybeAckRead(); });
 window.addEventListener("blur", () => { windowFocused = false; });

@@ -400,6 +400,18 @@ describe("acking an unread session", () => {
     expect(acks()).toBe(0);
   });
 
+  // A hidden tab may have missed `open-items-changed`.
+  it("re-reads the open items coming back visible", async () => {
+    page.visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settled();
+    fetcher.mockClear();
+    page.visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settled();
+    expect(fetcher.mock.calls.map(([url]) => url)).toContain("/api/continuous/open");
+  });
+
   it("acks on iOS coming back visible, which sends no focus event", async () => {
     h.isIOS.mockReturnValue(true);
     hideAndReturn();
@@ -458,6 +470,27 @@ it("re-reads the open items when a turn end wrote a marker", async () => {
   expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/continuous/open"]);
   expect(h.drawer.open()).toEqual(open);
   expect(vi.mocked(drawer.renderDrawer)).toHaveBeenCalled();
+});
+
+// The list's read and the marker's read race: the one started later wins whichever answers last.
+it("drops an open-items read that answers after a later one", async () => {
+  const workspace = Stream.all.find((s) => s.url === "/api/events")!;
+  const fetcher = vi.mocked(fetch);
+  const answers = [deferred(), deferred()];
+  const reads = [...answers];
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => url === "/api/continuous/open" ? reads.shift()!.promise : base(url, init));
+  const items = (problem: string) => ({ items: [{ problem, stage: "s", runs: [], status: "running" }], unlisted: [] });
+
+  workspace.onmessage?.({ data: JSON.stringify({ type: "sessions-changed" }) });
+  workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+  await settled();
+  answers[1]!.resolve(Response.json(items("newer")));
+  await settled();
+  answers[0]!.resolve(Response.json(items("older")));
+  await settled();
+
+  expect(h.drawer.open()?.items.map((i) => i.problem)).toEqual(["newer"]);
 });
 
 // A lead's session is saved after its run-changed refetch, so its first state names an unlisted id.
@@ -1054,6 +1087,13 @@ describe("chains", () => {
     ({ id, name: id.toUpperCase(), createdAt: id === "c1" ? 1 : 2, unread: false, waiting: 0, head: { sessionId: head, state: "idle" }, ...over });
   const heads: Record<string, string> = { c1: "h1", c2: "h2" };
   let items: object[] = [];
+  // The same key open in both chains, waiting only in c1.
+  const chainOf = (id: string) => ({ id, name: id.toUpperCase(), archived: false });
+  const open = [
+    { problem: "auth", stage: "s", status: "waiting on you", runs: [{ runId: "r1" }], chain: chainOf("c1") },
+    { problem: "auth", stage: "s", status: "running", runs: [{ runId: "r2" }], chain: chainOf("c2") },
+    { problem: "deploy", stage: "s", status: "running", runs: [], chain: chainOf("c2") },
+  ];
   let stored: string | null = null;
   const reads = () => vi.mocked(fetch).mock.calls.map(([url]) => String(url));
 
@@ -1073,7 +1113,7 @@ describe("chains", () => {
         return Promise.resolve(Response.json({ chainId: id, chain: [{ sessionId: heads[id], startedAt: 1, reason: "first" }], rotateAt: 60_000 }));
       }
       if (url === "/api/chains") return Promise.resolve(Response.json({ mode: "chain", chains: [info("c2", "h2"), info("c1", "h1"), info("c0", "h0", { archivedAt: 5 })] }));
-      if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
+      if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: open, unlisted: [] }));
       if (url.startsWith("/api/continuous/items?")) return Promise.resolve(Response.json({ items }));
       if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);
       if (url === "/api/sessions/child") return Promise.resolve(Response.json({ id: "child", cwd: "/w", createdAt: 1, state: "idle", chain: "c2" }));
@@ -1141,6 +1181,24 @@ describe("chains", () => {
     await settled();
     expect(h.views.chainId()).toBe("c2");
     expect(h.header.currentId()).toBe("h2");
+  });
+
+  // Every chain's items arrive in one read; the chat's tags, earlier options and callbacks read the chain on screen's.
+  it("reads the topics of the chain on screen only, from the first read and after a switch", async () => {
+    const topics = await import("./topics.js");
+    const row = document.createElement("div");
+    row.dataset.kind = "assistant";
+    document.querySelector("#turns")!.append(row);
+    topics.tagRow(row, "auth", () => {});
+    topics.refreshTopicTags();
+    const waiting = () => row.querySelector(".topic-tag")!.hasAttribute("data-waiting");
+    // The first read started with no chain chosen and named c1.
+    expect(h.views.chainId()).toBe("c1");
+    expect([waiting(), topics.topicOpen("deploy"), topics.runTopic("r1"), topics.runTopic("r2")]).toEqual([true, false, "auth", undefined]);
+
+    h.views.openChain("c2", null);
+    await settled();
+    expect([waiting(), topics.topicOpen("deploy"), topics.runTopic("r1"), topics.runTopic("r2")]).toEqual([false, true, undefined, "auth"]);
   });
 
   // A pre-chain item address finds the one chain holding it, else the first.
