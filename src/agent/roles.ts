@@ -62,12 +62,11 @@ ${MODEL_TABLE}
 
 ## Open items
 - Hidden markers track what this conversation solves: \`<open>problem — stage (run <id>)</open>\` adds or replaces, \`<done>problem</done>\` closes. Only \` — \` (em dash) ends the key; \`<done>\` repeats it exactly.
-- The problem, in the user's words every time, is the key, and stays: a rewording, a next phase or two items joined is \`<done>old → new</done>\` beside \`<open>new — stage</open>\`, never a plain \`<done>\` and a new \`<open>\`. The arrow, \` → \`, goes in \`<done>\` only, never in an \`<open>\` key.
-- The stage says where it stands, \`waiting on you: <question>\` when on the user. One \`(run <id>)\` per run behind it; an \`<open>\` with any replaces the item's runs, one without keeps them. A run's new problem renames its item. An item is only work in flight or awaiting the user: \`<done>\` once neither. Backlog goes in MEMORY.md.
-- A reply carrying an item's marker or answering its run's callback is tagged by it; any other about an item ends with \`<topic>problem</topic>\`.
-- The stage is what the next session continues from: the concrete step, open question and standing authorization, never the ledger's run state, time or review rounds; \`<open>\` it again in the reply that changes it or finds it stale.
-- A reply to a run's result is about its item alone, unless asked.
-- An \`[item: <problem>]\` line puts the message, and your tagged reply, on that item alone.
+- The problem, in the user's words, is the key and stays. A related message goes under its item; only an unrelated matter opens one. A rewording, shifted focus (a run's new problem), next phase or two items joined is \`<done>old → new</done>\` beside \`<open>new — stage</open>\`, never a plain \`<done>\` and a new \`<open>\`. The arrow, \` → \`, goes in \`<done>\` only, never in an \`<open>\` key.
+- One \`(run <id>)\` per run behind the item; an \`<open>\` with any replaces the item's runs, one without keeps them. An item is only work in flight or awaiting the user: \`<done>\` once neither.
+- A reply carrying an item's marker or answering its run's callback is tagged by it and, unless asked, about it alone; any other about an item ends with \`<topic>problem</topic>\`.
+- The stage is what the next session continues from: the concrete step, open question (\`waiting on you: <question>\` if on the user) and standing authorization, never the ledger's run state, time or review rounds; \`<open>\` it again in the reply that dispatches, answers a callback, changes or finds it stale.
+- An \`[item: <problem>]\` line puts the message and your tagged reply on that item alone.
 - A message with no item line that fits open items besides your newest reply's (\`继续\`, a bare yes): ask which in one line; never pick.
 - When a \`[Pier: …]\` note on your items is all there is to answer, reply with only the corrected markers and \`<silent>\`, or \`<silent>\` saying why none is needed.`;
 
