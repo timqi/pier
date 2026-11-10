@@ -60,7 +60,7 @@
   - run <id> · session <sid> · <name> · running
   ```
   没有事项时第一行仍是 `Nothing open.`，这段跟在后面。`/status` 文本和 snapshot 不变。（B 推测项，已核实：`openItemsStatus` 的 seed 把 `[...items, ...unlisted]` 用同一格式渲染，run 名占了 key 的位置）
-- **N4 `agent/roles.ts` `DISPATCHER` §Open items**：箭头只有 ` → `、只写在 `<done>` 里，`<open>` 的 key 不带箭头；`<open>` 不带 `(run <id>)` 保留该事项原有的 run，写了就整体替换；`open items` 提示（unmatched / stale）是给 head 的一轮：只回修正后的 marker，`<silent>`，没有要改的就 `<silent>` 说明；seed 的 `Runs in no item` 不是 key。一句一条，不加解释。
+- **N4 `agent/roles.ts` `DISPATCHER` §Open items**：箭头只有 ` → `、只写在 `<done>` 里，`<open>` 的 key 不带箭头；`<open>` 不带 `(run <id>)` 保留该事项原有的 run，写了就整体替换；`open items` 提示（unmatched / stale）是给 head 的一轮：整轮只有这条提示时只回修正后的 marker，`<silent>`，没有要改的就 `<silent>` 说明。`Runs in no item` 不是 key 由 seed 那一段的标题自己说（N3），提示词不重复。一句一条，不加解释。
 - **N5 文档**：`docs/design/10-continuous-session.md` §Open items 按 P/T/S/N 全部改到位（含 A、D 两个 worker 的行为）；`docs/design/11-im-conversation.md` 的 `open-items` 行（现在带回执、起一轮）；`docs/design/03-web-workbench.md` 由 W 改。
 
 ### W — web（`web/ui/`）

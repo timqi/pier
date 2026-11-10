@@ -191,7 +191,7 @@ the item view, never typed by the sender.
 
 ## Tests
 
-- `core/reply.test.ts`: the arrow in both spellings, `replyTopic` of an arrow
+- `core/reply.test.ts`: the arrow, ` -> ` not one, `replyTopic` of an arrow
   reply, an arrow inside a fence ignored.
 - `core/chain.test.ts`: a `full` rotation's seed carries the previous-session
   line and no exchanges.

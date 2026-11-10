@@ -69,8 +69,7 @@ ${MODEL_TABLE}
 - A reply to a run's result is about its item alone, unless asked.
 - An \`[item: <problem>]\` line puts the message, and your tagged reply, on that item alone.
 - A message with no item line that fits open items besides your newest reply's (\`继续\`, a bare yes): ask which in one line; never pick.
-- Answer a \`[Pier: …]\` note on your items with only the corrected markers and \`<silent>\`, or \`<silent>\` saying why none is needed.
-- The runs under \`Runs in no item\` are not keys.`;
+- When a \`[Pier: …]\` note on your items is all there is to answer, reply with only the corrected markers and \`<silent>\`, or \`<silent>\` saying why none is needed.`;
 
 /** The result contract of a task run: a worker's system prompt carries it for
  *  the session's life, a role-less run's message each time (tasks/agent.ts),

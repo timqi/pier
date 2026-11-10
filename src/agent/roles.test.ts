@@ -39,8 +39,8 @@ describe("the dispatcher contract", () => {
     for (const line of ["`Design final: <path>`", "`Goal:`", "`review clean at <sha7>, waiting on you to merge`", "`needs your decision`", "`still findings`"]) {
       expect(DISPATCHER).toContain(line);
     }
-    // How tasks/store.ts reads an arrow and a run-less `<open>`, what a note on the items asks, and the seed's runs block (tasks/open-items.ts).
-    for (const rule of ["The arrow, ` → `, goes in `<done>` only, never in an `<open>` key.", "an `<open>` with any replaces the item's runs, one without keeps them", "with only the corrected markers and `<silent>`, or `<silent>` saying why none is needed", "`Runs in no item` are not keys"]) expect(DISPATCHER).toContain(rule);
+    // How tasks/store.ts reads an arrow and a run-less `<open>`, and what the turn a note on the items opens is for (tasks/service.ts).
+    for (const rule of ["The arrow, ` → `, goes in `<done>` only, never in an `<open>` key.", "an `<open>` with any replaces the item's runs, one without keeps them", "When a `[Pier: …]` note on your items is all there is to answer, reply with only the corrected markers and `<silent>`, or `<silent>` saying why none is needed."]) expect(DISPATCHER).toContain(rule);
     // A clean review may still frame a P2/P3 list by the marker tasks/callbacks.ts extracts.
     expect(DISPATCHER).toContain("`P2/P3 begin` list");
     // The dispatcher filters that list rather than relaying it whole.
@@ -151,7 +151,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_850],
+    ["DISPATCHER", DISPATCHER, 1_840],
     ["WORKER", WORKER, 360],
     ['lead("build")', lead("build"), 530],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
