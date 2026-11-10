@@ -3,7 +3,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
-import type { OpenItemMarker } from "../core/reply.js";
+import { arrowOf, type OpenItemMarker } from "../core/reply.js";
 import { TASK_RUN_STATES, type AgentRole, type LeadPhase, type ModelTier, type TaskRunState } from "../core/types.js";
 import { createdPhase, createdRole, type Goal, type ItemRecord, type ItemSummary, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
@@ -34,7 +34,7 @@ const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1
 const KEPT_PROBES = 50;
 
 /** The separators an `<open>` written without ` — ` puts after its key (`key。stage`, `key: stage`). */
-const KEY_END = /^\s*[。:：\-–—]/u;
+const KEY_END = /^(?:\s*[。:：]|\s+[-–]\s)/u;
 /** Does a `<done>` name this key: it exactly, or it and then one of those separators. */
 export const namesKey = (done: string, key: string): boolean => key === done || (key.startsWith(done) && KEY_END.test(key.slice(done.length)));
 
@@ -539,16 +539,33 @@ export class TaskStore {
   }
 
   /** Main's markers, in reply order, as one write into `chainId`'s items; answers the rows each marker
-   *  changed and the keys its `<done>`s closed. A `<done>` closes and nothing deletes. Every item a marker
+   *  changed — `null` for a `<done>` that named nothing, `0` for one already settled — and the keys its
+   *  `<done>`s closed. A `<done>` closes and nothing deletes. Every item a marker
    *  touches, the item `answered.topic` names (as `itemHistory` finds it) and every item holding one of
    *  `answered.runIds` record `sessionId`, the writing head's, once. Arrows go last, so
-   *  `<done>old → new</done>` finds `new` wherever in the reply it was opened. */
-  markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: number[]; closed: string[] } {
+   *  `<done>old → new</done>` finds `new` wherever in the reply it was opened. An `<open>old → new — …</open>`
+   *  of an open `old` is `<open>new — …</open>` and that arrow. */
+  markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: (number | null)[]; closed: string[] } {
     const closed: string[] = [];
     const touched = new Set<string>();
     const changed = this.transact(() => {
-      const changed = markers.map((m) => m.op === "open" ? this.openItem(chainId, m, now, touched) : m.to === undefined ? this.closeItem(chainId, m.problem, now, closed, touched) : 0);
-      markers.forEach((m, i) => { if (m.op === "done" && m.to !== undefined) changed[i] = this.closeItem(chainId, m.problem, now, closed, touched, m.to); });
+      const arrows: [number, { problem: string; to: string; whole?: string }][] = [];
+      const changed = markers.map((m, i): number | null => {
+        if (m.op === "done") {
+          if (m.to === undefined) return this.closeItem(chainId, m, now, closed, touched);
+          arrows.push([i, { ...m, to: m.to }]);
+          return null;
+        }
+        const keys = this.openItems(chainId).map((r) => r.problem);
+        const arrow = arrowOf(m.problem);
+        if (!arrow || keys.includes(m.problem) || !keys.includes(arrow.old) || arrow.to === arrow.old) return this.openItem(chainId, m, now, touched);
+        arrows.push([i, { problem: arrow.old, to: arrow.to }]);
+        return this.openItem(chainId, { ...m, problem: arrow.to }, now, touched);
+      });
+      for (const [i, m] of arrows) {
+        const n = this.closeItem(chainId, m, now, closed, touched);
+        changed[i] = markers[i]!.op === "open" ? changed[i]! + (n ?? 0) : n;
+      }
       const topic = answered.topic === undefined ? undefined : this.itemHistory(chainId, answered.topic)?.problem;
       if (topic !== undefined) touched.add(topic);
       for (const id of answered.runIds ?? []) {
@@ -565,16 +582,18 @@ export class TaskStore {
 
   /** The user's close of `key`, one of `chainId`'s open keys, as a `<done>` of it closes it. */
   closeOpenItem(chainId: string, key: string, now: number): void {
-    this.transact(() => this.closeItem(chainId, key, now, [], new Set()));
+    this.transact(() => this.closeItem(chainId, { problem: key }, now, [], new Set()));
   }
 
-  /** An upsert keeps its row's place and opening time; a closed key reopens as if new — its row inserted
-   *  again, so it takes the end of the rowid order, with its aliases and sessions, its age started again. */
+  /** An upsert keeps its row's place and opening time, and its runs when the `<open>` names none; a closed
+   *  key reopens as if new — its row inserted again, so it takes the end of the rowid order, with its aliases
+   *  and sessions, its age started again. */
   private openItem(chainId: string, m: { problem: string; stage: string; runIds: string[] }, now: number, touched: Set<string>): number {
     const { changed, absorbed } = this.claimRuns(chainId, m.problem, m.runIds, now);
     const prior = (this.sql("DELETE FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL RETURNING aliases, sessions").all(chainId, m.problem) as { aliases: string; sessions: string }[])[0];
     const upserted = Number(this.sql(`INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at, aliases, sessions, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(chain_id, problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
+      ON CONFLICT(chain_id, problem) DO UPDATE SET stage = excluded.stage, updated_at = excluded.updated_at,
+        run_ids = CASE WHEN json_array_length(excluded.run_ids) = 0 THEN run_ids ELSE excluded.run_ids END`)
       .run(chainId, m.problem, m.stage, JSON.stringify(m.runIds), now, prior?.aliases ?? "[]", prior?.sessions ?? "[]", now).changes);
     // A key an `<open>` writes is its own item: no row, its own included, holds it as an alias — a reopened
     // key or a renamed item's old one — so its later close keeps its history reachable.
@@ -586,20 +605,43 @@ export class TaskStore {
   }
 
   /** The exact key, else the one item of the chain `namesKey` finds — an `<open>` written without ` — `
-   *  keyed the whole line; two such items close neither. With `to`, only into another open item. */
-  private closeItem(chainId: string, problem: string, now: number, closed: string[], touched: Set<string>, to?: string): number {
+   *  keyed the whole line; two such items close neither. An arrow's `whole` that is an open key closes it,
+   *  else only into another open item. `0` when the `<done>` is already settled: its key closed and no open
+   *  item's old name, or its arrow's `old` closed and `to` holding it; `null` when it names nothing. */
+  private closeItem(chainId: string, m: { problem: string; to?: string; whole?: string }, now: number, closed: string[], touched: Set<string>): number | null {
     const keys = this.openItems(chainId).map((r) => r.problem);
-    const named = keys.includes(problem) ? [problem] : keys.filter((key) => namesKey(problem, key));
+    const close = (key: string): number => {
+      closed.push(key);
+      touched.add(key);
+      return Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, key).changes);
+    };
+    if (m.whole !== undefined && keys.includes(m.whole)) return close(m.whole);
+    const named = keys.includes(m.problem) ? [m.problem] : keys.filter((key) => namesKey(m.problem, key));
     const key = named.length === 1 ? named[0]! : undefined;
-    if (key === undefined || (to !== undefined && (to === key || !keys.includes(to)))) return 0;
-    closed.push(key);
-    touched.add(key);
-    const changed = Number(this.sql("UPDATE open_items SET closed_at = ?, updated_at = ? WHERE chain_id = ? AND problem = ?").run(now, now, chainId, key).changes);
-    if (to !== undefined) {
-      this.absorb(chainId, to, key);
-      touched.add(to);
+    if (m.to === undefined) {
+      if (key !== undefined) return close(key);
+      const rows = this.sql("SELECT closed_at IS NULL AS open FROM open_items WHERE chain_id = ? AND (problem = ? OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ?))")
+        .all(chainId, m.problem, m.problem) as { open: number }[];
+      return rows.length > 0 && !rows.some((r) => r.open) ? 0 : null;
     }
-    return changed;
+    if (!keys.includes(m.to) || key === m.to) return null;
+    if (key !== undefined) {
+      touched.add(m.to);
+      const changed = close(key);
+      this.absorb(chainId, m.to, key);
+      // A rename's `<open>` names no run, to keep its item's: the old key's are that item's.
+      this.sql("UPDATE open_items SET run_ids = (SELECT run_ids FROM open_items WHERE chain_id = ? AND problem = ?) WHERE chain_id = ? AND problem = ? AND json_array_length(run_ids) = 0")
+        .run(chainId, key, chainId, m.to);
+      return changed;
+    }
+    if (this.itemHistory(chainId, m.to)!.aliases.includes(m.problem)) {
+      touched.add(m.to);
+      return 0;
+    }
+    if (!this.sql("SELECT 1 FROM open_items WHERE chain_id = ? AND problem = ? AND closed_at IS NOT NULL").get(chainId, m.problem)) return null;
+    touched.add(m.to);
+    this.absorb(chainId, m.to, m.problem);
+    return 0;
   }
 
   /** `into` takes `from`'s key, aliases and sessions, so its view reads `from`'s rows too, and the earlier
