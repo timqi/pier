@@ -309,7 +309,7 @@ function fillRail(): void {
 
 const fillPanel = (): void => { if (list) fill(list, [...(closeError ? [closeError] : []), ...(found ?? rows)]); };
 
-/** Dot, title, status mark and phrase of the shown row; below md the status glyph and the row count only (index.html). */
+/** Dot, title, status mark and phrase of the shown row; below md and docked the status glyph and the row count only (index.html, style.css). */
 function paintLead(): void {
   if (ordered[0]?.key !== topKey) shownKey = topKey = ordered[0]?.key ?? null;
   const at = Math.max(0, ordered.findIndex((p) => p.key === shownKey));

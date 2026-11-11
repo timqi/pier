@@ -433,6 +433,13 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 }
 /* Below md the bar's lead is the status glyph and the count (index.html). */
 @media (width < 48rem) { #status-item-state > .status-label { display: none; } }
+/* Docked, the sidebar's Items section already names the rows: the lead is the phone's glyph and count. */
+@media (width >= 64rem) {
+  main:has(#chain-rail[data-on]) :is(#status-next, #status-item-dot, #status-item-title, #status-item-stage, #status-item-state > .status-label) { display: none; }
+  main:has(#chain-rail[data-on]) #status-item-count { display: inline; }
+}
+/* A hairline between the title and the lead: the lead is the panel's row, not this view's state. */
+#status-lead:has(> #status-item:not(.hidden))::before { content: ""; flex: none; height: 1rem; margin-inline: 0.25rem; border-inline-start: 1px solid var(--color-neutral-300); }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
