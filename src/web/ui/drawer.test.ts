@@ -532,6 +532,40 @@ it("times each deferred Close on its own and sends the waiting ones when the pag
   vi.useRealTimers();
 });
 
+// The stream's re-read lands while a Close waits: the waiting row is neither a live row again nor gone with its Undo.
+it("keeps a waiting Close's Undo through a re-read of the items, and sends it once though the item left another way", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => { asked.push(url.split("/")[5]!); return { ok: true, status: 200, json: async () => ({}) }; }));
+  const of = (problem: string, status: "running" | "waiting on you" = "running") => ({ problem, stage: "", status, runs: [], chain: c });
+  open = { items: [of("auth"), of("deploy")], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  item("item:a/auth").querySelector(".item-close")!.onclick?.();
+
+  // Another item arrives and the waiting one changes state: its row is still the Undo, on both surfaces, uncounted.
+  open = { items: [of("auth", "waiting on you"), of("deploy"), of("billing")], unlisted: [] };
+  drawer.renderDrawer();
+  expect(labels()).toEqual(["deploy", "billing"]);
+  expect(item("item:a/auth").textContent).toBe("Closed \u2014Undo");
+  expect(rail().querySelectorAll(".item-undo")).toHaveLength(1);
+  expect(shown("#rail-items-head")).toBe("Items \u00b7 2");
+  expect(asked).toEqual([]);
+
+  // Closed elsewhere meanwhile: the Undo leaves with the item, and the timer's Close is the one request.
+  open = { items: [of("deploy"), of("billing")], unlisted: [] };
+  drawer.renderDrawer();
+  expect(panel().querySelector(".item-undo")).toBeNull();
+  expect(rail().querySelector(".item-undo")).toBeNull();
+  lapse();
+  await vi.waitFor(() => expect(asked).toEqual(["auth"]));
+  expect(labels()).toEqual(["deploy", "billing"]);
+  lapse();
+  expect(asked).toEqual(["auth"]);
+  vi.useRealTimers();
+});
+
 // The sidebar's Items section is the panel's list drawn again (§侧边栏): the same rows in the
 // same order, each surface its own nodes, one Close for both, a refusal said where it was asked.
 it("fills the rail's Items section with the panel's rows, closes on both surfaces from either, and refuses on the asking one", async () => {
