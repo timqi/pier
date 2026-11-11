@@ -553,16 +553,15 @@ it("keeps a waiting Close's Undo through a re-read of the items, and sends it on
   expect(shown("#rail-items-head")).toBe("Items \u00b7 2");
   expect(asked).toEqual([]);
 
-  // Closed elsewhere meanwhile: the Undo leaves with the item, and the timer's Close is the one request.
+  // Closed elsewhere meanwhile: the Undo leaves with the item and its timer, so no Close is sent to be refused.
   open = { items: [of("deploy"), of("billing")], unlisted: [] };
   drawer.renderDrawer();
   expect(panel().querySelector(".item-undo")).toBeNull();
   expect(rail().querySelector(".item-undo")).toBeNull();
   lapse();
-  await vi.waitFor(() => expect(asked).toEqual(["auth"]));
+  await Promise.resolve();
+  expect(asked).toEqual([]);
   expect(labels()).toEqual(["deploy", "billing"]);
-  lapse();
-  expect(asked).toEqual(["auth"]);
   vi.useRealTimers();
 });
 

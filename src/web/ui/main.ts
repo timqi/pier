@@ -194,8 +194,9 @@ async function chainHolding(problem: string): Promise<string | null> {
 }
 
 /** Where the reader left each chain's conversation, in memory: the row at the pane's top, how far
- *  above it that row began, and the newest row then. None for a reader at the tail, who returns pinned. */
-type Place = { anchor: string; offset: number; last: string };
+ *  above it that row began, the newest row then, and how many earlier sessions were paged in above —
+ *  read again on return, the row may be theirs. None for a reader at the tail, who returns pinned. */
+type Place = { anchor: string; offset: number; last: string; pages: number };
 const leftAt = new Map<string, Place>();
 /** The switched-to chain's saved place, taken by the next draw that paints. */
 let returning: Place | null = null;
@@ -208,7 +209,7 @@ function leaveChain(id: string): void {
   if (!continuousOpen() || paneItem || !snapshotReady || !document.querySelector("#to-bottom")?.hasAttribute("data-show")) return;
   const rows = stampedRows();
   const top = rows.find((r) => r.offsetTop - turnsPane.offsetTop + r.offsetHeight > turnsPane.scrollTop);
-  if (top) leftAt.set(id, { anchor: rowKey(top), offset: top.offsetTop - turnsPane.offsetTop - turnsPane.scrollTop, last: rowKey(rows.at(-1)) });
+  if (top) leftAt.set(id, { anchor: rowKey(top), offset: top.offsetTop - turnsPane.offsetTop - turnsPane.scrollTop, last: rowKey(rows.at(-1)), pages: earlier.length });
 }
 
 /** Back at the row the reader left; a message that landed below it since dots ↓. A row gone keeps the tail. */
@@ -775,8 +776,9 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   // A near-empty head opens with the sessions before it, read before the one paint; `loading` holds off a scroll's page meanwhile.
-  const before = chain.slice(1, 1 + AUTO_PAGES);
-  if (!keep && !view && got.ok && !("readonly" in got.value) && continuousOpen() && !earlier.length && before.length && shortHead(got.value.turns)) {
+  const left = continuousOpen() ? returning?.pages ?? 0 : 0;
+  const before = chain.slice(1, 1 + (left || AUTO_PAGES));
+  if (!keep && !view && got.ok && !("readonly" in got.value) && continuousOpen() && !earlier.length && before.length && (left || shortHead(got.value.turns))) {
     const read = await readEarlier(before);
     if (currentId !== id || generation !== loadSeq) return;
     earlier = read;

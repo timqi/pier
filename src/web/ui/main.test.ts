@@ -1213,6 +1213,8 @@ describe("chains", () => {
   const info = (id: string, head: string, over: object = {}) =>
     ({ id, name: id.toUpperCase(), createdAt: id === "c1" ? 1 : 2, unread: false, waiting: 0, head: { sessionId: head, state: "idle" }, ...over });
   const heads: Record<string, string> = { c1: "h1", c2: "h2" };
+  /** A chain's sessions before its head, newest first. */
+  let before: Record<string, string[]> = {};
   let items: object[] = [];
   // The same key open in both chains, waiting only in c1.
   const chainOf = (id: string) => ({ id, name: id.toUpperCase(), archived: false });
@@ -1229,6 +1231,7 @@ describe("chains", () => {
     Stream.all = [];
     stored = null;
     items = [];
+    before = {};
     h.itemTurns.mockImplementation(async (url) =>
       Response.json({ chain: url.split("/")[4], problem: "auth", aliases: [], sessions: [], epoch: "ep", lastSeq: 1 }));
     Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
@@ -1237,7 +1240,8 @@ describe("chains", () => {
       if (named?.[1] === "gone") return Promise.resolve(Response.json({ error: "chain: no chain gone" }, { status: 404 }));
       if (named) {
         const id = named[1] ?? "c1";
-        return Promise.resolve(Response.json({ chainId: id, chain: [{ sessionId: heads[id], startedAt: 1, reason: "first" }], rotateAt: 60_000 }));
+        const members = [heads[id], ...(before[id] ?? [])].map((sessionId) => ({ sessionId, startedAt: 1, reason: "first" }));
+        return Promise.resolve(Response.json({ chainId: id, chain: members, rotateAt: 60_000 }));
       }
       if (url === "/api/chains") return Promise.resolve(Response.json({ chains: [info("c2", "h2"), info("c1", "h1"), info("c0", "h0", { archivedAt: 5 })] }));
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: open, unlisted: [] }));
@@ -1388,6 +1392,37 @@ describe("chains", () => {
       h.views.openChain("c1", null);
       await settled();
       expect(h.keepScroll).toHaveBeenCalledOnce();
+    } finally {
+      toBottom.removeAttribute("data-show");
+      Object.assign(h.pane, { scrollTop: 0, scrollHeight: 0, querySelectorAll: () => [] });
+    }
+  });
+
+  // The row left may belong to a session paged in above the head: the return reads as many again before its one paint.
+  it("returns to a chain with the earlier sessions the reader had paged in", async () => {
+    before = { c2: ["e1", "e2", "e3"] };
+    const toBottom = document.querySelector("#to-bottom")!;
+    const row = document.createElement("div");
+    Object.assign(row.dataset, { kind: "user", at: "1" });
+    for (const [key, value] of Object.entries({ offsetTop: 0, offsetHeight: 100 })) Object.defineProperty(row, key, { value });
+    Object.assign(h.pane, { offsetTop: 0, scrollTop: 50, scrollHeight: 1000, querySelectorAll: () => [row] });
+    try {
+      h.views.openChain("c2", null);
+      await settled();
+      // The short head opened with two of them; the pager brings the third.
+      (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+      await settled();
+      toBottom.setAttribute("data-show", "");
+      h.views.openChain("c1", null);
+      await settled();
+      toBottom.removeAttribute("data-show");
+      const from = reads().length;
+      h.keepScroll.mockClear();
+      h.views.openChain("c2", null);
+      await settled();
+      expect(reads().slice(from).filter((url) => url.endsWith("/history")).sort())
+        .toEqual(["e1", "e2", "e3", "h2"].map((id) => `/api/sessions/${id}/history`));
+      expect(h.keepScroll).toHaveBeenCalledExactlyOnceWith(950, false);
     } finally {
       toBottom.removeAttribute("data-show");
       Object.assign(h.pane, { scrollTop: 0, scrollHeight: 0, querySelectorAll: () => [] });

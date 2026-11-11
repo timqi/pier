@@ -216,7 +216,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   force-scroll.
 - A switch to another chain and back, in memory per chain (`main.ts`
   `leaveChain`): a reader who left away from the tail returns to the row they
-  left, ↓ dotted when a message landed since; one who left at the tail, or
+  left, the earlier sessions they had paged in read again with the head, ↓ dotted when a message landed since; one who left at the tail, or
   whose row is gone, returns pinned to it, following.
 - Two floating buttons stack above the dock's right end: ↓ (`Scroll to the end`) shows
   once follow is released away from the tail, wears a dot when a message
