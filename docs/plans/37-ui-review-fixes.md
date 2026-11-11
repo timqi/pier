@@ -110,7 +110,7 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 修了：页面离开时等待中的 Close 经 service worker 发出 `634cd6c`；等待期间事项重读的回归测试 `5a3cb0d`；06/03 关于手机 sheet 头的表述 `7673166`。
 
 review 留下、未修（P2/P3）：
-- `drawer.ts` `sendClose`：Undo 的 5 秒内事项被别处关掉时，计时器仍发 Close，服务器回 404，用户看到一条红色拒绝。修法：`listed()` 里事项已离开时清掉计时器和等待项。
-- `main.ts` `leaveChain`：翻到 chain 更早成员后切走再回来落在末尾（不丢内容），03 未写明。
 - `visibilitychange → hidden` 会立即提交等待中的 Close：手机上 5 秒内切应用就没有 Undo 了，03 未写明这是取舍。
 - `menu.ts:146` 无 title 时默认 `closeLabel` 为 "Close undefined"（不会渲染）；`explorer.ts:175` `/api/chains` 读失败被缓存到 Files 重开。
+
+review 之后修了（`2b808d0`，只跑了 check/lint/test，未再 review、未在浏览器实测）：Undo 期间事项被别处关掉时丢弃等待中的 Close；切回 chain 时把离开前翻出的更早成员一起读回，恢复到原行。
