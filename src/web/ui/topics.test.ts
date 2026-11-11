@@ -79,6 +79,22 @@ it("names only the problem, dotted while its item waits on the user and they hav
   expect(dotted()).toEqual([false, false]);
 });
 
+// The item view names its item: a tag of one of its keys is marked to keep only the dot (style.css); another topic's is unmarked.
+it("marks the item view's own tags, by problem or alias, until the view is left", () => {
+  const own = (row: HTMLElement) => fake(row).querySelector(".topic-tag")!.hasAttribute("data-own");
+  topics.setViewTopics(new Set(["auth", "login"]));
+  const [b, a, c] = [add("user"), add("assistant"), add("assistant")];
+  topics.tagRow(a, "auth", vi.fn());
+  topics.tagRow(b, "login", vi.fn());
+  topics.tagRow(c, "deploy", vi.fn());
+  topics.setOpenTopics([{ problem: "auth", status: "waiting on you", runs: [] }]);
+  expect([own(a), own(b), own(c)]).toEqual([true, true, false]);
+  expect(fake(a).querySelector(".topic-tag")!.hasAttribute("data-waiting")).toBe(true);
+  topics.setViewTopics(new Set());
+  topics.refreshTopicTags();
+  expect([own(a), own(b), own(c)]).toEqual([false, false, false]);
+});
+
 it("drops the dot once the user answers the topic's newest reply, and a later reply of it asks again", () => {
   const dotted = () => fake(turns()).querySelectorAll(".topic-tag").map((t) => t.hasAttribute("data-waiting"));
   const reply = (topic?: string) => {

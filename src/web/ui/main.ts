@@ -60,7 +60,7 @@ import { initVersion } from "./version.js";
 import { initDrawer, renderDrawer, type SessionInfo } from "./drawer.js";
 import { itemMissing, itemTurnsUrl, renderItem, type ItemTurns } from "./item-view.js";
 import { refreshSuggestions } from "./suggestions.js";
-import { setOpenTopics } from "./topics.js";
+import { setOpenTopics, setViewTopics } from "./topics.js";
 import {
   activityThinking,
   activityToolEnd,
@@ -712,6 +712,7 @@ function resetPane(): void {
   clearOptimistic();
   lastSeq = 0;
   itemFilter = null;
+  setViewTopics(new Set());
 }
 
 /** The latest load while one runs: its superseded predecessors return early. */

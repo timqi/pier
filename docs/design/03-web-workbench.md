@@ -376,6 +376,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
     under it until it ends untagged; a divider shows; a clock follows the
     row it stamps; every other row is hidden (`data-item-hidden`), never
     removed from the pane's transcript. A head rotation re-reads the view.
+    A tag of the view's own item (its problem or an alias) is only its
+    waiting dot, gone when not waiting; another item's tag is as in the pane.
   - A 404 reads the server's `No item "<problem>"` with a Back to the
     conversation button; any other failure reads its error the same way.
   - Bar: the item's dot (`topicColour`) and problem as the title, `×`

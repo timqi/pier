@@ -6,7 +6,7 @@ import type { BackgroundRun, SessionState } from "../../core/types.js";
 import { appendTurn, renderSnapshot, turnsPane } from "./chat.js";
 import { h } from "./dom.js";
 import { button } from "./form.js";
-import { runTopic } from "./topics.js";
+import { runTopic, setViewTopics } from "./topics.js";
 
 /** GET /api/continuous/items/:chain/:problem/turns — the item's sessions in chain order, the head's up to `lastSeq`. */
 export interface ItemTurns {
@@ -27,6 +27,7 @@ export const itemTurnsUrl = (problem: string, chain: string): string =>
  *  snapshot's length: a streaming head's turn in flight is its last, maybe another item's. */
 export function renderItem(view: ItemTurns, head: { id: string; state: SessionState; turns: number }, runs: BackgroundRun[]): () => void {
   const keys = new Set([view.problem, ...view.aliases]);
+  setViewTopics(keys);
   const held = runs.filter((r) => keys.has(runTopic(r.runId) ?? ""));
   for (const s of view.sessions) {
     const own = s.sessionId === head.id && view.closedAt === undefined;
