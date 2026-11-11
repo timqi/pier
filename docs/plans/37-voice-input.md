@@ -1,6 +1,6 @@
 # Web 工作台实时语音输入
 
-状态：设计定稿，构建中（branch `voice-input`）。不碰 `native/`、`core/`、`agent/`。
+状态：已实现（branch `voice-input`）；真实 DashScope、Safari/iOS、Tauri 壳未实测。不碰 `native/`、`core/`、`agent/`。
 
 落地时要更新的 owner 文档：03（行为与 wire）、06（麦克风按钮与录音态）、
 `architecture.md`（`web/` 新文件的一句话）、CHANGELOG、`AGENTS.md` 的 `web/` 预算行。
