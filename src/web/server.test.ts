@@ -287,7 +287,7 @@ function setup(
     return { release };
   };
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, updates, updater, secrets, onUnlocked,
+    factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, host: "g1", updates, updater, secrets, onUnlocked,
     continuous,
     subscribed: () => subscription.enabled,
     // Assembled like main.ts does: data only, never a subprocess — spawning
@@ -1298,6 +1298,7 @@ describe("workbench server", () => {
       packages: fakePackages(),
       providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
+      host: "g1",
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
       continuous: idleChain(factory, router, hub),
@@ -2467,7 +2468,7 @@ describe("the continuous conversation's routes", () => {
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
-      providers: fakeProviders(), settings, updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
+      providers: fakeProviders(), settings, host: "g1", updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(), continuous: chain, ...(open ? { openItems: () => open } : {}), ...record,
     });
     const workspace: string[] = [];

@@ -365,6 +365,7 @@ registerConfigSyncRoutes(app, {
 registerTaskRoutes(app, tasks);
 registerChannelRoutes(app, channelStore, { reload: startChannels }, conversations, () => piConfig.readDefaults());
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
+const machine = machineName().split(".")[0] ?? "";
 registerPushRoutes(app, {
   store: new PushStore(db, secrets),
   hub,
@@ -376,7 +377,7 @@ registerPushRoutes(app, {
     const chainId = chain.chainOf(id)?.chainId;
     return chainId === undefined ? undefined : chains.get(chainId)?.name;
   },
-  host: machineName().split(".")[0] ?? "",
+  host: machine,
   publicUrl: () => settings.get().publicUrl,
 });
 app.route("/", createServer({
@@ -388,6 +389,7 @@ app.route("/", createServer({
   packages,
   providers: factory,
   settings,
+  host: machine,
   subscribed: () => configSync.status().enabled,
   // Assembled here: the catalog spawns ubix, which web/ may not.
   catalog: async () => {

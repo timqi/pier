@@ -1,7 +1,6 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
-import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
@@ -138,6 +137,8 @@ interface WebDeps {
   packages: PackageStore;
   providers: ProviderManager;
   settings: SettingsStore;
+  /** The machine's short hostname: the tab title and the sidebar's head when unnamed. */
+  host: string;
   /** Passed straight to the instance routes, which document them. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
   names?: readonly string[];
@@ -247,6 +248,7 @@ export function createServer(
     invokedBy,
     channelOf,
     continuous,
+    host,
   }: WebDeps,
 ): Hono {
   const app = new Hono();
@@ -920,7 +922,6 @@ export function createServer(
   // The tab says which instance this is: mistaking staging for production is
   // the mistake worth a few lines. Behind the auth guard, so a stranger at
   // /login learns neither fact.
-  const host = hostname().split(".")[0] ?? "";
   const prefix = tabPrefix(process.env.PIER_TITLE, host);
   let shell: string | null = null;
   const serveShell = async (c: Context, next: Next): Promise<Response | void> => {

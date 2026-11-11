@@ -135,7 +135,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - The payload is `{headline, title, body, url, tag}`: `headline` is `<host> · <chain>`
   (the short hostname alone outside a chain), `title` the reply's item (`replyTopic`),
   else its chain's name, else the session's label. `sw.js` shows `headline` as the
-  notification's title and `title` as the body's first line.
+  notification's title and `title` as the body's first line, unless the headline
+  already ends on it (a reply about no item).
 - Only the browser that spoke is notified: a message, an edit or a queue
   delivery records the sender's web session on the Pi session
   (`SessionStateStore.spokeFrom`, memory only), and the push goes to that
