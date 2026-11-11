@@ -200,10 +200,11 @@ updates this document.
   obsolete styles; no speculative abstractions, no new frameworks.
 - Native controls and semantics, readable contrast, visible focus, 44px touch
   targets.
-- A form on a coarse pointer: `.btn` is 44px high; a control that keeps a
-  smaller face — a switch, a segmented option, a help badge, a swatch, the
-  version link — carries `.touch-reach`, a hit area at least 2.75rem each way
-  that covers its face and passes under a neighbour's.
+- A form on a coarse pointer: `.btn` and a dropdown trigger
+  (`CONTROL_TRIGGER`) are 44px high; a control that keeps a smaller face — a
+  switch, a segmented option, a help badge, a swatch, the version link —
+  carries `.touch-reach`, a hit area at least 2.75rem each way that covers its
+  face and passes under a neighbour's.
 - Icons: Lucide, 24-unit viewBox, 2-unit rounded strokes, `currentColor`, via
   named imports through `ui/icons.ts` — never hand-drawn SVG or Unicode.
   Default 0.875rem; compact disclosures and status marks 0.75rem; icon size

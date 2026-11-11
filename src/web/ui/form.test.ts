@@ -74,3 +74,9 @@ it("positions a field's control under a help badge, so its face answers before t
   expect(helped.children[0]!.children.map((c) => c.localName)).toEqual(["span", "button"]);
   expect(helped.children[1]!.className.split(" ")).toContain("pointer-coarse:relative");
 });
+
+// Coarse pointer: `Browse…` is a `.btn`, 44px, and stretches its input; the trigger in the next column matches in px, not rem.
+it("floors a dropdown trigger at a button's 44px on a coarse pointer, an input left at its own height", () => {
+  expect(form.CONTROL_TRIGGER.split(" ")).toContain("pointer-coarse:min-h-[44px]");
+  expect(form.CONTROL).not.toContain("min-h");
+});
