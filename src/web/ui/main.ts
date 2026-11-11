@@ -193,8 +193,35 @@ async function chainHolding(problem: string): Promise<string | null> {
   return holding.size === 1 ? [...holding][0]! : firstChain() ?? chainId;
 }
 
+/** Where the reader left each chain's conversation, in memory: the row at the pane's top, how far
+ *  above it that row began, and the newest row then. None for a reader at the tail, who returns pinned. */
+type Place = { anchor: string; offset: number; last: string };
+const leftAt = new Map<string, Place>();
+/** The switched-to chain's saved place, taken by the next draw that paints. */
+let returning: Place | null = null;
+const stampedRows = (): HTMLElement[] => [...turnsPane.querySelectorAll<HTMLElement>(":scope > :is([data-kind='user'], [data-kind='assistant'])[data-at]")];
+const rowKey = (row: HTMLElement | undefined): string => `${row?.dataset.kind ?? ""}:${row?.dataset.at ?? ""}`;
+
+function leaveChain(id: string): void {
+  leftAt.delete(id);
+  // ↓ shows exactly when the reader is away from the tail with follow released (chat.ts paintToBottom).
+  if (!continuousOpen() || paneItem || !snapshotReady || !document.querySelector("#to-bottom")?.hasAttribute("data-show")) return;
+  const rows = stampedRows();
+  const top = rows.find((r) => r.offsetTop - turnsPane.offsetTop + r.offsetHeight > turnsPane.scrollTop);
+  if (top) leftAt.set(id, { anchor: rowKey(top), offset: top.offsetTop - turnsPane.offsetTop - turnsPane.scrollTop, last: rowKey(rows.at(-1)) });
+}
+
+/** Back at the row the reader left; a message that landed below it since dots ↓. A row gone keeps the tail. */
+function returnTo(left: Place): void {
+  const rows = stampedRows();
+  const row = rows.find((r) => rowKey(r) === left.anchor);
+  if (row) keepScroll(turnsPane.scrollHeight - (row.offsetTop - turnsPane.offsetTop - left.offset), rowKey(rows.at(-1)) !== left.last);
+}
+
 /** Make `id` the pane's chain and read its sessions; false when a later switch took over or the read failed, said in the pane. */
 async function switchChain(id: string): Promise<boolean> {
+  if (chainId !== null && chainId !== id) leaveChain(chainId);
+  returning = leftAt.get(id) ?? null;
   chainId = id;
   paintTopics();
   chain = [];
@@ -800,7 +827,9 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   else {
     if (continuousOpen()) renderEarlier();
     renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
+    if (returning && continuousOpen()) returnTo(returning);
   }
+  returning = null;
   if (keep) {
     keepScroll(fromBottom);
     if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });

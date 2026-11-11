@@ -212,6 +212,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   plain text.
 - Auto-scroll sticks to the bottom only when already near it; own sends
   force-scroll.
+- A switch to another chain and back, in memory per chain (`main.ts`
+  `leaveChain`): a reader who left away from the tail returns to the row they
+  left, ↓ dotted when a message landed since; one who left at the tail, or
+  whose row is gone, returns pinned to it, following.
 - Two floating buttons stack above the dock's right end: ↓ (`滚到底部`) shows
   once follow is released away from the tail, wears a dot when a message
   lands after that — a turn's reply once, however its row is redrawn — and its click scrolls smoothly to the end and re-arms follow;

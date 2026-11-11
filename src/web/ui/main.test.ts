@@ -1341,6 +1341,43 @@ describe("chains", () => {
     expect(h.views.chainId()).toBe("c1");
   });
 
+  // A switch away and back is back at the row the reader left, in memory; a reply landed meanwhile dots ↓,
+  // and a reader at the tail stays pinned there.
+  it("returns to a chain where the reader left it, or pinned at the tail", async () => {
+    const row = (kind: string, at: number, top: number): HTMLElement => {
+      const el = document.createElement("div");
+      Object.assign(el.dataset, { kind, at: String(at) });
+      for (const [key, value] of Object.entries({ offsetTop: top, offsetHeight: 100 })) Object.defineProperty(el, key, { value });
+      return el;
+    };
+    let rows = [row("user", 1, 0), row("assistant", 2, 100), row("user", 3, 200)];
+    Object.assign(h.pane, { offsetTop: 0, scrollTop: 150, scrollHeight: 1000, querySelectorAll: () => rows });
+    const toBottom = document.querySelector("#to-bottom")!;
+    try {
+      toBottom.setAttribute("data-show", "");
+      h.views.openChain("c2", null);
+      await settled();
+      expect(h.keepScroll).not.toHaveBeenCalled();
+      toBottom.removeAttribute("data-show"); // c2's reader is at its tail
+      rows = [row("user", 1, 0), row("assistant", 2, 100), row("user", 3, 200), row("assistant", 4, 300)];
+      h.pane.scrollHeight = 1200;
+      h.views.openChain("c1", null);
+      await settled();
+      // The reply at 2 began 50px above the pane's top.
+      expect(h.keepScroll).toHaveBeenCalledExactlyOnceWith(1050, true);
+      expect(h.keepScroll.mock.invocationCallOrder[0]).toBeGreaterThan(h.renderSnapshot.mock.invocationCallOrder.at(-1)!);
+
+      h.views.openChain("c2", null);
+      await settled();
+      h.views.openChain("c1", null);
+      await settled();
+      expect(h.keepScroll).toHaveBeenCalledOnce();
+    } finally {
+      toBottom.removeAttribute("data-show");
+      Object.assign(h.pane, { scrollTop: 0, scrollHeight: 0, querySelectorAll: () => [] });
+    }
+  });
+
   // The panel's rows of another chain navigate there first.
   it("opens another chain's item view from the status panel", async () => {
     h.drawer.itemView("auth", "c2");
