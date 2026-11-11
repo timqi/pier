@@ -41,8 +41,6 @@ interface Settings {
   customTools: CustomTool[];
   /** The workbench's accent, one of `ACCENTS`; `""` is the default ramp. */
   accent: string;
-  /** Off: Session mode, exactly one active chain and no list (core/chains.ts). */
-  chainMode: boolean;
 }
 
 /** The presets, each with the hex of its 600 step — what the manifest and the
@@ -167,15 +165,7 @@ export class SettingsStore {
         "a list of {name, toml}",
       ) ?? [],
       accent: accent ?? "",
-      chainMode: this.#flag("chainMode"),
     };
-  }
-
-  /** `"1"` or `"0"`; anything else is named and read as off (§5). */
-  #flag(key: string): boolean {
-    const raw = this.#value(key);
-    if (raw !== undefined && raw !== "0" && raw !== "1") log.warn(`settings.${key} is not 0 or 1 — reading it as off`);
-    return raw === "1";
   }
 
   /** A malformed row is named, not silently served as the empty value (§5). */
@@ -218,11 +208,6 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
-    return this.get();
-  }
-
-  setChainMode(on: boolean): Settings {
-    this.#set("chainMode", on ? "1" : "0");
     return this.get();
   }
 

@@ -142,7 +142,6 @@ const chain = new MainChain(db, {
   launcher: (runId) => taskStore.getRun(runId)?.invokedBySessionId ?? null,
   status: (now, chainId) => openItemsStatus(tasks.openItems(chainId), now, tasks.unmatchedDone(chainId)),
   close: (chainId, query) => tasks.closeItem(chainId, query, Date.now()),
-  mode: { get: () => settings.get().chainMode, set: async (on) => { settings.setChainMode(on); } },
   changed: () => hub.emitWorkspace({ type: "chains-changed" }),
   defaults: () => piConfig.readDefaults(),
 });
@@ -417,7 +416,7 @@ app.route("/", createServer({
   leads: () => taskStore.leads(),
   openItems: () => tasks.openItems(),
   items: (q, chainId) => taskStore.items(q, chainId),
-  itemHistory: (problem, chainId) => (chainId === undefined ? taskStore.itemHistoryByProblem(problem) : taskStore.itemHistory(chainId, problem)),
+  itemHistory: (problem, chainId) => taskStore.itemHistory(chainId, problem),
   closeItem: (chainId, problem) => tasks.closeItem(chainId, problem, Date.now(), true),
   invokedBy: (id) => taskStore.creatorOf(id)?.invokedBySessionId ?? undefined,
   itemSent: (item, sessionId) => {

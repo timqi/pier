@@ -98,8 +98,8 @@ const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
 const latest = () => Stream.all.at(-1)!;
 /** A read of the chain's sessions, named or not. */
 const chainUrl = (url: string) => /^\/api\/continuous(\?|$)/.test(url);
-/** `GET /api/chains`: the one chain, in session mode. */
-const chainList = () => Response.json({ mode: "session", chains: [{ id: "c1", name: "main", createdAt: 1, unread: false, waiting: 0 }] });
+/** `GET /api/chains`: the one chain. */
+const chainList = () => Response.json({ chains: [{ id: "c1", name: "main", createdAt: 1, unread: false, waiting: 0 }] });
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 beforeEach(async () => {
@@ -1112,7 +1112,7 @@ describe("chains", () => {
         const id = named[1] ?? "c1";
         return Promise.resolve(Response.json({ chainId: id, chain: [{ sessionId: heads[id], startedAt: 1, reason: "first" }], rotateAt: 60_000 }));
       }
-      if (url === "/api/chains") return Promise.resolve(Response.json({ mode: "chain", chains: [info("c2", "h2"), info("c1", "h1"), info("c0", "h0", { archivedAt: 5 })] }));
+      if (url === "/api/chains") return Promise.resolve(Response.json({ chains: [info("c2", "h2"), info("c1", "h1"), info("c0", "h0", { archivedAt: 5 })] }));
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: open, unlisted: [] }));
       if (url.startsWith("/api/continuous/items?")) return Promise.resolve(Response.json({ items }));
       if (url.startsWith("/api/continuous/items/")) return h.itemTurns(url);

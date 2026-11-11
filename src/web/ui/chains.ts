@@ -7,7 +7,7 @@ import { $, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { closeMenu, listStep, openMenu, openPanel, walkRows } from "./menu.js";
 import { chord, modalOpen } from "./shortcut.js";
-import type { ChainInfo, ChainList, ChainOpen } from "../types.js";
+import type { ChainInfo, ChainList } from "../types.js";
 
 /** Everything the list needs from the orchestrator (main.ts). */
 interface ChainsDeps {
@@ -162,7 +162,7 @@ function fill(root: HTMLElement): void {
   else root.replaceChildren(...parts);
 }
 
-/** Laid out and not fading: the rail is display:none below 64rem and off in session mode. */
+/** Laid out and not fading: the rail is display:none below 64rem and off before the list is read. */
 const shown = (root: HTMLElement | null): root is HTMLElement =>
   !!root?.isConnected && !root.closest("[inert]") && root.getClientRects().length > 0;
 const typing = (root: HTMLElement): boolean => root.contains(document.activeElement) && document.activeElement?.localName === "input";
@@ -180,10 +180,10 @@ function draw(force = false): void {
 }
 
 /** The list changed, or which chain is current did; the rail coming on or going off
- *  (chain mode, ⌘B) changes the bar title's shape, so it is told here, the one place that flips. */
+ *  (the list read, ⌘B) changes the bar title's shape, so it is told here, the one place that flips. */
 export function renderChains(): void {
   const was = sidebarDocked();
-  rail.toggleAttribute("data-on", deps.list()?.mode === "chain" && localStorage.getItem(RAIL) !== "off");
+  rail.toggleAttribute("data-on", deps.list() !== null && localStorage.getItem(RAIL) !== "off");
   draw();
   if (sidebarDocked() !== was) deps.docked();
 }
@@ -194,9 +194,9 @@ export const sidebarDocked = (): boolean => rail.hasAttribute("data-on") && wind
 
 /** ⌘B and the ⋯ menu's Sidebar: one key for "the sidebar" — the docked rail
  *  where it is laid out (its choice kept in `pier.rail`), the floated list below
- *  64rem. Nothing in session mode, which has no chains to list. */
+ *  64rem. Nothing before the list is read. */
 export function toggleSidebar(): void {
-  if (deps.list()?.mode !== "chain") return;
+  if (!deps.list()) return;
   if (!window.matchMedia(DOCKED).matches) return openChains();
   // Focus on the surface this takes away goes to the list's other way in: the title, or the rail's current row.
   const held = rail.contains(document.activeElement) || deps.anchor() === document.activeElement;
@@ -281,7 +281,7 @@ async function archive(c: ChainInfo, root: HTMLElement): Promise<void> {
   else draw(true);
 }
 
-/** Back into the active list, chain mode with it (the server turns it on). */
+/** Back into the active list. */
 export async function unarchive(id: string): Promise<string | null> {
   const res = await sendJson(`/api/chains/${id}`, { archived: false }, "PATCH");
   if (!res.ok) return failure(res, "Could not unarchive the chain");
@@ -300,27 +300,10 @@ function say(text: string, root: HTMLElement = rail): void {
   draw(true);
 }
 
-/** The ⋯ menu's switch. Off keeps the current chain and archives the rest, once they were seen. */
-export async function setChainMode(on: boolean): Promise<string | null> {
-  const keep = deps.current();
-  const body = { chain: on, ...(keep ? { keep } : {}) };
-  let res = await sendJson("/api/chains/mode", body, "PUT");
-  if (res.status === 409) {
-    const { error: why, chains } = (await res.json()) as { error: string; chains?: ChainOpen[] };
-    if (!chains) return why;
-    const lines = chains.map((c) => [c.name, c.open ? `${c.open} open` : "", c.waiting ? `${c.waiting} waiting on you` : ""].filter(Boolean).join(" · "));
-    if (!window.confirm(`Turn chain mode off? These chains will be archived:\n\n${lines.join("\n")}`)) return null;
-    res = await sendJson("/api/chains/mode", { ...body, force: true }, "PUT");
-  }
-  if (!res.ok) return failure(res, "Could not switch chain mode");
-  deps.refresh();
-  return null;
-}
-
 /** ⌘⇧[ / ⌘⇧]: the previous or next active chain in the list's order, wrapping. */
 function cycle(step: 1 | -1): void {
   const rows = active();
-  if (deps.list()?.mode !== "chain" || rows.length < 2) return;
+  if (rows.length < 2) return;
   const at = rows.findIndex((c) => c.id === deps.current());
   const next = rows[(at + step + rows.length) % rows.length];
   if (next) choose(next.id);

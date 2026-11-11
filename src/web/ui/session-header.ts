@@ -10,7 +10,7 @@ import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
-import { openChains, setChainMode, SIDEBAR_KEY, sidebarDocked, toggleSidebar } from "./chains.js";
+import { openChains, SIDEBAR_KEY, sidebarDocked, toggleSidebar } from "./chains.js";
 import type { ChainInfo } from "../types.js";
 import { openSystemPrompt } from "./system-prompt.js";
 import { chord, chordLabel, escapeKey, modalOpen } from "./shortcut.js";
@@ -37,10 +37,8 @@ interface HeaderDeps {
   openContinuous: () => void;
   /** The `‹`: to the chain whose run launched the session on screen, else the current one. */
   back: () => void;
-  /** The current chain's row in chain mode, whose name is the title; undefined in session mode. */
+  /** The current chain's row, whose name is the title; undefined before `GET /api/chains` answers. */
   chain: () => ChainInfo | undefined;
-  /** Chain mode is on (`GET /api/chains`). */
-  chainMode: () => boolean;
   /** The item view's problem, null off it. */
   item: () => string | null;
 }
@@ -148,7 +146,7 @@ export function renderHeader(): void {
   // own, opened from its run card — is named by its id.
   const chain = conversation ? deps.chain() : undefined;
   // The title is what the panel is *about*, so it is also the way in: the chain
-  // list in chain mode — unless the list is already on screen as the docked
+  // list — unless the list is already on screen as the docked
   // sidebar, when the title is a plain heading.
   const plain = !!chain && !item && sidebarDocked();
   const list = !!chain && !item && !plain;
@@ -480,22 +478,13 @@ function barMenu(anchor: HTMLElement): void {
       ...later,
     },
     {
-      label: "Chain mode",
-      separatorBefore: true,
-      hint: deps.chainMode() ? "On" : "Off",
-      onSelect: () => {
-        closeMenu();
-        void setChainMode(!deps.chainMode()).then((why) => { if (why) appendTurn("error", why); });
-      },
-    },
-    {
       label: "Sidebar",
-      hint: deps.chainMode() ? chordLabel(SIDEBAR_KEY) : "in chain mode",
+      separatorBefore: true,
+      hint: chordLabel(SIDEBAR_KEY),
       onSelect: () => {
         closeMenu();
         toggleSidebar();
       },
-      ...(deps.chainMode() ? {} : { disabled: true }),
     },
     {
       label: "Settings",

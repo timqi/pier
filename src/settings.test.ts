@@ -22,7 +22,6 @@ const EMPTY = {
   tools: [],
   customTools: [],
   accent: "",
-  chainMode: false,
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
@@ -119,16 +118,14 @@ describe("SettingsStore", () => {
 });
 
 describe("chain mode", () => {
-  it("is off until switched, and a value that is not a flag reads as off, named", () => {
-    const db = openDb(":memory:");
-    const store = new SettingsStore(db);
-    expect(store.get().chainMode).toBe(false);
-    expect(store.setChainMode(true).chainMode).toBe(true);
-    expect(store.setChainMode(false).chainMode).toBe(false);
-    db.prepare("UPDATE settings SET value = 'yes' WHERE key = 'chainMode'").run();
-    log.warn.mockClear();
-    expect(store.get().chainMode).toBe(false);
-    expect(log.warn).toHaveBeenCalledWith("settings.chainMode is not 0 or 1 — reading it as off");
+  it("is gone: the migration deletes the switch's row and nothing reads one", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec("INSERT INTO settings(key, value) VALUES ('chainMode', '1'); PRAGMA user_version = 42");
+    before.close();
+    const db = openDb(path);
+    expect(db.prepare("SELECT * FROM settings WHERE key = 'chainMode'").all()).toEqual([]);
+    expect(new SettingsStore(db).get()).not.toHaveProperty("chainMode");
     db.close();
   });
 });

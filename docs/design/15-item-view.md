@@ -111,8 +111,7 @@ holds it, else the first chain's.
   way back; an alias in it is replaced by the item's key, which the bar and
   the stamp then carry; with no head yet the conversation opens, its hash
   replacing the item's; a closed item's view is read-only history plus the composer.
-- **Rows**: `GET /api/continuous/items/:chain/:problem/turns` (the older
-  `/items/:problem/turns` resolves a problem one chain holds) →
+- **Rows**: `GET /api/continuous/items/:chain/:problem/turns` →
   `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns}]}`,
   the item's `sessions` in chain order, each session's transcript read off
   disk as the history route does and reduced to the item's rows by one rule
@@ -181,8 +180,7 @@ the item view, never typed by the sender.
   (`core/open-items.ts`, browser-safe); `withItem`/`splitItem`
   (`core/identity.ts`).
 - `TaskStore.openItems(chainId)` (open only), `TaskStore.items(q, chainId?)`,
-  `TaskStore.itemHistory(chainId, problem)`, `itemHistoryByProblem(problem)`
-  (unique only, the older route's), `markOpenItems` (closes, aliases, sessions).
+  `TaskStore.itemHistory(chainId, problem)`, `markOpenItems` (closes, aliases, sessions).
 - `WebDeps.items` and `WebDeps.itemHistory` (the store's two reads),
   `WebDeps.itemSent` (a stamped send's head recorded); the turns route reads
   each member's transcript as the history route does.

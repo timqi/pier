@@ -877,8 +877,7 @@ initHeader({
   rotateAt: () => rotateAt,
   openContinuous,
   back: () => void openChain((currentId && launchedFrom.get(currentId)) || chainId),
-  chain: () => (chainList?.mode === "chain" ? chainList.chains.find((c) => c.id === chainId) : undefined),
-  chainMode: () => chainList?.mode === "chain",
+  chain: () => chainList?.chains.find((c) => c.id === chainId),
   item: () => item,
 });
 initViews({

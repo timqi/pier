@@ -480,6 +480,10 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE open_items ADD COLUMN opened_at INTEGER;
   UPDATE open_items SET opened_at = (SELECT MIN(queued_at) FROM task_runs WHERE id IN (SELECT value FROM json_each(open_items.run_ids)));
   `,
+  // 43 — chains are always on: the Chain mode switch's row goes. Archived chains stay archived.
+  `
+  DELETE FROM settings WHERE key = 'chainMode';
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

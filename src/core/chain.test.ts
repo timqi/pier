@@ -69,10 +69,8 @@ function rig({
     // Per chain, the items `/chain` and `## Chains` count.
     items: {} as Record<string, OpenItemTarget["status"][]> };
   const chains = new Chains(db, (id) => status.items[id]?.length ?? 0);
-  const mode = { on: false, set: vi.fn(async (on: boolean) => { mode.on = on; }) };
   const deps: ConstructorParameters<typeof MainChain>[1] = {
     factory, router, home, chains,
-    mode: { get: () => mode.on, set: mode.set },
     changed: vi.fn(),
     ledger: (ids, since) => {
       ledger.push({ ids, since });
@@ -107,7 +105,7 @@ function rig({
     return s;
   };
   const say = (text: string, chainId = "main") => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" }, chainId);
-  return { chain, chains, mode, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, launcherAsked, existing, say, router, status, defaults, factory, restart };
+  return { chain, chains, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, launcherAsked, existing, say, router, status, defaults, factory, restart };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -872,15 +870,14 @@ describe("one chain per topic", () => {
     expect(await main).toMatchObject({ chainId: "main", rotated: "first" });
   });
 
-  it("seeds a head with its chain's name, memory and the other chains in chain mode, and only its own runs", async () => {
+  it("seeds a head with its chain's name, memory and the other active chains when there are two, and only its own runs", async () => {
     const r = rig({ runs: (ids) => ids.map((id) => ({ runId: `r-${id}`, name: "n", state: "failed" as const, targetSessionId: null, cwd: null, queuedAt: 1, finishedAt: 2 })) });
     await r.say("hi");
     const plain = r.sessions.get("m1")!.systemInputs[0]!.text;
     expect(plain).toMatch(/^\[Pier: a new session of chain "Main" — the first one\. Your chain's memory: chains\/main\/MEMORY\.md, notes chains\/main\/memory\/\./);
-    // Session mode: the one chain's items are `## Open`.
+    // A lone chain's items are `## Open`.
     expect(plain).not.toContain("## Chains");
 
-    r.mode.on = true;
     const design = r.chains.create("Design");
     mkdirSync(join(r.home, "chains", design.id), { recursive: true });
     writeFileSync(join(r.home, "chains", design.id, "MEMORY.md"), "the sidebar is a list");
@@ -950,20 +947,14 @@ describe("/chain", () => {
     expect(r.sessions.get("m1")!.prompts).toHaveLength(1);
   });
 
-  it("creates and switches on `/chain new`, turning chain mode on first", async () => {
+  it("creates and switches on `/chain new`", async () => {
     const r = rig();
-    // A refused name in Session mode leaves Session mode.
     await expect(r.say("/chain new")).rejects.toThrow("chain: name must be 1–40 characters");
-    expect(r.mode.on).toBe(false);
     expect(r.changed).not.toHaveBeenCalled();
-    r.mode.set.mockClear();
     const sent = await r.say("/chain new  Design ");
     expect(sent).toEqual({ chainId: expect.any(String), switched: expect.objectContaining({ name: "Design" }) });
     expect(r.chains.get(sent.chainId)?.name).toBe("Design");
-    expect(r.mode.set).toHaveBeenCalledWith(true);
     expect(r.chain.lastUserAt(sent.chainId)).toBe(r.clock.now);
-    await r.say("/chain new Other", sent.chainId);
-    expect(r.mode.set).toHaveBeenCalledTimes(1);
     await expect(r.say("/chain new design")).rejects.toThrow('chain: "design" exists');
     await expect(r.say("/chain new")).rejects.toThrow("chain: name must be 1–40 characters");
   });

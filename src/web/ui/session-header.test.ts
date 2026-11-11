@@ -25,7 +25,7 @@ vi.mock("./drawer.js", () => ({
   // Marked so the chip's title proves it uses the drawer's words, which
   // drawer.test.ts owns, rather than spelling its own second copy.
 }));
-const chains = vi.hoisted(() => ({ openChains: vi.fn(), toggleSidebar: vi.fn(), SIDEBAR_KEY: "b", sidebarDocked: vi.fn(() => false), setChainMode: vi.fn(async (_on: boolean): Promise<string | null> => null) }));
+const chains = vi.hoisted(() => ({ openChains: vi.fn(), toggleSidebar: vi.fn(), SIDEBAR_KEY: "b", sidebarDocked: vi.fn(() => false) }));
 vi.mock("./chains.js", () => chains);
 const systemPrompt = vi.hoisted(() => ({ openSystemPrompt: vi.fn() }));
 vi.mock("./system-prompt.js", () => systemPrompt);
@@ -36,7 +36,7 @@ const levels: ThinkingLevel[] = ["low", "high"];
 const openSettings = vi.fn();
 const openContinuous = vi.fn();
 const goBack = vi.fn();
-/** The current chain's row in chain mode; undefined in session mode. */
+/** The current chain's row; undefined before the list is read. */
 let chain: import("../types.js").ChainInfo | undefined;
 
 /** What the orchestrator's list says about the selected session. */
@@ -89,7 +89,6 @@ beforeEach(async () => {
     openContinuous,
     back: goBack,
     chain: () => chain,
-    chainMode: () => chain !== undefined,
     item: () => viewing,
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
@@ -150,8 +149,8 @@ it("titles the continuous conversation Pier, other sessions by their own title",
 const title = () => fake(document.querySelector("#chat-title"));
 const back = () => fake(document.querySelector("#bar-back"));
 
-// Chain mode names the chain and opens the list from the title; session mode keeps Pier and Session info.
-it("titles the conversation by its chain in chain mode, the title opening the chain list", async () => {
+// The title names the chain and opens the list; before the list is read it is Pier and opens Session info.
+it("titles the conversation by its chain, the title opening the chain list", async () => {
   conversation = true;
   current = session(0);
   chain = { id: "c1", name: "Design", createdAt: 1, unread: false, waiting: 0 };
@@ -202,31 +201,18 @@ it("titles the conversation by its chain in chain mode, the title opening the ch
   expect(openPanel).toHaveBeenCalled();
 });
 
-// The ⋯ switch shows its state and flips it; a refusal is said in the chat.
-it("switches chain mode from the ⋯ menu, its hint the current state", async () => {
-  const { appendTurn } = await import("./chat.js");
+// No Chain mode in ⋯: the sidebar's entry is always live, with ⌘B's label, whether the list is read or not.
+it("offers the sidebar in the ⋯ menu always, and no Chain mode", async () => {
   conversation = true;
   current = session(0);
   header.renderHeader();
-  const off = (await menuItems()).find((i) => i.label === "Chain mode")!;
-  expect(off.hint).toBe("Off");
-  off.onSelect();
-  expect(chains.setChainMode).toHaveBeenLastCalledWith(true);
-  chain = { id: "c1", name: "Design", createdAt: 1, unread: false, waiting: 0 };
-  chains.setChainMode.mockResolvedValueOnce("chain: no active chain c1");
-  const on = (await menuItems()).find((i) => i.label === "Chain mode")!;
-  expect(on.hint).toBe("On");
-  on.onSelect();
-  expect(chains.setChainMode).toHaveBeenLastCalledWith(false);
-  await Promise.resolve(); await Promise.resolve();
-  expect(appendTurn).toHaveBeenCalledWith("error", "chain: no active chain c1");
-  // The sidebar's entry follows: live with ⌘B's label in chain mode, named as chain mode's otherwise.
-  const sidebar = (await menuItems()).find((i) => i.label === "Sidebar")!;
-  expect(sidebar).toMatchObject({ hint: "⌘B" });
+  const items = await menuItems();
+  expect(items.find((i) => i.label === "Chain mode")).toBeUndefined();
+  const sidebar = items.find((i) => i.label === "Sidebar")!;
+  expect(sidebar).toMatchObject({ hint: "⌘B", separatorBefore: true });
+  expect(sidebar).not.toHaveProperty("disabled");
   sidebar.onSelect();
   expect(chains.toggleSidebar).toHaveBeenCalledOnce();
-  chain = undefined;
-  expect((await menuItems()).find((i) => i.label === "Sidebar")).toMatchObject({ hint: "in chain mode", disabled: true });
 });
 
 async function menuItems() {
@@ -240,11 +226,11 @@ it("offers the same ⋯ items on the conversation and on a child", async () => {
   current = session(0);
   header.renderHeader();
   const items = await menuItems();
-  const labels = ["Session info", "System prompt", "Browse files", "Model & reasoning…", "Chain mode", "Sidebar", "Settings"];
+  const labels = ["Session info", "System prompt", "Browse files", "Model & reasoning…", "Sidebar", "Settings"];
   expect(items.map((i) => i.label)).toEqual(labels);
   items[1]!.onSelect();
   expect(systemPrompt.openSystemPrompt).toHaveBeenCalledWith(current);
-  items[6]!.onSelect();
+  items[5]!.onSelect();
   expect(openSettings).toHaveBeenCalledOnce();
 
   conversation = false;

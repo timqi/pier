@@ -1,4 +1,4 @@
-// The chain list: its rows, inline create and rename, archive's confirm, the archived fold, the mode switch and the chords.
+// The chain list: its rows, inline create and rename, archive's confirm, the archived fold and the chords.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ChainInfo, ChainList } from "../types.js";
 import { fake, FakeElement, installPage } from "./dom.testkit.js";
@@ -28,7 +28,7 @@ vi.mock("./shortcut.js", () => ({ chord: (key: string, run: () => void) => chord
 
 const chain = (id: string, over: Partial<ChainInfo> = {}): ChainInfo =>
   ({ id, name: id, createdAt: 1, unread: false, waiting: 0, ...over });
-let list: ChainList;
+let list: ChainList | null;
 let current: string | null;
 const go = vi.fn();
 const refresh = vi.fn();
@@ -47,7 +47,7 @@ beforeEach(async () => {
   vi.stubGlobal("window", { confirm, matchMedia: () => ({ matches: docked, addEventListener: vi.fn() }) });
   stored.clear();
   vi.stubGlobal("localStorage", { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => stored.set(k, v), removeItem: (k: string) => stored.delete(k) });
-  list = { mode: "chain", chains: [chain("main", { waiting: 2 }), chain("ops", { createdAt: 2, head: { sessionId: "h", state: "streaming" } }),
+  list = { chains: [chain("main", { waiting: 2 }), chain("ops", { createdAt: 2, head: { sessionId: "h", state: "streaming" } }),
     chain("old", { archivedAt: 3 })] };
   current = "main";
   chains = await import("./chains.js");
@@ -62,8 +62,8 @@ const button = (root: FakeElement, text: string) => root.querySelectorAll("butto
 const settled = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const key = (input: FakeElement, k: string) => input.onkeydown?.({ key: k, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn() });
 
-// One set of rows: dot, name, what waits, the current one marked; the rail is there in chain mode only.
-it("lists the active chains in the server's order with their marks, the rail only in chain mode", () => {
+// One set of rows: dot, name, what waits, the current one marked; the rail is there once the list is read.
+it("lists the active chains in the server's order with their marks, the rail once the list is read", () => {
   chains.renderChains();
   const rail = fake(document.querySelector("#chain-rail"));
   expect(rail.hasAttribute("data-on")).toBe(true);
@@ -81,7 +81,7 @@ it("lists the active chains in the server's order with their marks, the rail onl
   chains.openChains();
   inRow("main", ".chain-open").onclick?.();
   expect(go).toHaveBeenLastCalledWith("main");
-  list = { ...list, mode: "session" };
+  list = null;
   chains.renderChains();
   expect(rail.hasAttribute("data-on")).toBe(false);
 });
@@ -176,23 +176,7 @@ it("folds the archived chains under Archived · N, each with Unarchive", async (
   expect(await chains.unarchive("old")).toBe("no chain old");
 });
 
-// Off keeps the current chain and lists what it would archive before forcing it.
-it("turns chain mode off after confirming the chains it archives, keeping the current one", async () => {
-  api.sendJson
-    .mockResolvedValueOnce(Response.json({ error: "chain mode off archives ops", chains: [{ id: "ops", name: "ops", open: 2, waiting: 1 }] }, { status: 409 }))
-    .mockResolvedValueOnce(Response.json(list));
-  expect(await chains.setChainMode(false)).toBeNull();
-  expect(confirm).toHaveBeenCalledWith(expect.stringContaining("ops · 2 open · 1 waiting on you"));
-  expect(api.sendJson.mock.calls.map(([, body]) => body)).toEqual([{ chain: false, keep: "main" }, { chain: false, keep: "main", force: true }]);
-  confirm.mockReturnValueOnce(false);
-  api.sendJson.mockResolvedValueOnce(Response.json({ error: "x", chains: [{ id: "ops", name: "ops", open: 0, waiting: 0 }] }, { status: 409 }));
-  expect(await chains.setChainMode(false)).toBeNull();
-  expect(api.sendJson).toHaveBeenCalledTimes(3);
-  api.sendJson.mockResolvedValueOnce(Response.json({ error: "chain: keep is not active" }, { status: 400 }));
-  expect(await chains.setChainMode(false)).toBe("chain: keep is not active");
-});
-
-it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode only", () => {
+it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, and stays on a lone one", () => {
   chords.get("shift+]")!();
   expect(go).toHaveBeenLastCalledWith("ops");
   chords.get("shift+[")!();
@@ -200,7 +184,7 @@ it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode o
   current = "ops";
   chords.get("shift+]")!();
   expect(go).toHaveBeenLastCalledWith("main");
-  list = { ...list, mode: "session" };
+  list = { chains: list!.chains.filter((c) => c.id !== "ops") };
   chords.get("shift+]")!();
   expect(go).toHaveBeenCalledTimes(3);
 });
@@ -208,11 +192,12 @@ it("cycles the active chains with ⌘⇧[ and ⌘⇧], wrapping, in chain mode o
 // One key for the sidebar: the docked rail where it is laid out, kept in pier.rail; the floated list below 64rem.
 it("⌘B hides and shows the docked rail, remembered, and opens the floated list where there is no rail", () => {
   const rail = fake(document.querySelector("#chain-rail"));
-  list = { ...list, mode: "session" };
+  const read = list;
+  list = null;
   chains.renderChains();
   expect(retitle).not.toHaveBeenCalled();
-  // Chain mode turned on docks the rail: the title is told, whoever re-rendered first (main.ts commitSessions).
-  list = { ...list, mode: "chain" };
+  // The list read docks the rail: the title is told, whoever re-rendered first (main.ts commitSessions).
+  list = read;
   chains.renderChains();
   expect(chains.sidebarDocked()).toBe(true);
   expect(retitle).toHaveBeenCalledTimes(1);

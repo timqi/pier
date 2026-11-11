@@ -35,17 +35,7 @@ export interface ChainInfo {
   waiting: number;
 }
 
-/** `GET /api/chains`, and what `PUT /api/chains/mode` answers: active chains
- *  first, newest user message first, then the archived. */
+/** `GET /api/chains`: active chains first, newest user message first, then the archived. */
 export interface ChainList {
-  mode: "session" | "chain";
   chains: ChainInfo[];
-}
-
-/** A chain `PUT /api/chains/mode` would archive, in its 409's `chains`. */
-export interface ChainOpen {
-  id: string;
-  name: string;
-  open: number;
-  waiting: number;
 }

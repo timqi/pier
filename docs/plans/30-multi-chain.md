@@ -1,5 +1,7 @@
 # 多 chain：手动隔离的多条连续对话
 
+Chain mode 开关已由 [36 §B4](36-chain-charter.md#b4-去掉-chain-mode-开关) 去掉：chain 常开。
+
 状态：用户已定稿（lead branch `design-multi-chain`）；开放问题按 lead 的建议决定（§已决的取舍）。只出设计，不写实现；不碰 `native/`。
 
 来源：今天一个实例只有一条连续对话（[10](../design/10-continuous-session.md)），

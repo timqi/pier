@@ -133,9 +133,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 (`core/chain.ts`) runs one head, queue, seed and chain memory per chain. The
 product behaviour is [plans/30](../plans/30-multi-chain.md).
 
-- Session mode (`settings.json` `chainMode: false`, the default) is exactly one
-  active chain, the list hidden; chain mode shows the list. Turning it off
-  archives every active chain but the current one.
+- Chains are always on: an instance with one chain lists one row.
 - A name is 1–40 characters, trimmed, not a `/chain` verb (`new`, `rename`,
   `archive`), unique among the active chains in any case; the id names the
   memory directory and survives a rename. The migration's chain is `main`,
@@ -157,14 +155,14 @@ product behaviour is [plans/30](../plans/30-multi-chain.md).
   other chains, then every other session; a chain member's hit is placed by
   its chain's name (`core/search.ts`, `skills/pier-search`).
 
-`/chain` is a chat command in both modes, on a head (home DM, web); in any
+`/chain` is a chat command on a head (home DM, web); in any
 other thread it is prose. `chatCommand` returns `{ command, args }`.
 
 | Command | Answer |
 | --- | --- |
 | `/chain` | one line per chain, `<name> · N open · M waiting on you`, `✓ ` before the current, archived last with `(archived)` (`MainChain.chainsText`); on a chain with no head yet, or archived, the surface shows it (`ChainSent.answer`) and no head starts |
 | `/chain <name>` | switch to the one name holding every word, any case (an exact name first), archived refused; ambiguity answers `/chain <q> matches A, B — say more`; never rotates |
-| `/chain new <name>` | create and switch; in Session mode turns chain mode on first |
+| `/chain new <name>` | create and switch |
 | `/chain rename <name>` | rename the current chain, answered as `/chain` is |
 | `/chain archive` | archive the current chain and switch to the first; refused while it has open items (`chain: <name> has N open — /status first`) |
 
@@ -176,7 +174,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the seed pointing at where the previous head left off; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost`, at the next send or the next web read of the head; the gone head leaves `main_chain` |
 | Rotation | a rotated or `/new` head keeps the previous head's model and reasoning, as the user last set them from the web or IM; a `first` or `lost` head starts on the Settings default, read then (unset: Pi's model at `low`); it gets one `session-seed` system input, mode `append` (no turn), and joins `main_chain` only once that lands |
-| Seed | a first line naming the chain and its memory paths, `MEMORY.md`, `## chains/<id>/MEMORY.md`, `## Open` (§Open items' complete seed projection over this chain's items, `Nothing open.` included), `## Chains` (chain mode only: one line per active chain, `<name> · <N> open · <M> waiting on you`, this one marked `(this one)`), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, the newest notes — the last 1K chars of global `memory/*.md` and 2K of `chains/<id>/memory/*.md`, each by whole lines, newest day first collected backwards across days until the budget is full, each day's lines under its own `## memory/<date>.md` heading so the head sees how old the latest is (a week away leaves it the week's last state, not an empty day) — and on a `full` rotation only `## Previous session`: `session <id>, last on <item> at <YYYY-MM-DD HH:MM>` — `<item>` the `replyTopic` of the previous head's last reply, `none` when it had none, the time its `completedAt` in local time — and the replay command `pier search --in <id> --around "<time>"`, never its exchanges (the user was mid-subject; an `idle`, `new` or `lost` head starts without the previous subject); older notes are never seeded — recall is on demand (§Home and memory); an unreadable file says so; each part is cut to its budget: each `MEMORY.md` 4K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), the notes as above, headed by `… <N> lines omitted, the rest in memory/<date>.md`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
+| Seed | a first line naming the chain and its memory paths, `MEMORY.md`, `## chains/<id>/MEMORY.md`, `## Open` (§Open items' complete seed projection over this chain's items, `Nothing open.` included), `## Chains` (only with two or more active chains: one line per active chain, `<name> · <N> open · <M> waiting on you`, this one marked `(this one)`), the run ledger since the previous head started less its `succeeded` and `skipped` runs (`pier task runs` shows those), one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, the newest notes — the last 1K chars of global `memory/*.md` and 2K of `chains/<id>/memory/*.md`, each by whole lines, newest day first collected backwards across days until the budget is full, each day's lines under its own `## memory/<date>.md` heading so the head sees how old the latest is (a week away leaves it the week's last state, not an empty day) — and on a `full` rotation only `## Previous session`: `session <id>, last on <item> at <YYYY-MM-DD HH:MM>` — `<item>` the `replyTopic` of the previous head's last reply, `none` when it had none, the time its `completedAt` in local time — and the replay command `pier search --in <id> --around "<time>"`, never its exchanges (the user was mid-subject; an `idle`, `new` or `lost` head starts without the previous subject); older notes are never seeded — recall is on demand (§Home and memory); an unreadable file says so; each part is cut to its budget: each `MEMORY.md` 4K chars from the end (`core/reply.ts` `cut`, the ellipsis its mark), the ledger 4K the same way (newest first, so the oldest go), the notes as above, headed by `… <N> lines omitted, the rest in memory/<date>.md`; `## Open` is bounded by its own rule — about 8K tokens at most; built before the session is created, so a seed that fails creates nothing and fails the send with its reason; opens with `[lang=<code>]` when the previous head's users spoke a detectable language, so a callback landing before anyone speaks to the new head is stamped with it ([04 §Who is speaking](04-im-channels.md#who-is-speaking)) |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- Chains are always on: the "Chain mode" switch is gone from the ⋯ menu, and `/chain new` no longer turns anything on. An instance that never turned it on now titles the conversation by its chain (`Main`) and, from 64rem, shows the sidebar with Chains and Items — ⌘B hides it and remembers. The seed lists `## Chains` only while two or more chains are active.
+- `GET /api/continuous/items/:problem/turns`, the item route without a chain, is gone; `/items/:chain/:problem/turns` stays.
+
+### Upgrade
+
+- The database migrates to schema 43, deleting the switch's setting; no chain is archived or restored — one archived by turning the switch off stays under `Archived · N`.
+- A web UI still open from before the update gets an error from its Chain mode entry; reload it.
+- Downgrading means restoring the pre-update backup from `db/backups/`: an older Pier refuses a database at this schema. An older Pier that finds no Chain mode setting reads it as off and hides the list while more than one chain is active; turning the switch on shows it again.
+
 ## 1.1.0
 
 ### Changed

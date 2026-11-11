@@ -425,7 +425,7 @@ export type WorkspaceEvent =
   | { type: "task-message-changed"; runId: string; messageId: string }
   | { type: "task-group-changed"; groupId: string }
   | { type: "open-items-changed" } // a head's turn end wrote an `<open>`/`<done>` marker
-  | { type: "chains-changed" } // a chain created, renamed, archived or unarchived, the mode switched, a head rotated
+  | { type: "chains-changed" } // a chain created, renamed, archived or unarchived, a head rotated
   /** The one event with content: a Web Push copy for a client push cannot
    *  reach (the native shell's webview). `browser` is the web auth session it
    *  targets (`sessionIdOf`, web/auth.ts), absent for every device; the SSE

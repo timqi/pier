@@ -532,16 +532,6 @@ export class TaskStore {
     };
   }
 
-  /** A link that names no chain (docs/design/15-item-view.md §Route): `itemHistory` in the one active chain
-   *  holding `problem`, else the first active chain's — the rule `web/ui/main.ts`' `chainHolding` follows. */
-  itemHistoryByProblem(problem: string): ItemRecord | undefined {
-    const chains = this.sql(`SELECT DISTINCT i.chain_id FROM open_items i JOIN chains c ON c.id = i.chain_id
-      WHERE c.archived_at IS NULL AND (i.problem = ? OR EXISTS (SELECT 1 FROM json_each(i.aliases) WHERE value = ?))`).all(problem, problem) as { chain_id: string }[];
-    const first = this.sql("SELECT id FROM chains WHERE archived_at IS NULL ORDER BY created_at, rowid LIMIT 1").get() as { id: string } | undefined;
-    const chain = chains.length === 1 ? chains[0]!.chain_id : first?.id;
-    return chain === undefined ? undefined : this.itemHistory(chain, problem);
-  }
-
   /** Main's markers, in reply order, as one write into `chainId`'s items (docs/design/10-continuous-session.md
    *  §Open items); answers the rows each marker changed — `null` for a `<done>` that named nothing, `0` for one
    *  already settled — and the keys its `<done>`s closed. Every item a marker touches, `answered.topic` names or

@@ -248,7 +248,7 @@ let list: HTMLElement | null = null;
 let rows: HTMLElement[] = [];
 let ordered: OpenItemPresentation[] = [];
 /** The sidebar's Items section (index.html): its head, its list and its own copy of the rows,
- *  filled by every render — hidden below 64rem and in session mode, where the fill is harmless. */
+ *  filled by every render — hidden below 64rem, where the fill is harmless. */
 const railItems = $("#rail-items");
 const railHead = h("p", "rail-head", "Items");
 railHead.id = "rail-items-head"; // the section's `aria-labelledby`

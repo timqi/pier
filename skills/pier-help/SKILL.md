@@ -37,9 +37,9 @@ truth.
   bar's lead item opens the status panel — what is running over the open items;
   the ⋯ menu holds the rest. Its current session, the head, runs in `$PIER_HOME/home`,
   which holds memory only: global `MEMORY.md` and daily notes in `memory/`.
-- Chain mode (the ⋯ menu's switch, off by default) splits it by hand into
-  named chains, each with its own head, open items and memory in
-  `chains/<id>/` beside the global one; with it off there is one chain.
+- It splits by hand into named chains, each with its own head, open items
+  and memory in `chains/<id>/` beside the global one; the list is the web's
+  sidebar and `/chain`, one row until a second chain is made.
 - Recall: `rg <words> memory chains/*/memory`; `pier search --in main <words>`
   over what the user and Pier said, `--in chain:<name>` in one chain;
   `--since` narrows a time such as last week.
@@ -102,7 +102,7 @@ truth.
     the four below.
   - `/chain <name>` — switch to it by any words from its name, any case; the home
     chat answers `↔ chain · <name>`.
-  - `/chain new <name>` — create one and switch to it; turns chain mode on.
+  - `/chain new <name>` — create one and switch to it.
   - `/chain rename <name>` — rename the current chain.
   - `/chain archive` — archive the current chain, refused while it has open
     items; back to the first chain.

@@ -94,15 +94,14 @@ const SETTINGS_JSON = {
   tools: [],
   customTools: [],
   accent: "",
-  chainMode: false,
   accents: ACCENTS,
   catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
 };
 
-/** Session mode's register and switch, as main.ts wires them over `db`; `/done` is the route's test's. */
+/** The chain register, as main.ts wires it over `db`; `/done` is the route's test's. */
 const chainsOf = (db: DatabaseSync, openCount: (chainId: string) => number = () => 0) =>
-  ({ chains: new Chains(db, openCount), mode: { get: () => false, set: async () => {} }, changed: () => {}, close: (): string => { throw new Error("unused"); }, launcher: () => null });
+  ({ chains: new Chains(db, openCount), changed: () => {}, close: (): string => { throw new Error("unused"); }, launcher: () => null });
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
@@ -2427,7 +2426,7 @@ describe("the continuous conversation's routes", () => {
     ledger: () => LedgerRun[] = () => [], open?: OpenItems,
     { openCount, ...record }: {
       items?: (q: string, chainId?: string) => ItemSummary[];
-      itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
+      itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
       closeItem?: (chainId: string, problem: string) => string;
       itemSent?: (item: string, sessionId: string) => void;
       invokedBy?: (sessionId: string) => string | undefined;
@@ -2536,7 +2535,7 @@ describe("the continuous conversation's routes", () => {
       ? [{ role: "user", text: "fix sign in" }, { role: "assistant", text: "On it.\n<open>sign in</open>", steps: [{ id: "t1", name: "bash", args: { cmd: "ls" }, output: "x" }] }, { role: "user", text: "other" }, { role: "assistant", text: "Sure." }]
       : undefined) as ChatTurn[] | undefined);
     sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<done>sign in \u2192 login</done>" }] }));
-    const res = await app.request(`/api/continuous/items/${encodeURIComponent("sign in")}/turns`);
+    const res = await app.request(`/api/continuous/items/main/${encodeURIComponent("sign in")}/turns`);
     expect(res.status).toBe(200);
     const body = await res.json() as { epoch: string; lastSeq: number };
     expect(body).toEqual({
@@ -2555,7 +2554,7 @@ describe("the continuous conversation's routes", () => {
         ] },
       ],
     });
-    const missing = await app.request("/api/continuous/items/nope/turns");
+    const missing = await app.request("/api/continuous/items/main/nope/turns");
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: "No item \"nope\"" });
   });
@@ -2566,7 +2565,7 @@ describe("the continuous conversation's routes", () => {
     restarted();
     factory.readHistory.mockRejectedValue(new Error("bad JSON at line 3"));
     sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<topic>login</topic>" }] }));
-    const res = await app.request("/api/continuous/items/login/turns");
+    const res = await app.request("/api/continuous/items/main/login/turns");
     expect(res.status).toBe(200);
     const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
     expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)])).toEqual([["old", ["system"]], ["head", ["user", "assistant"]]]);
@@ -2579,7 +2578,7 @@ describe("the continuous conversation's routes", () => {
     restarted();
     factory.readHistory.mockResolvedValue([{ role: "user", text: "fix login" }, { role: "assistant", text: "On it.\n<open>login</open>" }]);
     sessions.set("head", sharedFake("head", { history: [{ role: "user", text: "go on" }, { role: "assistant", text: "Done.\n<topic>login</topic>" }] }));
-    const res = await app.request("/api/continuous/items/login/turns");
+    const res = await app.request("/api/continuous/items/main/login/turns");
     expect(res.status).toBe(200);
     const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
     expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)]))
@@ -2595,7 +2594,7 @@ describe("the continuous conversation's routes", () => {
     const head = sharedFake("head");
     head.history = () => Promise.reject(new Error("transcript truncated"));
     sessions.set("head", head);
-    const res = await app.request("/api/continuous/items/login/turns");
+    const res = await app.request("/api/continuous/items/main/login/turns");
     expect(res.status).toBe(200);
     const body = await res.json() as { sessions: { sessionId: string; turns: { index: number; turn: ChatTurn }[] }[] };
     expect(body.sessions.map((s) => [s.sessionId, s.turns.map((t) => t.turn.role)])).toEqual([["old", ["user", "assistant"]], ["head", ["system"]]]);
@@ -2606,7 +2605,7 @@ describe("the continuous conversation's routes", () => {
     const problem = "CI / deploy 修复";
     const store = new TaskStore(openDb(":memory:"));
     const { app, post, clock } = chainRig(undefined, undefined, {
-      itemHistory: (p) => store.itemHistoryByProblem(p),
+      itemHistory: (p, chain) => store.itemHistory(chain, p),
       itemSent: (item, sessionId) => { store.markOpenItems([], clock.now, sessionId, "main", { topic: item }); },
     });
     await post("/api/continuous/messages", { text: "one" });
@@ -2614,7 +2613,7 @@ describe("the continuous conversation's routes", () => {
     clock.now += 2 * IDLE_MS;
     expect((await post("/api/continuous/messages", { text: withItem(problem, "ship it"), mode: "auto" })).status).toBe(202);
     // Read before any reply: an untagged one, or none yet, records nothing at the turn end.
-    const res = await app.request(`/api/continuous/items/${encodeURIComponent(problem)}/turns`);
+    const res = await app.request(`/api/continuous/items/main/${encodeURIComponent(problem)}/turns`);
     expect(res.status).toBe(200);
     const { sessions } = await res.json() as { sessions: { sessionId: string; turns: { turn: ChatTurn }[] }[] };
     expect(sessions.map((s) => s.sessionId)).toEqual(["m1", "m2"]);
@@ -2701,15 +2700,14 @@ describe("the continuous conversation's routes", () => {
     const listed = async (app: Hono) => (await (await app.request("/api/chains")).json()) as ChainList;
     const idOf = async (app: Hono, name: string) => (await listed(app)).chains.find((c) => c.name === name)!.id;
 
-    it("creates a chain, turning chain mode on, and refuses a bad or taken name", async () => {
-      const { app, post, settings, workspace } = chainRig();
-      expect(await listed(app)).toEqual({ mode: "session", chains: [expect.objectContaining({ id: "main", name: "Main", unread: false, waiting: 0 })] });
+    it("creates a chain and refuses a bad or taken name", async () => {
+      const { app, post, workspace } = chainRig();
+      expect(await listed(app)).toEqual({ chains: [expect.objectContaining({ id: "main", name: "Main", unread: false, waiting: 0 })] });
       const made = await post("/api/chains", { name: " Design " });
       expect(made.status).toBe(201);
       expect(await made.json()).toEqual({ id: expect.any(String), name: "Design", createdAt: expect.any(Number), unread: false, waiting: 0 });
-      expect(settings.get().chainMode).toBe(true);
       expect(workspace).toContain("chains-changed");
-      expect((await listed(app)).mode).toBe("chain");
+      expect(await listed(app)).not.toHaveProperty("mode");
       const taken = await post("/api/chains", { name: "design" });
       expect(taken.status).toBe(409);
       expect(await taken.json()).toEqual({ error: 'chain: "design" exists' });
@@ -2735,8 +2733,8 @@ describe("the continuous conversation's routes", () => {
       expect(chains[1]!.head).toBeUndefined();
     });
 
-    it("renames, archives once the open items are confirmed, and unarchives into chain mode", async () => {
-      const { app, post, send, settings, workspace } = chainRig(undefined, undefined, { openCount: (id) => (id === "main" ? 2 : 0) });
+    it("renames, archives once the open items are confirmed, and unarchives", async () => {
+      const { app, post, send, workspace } = chainRig(undefined, undefined, { openCount: (id) => (id === "main" ? 2 : 0) });
       await post("/api/chains", { name: "Design" });
       const id = await idOf(app, "Design");
       const renamed = await send(`/api/chains/${id}`, { name: "Desk" }, "PATCH");
@@ -2755,29 +2753,13 @@ describe("the continuous conversation's routes", () => {
       expect(workspace).toEqual(["chains-changed"]);
       // The last active chain stays.
       expect((await send(`/api/chains/${id}`, { archived: true }, "PATCH")).status).toBe(400);
-      settings.setChainMode(false);
       const back = await send("/api/chains/main", { archived: false }, "PATCH");
       expect(await back.json()).not.toHaveProperty("archivedAt");
-      expect(settings.get().chainMode).toBe(true);
     });
 
-    it("turns chain mode off only once the chains it archives were seen, keeping the caller's", async () => {
-      const { app, post, send, settings } = chainRig();
-      await post("/api/chains", { name: "Design" });
-      const id = await idOf(app, "Design");
-      const asked = await send("/api/chains/mode", { chain: false }, "PUT", { "X-Pier-Chain": id });
-      expect(asked.status).toBe(409);
-      expect(await asked.json()).toEqual({ error: "chain mode off archives Main", chains: [{ id: "main", name: "Main", open: 0, waiting: 0 }] });
-      expect(settings.get().chainMode).toBe(true);
-      const off = await send("/api/chains/mode", { chain: false, force: true }, "PUT", { "X-Pier-Chain": id });
-      expect(off.status).toBe(200);
-      const body = await off.json() as ChainList;
-      expect(body.mode).toBe("session");
-      expect(body.chains.map((c) => [c.name, c.archivedAt === undefined])).toEqual([["Design", true], ["Main", false]]);
-      expect((await send("/api/chains/mode", { chain: false, keep: "main" }, "PUT")).status).toBe(400);
-      expect((await send("/api/chains/mode", { chain: true }, "PUT")).status).toBe(200);
-      expect(settings.get().chainMode).toBe(true);
-      expect((await send("/api/chains/mode", {}, "PUT")).status).toBe(400);
+    it("has no Chain mode switch to turn", async () => {
+      const { send } = chainRig();
+      expect((await send("/api/chains/mode", { chain: false, force: true }, "PUT")).status).toBe(404);
     });
 
     it("reads and sends to the chain named, refuses an archived one, and answers a `/chain` switch", async () => {
@@ -2809,14 +2791,14 @@ describe("the continuous conversation's routes", () => {
 
     it("finds an item in the chain its route names, and searches one chain", async () => {
       const record: ItemRecord = { chain: "c2", problem: "login", aliases: [], sessions: [], runIds: [] };
-      const itemHistory = vi.fn((_p: string, chainId?: string) => (chainId === "c2" ? record : undefined));
+      const itemHistory = vi.fn((_p: string, chainId: string) => (chainId === "c2" ? record : undefined));
       const items = vi.fn((_q: string, _chain?: string) => [] as ItemSummary[]);
       const { app } = chainRig(undefined, undefined, { itemHistory, items });
       expect((await app.request("/api/continuous/items/c2/login/turns")).status).toBe(200);
       expect(itemHistory).toHaveBeenLastCalledWith("login", "c2");
       expect((await app.request("/api/continuous/items/main/login/turns")).status).toBe(404);
+      // The route of bookmarks made before chains is gone.
       expect((await app.request("/api/continuous/items/login/turns")).status).toBe(404);
-      expect(itemHistory).toHaveBeenLastCalledWith("login");
       await app.request("/api/continuous/items?q=log&chain=c2");
       expect(items).toHaveBeenLastCalledWith("log", "c2");
     });

@@ -49,7 +49,7 @@ import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
 import type { PasskeyStore } from "./passkeys.js";
-import type { ChainInfo, ChainList, ChainOpen, ToolsSyncNote } from "./types.js";
+import type { ChainInfo, ChainList, ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
@@ -166,10 +166,9 @@ interface WebDeps {
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
   /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
   openItems?: () => OpenItems;
-  /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's routes read;
-   *  with no chain an item is found by its problem alone, when only one chain has it. */
+  /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's routes read. */
   items?: (q: string, chainId?: string) => ItemSummary[];
-  itemHistory?: (problem: string, chainId?: string) => ItemRecord | undefined;
+  itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
   /** `TaskService.closeItem` of exactly `problem`: the status panel's Close. */
   closeItem?: (chainId: string, problem: string) => string;
   /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
@@ -555,14 +554,6 @@ export function createServer(
   const chains = continuous.chains;
   const openRows = (): OpenItem[] => openItems?.().items ?? [];
   const chainsChanged = (): void => hub.emitWorkspace({ type: "chains-changed" });
-  /** Creating or unarchiving a chain is asking for more than one: session mode cannot hold it. */
-  const chainModeOn = (): void => {
-    if (!settings.get().chainMode) settings.setChainMode(true);
-  };
-  const openIn = (id: string, all: OpenItem[]): { open: number; waiting: number } => {
-    const { open, waiting } = chainCounts(all.filter((i) => i.chain?.id === id));
-    return { open, waiting };
-  };
   const chainInfo = (row: ChainRow, open: OpenItem[]): ChainInfo => {
     const head = continuous.members(row.id)[0]?.sessionId;
     const lastUserAt = continuous.lastUserAt(row.id);
@@ -572,7 +563,7 @@ export function createServer(
       ...(lastUserAt === undefined ? {} : { lastUserAt }),
       ...(head ? { head: { sessionId: head, state: router.stateOf(head) ?? "idle" } } : {}),
       unread: head !== undefined && state.unread(head),
-      waiting: openIn(row.id, open).waiting,
+      waiting: chainCounts(open.filter((i) => i.chain?.id === row.id)).waiting,
     };
   };
   // Creating a chain is a user act too: it rises to the top until another is spoken to.
@@ -581,7 +572,7 @@ export function createServer(
     const open = openRows();
     const rows = chains.list().map((row) => chainInfo(row, open));
     const active = rows.filter((c) => c.archivedAt === undefined).sort((a, b) => recency(b) - recency(a));
-    return { mode: settings.get().chainMode ? "chain" : "session", chains: [...active, ...rows.filter((c) => c.archivedAt !== undefined)] };
+    return { chains: [...active, ...rows.filter((c) => c.archivedAt !== undefined)] };
   };
   const chainRefused = (c: Context, err: unknown): Response => {
     if (err instanceof ChainInvalid) return c.json({ error: err.message }, 400);
@@ -596,8 +587,6 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
     try {
-      // Mode first, as `/chain new` does: a failed settings write leaves one chain, not two.
-      chainModeOn();
       const row = chains.create(body.name);
       chainsChanged();
       return c.json(chainInfo(row, openRows()), 201);
@@ -616,10 +605,7 @@ export function createServer(
       const row = chains.transact(() => {
         let row = chains.get(id)!;
         if (body.archived === true) row = chains.archive(id, body.force === true);
-        if (body.archived === false) {
-          chainModeOn();
-          row = chains.unarchive(id);
-        }
+        if (body.archived === false) row = chains.unarchive(id);
         return typeof body.name === "string" ? chains.rename(id, body.name) : row;
       });
       chainsChanged();
@@ -627,29 +613,6 @@ export function createServer(
     } catch (err) {
       return chainRefused(c, err);
     }
-  });
-
-  // Off keeps one chain, the caller's own by default, and archives the rest once the caller has seen them.
-  guarded(app, "PUT", "/api/chains/mode", 400, async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.chain !== "boolean") return c.json({ error: "chain: boolean required" }, 400);
-    if (body.chain) {
-      chainModeOn();
-      chainsChanged();
-      return c.json(chainList());
-    }
-    const keep = typeof body.keep === "string" ? body.keep : c.req.header("X-Pier-Chain") ?? chains.first().id;
-    if (chains.get(keep)?.archivedAt !== null) return c.json({ error: `chain: no active chain ${keep}` }, 400);
-    const others = chains.list().filter((r) => r.archivedAt === null && r.id !== keep);
-    if (others.length && body.force !== true) {
-      const open = openRows();
-      const listed: ChainOpen[] = others.map((r) => ({ id: r.id, name: r.name, ...openIn(r.id, open) }));
-      return c.json({ error: `chain mode off archives ${others.map((r) => r.name).join(", ")}`, chains: listed }, 409);
-    }
-    for (const r of others) chains.archive(r.id, true);
-    settings.setChainMode(false);
-    chainsChanged();
-    return c.json(chainList());
   });
 
   // One chain's sessions, newest first; the client pages back through them with /history. No chain: the first.
@@ -670,12 +633,11 @@ export function createServer(
   });
 
   // One item's rows (docs/design/15-item-view.md \u00a7Rows), its sessions oldest first; the head's
-  // up to the snapshot's cursor, read as /history reads it. Without a chain, the route of
-  // bookmarks made before chains: an item only one chain has.
+  // up to the snapshot's cursor, read as /history reads it.
   app.use("/api/continuous/items/:chain/:problem/turns", compress());
-  app.use("/api/continuous/items/:problem/turns", compress());
-  const itemTurnsOf = async (c: Context, problem: string, chainId?: string): Promise<Response> => {
-    const item = chainId === undefined ? itemHistory?.(problem) : itemHistory?.(problem, chainId);
+  guarded(app, "GET", "/api/continuous/items/:chain/:problem/turns", 404, async (c) => {
+    const problem = c.req.param("problem");
+    const item = itemHistory?.(problem, c.req.param("chain"));
     if (!item) return c.json({ error: `No item "${problem}"` }, 404);
     const members = continuous.members(item.chain);
     const [head, ...rest] = members;
@@ -709,10 +671,7 @@ export function createServer(
     }
     log.warn(`item view of "${problem}": the head changed during all 3 reads`);
     return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
-  };
-  guarded(app, "GET", "/api/continuous/items/:chain/:problem/turns", 404, (c) =>
-    itemTurnsOf(c, c.req.param("problem"), c.req.param("chain")));
-  guarded(app, "GET", "/api/continuous/items/:problem/turns", 404, (c) => itemTurnsOf(c, c.req.param("problem")));
+  });
 
   // The status panel's Close: the item as the head's `<done>` closes it, the head told.
   guarded(app, "POST", "/api/continuous/items/:chain/:problem/close", 400, async (c) => {

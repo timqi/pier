@@ -55,8 +55,6 @@ interface ChainDeps {
   /** `/done <query>`: closes the one open item of the chain `query` names, answering its key;
    *  refuses with a `ChatCommandRefused`. */
   close: (chainId: string, query: string) => string;
-  /** Settings' chainMode: `/chain new` in Session mode turns it on. */
-  mode: { get(): boolean; set(on: boolean): Promise<void> };
   /** A `/chain` command switched to, created, renamed or archived a chain, from any surface:
    *  every chain list re-read (`chains-changed`). */
   changed: () => void;
@@ -283,17 +281,7 @@ export class MainChain {
     const verb = word.toLowerCase();
     if (!args || verb === "rename") return undefined;
     if (verb === "new") {
-      // Session mode is exactly one active chain: chain mode comes first, so a second never exists
-      // without it, and goes back off when the name is refused.
-      const was = this.deps.mode.get();
-      if (!was) await this.deps.mode.set(true);
-      let created: ChainRow;
-      try {
-        created = this.deps.chains.create(rest.join(" "));
-      } catch (err) {
-        if (!was) await this.deps.mode.set(false);
-        throw err;
-      }
+      const created = this.deps.chains.create(rest.join(" "));
       this.lastUser.set(created.id, this.now());
       return created;
     }
@@ -499,11 +487,11 @@ export class MainChain {
   }
 
   /** Every active chain with its counts, so the head knows where another topic lives;
-   *  none in Session mode, whose one chain's items `## Open` already lists. */
+   *  none for a lone chain, whose items `## Open` already lists. */
   private chainLines(current: string): string {
-    if (!this.deps.mode.get()) return "";
-    return this.deps.chains.list().filter((c) => c.archivedAt === null)
-      .map((c) => `${this.chainLine(c)}${c.id === current ? " (this one)" : ""}`).join("\n");
+    const active = this.deps.chains.list().filter((c) => c.archivedAt === null);
+    if (active.length < 2) return "";
+    return active.map((c) => `${this.chainLine(c)}${c.id === current ? " (this one)" : ""}`).join("\n");
   }
 
   /** The newest notes in `dir` under one budget, collected newest day first and listed
