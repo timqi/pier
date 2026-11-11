@@ -470,7 +470,7 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
   .chain-more { opacity: 0; }
   .chain-row:is(:hover, :focus-within) .chain-more, .chain-more[aria-expanded="true"] { opacity: 1; }
 }
-@media (pointer: coarse) { :is(.chain-open, .chain-more) { min-height: 44px; min-width: 44px; } }
+@media (pointer: coarse) { :is(.chain-open, .chain-more, .rail-head .icon-btn) { min-height: 44px; min-width: 44px; } }
 #chain-rail { display: none; }
 /* 64rem is chains.ts DOCKED, the same number by hand. */
 @media (width >= 64rem) {
