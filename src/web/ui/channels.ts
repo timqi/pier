@@ -330,7 +330,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. A chat left on Default launches in the workspace directory with the Settings default model and reasoning, read at every launch. The home chat's main conversation keeps the previous head's choice when it starts a new head; the Settings default is only its first head's. DMs are always bound-users-only."),
       h(
         "div",
-        "flex flex-wrap items-center gap-x-6 gap-y-2",
+        "reach-row flex flex-wrap items-center gap-x-6 gap-y-2",
         toggle("Require mention in groups", "", cfg.requireMention, set((v) => (cfg.requireMention = v))),
         toggle("Require bound user", "", cfg.requireBind, set((v) => (cfg.requireBind = v))),
       ),
@@ -379,7 +379,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       await load();
     };
     const out: HTMLElement[] = [];
-    const switches = h("div", "flex flex-wrap items-center gap-x-6 gap-y-2");
+    const switches = h("div", "reach-row flex flex-wrap items-center gap-x-6 gap-y-2");
     if (chat.kind === "dm") {
       // A DM has two parties: mention is meaningless and bind is not optional.
       // Two switches that cannot move are worse than a sentence saying so.

@@ -64,3 +64,13 @@ it("marks the open tab as the current page, by more than its colour", () => {
   other.onclick!();
   expect(onClick).toHaveBeenCalledOnce();
 });
+
+// Coarse pointer: the badge's 2.75rem reach hangs over the control below it (style.css `.touch-reach`).
+it("positions a field's control under a help badge, so its face answers before the badge's reach", () => {
+  const control = (): HTMLElement => document.createElement("input");
+  const plain = fake(form.field("Endpoint", control()));
+  expect(plain.children[1]!.className).not.toContain("relative");
+  const helped = fake(form.field("Bot token", control(), { help: document.createElement("button") }));
+  expect(helped.children[0]!.children.map((c) => c.localName)).toEqual(["span", "button"]);
+  expect(helped.children[1]!.className.split(" ")).toContain("pointer-coarse:relative");
+});

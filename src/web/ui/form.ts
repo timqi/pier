@@ -151,7 +151,11 @@ interface FieldOptions {
 export function field(label: string, control: HTMLElement, opts: FieldOptions = {}): HTMLElement {
   const box = h("div", "flex flex-col gap-1.5");
   const head = h("div", "flex items-center gap-1.5", h("span", "field-label", label));
-  if (opts.help) head.append(opts.help);
+  if (opts.help) {
+    head.append(opts.help);
+    // The badge's reach hangs over the control on a coarse pointer; positioned, the control answers for its own face.
+    control.classList.add("pointer-coarse:relative");
+  }
   box.append(head, control);
   if (opts.hint) box.append(h("span", "text-[12px] leading-snug text-neutral-400", opts.hint));
   return box;
