@@ -22,7 +22,8 @@ delivery.
   (`createdRole`, `TaskStore.roleOf`); when its session appears in the status panel is
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
 - The preamble runs general to specific: Pier's baseline with the chat
-  surface (`surfacePrompt`, after `# Working style`), the user's `SYSTEM.md`,
+  surface (`surfacePrompt`, after `# Working style`; a worker's is the reply
+  language and the instance's facts alone), the user's `SYSTEM.md`,
   then the role contract, its last block (`pierSystemPrompt`, `agent/pi.ts`);
   the project context holds only real files, the cwd's `AGENTS.md` then
   `AgentLaunchOptions.contextFiles` (a missing one skipped, an unreadable one

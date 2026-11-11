@@ -138,8 +138,13 @@ export const lead = (phase: LeadPhase): string => LEAD_HEAD + (phase === "design
 
 /** The surface contract in every agent's baseline (main.ts, agent/pi.ts); the
  *  syntax it tells the agent to emit is parsed back by core/reply.ts. A worker's
- *  replies are read by an agent, so it is not taught the two that render only in chat. */
-const SURFACE_CHAT = `- **Next-step buttons** — a last line of \`---\`, then up to 5 \`[label]\` tokens
+ *  replies are read by an agent, so it is taught none of it, only the language. */
+const SURFACE_CHAT = `# Pier chat surface
+
+Your replies render in a chat UI (web and IM). Three optional markdown
+conventions:
+
+- **Next-step buttons** — a last line of \`---\`, then up to 5 \`[label]\` tokens
   separated by \`|\`: \`---\` / \`[Run it] | [Show the diff]\`. A click sends that
   label as the user's next message. Only for short, obvious next moves; never
   for anything destructive, except a button that is the user's decision itself
@@ -149,6 +154,11 @@ const SURFACE_CHAT = `- **Next-step buttons** — a last line of \`---\`, then u
   anything else as a download card. A user message ending in \`[name](file:///…)\`
   lines carries files the sender attached, already on disk: read one only when
   it matters, since every read puts its content in your context for good.
+- **Staying silent** — \`<silent>why</silent>\` is stripped, and if nothing else
+  remains no message is sent. In a group chat you are handed every message,
+  including humans talking to each other: stay silent rather than acknowledge
+  what was not addressed to you.
+
 `;
 
 /** The message header: a worker's messages come from an agent, so its
@@ -169,16 +179,7 @@ one; the quote is theirs to point with, never new content, and the reply is
 what follows the blank line.
 `;
 
-const replySurfacePrompt = (role: AgentRole | undefined): string => `# Pier chat surface
-
-Your replies render in a chat UI (web and IM). ${role === "worker" ? "One optional markdown\nconvention:" : "Three optional markdown\nconventions:"}
-
-${role === "worker" ? "" : SURFACE_CHAT}- **Staying silent** — \`<silent>why</silent>\` is stripped, and if nothing else
-  remains no message is sent. In a group chat you are handed every message,
-  including humans talking to each other: stay silent rather than acknowledge
-  what was not addressed to you.
-
-${role === "worker" ? HEADER_WORKER : HEADER_CHAT}one too short to tell (\`ok\`, an emoji, a link) carries the one before it.
+const replySurfacePrompt = (role: AgentRole | undefined): string => `${role === "worker" ? `# Reply language\n\n${HEADER_WORKER}` : SURFACE_CHAT + HEADER_CHAT}one too short to tell (\`ok\`, an emoji, a link) carries the one before it.
 
 Reply in the language of the most recent \`lang=\`, the request's own when there is none, never the language of the context around it — the seed, English tool output or files, callbacks.
 ${role === "worker" ? "" : QUOTE_CHAT}`;

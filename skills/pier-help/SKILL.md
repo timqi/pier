@@ -215,6 +215,6 @@ improvising.
 
 - Chat conventions — next-step buttons, `file://` attachments, staying
   silent, `[name<id> time place]` sender headers — are in `# Pier chat surface`,
-  already in your system prompt.
+  already in your system prompt; a worker has none, its replies read by an agent.
 - Delegating and scheduling work: the pier-tasks skill. Reading and posting
   Slack: pier-slack. A command that needs a token or key: pier-vault.

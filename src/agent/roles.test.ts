@@ -152,7 +152,7 @@ describe("the surface prompt", () => {
     expect(prompt).not.toContain("http");
   });
 
-  it("teaches the chat syntax core/reply.ts parses, and a worker only what an agent reader needs", () => {
+  it("teaches the chat syntax core/reply.ts parses, and a worker only the reply's language", () => {
     for (const role of [undefined, "lead"] as const) {
       const prompt = surfacePrompt(instance, role);
       for (const syntax of ["`---`", "`[label]`", "file:///abs/path/report.md", "<silent>why</silent>", "[name<id> time place lang=zh]", "[re assistant 2026-06-01 12:00]", "`[item: <problem>]`", "`lang=`"]) {
@@ -160,15 +160,15 @@ describe("the surface prompt", () => {
       }
     }
     const worker = surfacePrompt(instance, "worker");
-    for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>", "[item:"]) expect(worker).not.toContain(gone);
-    for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch"]) expect(worker).toContain(kept);
+    for (const gone of ["chat UI", "Next-step buttons", "file://", "<silent>", "[re assistant", "name<id>", "[item:"]) expect(worker).not.toContain(gone);
+    for (const kept of ["[lang=zh]", "`lang=`", "apply_patch"]) expect(worker).toContain(kept);
   });
 
   // It is part of the baseline's top level, and a replayed baseline ends on its last sentence.
   it("heads its sections like the baseline's and ends on SURFACE_END", () => {
     for (const role of [undefined, "lead", "worker"] as const) {
       const prompt = surfacePrompt(instance, role);
-      expect(prompt).toMatch(/^# Pier chat surface\n/);
+      expect(prompt).toMatch(role === "worker" ? /^# Reply language\n/ : /^# Pier chat surface\n/);
       expect(prompt).toContain("\n# This Pier instance\n");
       expect(prompt).not.toMatch(/^## /m);
       expect(prompt.endsWith(SURFACE_END)).toBe(true);
