@@ -212,7 +212,7 @@ function listed(now: number): Listed & { sessions: SessionInfo[] } {
   const sessions = inProgress(deps.sessions(), deps.chain(), deps.chains());
   const chainOf = new Map(open.items.map((i) => [itemKey(i.problem, i.chain?.id), i.chain]));
   for (const key of closing) if (!chainOf.has(key)) closing.delete(key);
-  // Closed elsewhere while its Undo showed: nothing is left to close, and sending would be refused.
+  // Its item left the list while its Undo showed, closed elsewhere: nothing is left to close.
   for (const [key, close] of pending) if (!chainOf.has(key)) { clearTimeout(close.timer); pending.delete(key); }
   const all = [
     ...open.items.map((i) => itemRow(i, now)).filter((p) => !closing.has(p.key)),

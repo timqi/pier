@@ -553,7 +553,7 @@ it("keeps a waiting Close's Undo through a re-read of the items, and sends it on
   expect(shown("#rail-items-head")).toBe("Items \u00b7 2");
   expect(asked).toEqual([]);
 
-  // Closed elsewhere meanwhile: the Undo leaves with the item and its timer, so no Close is sent to be refused.
+  // Closed elsewhere meanwhile: the Undo leaves with the item and its timer, and no Close is sent.
   open = { items: [of("deploy"), of("billing")], unlisted: [] };
   drawer.renderDrawer();
   expect(panel().querySelector(".item-undo")).toBeNull();
