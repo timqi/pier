@@ -966,6 +966,9 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #bar #session-meta:not([data-urgent]) { display: none; }
   /* The conversation's one chip is the context, short enough to stay beside the title. */
   #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
+  /* The item view's way back is its × alone, which Esc shares; the title takes the room. */
+  #bar[data-item] #bar-back, #bar[data-item] #session-meta[data-inline]:not(.hidden) { display: none; }
+  main:has(#bar[data-item]) #to-main { display: none; }
   /* A reply is the reading: on a phone it has no side to give away. */
   #turns > [data-kind="assistant"] { max-width: 100%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }

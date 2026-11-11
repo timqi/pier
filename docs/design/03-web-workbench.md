@@ -215,7 +215,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - Two floating buttons stack above the dock's right end: ↓ (`滚到底部`) shows
   once follow is released away from the tail, wears a dot when a message
   lands after that — a turn's reply once, however its row is redrawn — and its click scrolls smoothly to the end and re-arms follow;
-  ⌂ (`回到主会话`) shows off the conversation and opens the current chain's `#/chain/<id>`.
+  ⌂ (`回到主会话`) shows off the conversation, but not in an item view below md, and opens the current chain's `#/chain/<id>`.
 
 ### Bar and status panel (`session-header.ts`, `drawer.ts`)
 
@@ -380,7 +380,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
     conversation button; any other failure reads its error the same way.
   - Bar: the item's dot (`topicColour`) and problem as the title, `×`
     beside it, and ‹; `×`, ‹ and Esc (after a running turn's Stop) return to
-    the chain at its tail.
+    the chain at its tail. Below md `×` is the one way back: ‹, ⌂ and the
+    context chip hide (`#bar[data-item]`), so the title has the bar.
   - Composer: a send is `withItem(problem, text)` — `[item: <problem>]` on
     the first line, above a quote block — to `POST /api/continuous/messages`;
     a chat command or skill ask goes unstamped. Every user bubble and queue

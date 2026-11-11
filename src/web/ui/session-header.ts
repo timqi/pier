@@ -161,6 +161,8 @@ export function renderHeader(): void {
     chatTitle.prepend(dot);
   }
   itemClose.classList.toggle("hidden", !item);
+  // Below md the item view's one way back is its × (style.css): ‹, ⌂ and the context chip leave the title the bar.
+  bar.toggleAttribute("data-item", !!item);
   if (list) chatTitle.append(icon(ChevronDown, "ml-1 inline-block h-3.5 w-3.5 align-middle text-neutral-500"));
   if (chatTitle.localName === "button") (chatTitle as HTMLButtonElement).disabled = !s && !list;
   chatTitle.classList.toggle("cursor-pointer", !plain && (!!s || list));

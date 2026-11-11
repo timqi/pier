@@ -146,7 +146,7 @@ holds it, else the first chain's.
   as today; a chat command is sent unstamped. The IM adapters write no item line.
 - Unread, the dot and the next-step rows are the pane's rules unchanged.
 - The phone: the same materials; the bar's `×` and the panel's row action are
-  the touch targets; the search field keeps the panel's keyboard behaviour
+  the touch targets, `×` the bar's one way back (‹, ⌂ and the context chip hidden); the search field keeps the panel's keyboard behaviour
   ([06](06-ui-ux.md)).
 
 ## Chat surface
