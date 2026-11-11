@@ -1131,6 +1131,24 @@ describe("the turn's bubble", () => {
     });
   });
 
+  it("previews a tool's arguments by their values: a lone key's value, else key=value; anything else its JSON", () => {
+    const calls: [string, unknown][] = [
+      ["bash", { command: "cd /w &&\n  npm test" }],
+      ["read", { path: "src/a.ts", offset: 10, limit: 50 }],
+      ["write", { path: "b.md", content: "x".repeat(500) }],
+      ["echo", "plain"],
+      ["noop", {}],
+    ];
+    for (const [i, [name, args]] of calls.entries()) activity.activityToolStart(1, `c${i}`, name, args);
+    const previews = details().at(-1)!.querySelectorAll("summary").map((s) => s.children[2]!.textContent);
+    expect(previews).toEqual([
+      "cd /w && npm test",
+      "path=src/a.ts offset=10 limit=50",
+      `path=b.md content=${"x".repeat(48)}…`,
+      '"plain"',
+      "{}",
+    ]);
+  });
 
   describe("a topic waiting on the user", () => {
     const asks = "<open>auth — waiting on you: 60K or 80K?</open>\n60K or 80K?\n\n---\n[60K] | [80K]";

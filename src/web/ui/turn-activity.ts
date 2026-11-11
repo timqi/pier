@@ -522,11 +522,19 @@ export function noteTurnError(): void {
   if (activity) activity.sawError = true;
 }
 
-/** Sliced before the collapse so a 200KB `write` argument isn't regex-scanned
+const clip = (text: string, max: number): string => (text.length > max ? text.slice(0, max) + "…" : text);
+
+/** The values tell one call from the next, not the JSON around them: a lone
+ *  key's value, else `key=value` pairs; anything not an object, its JSON.
+ *  Sliced before the collapse so a 200KB `write` argument isn't regex-scanned
  *  for 100 characters. */
-function argsPreview(argsText: string): string {
-  const short = argsText.slice(0, 400).replace(/\s+/g, " ");
-  return short.length > 100 ? short.slice(0, 100) + "…" : short;
+function argsPreview(args: unknown, argsText: string): string {
+  const value = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v) ?? "").slice(0, 400).replace(/\s+/g, " ");
+  const entries = args && typeof args === "object" && !Array.isArray(args) ? Object.entries(args) : [];
+  const text = entries.length === 1 ? value(entries[0]![1])
+    : entries.length ? entries.map(([k, v]) => `${k}=${clip(value(v), 48)}`).join(" ")
+    : argsText.slice(0, 400).replace(/\s+/g, " ");
+  return clip(text, 100);
 }
 
 export function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
@@ -549,7 +557,7 @@ function toolRow(group: HTMLElement, id: string, name: string, args: unknown): T
   const statusEl = h("span", "ml-auto flex flex-none");
   // min-w-0, or a flex item's min-content floor keeps an unbreakable argument
   // (a path, a URL) at full width and truncate never gets to run.
-  const preview = h("span", "min-w-0 truncate text-neutral-500", argsPreview(argsText));
+  const preview = h("span", "min-w-0 truncate text-neutral-500", argsPreview(args, argsText));
   const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
     h("span", "flex-none font-semibold", name),
     preview,
@@ -744,7 +752,7 @@ async function fillDetail(group: HTMLElement, turnIndex: number, from?: string):
     }
     const argsText = JSON.stringify(step.args, null, 2) ?? "";
     row.argsPre.textContent = argsText;
-    row.preview.textContent = argsPreview(argsText);
+    row.preview.textContent = argsPreview(step.args, argsText);
     if (step.output) {
       row.outputPre.textContent = step.output;
       row.outputPre.classList.remove("hidden");

@@ -305,7 +305,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   reply rendered as chat markdown (files route against the child session,
   relative paths against its cwd); a delegation's prompt and a task
   message stay plain text. The steps log: thinking,
-  progress, tool rows; tool rows reveal args/output, thinking rows
+  progress, tool rows; a tool row previews its arguments as a lone key's
+  value or `key=value` pairs (non-objects as JSON) and reveals args/output, thinking rows
   tail-capped text; an opened log scrolls independently and follows its
   tail; simple replies leave no empty log; interrupted work stays visible. A
   replayed settled log is drawn on its first open, and one whose detail is
