@@ -5,6 +5,7 @@ import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.te
 const state = vi.hoisted(() => ({
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
   observed: [] as { target: unknown; options?: ResizeObserverOptions; fire: () => void }[],
+  pagehide: null as (() => void) | null,
   reads: null as { onload: (() => void) | null; onerror: (() => void) | null; error: Error | null }[] | null,
 }));
 vi.mock("./chat.js", () => ({
@@ -12,6 +13,20 @@ vi.mock("./chat.js", () => ({
 }));
 vi.mock("./attachments.js", () => ({ imageThumb: () => document.createElement("img") }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
+// The take is voice.test.ts's; here only what the composer does with its events.
+const take = vi.hoisted(() => ({
+  on: null as { onEvent: (e: unknown) => void; onState: (s: string) => void } | null,
+  stop: vi.fn(), cancel: vi.fn(),
+}));
+vi.mock("./voice.js", async (real) => ({
+  ...await real<typeof import("./voice.js")>(),
+  voiceAvailable: () => Promise.resolve(true),
+  startTake: (on: NonNullable<typeof take.on>) => {
+    take.on = on;
+    on.onState("starting");
+    return { stop: take.stop, cancel: take.cancel };
+  },
+}));
 
 const node = (selector: string): FakeElement => fake(document.querySelector(selector));
 /** The nodes on screen right now: a redraw replaces them even when it reads the same. */
@@ -39,7 +54,7 @@ beforeEach(async () => {
   state.id = "a"; state.visible = true; state.observed = [];
   drafts = new Map();
   stored = new Map();
-  vi.stubGlobal("window", {});
+  vi.stubGlobal("window", { addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") state.pagehide = fn; } });
   doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
@@ -775,5 +790,111 @@ describe("the chat-command completion", () => {
     type("/");
     expect(rows()).toEqual([]);
     expect(menu().classList.contains("hidden")).toBe(true);
+  });
+});
+
+describe("voice input", () => {
+  type Draft = FakeElement & { selectionEnd: number; setRangeText: (text: string, from: number, to: number, mode: string) => void };
+  let input: Draft;
+  /** The textarea's caret and `setRangeText(…, "preserve")`, which the DOM double lacks. */
+  beforeEach(async () => {
+    input = node("#input") as Draft;
+    input.selectionEnd = 0;
+    input.setRangeText = (text, from, to) => {
+      const v = input.value;
+      input.value = v.slice(0, from) + text + v.slice(to);
+      if (input.selectionEnd >= to) input.selectionEnd += text.length - (to - from);
+      else if (input.selectionEnd > from) input.selectionEnd = from + text.length;
+    };
+    take.on = null;
+    await settled(); // the availability check
+  });
+  const typeAt = (text: string, caret: number) => {
+    input.value = text;
+    input.selectionEnd = caret;
+    input.oninput!();
+  };
+  const startAt = (text: string, caret: number) => {
+    typeAt(text, caret);
+    node("#voice").onclick!();
+  };
+  const say = (type: string, text: string) => take.on!.onEvent({ type, text });
+
+  it("shows the mic, and its stop and cancel while a take runs", () => {
+    const mic = node("#voice");
+    expect(mic.hidden).toBe(false);
+    expect(node("#voice-cancel").hidden).toBe(true);
+    startAt("", 0);
+    expect(mic.getAttribute("aria-pressed")).toBe("true");
+    expect(node("#voice-cancel").hidden).toBe(false);
+    take.on!.onState("recording");
+    expect([node("#voice-mic").hidden, node("#voice-stop").hidden]).toEqual([true, false]);
+    mic.onclick!();
+    expect(take.stop).toHaveBeenCalledOnce();
+    take.on!.onState("finishing");
+    expect(mic.disabled).toBe(true);
+    take.on!.onState("idle");
+    expect([mic.getAttribute("aria-pressed"), mic.disabled, node("#voice-cancel").hidden]).toEqual(["false", false, true]);
+  });
+
+  it("writes at the caret, follows the user's edits around it, and keeps the text when done", () => {
+    startAt("ask: please", 5);
+    say("partial", "hel");
+    say("final", "Hello. ");
+    expect(input.value).toBe("ask: Hello. please");
+    expect(input.selectionEnd).toBe(12); // the user's caret moved with the text before it
+    typeAt("Then ask: Hello. please", 5);
+    say("partial", "more");
+    expect(input.value).toBe("Then ask: Hello. moreplease");
+    expect(drafts.get("pier.draft.a")).toBe("Then ask: Hello. moreplease");
+    take.on!.onEvent({ type: "done" });
+    take.on!.onState("idle");
+    expect(input.value).toBe("Then ask: Hello. moreplease");
+  });
+
+  it("cancels by removing only what the take still owns", () => {
+    startAt("", 0);
+    say("final", "mine now");
+    typeAt("mine, now", 5); // inside the span: its text is the user's
+    say("partial", " and this");
+    expect(input.value).toBe("mine, and this now");
+    node("#voice-cancel").onclick!();
+    expect(take.cancel).toHaveBeenCalledOnce();
+    expect(input.value).toBe("mine, now");
+  });
+
+  it("drops the partial on an error and says why", () => {
+    startAt("", 0);
+    say("final", "Kept.");
+    say("partial", " lost");
+    take.on!.onEvent({ type: "error", message: "upstream closed" });
+    take.on!.onState("idle");
+    expect(input.value).toBe("Kept.");
+    expect(state.appendTurn).toHaveBeenCalledWith("error", "voice input: upstream closed");
+  });
+
+  it("cancels on a session switch, leaving the old draft without the take's text", () => {
+    startAt("draft ", 6);
+    say("partial", "spoken");
+    select("b");
+    expect(take.cancel).toHaveBeenCalledOnce();
+    expect(drafts.get("pier.draft.a")).toBe("draft ");
+  });
+
+  it("cancels when the page goes away", () => {
+    startAt("", 0);
+    state.pagehide!();
+    expect(take.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("sends the draft as it stands on send, ends the take, and keeps its later text out", async () => {
+    startAt("", 0);
+    say("partial", "half a sentence");
+    state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
+    await composer.send("auto");
+    expect(take.stop).toHaveBeenCalledOnce();
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("half a sentence");
+    say("final", "Half a sentence.");
+    expect(input.value).toBe("");
   });
 });

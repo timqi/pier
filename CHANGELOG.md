@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Web: voice input. The mic beside Send dictates into the draft as you speak — Pier relays the audio to the recognition service, nothing is sent until you send it; × or Esc cancels and removes the dictated text. Shown only when the instance has a recognition key (`DASHSCOPE_API_KEY` in the vault).
+
 ## 1.2.0
 
 ### Changed

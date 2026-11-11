@@ -35,6 +35,12 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`; non-blank text required — attachments were already uploaded and ride the text as marker lines) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/inbox` | body `{name?, mimeType, data}` (base64, ≤32MB) → saved via `core/inbox.ts` under `$PIER_HOME/inbox/web/`, returns `{path}`; the client appends `[name](file:///path)` to the message it then sends |
 | `POST /api/sessions/:id/abort` | abort the current run |
+| `GET /api/voice` | *(voice input, `web/voice.ts`)* `{available}`: a recognition provider is configured and its key readable |
+| `POST /api/voice` | body `{language?}` → open a take, connect upstream, `{id}` (random); 503 `{error}` without a provider. One take per browser session: a new one closes the old |
+| `GET /api/voice/:id/events` | SSE, `data:` JSON: `{type:"ready"}` upstream ready (audio before it is buffered, 128 frames at most, then `error`); `{type:"partial", text}` the current sentence, replacing the last partial; `{type:"final", text}` a settled sentence, appended; `{type:"error", message}` or `{type:"done"}` (after `finish`), then the stream ends. Disconnecting cancels the take |
+| `POST /api/voice/:id/audio` | body raw PCM16LE, 16 kHz, mono, ≤ 256 KB (413 over); 202. Sent serially, so no sequence numbers |
+| `POST /api/voice/:id/finish` | no more audio; `done` follows once upstream has finished |
+| `DELETE /api/voice/:id` | cancel: close upstream, discard. A take lasts 5 minutes at most, closes with `error` after 15 s with neither audio nor `finish`, and is 404 to any other browser session |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
@@ -431,6 +437,25 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Composer**: **Send** submits while idle; while a turn runs, sending queues
   with `mode:"auto"` (amber clock). **Stop** or Esc aborts the running turn.
   Enter sends, never during IME composition (`isComposing`/229).
+- **Voice input** (`voice.ts`, `voice-worklet.ts`): the mic left of Send
+  exists only when `GET /api/voice` is `available` and the browser has
+  `AudioWorkletNode` and `getUserMedia`. A click starts a take: microphone,
+  the capture worklet (`/app/assets/voice-worklet-<hash>.js`, the channels
+  averaged to mono, 16 kHz PCM16, a 250 ms frame), `POST /api/voice`, the
+  take's event stream; audio goes up one POST at a time, frames that queue
+  meanwhile as one body (≤ 32 frames). The next click stops it: the last
+  frame, then `finish`; `done` ends it. The microphone and audio context are
+  released on every exit; text is never sent by itself.
+- **Voice text in the draft**: the take holds a span from the caret where it
+  started — its final sentences, then the partial. `partial` replaces the
+  partial, `final` settles it. An edit wholly before the span moves it, one
+  after leaves it, one touching it gives its text to the user and a new empty
+  span starts at the caret. Each write keeps the user's caret and saves the
+  draft. `done` releases the span. Cancel (×, Esc), a session switch and
+  `pagehide` remove what the span holds and `DELETE` the take; Send ends the
+  take and sends the draft as it stands, later text dropped. `error` and a
+  refused or missing microphone keep the final sentences, drop the partial and
+  post an error row `voice input: <reason>`.
 - **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (each line from `CHAT_COMMANDS`; the

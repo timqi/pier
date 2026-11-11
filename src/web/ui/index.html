@@ -146,6 +146,16 @@
           <textarea id="input" rows="1"
             class="block max-h-48 min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 focus:outline-none"
             placeholder="Message…"></textarea>
+          <!-- Voice input (composer.ts): shown when GET /api/voice is available; cancel while a take runs. -->
+          <button type="button" id="voice-cancel" aria-label="Cancel voice input" hidden
+            class="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
+            <span data-icon="X" class="h-3.5 w-3.5"></span>
+          </button>
+          <button type="button" id="voice" title="Voice input" aria-label="Voice input" aria-pressed="false" hidden
+            class="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
+            <span id="voice-mic" data-icon="Mic" class="h-3.5 w-3.5"></span>
+            <span id="voice-stop" data-icon="Square" hidden class="h-3.5 w-3.5"></span>
+          </button>
           <button type="button" id="stop" title="Stop the running turn" aria-label="Stop the running turn"
             class="hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
             <span data-icon="Square" class="h-3.5 w-3.5"></span>

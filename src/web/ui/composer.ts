@@ -12,6 +12,7 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, splitItem, splitSpeaker, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
+import { type Span, type SpanEdit, spanAt, spanCancel, spanEdited, spanError, spanText, startTake, type Take, type TakeState, type VoiceEvent, voiceAvailable } from "./voice.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
@@ -465,6 +466,7 @@ export function saveDraft(id = deps.sessionId(), text = input.value): void {
 }
 
 export function restoreDraft(id: string): void {
+  cancelVoice(); // the take belongs to the session it was started in
   ++draftVersion;
   input.value = sessionStorage.getItem(draftKey(id)) ?? "";
   autosize();
@@ -505,6 +507,9 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
   if (label === undefined) {
     if (sending) return;
     sending = true;
+    // The take ends, but its later text must not land in the next draft.
+    span = null;
+    take?.stop();
     // Cleared before any await: whatever is typed while an upload runs is a
     // new draft, not collateral of this send.
     input.value = "";
@@ -628,6 +633,84 @@ async function recallQueue(): Promise<void> {
   }
 }
 
+// --- voice input ----------------------------------------------------------------------
+// One take at a time (voice.ts); its text is a span of the draft, last
+// reconciled with the user's edits at `spanDraft`.
+
+const voiceBtn = $<HTMLButtonElement>("#voice");
+const voiceCancel = $("#voice-cancel");
+let take: Take | null = null;
+let takeSession: string | null = null;
+let span: Span | null = null;
+let spanDraft = "";
+
+function spanSync(): void {
+  if (span && input.value !== spanDraft) span = spanEdited(span, spanDraft, input.value, input.selectionEnd);
+  spanDraft = input.value;
+}
+
+/** `setRangeText` with "preserve" keeps the user's caret where it was. */
+function voiceWrite(edit: (span: Span) => SpanEdit): void {
+  spanSync();
+  if (!span) return;
+  const e = edit(span);
+  input.setRangeText(e.text, e.from, e.to, "preserve");
+  span = e.span;
+  spanDraft = input.value;
+  autosize();
+  saveDraft(takeSession);
+}
+
+function voiceEvent(e: VoiceEvent): void {
+  if (e.type === "partial" || e.type === "final") voiceWrite((s) => spanText(s, e.type, e.text));
+  if (e.type !== "error") return;
+  voiceWrite(spanError);
+  appendTurn("error", `voice input: ${e.message}`);
+}
+
+const VOICE_TITLE: Record<TakeState, string> = { idle: "Voice input", starting: "Starting the microphone — click to stop", recording: "Stop voice input", finishing: "Finishing voice input…" };
+
+/** The look of each state is style.css's, keyed on `aria-pressed` and `disabled`. */
+function voiceState(state: TakeState): void {
+  if (state === "idle") take = span = null;
+  const live = state !== "idle";
+  const stopping = state === "recording" || state === "finishing";
+  voiceBtn.disabled = state === "finishing";
+  voiceBtn.title = VOICE_TITLE[state];
+  voiceBtn.setAttribute("aria-pressed", String(live));
+  $("#voice-mic").hidden = stopping;
+  $("#voice-stop").hidden = !stopping;
+  voiceCancel.hidden = !live;
+}
+
+function toggleVoice(): void {
+  if (take) return take.stop();
+  takeSession = deps.sessionId();
+  spanDraft = input.value;
+  span = spanAt(input.selectionEnd);
+  try {
+    take = startTake({ onEvent: voiceEvent, onState: voiceState });
+  } catch (err) {
+    voiceState("idle");
+    appendTurn("error", `voice input: ${String(err)}`);
+  }
+}
+
+function cancelVoice(): void {
+  if (!take) return;
+  voiceWrite(spanCancel);
+  take.cancel();
+}
+
+/** Shown only where the server can transcribe and the browser can capture. */
+async function offerVoice(): Promise<void> {
+  if (!(await voiceAvailable())) return;
+  voiceBtn.hidden = false;
+  voiceBtn.onclick = toggleVoice;
+  voiceCancel.onclick = cancelVoice;
+  window.addEventListener("pagehide", cancelVoice);
+}
+
 // --- wiring ----------------------------------------------------------------------------
 
 export function initComposer(d: ComposerDeps): void {
@@ -641,6 +724,8 @@ export function initComposer(d: ComposerDeps): void {
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });
   };
   stopBtn.onclick = abort;
+  // Before the turn's Esc: a take running is the nearer thing to cancel.
+  escapeKey(voiceCancel, "Cancel voice input", cancelVoice, () => take !== null && deps.chatVisible());
   // Only while the button is on screen: Esc with nothing running belongs to
   // the browser, and in a Console view there is no turn in front of you.
   escapeKey(stopBtn, "Stop the running turn", abort, () =>
@@ -657,6 +742,7 @@ export function initComposer(d: ComposerDeps): void {
   // Focusing the composer means the user is watching the tail.
   input.onfocus = followTail;
   input.oninput = () => {
+    spanSync();
     autosize();
     saveDraft();
     commandDismissed = false;
@@ -706,4 +792,5 @@ export function initComposer(d: ComposerDeps): void {
     attachInput.value = "";
   };
   updateComposer();
+  void offerVoice();
 }

@@ -856,11 +856,15 @@ main {
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
 /* The box docked at the column's foot: a bordered surface, its focus a ring. */
 #composer > div:focus-within { box-shadow: 0 0 0 3px var(--color-indigo-100); }
-#composer :is(#attach, #send, #stop) {
+#composer :is(#attach, #voice, #voice-cancel, #send, #stop) {
   width: var(--composer-control-size);
   height: var(--composer-control-size);
   border-radius: 50%;
 }
+/* A take in progress (composer.ts voiceState): the accent tint; finishing is inert. */
+#voice[aria-pressed="true"] { background: var(--color-indigo-50); color: var(--color-indigo-700); }
+#voice[aria-pressed="true"]:hover { background: var(--color-indigo-100); }
+#voice:disabled { background: none; color: var(--color-neutral-400); cursor: default; }
 /* Opacity/transform entrances avoid layout animation; history replay skips them. */
 @keyframes surface-in {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }
