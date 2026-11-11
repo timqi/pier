@@ -5,7 +5,7 @@
 
 import type { SystemPrompt, SystemPromptBlock } from "../core/types.js";
 import { textOf, type PiMessage } from "./events.js";
-import { ROLE_GUARD, SURFACE_END } from "./roles.js";
+import { DISPATCHER, lead, ROLE_GUARD, SURFACE_END, WORKER } from "./roles.js";
 
 export type PiSystemMessage = PiMessage & { sections?: Record<string, string | null> };
 
@@ -17,12 +17,15 @@ const PIER_FILES: Record<string, string> = {
   "<pier>/worker.md": "Role · worker",
 };
 
-/** Each contract's H1 (roles.ts); a lead's phase is the one section it carries. */
+const h1 = (text: string): string => text.split("\n", 1)[0] ?? "";
+
+/** A contract is known by its whole H1 (roles.ts), which a SYSTEM.md heading may only begin like;
+ *  a lead's phase is the one section it carries. */
 function roleLabel(contract: string): string {
-  const title = contract.split("\n", 1)[0] ?? "";
-  if (title.startsWith("# You are the main session")) return "Role · dispatcher";
-  if (title.startsWith("# You are a worker")) return "Role · worker";
-  if (!title.startsWith("# You are a feature lead")) return "Role";
+  const title = h1(contract);
+  if (title === h1(DISPATCHER)) return "Role · dispatcher";
+  if (title === h1(WORKER)) return "Role · worker";
+  if (title !== h1(lead("build"))) return "Role";
   return /^## Design$/m.test(contract) ? "Role · lead · design" : /^## Build$/m.test(contract) ? "Role · lead · build" : "Role · lead";
 }
 

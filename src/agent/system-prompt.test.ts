@@ -195,7 +195,7 @@ describe("replaySystemPrompt", () => {
     for (const [role, contract, label] of roles) {
       const baseline = pierSystemPrompt(undefined, role, surfacePrompt(instance, role));
       // A SYSTEM.md may carry headings of its own, `# You are …` ones too: with no role it stays the user's whole.
-      for (const user of [undefined, "# Mine\nlocal rules", "# You are terse\nlocal rules"]) {
+      for (const user of [undefined, "# Mine\nlocal rules", "# You are terse\nlocal rules", "# You are the main session's helper\nlocal rules", "# You are a worker bee\nlocal rules", "# You are a feature lead's scribe\nlocal rules"]) {
         expect(replayed(pierSystemPrompt(user, role, surfacePrompt(instance, role), contract))).toEqual([
           { label: "Pier baseline", text: baseline },
           ...(user ? [{ label: "SYSTEM.md", text: user }] : []),
