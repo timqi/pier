@@ -666,12 +666,13 @@ main {
    swatch and the version link keep their face and reach 2.75rem each way, never
    in from the face: a switch's label answers along its whole width. Where the
    gap around one is less, the reach passes under what it meets, as a chip's
-   does: the switches a wrapped row stacks, and a field's control under its help
-   badge, positioned to stay on top (form.ts). */
+   does: a field's control under its help badge, positioned to stay on top
+   (form.ts). The switches a wrapped row stacks stand clear of each other. */
 @media (pointer: coarse) {
   .btn { min-height: 44px; }
   .touch-reach { position: relative; }
   .touch-reach::before { content: ""; position: absolute; inset: min(0px, calc((100% - 2.75rem) / 2)); }
+  .reach-row { row-gap: 1.75rem; } /* over 2.75rem less a label's 1.22rem line: both reaches whole */
 }
 /* The ends are under the chrome (grid above), so they pad by what covers them,
    and rows dissolve into the pane's edges instead of being cut at a chrome
