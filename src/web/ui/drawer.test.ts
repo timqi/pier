@@ -689,6 +689,48 @@ it("moves the focus to the current chain's row when the rail's last item row clo
   vi.useRealTimers();
 });
 
+// An item closed elsewhere takes its focused Undo away with no timer to hand the focus on: the render does, as a sent Close does.
+it("keeps the focus in the list when a focused Undo's item closes elsewhere, on the chain's row after the rail's last", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+  vi.stubGlobal("fetch", asked);
+  const chainRow = doc.createElement("button");
+  chainRow.setAttribute("aria-current", "page");
+  doc.querySelector("#rail-chains")!.append(chainRow);
+  const of = (problem: string) => ({ problem, stage: "", status: "running" as const, runs: [], chain: c });
+  const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
+  const closeFocused = (li: () => ReturnType<typeof item>): void => {
+    const close = li().querySelector(".item-close")!;
+    close.focus();
+    close.onclick?.();
+    expect(doc.activeElement).toBe(undoOf(li()));
+  };
+  open = { items: [of("auth"), of("deploy"), of("billing")], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+
+  // The panel's middle row: the row that takes its place takes the focus.
+  closeFocused(() => item("item:a/deploy"));
+  open = { items: [of("auth"), of("billing")], unlisted: [] };
+  drawer.renderDrawer();
+  expect(doc.activeElement).toBe(item("item:a/billing").querySelector(".session-open"));
+  // The rail's bottom row: the one above it.
+  closeFocused(() => railItem("item:a/billing"));
+  open = { items: [of("auth")], unlisted: [] };
+  drawer.renderDrawer();
+  expect(doc.activeElement).toBe(railItem("item:a/auth").querySelector(".session-open"));
+  // The rail's last row: `Nothing open` has no list, so the current chain's row.
+  closeFocused(() => railItem("item:a/auth"));
+  open = { items: [], unlisted: [] };
+  drawer.renderDrawer();
+  expect(rail().textContent).toContain("Nothing open");
+  expect(doc.activeElement).toBe(chainRow);
+  lapse();
+  expect(asked).not.toHaveBeenCalled();
+  vi.useRealTimers();
+});
+
 // A search's open match is its panel row: a row the stream drops leaves the results too, not left behind as a detached node.
 it("drops a search's open match whose row the stream took away", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

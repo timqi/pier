@@ -203,17 +203,22 @@ const UNDO_MS = 5000;
 const undoNodes: Record<Surface, Map<string, HTMLElement>> = { panel: new Map(), rail: new Map() };
 /** A render's rows in order, and the chain of each item row by key. */
 interface Listed { ordered: OpenItemPresentation[]; chainOf: Map<string, OpenItem["chain"]> }
+const listOf = (surface: Surface): HTMLElement | null => (surface === "rail" ? railList : list);
+/** Where `key`'s row stands in a surface's list while the focus is inside it, else -1. */
+const focusedRow = (key: string, surface: Surface): number =>
+  [...(listOf(surface)?.children ?? [])].findIndex((li) => (li as HTMLElement).dataset.rowKey === key && li.contains(document.activeElement));
 
 /** Items keep their own identity even when they hold the same session; only independent sessions deduplicate.
  *  Waiting on you first, every chain's; then the current chain's rest, then the other chains' (§状态面板). */
-function listed(now: number): Listed & { sessions: SessionInfo[] } {
+function listed(now: number): Listed & { sessions: SessionInfo[]; dropped: string[] } {
   const open = deps.open() ?? { items: [], unlisted: [] };
   const held = new Set([...open.items.flatMap((i) => i.runs), ...open.unlisted].flatMap((r) => (r.targetSessionId ? [r.targetSessionId] : [])));
   const sessions = inProgress(deps.sessions(), deps.chain(), deps.chains());
   const chainOf = new Map(open.items.map((i) => [itemKey(i.problem, i.chain?.id), i.chain]));
   for (const key of closing) if (!chainOf.has(key)) closing.delete(key);
   // Its item left the list while its Undo showed, closed elsewhere: nothing is left to close.
-  for (const [key, close] of pending) if (!chainOf.has(key)) { clearTimeout(close.timer); pending.delete(key); }
+  const dropped = [...pending.keys()].filter((key) => !chainOf.has(key));
+  for (const key of dropped) { clearTimeout(pending.get(key)!.timer); pending.delete(key); }
   const all = [
     ...open.items.map((i) => itemRow(i, now)).filter((p) => !closing.has(p.key)),
     ...open.unlisted.map((r) => unlistedRow(r, now)),
@@ -225,7 +230,7 @@ function listed(now: number): Listed & { sessions: SessionInfo[] } {
   const waits = (r: OpenItemPresentation): boolean => waitsOnYou(r.status);
   const elsewhere = (r: OpenItemPresentation): boolean => chainTag(chainOf.get(r.key)) !== undefined;
   const rest = all.filter((r) => !waits(r));
-  return { ordered: [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)], chainOf, sessions };
+  return { ordered: [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)], chainOf, sessions, dropped };
 }
 
 /** One surface's row nodes for `ordered`, reused by key; a node whose row left is dropped. */
@@ -301,6 +306,8 @@ export function renderDrawer(): void {
   if (key === drawn) return;
   drawn = key;
   const got = listed(Date.now());
+  // A dropped Close's Undo that holds the focus, on either surface: read before its row goes.
+  const left = (["panel", "rail"] as const).flatMap((on) => got.dropped.map((key) => ({ on, at: focusedRow(key, on) }))).find((l) => l.at >= 0);
   // A row waiting on its Close is no longer what the bar leads with or counts.
   ordered = got.ordered.filter((p) => !pending.has(p.key));
   const sessions = got.sessions;
@@ -322,6 +329,16 @@ export function renderDrawer(): void {
     if (!rows.length) closeMenu();
     else fillPanel();
   }
+  if (left) focusRow(left.on, left.at);
+}
+
+/** Focus stays in the list for the keys' walk: on the row now at `at`, where one left. The rail's
+ *  last row leaves its list for `Nothing open`, so the current chain's row above takes it. */
+function focusRow(surface: Surface, at: number): void {
+  const root = listOf(surface);
+  const to = root?.isConnected ? (root.children[at] ?? root.lastElementChild)?.querySelector("button")
+    : surface === "rail" ? $("#rail-chains").querySelector<HTMLElement>("[aria-current]") ?? $("#rail-chains").querySelector("button") : null;
+  to?.focus({ preventScroll: true });
 }
 
 const standing = (error: HTMLElement | null): HTMLElement | null =>
@@ -385,8 +402,7 @@ announcer.setAttribute("role", "status");
 function closeItem(problem: string, chain: string, from: Surface): void {
   const key = itemKey(problem, chain);
   if (pending.has(key)) return;
-  const root = from === "rail" ? railList : list;
-  const focused = !!root && [...root.children].some((li) => (li as HTMLElement).dataset.rowKey === key && li.contains(document.activeElement));
+  const focused = focusedRow(key, from) >= 0;
   pending.set(key, { problem, chain, from, timer: setTimeout(() => void sendClose(key), UNDO_MS) });
   closeError = railError = null;
   renderDrawer();
@@ -416,22 +432,14 @@ async function sendClose(key: string): Promise<void> {
   const { problem, chain, from, timer } = close;
   clearTimeout(timer);
   pending.delete(key);
-  const root = from === "rail" ? railList : list;
-  const row = root ? [...root.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
-  const focused = row >= 0 && root!.children[row]!.contains(document.activeElement);
+  const row = focusedRow(key, from);
   // The previous refusal atop the list leaves with this Close: the rows below it move up one.
   const error = from === "rail" ? railError : closeError;
-  const at = error && error.parentElement === root ? row - 1 : row;
+  const at = error && error.parentElement === listOf(from) ? row - 1 : row;
   closing.add(key);
   closeError = railError = null;
   renderDrawer();
-  // Focus stays in the list for the keys' walk: on the row that took the closed one's place. The rail's
-  // last row leaves its list for `Nothing open`, so the current chain's row above takes it.
-  if (focused) {
-    const to = root?.isConnected ? (root.children[at] ?? root.lastElementChild)?.querySelector("button")
-      : from === "rail" ? $("#rail-chains").querySelector<HTMLElement>("[aria-current]") ?? $("#rail-chains").querySelector("button") : null;
-    to?.focus({ preventScroll: true });
-  }
+  if (row >= 0) focusRow(from, at);
   const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item", true);
   if (refusal === undefined) return;
   closing.delete(key);
