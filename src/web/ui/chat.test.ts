@@ -652,12 +652,13 @@ describe("tail follow across the final render", () => {
     frame();
     expect(top).toBe(100);
     expect(button.hasAttribute("data-unread")).toBe(true);
-    expect(button.getAttribute("aria-label")).toBe("滚到底部（有新消息）");
+    expect(button.getAttribute("aria-label")).toBe("Scroll to the end (new messages)");
     button.click();
     frame();
     expect(atEnd()).toBe(true);
     expect(button.hasAttribute("data-show")).toBe(false);
     expect(button.hasAttribute("data-unread")).toBe(false);
+    expect(button.getAttribute("aria-label")).toBe("Scroll to the end");
     chat.appendDelta("Streaming on. ".repeat(20));
     frame();
     expect(atEnd()).toBe(true); // following again

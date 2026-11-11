@@ -222,7 +222,7 @@ function paintToBottom(): void {
   const unread = landedSeq !== seenSeq;
   toBottom.toggleAttribute("data-show", away);
   toBottom.toggleAttribute("data-unread", unread);
-  toBottom.setAttribute("aria-label", unread ? "滚到底部（有新消息）" : "滚到底部");
+  toBottom.setAttribute("aria-label", unread ? "Scroll to the end (new messages)" : "Scroll to the end");
 }
 
 toBottom.onclick = () => {

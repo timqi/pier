@@ -326,10 +326,10 @@ it("names the item view's problem with its dot and ×, each way out opening the 
 });
 
 // The floating home button is the same way back, there only off the conversation.
-it("shows the floating 回到主会话 button on a run or another session, and it opens the conversation", () => {
+it("shows the floating ⌂ button on a run or another session, and it opens the conversation", () => {
   const toMain = fake(document.querySelector("#to-main"));
-  expect(toMain.getAttribute("aria-label")).toBe("回到主会话");
-  expect(toMain.title).toBe("回到主会话");
+  expect(toMain.getAttribute("aria-label")).toBe("Back to the conversation");
+  expect(toMain.title).toBe("Back to the conversation");
   current = { ...session(0), title: "run" };
   header.renderHeader();
   expect(toMain.hasAttribute("data-show")).toBe(true);
