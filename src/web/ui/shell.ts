@@ -21,8 +21,8 @@ export function setBadge(count: number): boolean {
 
 /** Web Push cannot reach a webview; the workspace stream's copy comes here. A
  *  click is the shell's: it sets this page's hash itself, so no event comes back. */
-export function notify({ title, body, url, tag }: { title: string; body: string; url: string; tag: string }): void {
-  invoke("notify", { title, body, url, tag });
+export function notify({ headline, title, body, url, tag }: { headline: string; title: string; body: string; url: string; tag: string }): void {
+  invoke("notify", { headline, title, body, url, tag });
 }
 
 /** The palette this page paints in, so the shell's tab bar can follow the

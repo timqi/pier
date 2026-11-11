@@ -2155,7 +2155,7 @@ describe("workbench server", () => {
     const open = async (cookie?: string) =>
       (await app.request("/api/events", cookie ? { headers: { cookie } } : {})).body!.getReader();
     const readers = { a: await open("pier_session=a.sig"), b: await open("pier_session=b.sig"), none: await open() };
-    const note = { title: "pier", body: "done", url: "/app/#/session/s1", tag: "s1" };
+    const note = { headline: "g1 · pier", title: "pier", body: "done", url: "/app/#/session/s1", tag: "s1" };
     hub.emitWorkspace({ type: "notification", ...note, browser: "a" });
     hub.emitWorkspace({ type: "notification", ...note, tag: "all" });
     hub.emitWorkspace({ type: "sessions-changed" });

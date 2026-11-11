@@ -78,6 +78,7 @@ function setup(settleMs = 0, title = "pier") {
   const unread = vi.fn(() => true);
   const channelOf = vi.fn((_id: string): string | undefined => "web");
   const browserOf = vi.fn((_id: string): string | undefined => undefined);
+  const chainName = vi.fn((_id: string): string | undefined => undefined);
   const app = new Hono();
   registerPushRoutes(app, {
     store,
@@ -86,6 +87,8 @@ function setup(settleMs = 0, title = "pier") {
     channelOf,
     browserOf,
     summary: async () => ({ title, cwd: "/tmp/pier" }),
+    chainName,
+    host: "g1",
     publicUrl: () => "https://pier.example.com",
     settleMs,
   });
@@ -95,7 +98,7 @@ function setup(settleMs = 0, title = "pier") {
     sent.push({ url: String(url), body: init.body as Uint8Array });
     return new Response(status.body, { status: status.code });
   }));
-  return { app, hub, store, auth, db, cookie, unread, channelOf, browserOf, sent, status };
+  return { app, hub, store, auth, db, cookie, unread, channelOf, browserOf, chainName, sent, status };
 }
 
 afterEach(() => {
@@ -387,6 +390,7 @@ describe("the finished-turn trigger", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(events.filter((e) => e.type === "notification")).toEqual([{
       type: "notification",
+      headline: "g1",
       title: "pier",
       body: "all done",
       url: "/app/#/session/s1",
@@ -484,6 +488,7 @@ describe("the finished-turn trigger", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload).toEqual({
+      headline: "g1",
       title: "pier",
       body: "… the answer",
       url: "/app/#/session/s1",
@@ -524,6 +529,28 @@ describe("the finished-turn trigger", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
     expect(payload.body).toBe("Merged — restart when you like.");
+  });
+
+  it("previews the words without the markdown marks", async () => {
+    const { app, hub, sent, cookie } = setup(3_000);
+    const sub = await subscribe(app, cookie);
+    finishTurn(hub, "## Done\n\n**Merged** `main` per [the plan](https://x.test):\n\n- one\n1. two\n> quoted");
+    await vi.advanceTimersByTimeAsync(3_000);
+    const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
+    expect(payload.body).toBe("Done Merged main per the plan: one two quoted");
+  });
+
+  it("heads with the host and chain, titled by the reply's item, else by its chain", async () => {
+    const { app, hub, sent, cookie, chainName } = setup(3_000);
+    chainName.mockReturnValue("pier");
+    const sub = await subscribe(app, cookie);
+    finishTurn(hub, "Merged.\n<open>notify title — review</open>");
+    await vi.advanceTimersByTimeAsync(3_000);
+    finishTurn(hub, "Nothing on the list.");
+    await vi.advanceTimersByTimeAsync(3_000);
+    const [item, chain] = sent.map((s) => JSON.parse(decryptPush(s.body, sub)) as PushPayload);
+    expect([item?.headline, item?.title, item?.body]).toEqual(["g1 · pier", "notify title", "Merged."]);
+    expect([chain?.headline, chain?.title]).toEqual(["g1 · pier", "pier"]);
   });
 
   it("names the session without the speaker header its title carries", async () => {

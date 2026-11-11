@@ -430,7 +430,7 @@ export type WorkspaceEvent =
    *  reach (the native shell's webview). `browser` is the web auth session it
    *  targets (`sessionIdOf`, web/auth.ts), absent for every device; the SSE
    *  route filters on it and never writes it. */
-  | { type: "notification"; title: string; body: string; url: string; tag: string; browser?: string };
+  | { type: "notification"; headline: string; title: string; body: string; url: string; tag: string; browser?: string };
 
 /** How much of a tool result any surface ever shows. A transcript replay
  *  carries no more than that: a session's tool output is most of its history

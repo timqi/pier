@@ -7,11 +7,12 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Hono } from "hono";
 import type { EventHub } from "../core/hub.js";
 import { sessionLabel } from "../core/identity.js";
-import { cut, isSilentReply, splitReply } from "../core/reply.js";
+import { cut, isSilentReply, replyTopic, saidText, splitReply } from "../core/reply.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 import { isSealed, type Secrets } from "../secrets.js";
 import { sessionIdOf } from "./auth.js";
+import { plainText } from "./plain-text.js";
 import {
   generateVapidKeys,
   type PushTarget,
@@ -119,6 +120,9 @@ export class PushStore {
 
 /** A push service need not carry more than 4 kB. */
 export interface PushPayload {
+  /** `<host> · <chain>`: which instance and chain spoke. */
+  headline: string;
+  /** The open item the reply is about, else its chain, else its session. */
   title: string;
   body: string;
   url: string;
@@ -136,14 +140,19 @@ interface PushDeps {
    *  only that browser is notified. Undefined: nobody has, so every device. */
   browserOf(sessionId: string): string | undefined;
   summary(sessionId: string): Promise<{ title?: string; cwd: string } | undefined>;
+  /** The name of the chain the session is a head of; undefined outside every chain. */
+  chainName(sessionId: string): string | undefined;
+  /** The machine's short hostname, the headline's lead. */
+  host: string;
   /** For the VAPID `sub` claim only. */
   publicUrl(): string;
   /** Test seam. */
   settleMs?: number;
 }
 
-const preview = (text: string): string =>
-  cut(text.replace(/```[\s\S]*?```/g, "…").replace(/\s+/g, " ").trim(), MAX_BODY_CHARS);
+/** A lock screen shows no markup: Pier's markers and the markdown marks are taken off. */
+const preview = (markdown: string): string =>
+  cut(plainText(saidText(markdown).replace(/```[\s\S]*?```/g, "…")).replace(/\s+/g, " ").trim(), MAX_BODY_CHARS);
 
 /** A half-valid subscription would fail later, inside a send nobody watches. */
 function parseTarget(body: unknown): PushTarget | null {
@@ -166,7 +175,7 @@ function parseTarget(body: unknown): PushTarget | null {
 }
 
 export function registerPushRoutes(app: Hono, deps: PushDeps): void {
-  const { store, hub, unread, channelOf, browserOf, summary, publicUrl, settleMs = SETTLE_MS } = deps;
+  const { store, hub, unread, channelOf, browserOf, summary, chainName, host, publicUrl, settleMs = SETTLE_MS } = deps;
 
   /** Must be a mailto: or https: URL or Apple rejects the token outright. */
   const subject = (): string => {
@@ -260,9 +269,11 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
       }
       // One async step before the send, so a failure in either half is reported.
       void (async () => {
+        const chain = chainName(e.sessionId);
         await deliver({
-          title: sessionLabel(await summary(e.sessionId)),
-          body: preview(reply.text) || "Turn finished.",
+          headline: [host, chain].filter(Boolean).join(" · ") || "Pier",
+          title: replyTopic(text) ?? chain ?? sessionLabel(await summary(e.sessionId)),
+          body: preview(text) || "Turn finished.",
           url: `/app/#/session/${encodeURIComponent(e.sessionId)}`,
           tag: e.sessionId,
         }, browserOf(e.sessionId));
@@ -320,6 +331,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
   // On a phone, a permission granted to the wrong context looks like a granted one.
   app.post("/api/push/test", async (c) => {
     const { sent, failed } = await deliver({
+      headline: host || "Pier",
       title: "Pier",
       body: "Notifications are working.",
       url: "/app/",

@@ -1,6 +1,7 @@
 // Wiring only — no logic lives here. See docs/architecture.md.
 
 import { existsSync } from "node:fs";
+import { hostname as machineName } from "node:os";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -371,6 +372,11 @@ registerPushRoutes(app, {
   channelOf: (id) => router.conversationOf(id)?.channelId,
   browserOf: (id) => sessionState.browserOf(id),
   summary: (id) => factory.find(id),
+  chainName: (id) => {
+    const chainId = chain.chainOf(id)?.chainId;
+    return chainId === undefined ? undefined : chains.get(chainId)?.name;
+  },
+  host: machineName().split(".")[0] ?? "",
   publicUrl: () => settings.get().publicUrl,
 });
 app.route("/", createServer({

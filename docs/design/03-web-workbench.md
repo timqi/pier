@@ -130,7 +130,12 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `focus` event comes), and `document.hasFocus()` — and the chat shows that
   session. Sessions answering an IM conversation
   (`router.conversationOf(id)`) are not, nor is a run all of whose non-empty
-  turns stayed silent; the body is the last spoken turn's `splitReply(text).text`, markers off.
+  turns stayed silent; the body is the last spoken turn's `saidText` read as `plainText`
+  (`src/web/plain-text.ts`): Pier's markers and the markdown marks off.
+- The payload is `{headline, title, body, url, tag}`: `headline` is `<host> · <chain>`
+  (the short hostname alone outside a chain), `title` the reply's item (`replyTopic`),
+  else its chain's name, else the session's label. `sw.js` shows `headline` as the
+  notification's title and `title` as the body's first line.
 - Only the browser that spoke is notified: a message, an edit or a queue
   delivery records the sender's web session on the Pi session
   (`SessionStateStore.spokeFrom`, memory only), and the push goes to that
@@ -386,7 +391,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   takes it, nor a chat command or an ask naming one of the session's skills
   (`isCommandText`, `core/types.ts`); `/tmp` or `/Users/…` is a reply. A user bubble renders the quote as a block above its words — role
   and minute, the excerpt clamped to two lines (a reply's markdown shown as
-  plain text, `dom.ts` `plainText`; the stored excerpt unchanged), a neutral grey bar — and a click reveals the source
+  plain text, `plain-text.ts` `plainText`; the stored excerpt unchanged), a neutral grey bar — and a click reveals the source
   (`quoteSource`: same role and minute, then the row whose text opens with
   the excerpt); a source not on screen leaves the block inert with a title
   saying so. Only user messages carry quotes.

@@ -10,7 +10,8 @@ import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewrite
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitItem, splitQuote, splitSpeaker, withoutHeaderLanguage, withoutLanguage, type Quote, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, plainText, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { plainText } from "../plain-text.js";
+import { $, addCodeCopy, agoLabel, h, holdToCopy, markdownBox, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { openItemsCard } from "./open-items.js";
 import { RUNS_IN_NO_ITEM, type OpenItemsSnapshot, type OpenItemTarget } from "../../core/types.js";
 import { button } from "./form.js";

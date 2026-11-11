@@ -66,10 +66,12 @@ self.addEventListener("push", (event) => {
   } catch {
     data = {};
   }
-  const title = data.title || "Pier";
+  // A Web Notification has no subtitle: the item or chain leads the body under the headline.
+  const title = data.headline || data.title || "Pier";
+  const body = data.body || "A turn finished.";
   event.waitUntil((async () => {
     await self.registration.showNotification(title, {
-      body: data.body || "A turn finished.",
+      body: data.headline && data.title ? `${data.title}\n${body}` : body,
       tag: data.tag || "pier",
       // The tag collapses a session's turns into one banner; without this the
       // second turn silently replaces the first — no sound, no re-alert, which

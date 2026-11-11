@@ -139,7 +139,7 @@ one ~30-line module; in a browser every call is a no-op.
 - **Notifications**: Web Push cannot reach a webview, so the push pipeline
   (`push.ts`: settle window, silent-reply and seen checks, "the browser that
   spoke" targeting) gains a second delivery: besides the push, `deliver`
-  emits `{type: "notification", title, body, url, tag}` on the workspace
+  emits `{type: "notification", headline, title, body, url, tag}` on the workspace
   stream, and `GET /api/events` forwards it only to the web session the push
   targets (every one for the "every device" case). The UI in a browser
   ignores the event (push already covers it); in the shell the bridge hands
@@ -148,7 +148,7 @@ one ~30-line module; in a browser every call is a no-op.
   accent preset nearest the instance's accent by hue, and the preset's
   `icon-192-<accent>.png` is the notification's image (macOS `contentImage`
   on the right, the left one is the bundle's; the freedesktop app icon
-  elsewhere). The session's title is the macOS subtitle, dropped elsewhere.
+  elsewhere). The payload's `title` is the macOS subtitle, dropped elsewhere; the bridge passes `headline` too, which the shell does not read yet.
   It plays the system's default sound
   (`NSUserNotificationDefaultSoundName`; the freedesktop `message-new-instant`
   elsewhere) unless the same session's sounded within 30s. Body is the same

@@ -67,6 +67,7 @@ src/
                route answers JSON), fs.ts (confined resolver + ls/file/mkdir), explorer.ts
                (git refs, worktrees, diffs), session-state.ts (unread, working
                set), push.ts + webpush.ts (RFC 8291/8292), ui/public/sw.js,
+               plain-text.ts (markdown without its marks, the server's and the UI's),
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
