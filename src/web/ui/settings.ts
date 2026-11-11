@@ -98,6 +98,8 @@ export function createSettingsView(
       theme,
       closeBtn,
     );
+    // Seven tabs outrun a phone's strip: the open one, which Settings may reopen on, is brought into it.
+    head.querySelector("[aria-current]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   // --- Instance: public URL ------------------------------------------------------

@@ -103,7 +103,7 @@ export function swatches(options: [string, string][], value: string, onChange: (
 export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
   const el = btn(
     label,
-    `flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+    `tab flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] transition-colors ${
       active
         ? "bg-indigo-100 font-medium text-indigo-700"
         : "text-neutral-600 hover:bg-neutral-200"

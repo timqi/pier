@@ -642,6 +642,11 @@ main {
    switch and a status line, not a page's worth of band — centres them over the
    column of cards below it instead of hanging them off the left edge. */
 .pagehead-hug { justify-content: center; }
+/* A tab's width stays its label's: a min-width would let the scrolling strip squeeze it. */
+@media (pointer: coarse) {
+  .pagehead :is(.tab, .icon-btn) { min-height: 44px; }
+  .pagehead .icon-btn { min-width: 44px; }
+}
 /* The ends are under the chrome (grid above), so they pad by what covers them,
    and rows dissolve into the pane's edges instead of being cut at a chrome
    boundary. An end row's own --turn-gap is its distance from the chrome; the
