@@ -1,6 +1,6 @@
 # chain 章程与 system prompt 的分层
 
-状态：用户已定稿（lead branch `chain-charter`）。只出设计，不写实现；不碰 `native/`。
+状态：已实现（branch `chain-charter`）；不碰 `native/`。
 换 head 时沿用上一个 head 的 model/thinking 由 run `fyv4xsjvfnyv82z8` 做，不在本文。
 
 本文两部分：A 是对现有 system prompt 拼装的 review，B 是四项改动——chain 章程、
