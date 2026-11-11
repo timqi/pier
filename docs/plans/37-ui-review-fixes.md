@@ -100,8 +100,7 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 1440×900、1180×820 粗指针、390×844 粗指针，亮暗各一遍，截图在 `/tmp/ui22/shots/`。顺带修了：Undo 行等高 `742f03a`、粗指针 popover 菜单行 44px `af4adb4`、侧栏 New chain `+` 44px `fae0c92`、Agent 的 Add tool/package 44px `ffd6e74`。
 
 未修、需取舍（不在 28 条内）：
-- Settings 里粗指针下不到 44px 的控件：`.btn` 37–41px、Slack/Lark 与 Vault 开关 25–29px、帮助 `?` 16–18px、accent 色块 40px、版本链接。06 只承诺了标签、主题和 ✕。
-- 状态面板搜索框平板上 38px；Agent package 展开箭头宽 20px。
+- Settings 粗指针控件已补到 44px（`.btn` min-height，开关/分段/帮助 `?`/色块/版本链接用 `.touch-reach` 热区，状态面板搜索框 min-h-11）。未补：文本输入框平板上 41px、句中的 `vt` 链接 11×15、Agent package 展开箭头宽 20px（热区会盖住旁边的标签）。
 - 字号的遗留写法（值已在档位上，但写成 rem 字面量）：`chains.ts` 等约 10 处。
 - 待查：从子会话重载 `#/settings/models` 显示了子会话而不是 Settings（测试夹具或产品 bug，未定）。
 

@@ -661,6 +661,14 @@ main {
   .pagehead :is(.tab, .icon-btn) { min-height: 44px; }
   .pagehead .icon-btn { min-width: 44px; }
 }
+/* A form on a thumb: a button grows to the floor; a switch, a help badge, a
+   swatch and the version link keep their face and reach 2.75rem each way, which
+   the gaps around them hold without covering a neighbour. */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .touch-reach { position: relative; }
+  .touch-reach::before { content: ""; position: absolute; inset: calc((100% - 2.75rem) / 2); }
+}
 /* The ends are under the chrome (grid above), so they pad by what covers them,
    and rows dissolve into the pane's edges instead of being cut at a chrome
    boundary. An end row's own --turn-gap is its distance from the chrome; the

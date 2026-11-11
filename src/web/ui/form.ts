@@ -32,7 +32,7 @@ export function segmented<K extends string>(options: [string, K, IconNode?][], v
     const active = key === value;
     const opt = btn(
       glyph ? "" : label,
-      `cursor-pointer whitespace-nowrap rounded text-[12px] transition-colors ${glyph ? "flex h-7 w-7 items-center justify-center" : "px-3 py-1"} ${
+      `touch-reach cursor-pointer whitespace-nowrap rounded text-[12px] transition-colors ${glyph ? "flex h-7 w-7 items-center justify-center" : "px-3 py-1"} ${
         active ? "bg-white font-medium text-neutral-800 ring-1 ring-(--line)" : "text-neutral-500 hover:text-neutral-700"
       }`,
     );
@@ -60,7 +60,7 @@ export function swatches(options: [string, string][], value: string, onChange: (
   const buttons = options.map(([key, color]) => {
     const opt = btn(
       "",
-      "flex h-10 w-10 cursor-pointer items-center justify-center rounded-full ring-neutral-800 ring-offset-2 ring-offset-white transition-shadow hover:ring-2",
+      "touch-reach flex h-10 w-10 cursor-pointer items-center justify-center rounded-full ring-neutral-800 ring-offset-2 ring-offset-white transition-shadow hover:ring-2",
     );
     opt.style.background = color;
     opt.setAttribute("role", "radio");
@@ -226,7 +226,7 @@ export function toggle(
   );
   // relative: the sr-only box is absolute, and would otherwise land outside a
   // scrolling pane and stretch the document.
-  const row = h("label", `relative flex cursor-pointer gap-2.5 ${label ? "items-start" : "items-center"}`);
+  const row = h("label", `touch-reach relative flex cursor-pointer gap-2.5 ${label ? "items-start" : "items-center"}`);
   row.append(box, track);
   if (label) {
     const head = h("span", "flex items-center gap-1.5", h("span", "text-[13px] text-neutral-700", label));
@@ -310,7 +310,7 @@ export function helpBadge(title: string, steps: (string | HTMLElement)[]): HTMLE
   const wrap = h("span", "group relative inline-flex");
   const badgeEl = btn(
     "",
-    "flex h-4 w-4 cursor-help items-center justify-center text-neutral-400 transition-colors group-hover:text-indigo-500",
+    "touch-reach flex h-4 w-4 cursor-help items-center justify-center text-neutral-400 transition-colors group-hover:text-indigo-500",
   );
   badgeEl.append(icon(CircleQuestionMark, "h-full w-full"));
   badgeEl.setAttribute("aria-label", title);

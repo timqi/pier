@@ -477,7 +477,7 @@ async function search(q: string): Promise<void> {
 }
 
 function searchField(): HTMLInputElement {
-  const field = h("input", "mb-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900") as HTMLInputElement;
+  const field = h("input", "mb-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 pointer-coarse:min-h-11") as HTMLInputElement;
   field.type = "search";
   field.placeholder = "Search items, closed ones too";
   field.setAttribute("aria-label", "Search items");
