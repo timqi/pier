@@ -233,6 +233,7 @@ function rowsOn(surface: Surface, { ordered, chainOf }: Listed): HTMLElement[] {
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
       panelView: (problem) => toView(problem, chain?.id),
       ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id, surface) } : {}),
+      folded: surface === "rail",
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
     }, nodes.get(p.key));

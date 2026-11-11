@@ -14,6 +14,7 @@ const menu = vi.hoisted(() => ({
     menu.panel = panel;
     return panel;
   }),
+  openMenu: vi.fn(),
 }));
 vi.mock("./menu.js", async (actual) => ({ ...(await actual<typeof import("./menu.js")>()), ...menu }));
 const badge = vi.hoisted(() => vi.fn());
@@ -527,6 +528,30 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   item("item:b/asks").querySelector(".item-close")!.onclick?.();
   expect(railRows()).toEqual(["solo"]);
   expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
+});
+
+// Without hover the sidebar's row folds its two actions into one ⋯ (style.css); the panel's keeps both.
+it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's none", async () => {
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return { ok: true, status: 200, json: async () => ({}) }; }));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
+  expect(item("item:a/auth").querySelector(".item-more")).toBeNull();
+  expect(railItem("session:solo").querySelector(".item-more")).toBeNull();
+  const more = railItem("item:a/auth").querySelector(".item-more")!;
+  expect(more.getAttribute("aria-label")).toBe("Actions for auth");
+  more.onclick?.();
+  const [anchor, entries, title] = menu.openMenu.mock.calls[0]! as [unknown, { label: string; onSelect: () => void }[], string];
+  expect([anchor, entries.map((e) => e.label), title]).toEqual([more, ["Item view", "Close"], "auth"]);
+  entries[0]!.onSelect();
+  expect(itemView).toHaveBeenCalledWith("auth", "a");
+  entries[1]!.onSelect();
+  expect(railRows()).toEqual(["solo"]);
+  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
 });
 
 // The rail's last row closed leaves `Nothing open` and no list to keep the focus in: the current chain's row above takes it.
