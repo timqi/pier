@@ -4,12 +4,13 @@ import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.te
 
 const state = vi.hoisted(() => ({
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
+  pane: { offsetWidth: 0, clientWidth: 0 },
   observed: [] as { target: unknown; options?: ResizeObserverOptions; fire: () => void }[],
   pagehide: null as (() => void) | null,
   reads: null as { onload: (() => void) | null; onerror: (() => void) | null; error: Error | null }[] | null,
 }));
 vi.mock("./chat.js", () => ({
-  appendTurn: state.appendTurn, excerptText: (t: string, _role: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
+  appendTurn: state.appendTurn, excerptText: (t: string, _role: string) => t.split("\n")[0], followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: state.pane,
 }));
 vi.mock("./attachments.js", () => ({ imageThumb: () => document.createElement("img") }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
@@ -134,6 +135,13 @@ it("measures the dock's parts as border-box", () => {
   const dock = state.observed.filter((o) => o.target !== node("#input").parentNode).map((o) => o.options);
   expect(dock.length).toBe(2);
   expect(dock).toEqual(dock.map(() => ({ box: "border-box" })));
+});
+
+// The pane's two scrollbar gutters come out of its inset, so a reply's edges stay the dock's.
+it("hands the pane half its scrollbar's width per edge", () => {
+  Object.assign(state.pane, { offsetWidth: 980, clientWidth: 960 });
+  state.observed.find((o) => o.target === node("#composer"))!.fire();
+  expect(fake(document.querySelector("main")).style.getPropertyValue("--gutter")).toBe("10px");
 });
 
 // The height is read at the row's width: a window resized under a draft reads it again.

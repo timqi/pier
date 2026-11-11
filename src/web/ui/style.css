@@ -649,8 +649,10 @@ main {
 #turns {
   padding:
     var(--head-h)
-    var(--col-pad)
+    max(0px, calc(var(--col-pad) - var(--gutter, 0px)))
     calc(var(--dock-h, 4rem) - 0.5rem);
+  /* Centred whether a classic scrollbar shows or not; composer.ts measures --gutter. */
+  scrollbar-gutter: stable both-edges;
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts reveal). */
   scroll-padding-block: calc(var(--head-h) + var(--turn-gap)) calc(var(--dock-h, 4rem) - 0.5rem + var(--turn-gap));
