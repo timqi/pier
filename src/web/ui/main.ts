@@ -194,9 +194,10 @@ async function chainHolding(problem: string): Promise<string | null> {
 }
 
 /** Where the reader left each chain's conversation, in memory: the row at the pane's top, how far
- *  above it that row began, the newest row then, and how many earlier sessions were paged in above —
- *  read again on return, the row may be theirs. None for a reader at the tail, who returns pinned. */
-type Place = { anchor: string; offset: number; last: string; pages: number };
+ *  above it that row began, the newest row then, and the oldest session on screen — every session down
+ *  to it is read again on return, a head rotated past since among them: the row may be in any. None for
+ *  a reader at the tail, who returns pinned. */
+type Place = { anchor: string; offset: number; last: string; oldest: string };
 const leftAt = new Map<string, Place>();
 /** The switched-to chain's saved place, taken by the next draw that paints. */
 let returning: Place | null = null;
@@ -209,7 +210,7 @@ function leaveChain(id: string): void {
   if (!continuousOpen() || paneItem || !snapshotReady || !document.querySelector("#to-bottom")?.hasAttribute("data-show")) return;
   const rows = stampedRows();
   const top = rows.find((r) => r.offsetTop - turnsPane.offsetTop + r.offsetHeight > turnsPane.scrollTop);
-  if (top) leftAt.set(id, { anchor: rowKey(top), offset: top.offsetTop - turnsPane.offsetTop - turnsPane.scrollTop, last: rowKey(rows.at(-1)), pages: earlier.length });
+  if (top) leftAt.set(id, { anchor: rowKey(top), offset: top.offsetTop - turnsPane.offsetTop - turnsPane.scrollTop, last: rowKey(rows.at(-1)), oldest: (earlier[0]?.member ?? chain[0]!).sessionId });
 }
 
 /** Back at the row the reader left; a message that landed below it since dots ↓. A row gone keeps the tail. */
@@ -776,7 +777,8 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   // A near-empty head opens with the sessions before it, read before the one paint; `loading` holds off a scroll's page meanwhile.
-  const left = continuousOpen() ? returning?.pages ?? 0 : 0;
+  const oldest = continuousOpen() ? returning?.oldest : undefined;
+  const left = Math.max(0, chain.findIndex((m) => m.sessionId === oldest));
   const before = chain.slice(1, 1 + (left || AUTO_PAGES));
   if (!keep && !view && got.ok && !("readonly" in got.value) && continuousOpen() && !earlier.length && before.length && (left || shortHead(got.value.turns))) {
     const read = await readEarlier(before);

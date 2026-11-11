@@ -1429,6 +1429,61 @@ describe("chains", () => {
     }
   });
 
+  // A head of six messages opens alone, so the read is the return's own; a rotation meanwhile puts the head
+  // the reader left behind the new one, and the row may be in it.
+  it("returns to a chain through every session down to the oldest the reader had, a rotation since included", async () => {
+    before = { c2: ["e1", "e2"] };
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const res = await base(url, init);
+      if (!/^\/api\/sessions\/h\d\/history$/.test(String(url))) return res;
+      const turns = Array.from({ length: 6 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: "" }));
+      return Response.json({ ...(await res.json()) as object, turns });
+    });
+    const histories = (from: number) => reads().slice(from).filter((url) => url.endsWith("/history")).map((url) => url.split("/")[3]).sort();
+    const toBottom = document.querySelector("#to-bottom")!;
+    const row = document.createElement("div");
+    Object.assign(row.dataset, { kind: "user", at: "1" });
+    for (const [key, value] of Object.entries({ offsetTop: 0, offsetHeight: 100 })) Object.defineProperty(row, key, { value });
+    Object.assign(h.pane, { offsetTop: 0, scrollTop: 50, scrollHeight: 1000, querySelectorAll: () => [row] });
+    // The wrapped reads answer a few turns later than the suite's own.
+    const to = async (id: string): Promise<void> => {
+      h.views.openChain(id, null);
+      await settled();
+      await settled();
+    };
+    const away = async (): Promise<number> => {
+      toBottom.setAttribute("data-show", "");
+      await to("c1");
+      toBottom.removeAttribute("data-show");
+      h.keepScroll.mockClear();
+      return reads().length;
+    };
+    try {
+      let from = reads().length;
+      await to("c2");
+      expect(histories(from)).toEqual(["h2"]);
+      (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+      await settled();
+      await settled();
+      from = await away();
+      await to("c2");
+      expect(histories(from)).toEqual(["e1", "h2"]);
+      expect(h.keepScroll).toHaveBeenCalledExactlyOnceWith(950, false);
+
+      from = await away();
+      heads.c2 = "h3";
+      before = { c2: ["h2", "e1", "e2"] };
+      await to("c2");
+      expect(histories(from)).toEqual(["e1", "h2", "h3"]);
+      expect(h.keepScroll).toHaveBeenCalledExactlyOnceWith(950, false);
+    } finally {
+      heads.c2 = "h2";
+      toBottom.removeAttribute("data-show");
+      Object.assign(h.pane, { scrollTop: 0, scrollHeight: 0, querySelectorAll: () => [] });
+    }
+  });
+
   // The panel's rows of another chain navigate there first.
   it("opens another chain's item view from the status panel", async () => {
     h.drawer.itemView("auth", "c2");
