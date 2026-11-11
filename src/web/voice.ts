@@ -1,6 +1,6 @@
 // Voice input's relay (/api/voice*): one recognition take per browser, its
 // audio in over POST and its text out over SSE, to a swappable AsrProvider.
-// See docs/plans/37-voice-input.md for the wire contract.
+// See docs/plans/38-voice-input.md for the wire contract.
 
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";

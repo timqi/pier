@@ -1,10 +1,26 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 ### Added
 
 - Web: voice input. The mic beside Send dictates into the draft as you speak — Pier relays the audio to the recognition service, nothing is sent until you send it; × or Esc cancels and removes the dictated text. Shown only when the instance has a recognition key (`DASHSCOPE_API_KEY` in the vault).
+
+### Changed
+
+- Web: an open item is titled by its problem in the sidebar, status panel and bar, the same name as its topic tag; its runs' name is the tooltip. A row that opens a child session wears ↗, and a chain row with a running item shows a dot.
+- Web: Close on an open item waits five seconds behind an in-place Undo before it is sent; leaving or hiding the page sends it at once.
+- Web: on touch, every control — bar, composer, chips, menus, Settings, sheets — is a 44px target, and menus hide their keyboard shortcuts.
+- Web: the interface's type is six sizes, muted text at 4.5:1 contrast; the floating ⌂ and ↓ are named in English.
+- Web: a running worker's session opens its live steps; a tool row previews its arguments' values, not their JSON; a thinking row is cut on a word.
+- Web: on a phone the item view has one way back, the chip row scrolls sideways on one line, and the chain list and status sheets have a title and close button.
+
+### Fixed
+
+- Web: switching chains and back keeps your scroll position.
+- Web: Settings marks and scrolls to the open tab; Models aligns provider rows; a disabled select looks disabled.
+- Web: Files shows chain folders by name and lists `memory` newest first; Tasks shows a last run's age as an age.
+- Web: a single-run item no longer shows its age twice.
 
 ## 1.2.0
 
