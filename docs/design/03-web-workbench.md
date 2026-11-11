@@ -29,7 +29,7 @@ surface owns its routes and is mounted beside it.
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `GET /api/models` | the same list without a session, for pickers |
-| `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
+| `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model, thinkingLevel}`, the level as Pi clamped it |
 | `GET/POST /api/sessions/:id/thinking` | read or set the reasoning level (history also carries `thinkingLevel`) |
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`; non-blank text required — attachments were already uploaded and ride the text as marker lines) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/inbox` | body `{name?, mimeType, data}` (base64, ≤32MB) → saved via `core/inbox.ts` under `$PIER_HOME/inbox/web/`, returns `{path}`; the client appends `[name](file:///path)` to the message it then sends |

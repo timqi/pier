@@ -500,7 +500,7 @@ export function createServer(
     }
     const session = await ensure(c.req.param("id"));
     await session.setModel({ provider: body.provider, id: body.id });
-    return c.json({ model: session.model });
+    return c.json({ model: session.model, thinkingLevel: session.thinkingLevel });
   });
 
   guarded(app, "POST", "/api/sessions/:id/thinking", 400, async (c) => {

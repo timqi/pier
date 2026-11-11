@@ -1840,7 +1840,7 @@ describe("workbench server", () => {
       });
     const ok = await post({ provider: "openai", id: "gpt-5.2" });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ model: { provider: "openai", id: "gpt-5.2" } });
+    expect(await ok.json()).toEqual({ model: { provider: "openai", id: "gpt-5.2" }, thinkingLevel: "medium" });
     expect(session.calls).toContain("setModel:openai/gpt-5.2");
     expect((await post({ provider: "x" })).status).toBe(400);
     expect((await post({ provider: "x", id: "nope" })).status).toBe(400);

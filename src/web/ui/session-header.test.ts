@@ -418,3 +418,41 @@ it("keeps the cached list and reports the failure when the read fails", async ()
   expect(picker.modelPicker).toHaveBeenCalledTimes(2);
 });
 
+
+// Pi clamps the level to the model being left: the level picked in the selector
+// is applied again after the switch, and the header shows what Pi kept.
+it("re-applies the selector's reasoning level after a model switch and shows what Pi returns", async () => {
+  const other: ModelRef = { provider: "test", id: "other" };
+  const reply = (body: unknown) => ({ ok: true, json: async () => body }) as Response;
+  vi.mocked(api.sendJson).mockImplementation(async (url: string) =>
+    url.endsWith("/model") ? reply({ model: other, thinkingLevel: "low" }) : reply({ level: "high" }));
+  chip().onclick!();
+  await vi.waitFor(() => expect(picker.modelPicker).toHaveBeenCalledTimes(1));
+  const props = vi.mocked(picker.modelPicker).mock.lastCall![0];
+  props.onThinkingPick("low");
+  props.onThinkingPick("high");
+  vi.mocked(api.sendJson).mockClear();
+  props.onPick(other);
+  await vi.waitFor(() => expect(api.sendJson).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(api.sendJson).mock.calls).toEqual([
+    ["/api/sessions/s1/model", other],
+    ["/api/sessions/s1/thinking", { level: "high" }],
+  ]);
+  await vi.waitFor(() => expect(chips().map((c) => c.textContent)).toEqual([other.id, "high"]));
+});
+
+it("shows the reasoning level the model switch came back with", async () => {
+  const other: ModelRef = { provider: "test", id: "other" };
+  let level: () => void = () => {};
+  vi.mocked(api.sendJson).mockImplementation(async (url: string) =>
+    url.endsWith("/model")
+      ? ({ ok: true, json: async () => ({ model: other, thinkingLevel: "low" }) }) as Response
+      // The level write is still on the wire: the header already reads the switch's answer.
+      : new Promise<Response>((resolve) => { level = () => resolve({ ok: true, json: async () => ({ level: "high" }) } as Response); }));
+  chip().onclick!();
+  await vi.waitFor(() => expect(picker.modelPicker).toHaveBeenCalledTimes(1));
+  vi.mocked(picker.modelPicker).mock.lastCall![0].onPick(other);
+  await vi.waitFor(() => expect(chips().map((c) => c.textContent)).toEqual([other.id, "low"]));
+  level();
+  await vi.waitFor(() => expect(chips().map((c) => c.textContent)).toEqual([other.id, "high"]));
+});

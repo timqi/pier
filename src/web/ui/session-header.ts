@@ -332,6 +332,9 @@ async function pickModel(anchor: HTMLElement, id: string, fromMenu = false): Pro
     const state = JSON.stringify([models, level, levels]);
     if (state === drawn) return;
     drawn = state;
+    // The selector's level is the user's choice for the model they pick next, re-applied after
+    // the switch: Pi clamps the level to the old model's, which may have lacked it.
+    let picked = level;
     const picker = modelPicker({
       models,
       current: id === deps.currentId() ? currentModel : null,
@@ -339,9 +342,12 @@ async function pickModel(anchor: HTMLElement, id: string, fromMenu = false): Pro
       thinkingLevels: levels,
       onPick: (m, thinking) => {
         closeMenu();
-        void applyModel(id, m, thinking);
+        void applyModel(id, m, thinking ?? picked);
       },
-      onThinkingPick: (picked) => void setThinkingLevel(id, picked),
+      onThinkingPick: (l) => {
+        picked = l;
+        void setThinkingLevel(id, l);
+      },
     });
     shown.replaceWith(picker);
     shown = picker;
@@ -399,9 +405,11 @@ async function setModel(id: string, model: ModelRef): Promise<boolean> {
     appendTurn("error", `model change failed: ${error ?? res.status}`);
     return false;
   }
-  const { model: applied } = (await res.json()) as { model: ModelRef | null };
+  // Pi clamps the reasoning level to the new model's, so the level comes back with it.
+  const { model: applied, thinkingLevel } = (await res.json()) as { model: ModelRef | null; thinkingLevel: ThinkingLevel };
   if (id === deps.currentId() && applied) {
     currentModel = applied;
+    currentThinking = thinkingLevel;
     renderHeader();
   }
   return true;
