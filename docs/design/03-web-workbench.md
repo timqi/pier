@@ -155,9 +155,11 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the
   push service's answer (principle 5).
-- `sw.js` is registered with scope `/app/`; it caches nothing, its one `fetch`
-  handler is a navigation fallback inside that scope, and a notification only
-  ever opens a same-origin URL (anything else opens `/app/`).
+- `sw.js` is registered with scope `/app/`; it caches nothing, its `fetch`
+  handler is a navigation fallback inside that scope and sends a `keepalive`
+  request itself — a leaving page's Close or error report, which the page does
+  not outlive — and a notification only ever opens a same-origin URL (anything
+  else opens `/app/`).
 - One VAPID key pair per instance, minted on first use, never rotated on its
   own; the private half is sealed by `Secrets` in `push_identity`.
 - The Notifications card lists every subscribed device under the switch, in

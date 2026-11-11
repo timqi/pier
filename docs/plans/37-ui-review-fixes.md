@@ -90,7 +90,7 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 
 - 五个分支合入于 `8ae9961`，check/lint/test 全绿（2320）。`web/` 14171，上限抬到 14.2k；`core/` 2338。
 - 已知未验证/遗留：
-  - #12 页面离开时的 keepalive close：请求每次都发出，但 headless Chrome 下有 service worker 时送达不稳定（约 3/8）；隐藏标签页用的是伪造的 `visibilityState`。
+  - #12 页面离开时的 keepalive close：service worker 控制页面时，由页面发出的请求随页面一起丢（一个等待项时 0/8）；`sw.js` 改为自己发 keepalive 请求后，1/2/3 个等待项 × 导航离开两种方式各 8 次全部送达（headless Chromium，经本地转发代理计数）。隐藏标签页用的是伪造的 `visibilityState`。
   - #18 1024 宽侧栏停靠时 provider 行动作区仍折行。
   - #1 折叠行后紧跟话题标签时两者平分间距（约 40px）。
   - 所有浏览器数字来自 Chromium 模拟 + 拦截/注入的数据；Safari/iOS、暗色未测。

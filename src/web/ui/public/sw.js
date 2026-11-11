@@ -3,10 +3,11 @@
 //
 // It caches nothing. The shell is revalidated on every navigation and the
 // bundles it names are content-hashed, so a cache in front of that is exactly
-// how an installed Pier ends up asking for assets a release replaced. The one
+// how an installed Pier ends up asking for assets a release replaced. The
 // fetch handler is a navigation fallback: without it an offline tap on the
 // home-screen icon shows the browser's error page, which does not say which
-// of the two — Pier or the network — is down.
+// of the two — Pier or the network — is down. It also sends a leaving page's
+// `keepalive` request, which the page would not outlive.
 
 const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Pier is unreachable</title>
@@ -43,6 +44,10 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+  // A leaving page's request — a waiting Close (drawer.ts sendAll), an error
+  // report — is sent from here: left to the network it is the page that sends
+  // it, and the page is gone.
+  if (request.keepalive) return event.respondWith(fetch(request));
   if (request.mode !== "navigate" || request.method !== "GET") return; // straight to the network
   event.respondWith((async () => {
     try {
