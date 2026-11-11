@@ -433,10 +433,17 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 }
 /* Below md the bar's lead is the status glyph and the count (index.html). */
 @media (width < 48rem) { #status-item-state > .status-label { display: none; } }
+/* Docked, the sidebar's Items section already names the rows: the lead is the phone's glyph and count. */
+@media (width >= 64rem) {
+  main:has(#chain-rail[data-on]) :is(#status-next, #status-item-dot, #status-item-title, #status-item-stage, #status-item-state > .status-label) { display: none; }
+  main:has(#chain-rail[data-on]) #status-item-count { display: inline; }
+}
+/* A hairline between the title and the lead: the lead is the panel's row, not this view's state. */
+#status-lead:has(> #status-item:not(.hidden))::before { content: ""; flex: none; height: 1rem; margin-inline: 0.25rem; border-inline-start: 1px solid var(--color-neutral-300); }
 .open-item button { cursor: pointer; }
 .open-item button:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 2px; border-radius: 4px; }
 @media (pointer: coarse) {
-  :is(.open-item .session-open, .open-item .item-view-open, .open-item .item-close, .open-item .open-item-reopen, #status-item, #status-next) { min-height: 44px; min-width: 44px; }
+  :is(.open-item .session-open, .open-item .item-view-open, .open-item .item-close, .open-item .open-item-reopen, #status-item, #status-next, #chat-title, #chat-menu) { min-height: 44px; min-width: 44px; }
 }
 /* The chain list (chains.ts): the same rows floated and docked. A row's ⋯ waits for the hover a finger has not got. */
 .chain-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
@@ -590,7 +597,12 @@ main {
      floor, packed, and the log shows more of them, or a 256px box holds five
      rows of air. The row's own py-0.5 is outside the floor, so a row's pitch
      is 4px more than the floor says. */
-  .chip::before, .topic-tag::before, .line-fold::before { content: ""; position: absolute; inset-inline: 0; inset-block: calc((2.75rem - 100%) / 2); }
+  .chip::before, .topic-tag::before, .line-fold::before { content: ""; position: absolute; inset-inline: 0; inset-block: calc((100% - 2.75rem) / 2); }
+  /* The reach passes under what it meets: a wrapped row's chips, 6px apart, and
+     a link or code span in the line below, positioned to stay on top. */
+  .chip-row { isolation: isolate; }
+  .chip-row > ::before { z-index: -1; }
+  .md :is(a, :not(pre) > code) { position: relative; }
   .activity-log details > summary { min-height: 28px; }
   .activity-log { gap: 0; max-height: 20rem; }
 }
@@ -962,6 +974,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #turns > [data-time]::after { content: none; }
   #input { font-size: max(16px, 1rem); }
 }
+/* After the phone's size: a thumb's floor at any width. */
+@media (pointer: coarse) { #composer { --composer-control-size: 44px; } }
 @keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   #turns > [data-enter], dialog[open]:not(#image-dialog) {
