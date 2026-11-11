@@ -67,10 +67,11 @@ self.addEventListener("push", (event) => {
     data = {};
   }
   // A Web Notification has no subtitle: the item leads the body under the headline,
-  // unless it is only the chain the headline already ends on.
+  // unless it is only the chain the headline already ends on or is (no hostname).
   const title = data.headline || data.title || "Pier";
   const body = data.body || "A turn finished.";
-  const lead = data.headline && data.title && !data.headline.endsWith(` · ${data.title}`);
+  const lead = data.headline && data.title && data.headline !== data.title
+    && !data.headline.endsWith(` · ${data.title}`);
   event.waitUntil((async () => {
     await self.registration.showNotification(title, {
       body: lead ? `${data.title}\n${body}` : body,

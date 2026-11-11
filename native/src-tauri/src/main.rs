@@ -703,9 +703,10 @@ fn notify(
     #[cfg(not(target_os = "macos"))]
     let headed = headline.is_some();
     let (headline, subtitle) = match headline {
-        // A reply about no item is titled by its chain, which the headline already ends on.
+        // A reply about no item is titled by its chain, which the headline already ends on or is.
         Some(headline) => {
-            let subtitle = (!headline.ends_with(&format!(" · {title}"))).then_some(title);
+            let repeated = headline == title || headline.ends_with(&format!(" · {title}"));
+            let subtitle = (!repeated).then_some(title);
             (headline, subtitle)
         }
         None => {
