@@ -404,7 +404,7 @@ export function createConfigView(
     }
     /** A section's header action, marked while its pane is the open one. */
     const action = (label: string, sel: Selection): HTMLElement => {
-      const el = btn(label, `normal-case tracking-normal hover:underline ${isActive(sel) ? "text-indigo-700" : "text-indigo-600"}`);
+      const el = btn(label, `normal-case tracking-normal hover:underline max-md:min-h-11 pointer-coarse:min-h-11 ${isActive(sel) ? "text-indigo-700" : "text-indigo-600"}`);
       el.onclick = () => open(sel);
       return el;
     };
