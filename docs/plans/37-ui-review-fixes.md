@@ -104,3 +104,13 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 - 状态面板搜索框平板上 38px；Agent package 展开箭头宽 20px。
 - 字号的遗留写法（值已在档位上，但写成 rem 字面量）：`chains.ts` 等约 10 处。
 - 待查：从子会话重载 `#/settings/models` 显示了子会话而不是 Settings（测试夹具或产品 bug，未定）。
+
+## 最终 review（goal `r2zkz63k19crw59d`，clean at `7673166`）
+
+修了：页面离开时等待中的 Close 经 service worker 发出 `634cd6c`；等待期间事项重读的回归测试 `5a3cb0d`；06/03 关于手机 sheet 头的表述 `7673166`。
+
+review 留下、未修（P2/P3）：
+- `drawer.ts` `sendClose`：Undo 的 5 秒内事项被别处关掉时，计时器仍发 Close，服务器回 404，用户看到一条红色拒绝。修法：`listed()` 里事项已离开时清掉计时器和等待项。
+- `main.ts` `leaveChain`：翻到 chain 更早成员后切走再回来落在末尾（不丢内容），03 未写明。
+- `visibilitychange → hidden` 会立即提交等待中的 Close：手机上 5 秒内切应用就没有 Undo 了，03 未写明这是取舍。
+- `menu.ts:146` 无 title 时默认 `closeLabel` 为 "Close undefined"（不会渲染）；`explorer.ts:175` `/api/chains` 读失败被缓存到 Files 重开。
