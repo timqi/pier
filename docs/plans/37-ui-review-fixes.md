@@ -124,8 +124,13 @@ review 之后修了（`2b808d0`，只跑了 check/lint/test，未再 review、�
 
 未修、需取舍：
 - Undo 期间事项被改名（旧 key 成为别名，`tasks/store.ts` `claimRuns`）：旧 key 离开列表，等待中的 Close 被静默丢弃，事项以新名字留着。`OpenItem` 不带别名，前端分不清「别处关了」和「改名了」。
-- 手机上换行叠放的两个开关行距 9px：上面那个可点高度 36.5px，下面 44.5px。要两个都到 44px 得把粗指针下的行距加到约 1.75rem。
 - 切回 chain 时一次并行读回离开前翻出的全部成员，没有上限。
 - 不在这次 diff 内：平板 `Close charter` 32×32、Models 的 `Move up`/`Move down` 28×28；手机 Files 头 409px 在 390px 里横向滚动（细指针下相同）。
 
 实测（Chromium 模拟 1180×820 与 390×844 粗指针 + 触摸，1440×900 细指针；数据为拦截注入）：Settings 七个主题、Agent 各面板、Add provider、登录流程、Charter、Files、目录选择器里没有低于 44px 的 `.btn`，没有热区在别的控件的面内响应，没有新增横向滚动；细指针下 `.touch-reach`、`.reach-row`、`.btn` 的计算样式和目录行的几何与 `7673166` 相同。Safari/iOS、暗色、真机触摸未测。
+
+之后又修了四处（只跑了 check/lint/test，没有浏览器实测，尺寸是按规则算的）：
+- 焦点在 Undo 上时事项被别处关掉，焦点交给接替的行（侧栏最后一行交给当前 chain 行），与计时器路径同一条规则 `dbcfd36`。
+- 下拉触发器（`CONTROL_TRIGGER`）粗指针下 44px，与同行的目录字段等高；Settings 的 Default model、Title model 一并变高 `4e34503`。
+- `.reach-row` 与 `.chip-row` 相同的两条规则合成一个选择器 `aa551d4`；随 `.chip-row` 的查询，窄于 48rem 的细指针下 `.reach-row` 也带上 `isolation`，那里没有热区可排。
+- 换行叠放的开关粗指针下行距 1.75rem，两个热区各自完整（平板 44px、手机 49.5px）`cc28966`。算下来 `.reach-row` 的「从邻居下面穿过」已不再被用到，未实测，留着。
