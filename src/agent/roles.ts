@@ -123,7 +123,7 @@ const LEAD_BUILD = `
 - Started per a doc: read it first; it is the whole state. Started with no doc: plan one here and build it; a plan needing the user's OK is a question in your reply, never a \`Design final:\`.
 - Split it into worker runs, \`pier task run --name "<a few words>"\`, the model per §Models; the prompt is a worker's whole handoff. You never launch a lead. A stuck or redirected worker: \`--run <id> --fresh\`.
 - Workers writing in parallel each take \`--worktree <branch>\` off yours, \`--rounds 0\` unless you want their reviews. A sequential worker may use this tree: you neither edit nor integrate until it returns, the tree clean at each handoff.
-- Integrate with \`git merge <branch>\` in this worktree; its worktree stays.
+- Integrate linearly, never a merge commit the target's rebase would replay: \`git -C <its worktree> rebase <your branch>\`, conflicts resolved there, then \`git merge --ff-only <branch>\` here; its worktree stays.
 - While a result is still owed to you, your replies reach only this session. Your reply to the last one is the milestone your supervisor reads. It is the conclusion ending on the verified state, then any question only the user can answer.
 - Before the done milestone the integrated branch is reviewed as a goal, \`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"\`, its fixes holding this tree. The done milestone names that goal's \`Goal:\` line; a material change after it opens another, a wording fix need not.
 - Done is yours to declare, in a reply when no result is owed to you. It ends on the branch ready (committed, tree clean, at the sha named) and the worktrees left for the user.

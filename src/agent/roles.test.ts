@@ -103,9 +103,10 @@ describe("the lead contract", () => {
 
   it("launches workers and its review goal, and integrates without merging into the target", () => {
     const build = lead("build");
-    for (const line of ["`--worktree <branch>`", "`--rounds 0`", '`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"`', "`git merge <branch>`", "`wt merge`/`wt remove`"]) {
+    for (const line of ["`--worktree <branch>`", "`--rounds 0`", '`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"`', "`git -C <its worktree> rebase <your branch>`", "`git merge --ff-only <branch>`", "`wt merge`/`wt remove`"]) {
       expect(build).toContain(line);
     }
+    expect(build).not.toContain("`git merge <branch>`");
     expect(build).not.toContain("Approved:");
   });
 });
@@ -182,7 +183,7 @@ describe("prompt sizes", () => {
   it.each([
     ["DISPATCHER", DISPATCHER, 2_000],
     ["WORKER", WORKER, 395],
-    ['lead("build")', lead("build"), 560],
+    ['lead("build")', lead("build"), 600],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);
