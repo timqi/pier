@@ -295,6 +295,46 @@ describe("session loads", () => {
     expect(latest().closed).toBe(false);
   });
 
+  // A switch re-reads one session, not every chain's list: only a turn's end changes that.
+  it("re-lists the sessions when a turn ends, not when a load reads idle", async () => {
+    const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const lists = () => fetcher.mock.calls.filter(([url]) => url === "/api/sessions" || url === "/api/continuous/open").length;
+    fetcher.mockClear();
+    h.views.select("a");
+    await settled();
+    h.views.select("b");
+    await settled();
+    expect(lists()).toBe(0);
+
+    const event = (seq: number, body: object) => latest().onmessage?.({ data: JSON.stringify({ sessionId: "b", seq, ts: 1, ...body }) });
+    event(1, { type: "state", state: "idle" });
+    await settled();
+    expect(lists()).toBe(0);
+    event(2, { type: "state", state: "streaming" });
+    event(3, { type: "state", state: "idle" });
+    await settled();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(expect.arrayContaining(["/api/sessions", "/api/continuous/open"]));
+  });
+
+  // The stream dropped mid-turn and came back after it: the reload's snapshot is the only word of that turn's end.
+  it("re-lists the sessions when a reload's snapshot ends the turn the pane showed streaming", async () => {
+    const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const lists = () => fetcher.mock.calls.filter(([url]) => url === "/api/sessions" || url === "/api/continuous/open").length;
+    h.views.select("a");
+    await settled();
+    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "state", state: "streaming" }) });
+    fetcher.mockClear();
+    latest().reset();
+    await settled();
+    expect(h.composer.sessionState()).toBe("idle");
+    expect(lists()).toBe(2);
+
+    fetcher.mockClear();
+    latest().reset();
+    await settled();
+    expect(lists()).toBe(0);
+  });
+
   // Pi can refuse a prompt before its turn starts (no model, no auth): the
   // error is the only event, and the optimistic streaming must not outlive it.
   it("clears the optimistic streaming state on an error with no turn open", async () => {

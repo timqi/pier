@@ -488,13 +488,16 @@ function maybeSetTitle(id: string, text: string): void {
 }
 
 function setState(state: SessionState): void {
+  // Only a turn's end changes the list — an event's, or a reload's snapshot past a turn the shown state missed;
+  // re-listing on a load's idle re-reads every chain on each switch.
+  const ended = currentState === "streaming" && state === "idle";
   currentState = state;
   const s = sessions.find((x) => x.id === currentId);
   if (s) s.state = state;
   renderDrawer();
   renderHeader();
   updateComposer();
-  if (state === "idle") void refreshSessions();
+  if (ended) void refreshSessions();
 }
 
 // --- event handling ----------------------------------------------------------------
