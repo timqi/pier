@@ -53,7 +53,7 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 | 19 | `.select:disabled` 样式 | done `ace2f6a` |
 | 20 | Settings 标签 `aria-current` | done `3b4e983` |
 | 21 | 两个浮动按钮文案改英文，同步 03 | done `cb9e63b` |
-| 22 | 字号档位收敛到约 5 档，折叠行 12px，对比度 ≥4.5 | wip（本树串行） |
+| 22 | 字号档位收敛到约 5 档，折叠行 12px，对比度 ≥4.5 | done `c5fcff0`（六档 11/12/13/14/15/16，neutral-400 调到 ≥4.5:1） |
 | 23 | Files：chain 目录显示名字，`memory` 新到旧，对话框焦点环 | done `0adc15f` |
 | 24 | 粗指针下隐藏菜单快捷键提示 | done `5894fac` |
 | 25 | 单 run 事项不重复 `open` / `elapsed` | done `e3e2d30` |
@@ -91,7 +91,16 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 - 五个分支合入于 `8ae9961`，check/lint/test 全绿（2320）。`web/` 14171，上限抬到 14.2k；`core/` 2338。
 - 已知未验证/遗留：
   - #12 页面离开时的 keepalive close：请求每次都发出，但 headless Chrome 下有 service worker 时送达不稳定（约 3/8）；隐藏标签页用的是伪造的 `visibilityState`。
-  - #12 细指针下「Closed — Undo」行高 30px（普通行 52px），下面的行会上移 —— 随 #22 一起修成等高。
   - #18 1024 宽侧栏停靠时 provider 行动作区仍折行。
   - #1 折叠行后紧跟话题标签时两者平分间距（约 40px）。
   - 所有浏览器数字来自 Chromium 模拟 + 拦截/注入的数据；Safari/iOS、暗色未测。
+
+## 整体复测（`ffd6e74`）
+
+1440×900、1180×820 粗指针、390×844 粗指针，亮暗各一遍，截图在 `/tmp/ui22/shots/`。顺带修了：Undo 行等高 `742f03a`、粗指针 popover 菜单行 44px `af4adb4`、侧栏 New chain `+` 44px `fae0c92`、Agent 的 Add tool/package 44px `ffd6e74`。
+
+未修、需取舍（不在 28 条内）：
+- Settings 里粗指针下不到 44px 的控件：`.btn` 37–41px、Slack/Lark 与 Vault 开关 25–29px、帮助 `?` 16–18px、accent 色块 40px、版本链接。06 只承诺了标签、主题和 ✕。
+- 状态面板搜索框平板上 38px；Agent package 展开箭头宽 20px。
+- 字号的遗留写法（值已在档位上，但写成 rem 字面量）：`chains.ts` 等约 10 处。
+- 待查：从子会话重载 `#/settings/models` 显示了子会话而不是 Settings（测试夹具或产品 bug，未定）。
