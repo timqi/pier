@@ -247,12 +247,13 @@ const refreshOpenItems = coalesce(async () => {
   renderDrawer();
 });
 
-/** The panel's rows, the chat's tags and its earlier options read the same items; a read older than the one on hand is dropped,
+/** The panel's rows, the chain rows' dots, the chat's tags and its earlier options read the same items; a read older than the one on hand is dropped,
  *  the chat repainted all the same for the chain a first read just named. */
 function commitOpenItems({ seq, open }: { seq: number; open: OpenItems }): void {
   if (seq > openCommitted) [openCommitted, openItems] = [seq, open];
   paintTopics();
   refreshSuggestions();
+  renderChains();
 }
 
 /** The chat's tags read only the chain on screen: the same key may be open in another chain. */
@@ -441,7 +442,6 @@ const refreshSessions = coalesce(async () => {
   if (chainId === null || chainId === reading) ({ chainId, chain, rotateAt } = next);
   commitOpenItems(open);
   commitSessions(rows);
-  renderChains();
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   // Not awaited: the move's reads, guarded by their own generation, must not hold every later refresh behind them.
   const head = headId();
@@ -892,6 +892,7 @@ initChains({
   refresh: () => void refreshSessions(),
   anchor: () => document.getElementById("chat-title")!,
   docked: renderHeader,
+  running: (id) => openItems?.items.some((i) => i.chain?.id === id && i.status === "running") ?? false,
 });
 // A head keeps the charter it opened with: the pane says so where it is on screen.
 onCharterSaved((id, head) => {

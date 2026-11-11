@@ -3,7 +3,7 @@
 // reporting run on index.html's body, so no browser, Pi session or network is needed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTurn } from "../../core/types.js";
-import { fake, installPage } from "./dom.testkit.js";
+import { fake, FakeElement, installPage } from "./dom.testkit.js";
 
 const h = vi.hoisted(() => ({
   drawer: null as unknown as Parameters<typeof import("./drawer.js").initDrawer>[0],
@@ -1276,6 +1276,22 @@ describe("chains", () => {
     h.views.openChain(null, null);
     await settled();
     expect(h.header.currentId()).toBe("h1");
+  });
+
+  // The chain rows read the panel's open items, by chain, and redraw when those change.
+  it("marks the chain whose open item runs, and unmarks it when the items say it stopped", async () => {
+    const laidOut = vi.spyOn(FakeElement.prototype, "getClientRects").mockReturnValue([{}]);
+    const dot = (id: string) => fake(document.querySelector("#rail-chains")!.querySelector(`[data-chain="${id}"]`)!.querySelector(".chain-dot")).classList.contains("running-dot");
+    const workspace = Stream.all.find((s) => s.url === "/api/events")!;
+    workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+    await settled();
+    expect([dot("c1"), dot("c2")]).toEqual([false, true]);
+    const was = open.splice(1);
+    workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+    await settled();
+    open.push(...was);
+    expect(dot("c2")).toBe(false);
+    laidOut.mockRestore();
   });
 
   it("says a link to no chain in the pane, opening no other chain in its place", async () => {
