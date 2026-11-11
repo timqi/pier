@@ -87,7 +87,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
   const main = h("button", "session-open flex w-full min-w-0 items-start gap-2 text-left", dot,
-    h("span", "min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, away, tag), stage, metadata));
+    h("span", "open-item-text min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, away, tag), stage, metadata));
   main.setAttribute("type", "button");
   const column = h("div", "min-w-0 flex-1", main);
   const li = h("li", "open-item", column);

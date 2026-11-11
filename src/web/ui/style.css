@@ -421,6 +421,19 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 .open-item-phrase:empty { display: none; }
 /* The age rides the stage line, not the metadata, so the rail, which hides the metadata, keeps it. */
 .open-item-age::before { content: "·"; margin-inline-end: 0.375rem; color: var(--color-neutral-400); }
+/* A phone's row gives the phrase the stage line after the status; the age and the metadata share the
+   line under it, a separator only between them. 40rem is menu.ts's sheet width. */
+@media (width < 40rem) {
+  .open-item-text { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.375rem; }
+  .open-item-text > :first-child { flex-basis: 100%; }
+  .open-item-stage { display: contents; }
+  .open-item-stage::after { content: ""; flex-basis: 100%; order: 1; }
+  .open-item-phrase { flex: 1 1 0; min-width: 0; }
+  .open-item-age { order: 2; }
+  .open-item-meta:not(.hidden) { order: 2; flex: 1 1 0; min-width: 0; white-space: normal; }
+  :is(.open-item-age, .open-item-meta)::before { content: none; }
+  .open-item-stage:has(> .open-item-age:not(.hidden)) + .open-item-meta::before { content: "·"; margin-inline-start: 0; }
+}
 /* With a mouse the actions float over the row's right end on hover or focus, on
    the row's own hover plate, so the title has the whole width to read in. */
 @media (hover: hover) and (pointer: fine) {
