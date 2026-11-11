@@ -479,7 +479,7 @@ it("re-lists the sessions and checks the version when the workspace stream recon
   workspace?.onopen?.();
   await settled();
 
-  expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
+  expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", { signal: expect.any(AbortSignal) });
   expect(h.matchVersion).toHaveBeenCalledOnce();
 });
 
@@ -504,36 +504,44 @@ it("reopens dead streams through the revive it hands streamDied", async () => {
   expect(latest().url).toContain("/api/sessions/a/events");
 });
 
-// The drawer's run rows re-read on a marker written, without re-listing every session.
-it("re-reads the open items when a turn end wrote a marker", async () => {
+// An item closed and its run's session settled land together: one read, so no row is left showing a run as queued.
+it("re-lists the sessions with the open items when an item changes", async () => {
   const drawer = await import("./drawer.js");
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
-  const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  const fetcher = vi.mocked(fetch);
   const open = { items: [{ problem: "p", stage: "s", runs: [], status: "waiting on you" }], unlisted: [] };
+  const rows = [{ id: "c", cwd: "/test", createdAt: 3, state: "idle" }];
+  const base = fetcher.getMockImplementation()!;
   fetcher.mockClear();
-  fetcher.mockImplementationOnce(() => Promise.resolve(Response.json(open)));
+  fetcher.mockImplementation((url, init) => url === "/api/continuous/open" ? Promise.resolve(Response.json(open))
+    : url === "/api/sessions" ? Promise.resolve(Response.json(rows)) : base(url, init));
   vi.mocked(drawer.renderDrawer).mockClear();
 
   workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
   await settled();
 
-  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/continuous/open"]);
+  expect(fetcher.mock.calls.map(([url]) => url).sort()).toEqual(["/api/chains", "/api/continuous/open", "/api/continuous?chain=c1", "/api/sessions"]);
   expect(h.drawer.open()).toEqual(open);
+  expect(h.drawer.sessions().map((s) => s.id)).toEqual(["c"]);
   expect(vi.mocked(drawer.renderDrawer)).toHaveBeenCalled();
 });
 
-// The list's read and the marker's read race: the one started later wins whichever answers last.
+// The list's read and a held session's read race: the one started later wins whichever answers last.
 it("drops an open-items read that answers after a later one", async () => {
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const fetcher = vi.mocked(fetch);
+  const held = { items: [], unlisted: [{ targetSessionId: "b" }] };
+  const base = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => url === "/api/continuous/open" ? Promise.resolve(Response.json(held)) : base(url, init));
+  workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+  await settled();
   const answers = [deferred(), deferred()];
   const reads = [...answers];
-  const base = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url, init) => url === "/api/continuous/open" ? reads.shift()!.promise : base(url, init));
   const items = (problem: string) => ({ items: [{ problem, stage: "s", runs: [], status: "running" }], unlisted: [] });
 
   workspace.onmessage?.({ data: JSON.stringify({ type: "sessions-changed" }) });
-  workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+  workspace.onmessage?.({ data: JSON.stringify({ type: "session-state", sessionId: "b", state: "running" }) });
   await settled();
   answers[1]!.resolve(Response.json(items("newer")));
   await settled();
@@ -574,7 +582,7 @@ describe("the continuous conversation", () => {
     return Response.json({ ...body, turns: [...body.turns, ...Array.from({ length: 5 }, (_, i) => ({ role: i % 2 ? "user" : "assistant", text: "" }))] });
   };
 
-  let chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
+  let chainRead = (_init?: RequestInit) => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
   async function boot(members: ReturnType<typeof member>[], head: (text: string) => Promise<Response> = long) {
     chain = members;
     chainRead = () => Promise.resolve(Response.json({ chainId: "c1", chain, rotateAt: 60_000 }));
@@ -583,7 +591,7 @@ describe("the continuous conversation", () => {
     Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
     const fetcher = vi.fn((url: string, init?: RequestInit) => {
-      if (chainUrl(url)) return chainRead();
+      if (chainUrl(url)) return chainRead(init);
       if (url === "/api/chains") return Promise.resolve(chainList());
       if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [] }));
       if (url.endsWith("/history")) return h.history(url, init);
@@ -1006,6 +1014,35 @@ describe("the continuous conversation", () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(h.header.currentId()).toBe("h2");
       expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
+    });
+  });
+
+  it("gives up on a re-list read that never answers, reports it and follows the head on the retry", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    await catchingRejections(async (rejected) => {
+      // AbortSignal.timeout runs on Node's own clock; this one is on the faked one.
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+        const c = new AbortController();
+        setTimeout(() => c.abort(new DOMException("signal timed out", "TimeoutError")), ms);
+        return c.signal;
+      });
+      try {
+        const read = chainRead;
+        let hangs = 1;
+        chainRead = (init) => hangs-- > 0 ? hung(init) : read(init);
+        chain = [member("h2"), member("h1"), member("h0", "first")];
+        h.composer.headMoved?.();
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(rejected).toEqual([]);
+        expect(h.header.currentId()).toBe("h1");
+        await vi.advanceTimersByTimeAsync(1);
+        expect(rejected).toHaveLength(1);
+        expect((rejected[0] as DOMException).name).toBe("TimeoutError");
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(h.header.currentId()).toBe("h2");
+      } finally {
+        timeout.mockRestore();
+      }
     });
   });
 

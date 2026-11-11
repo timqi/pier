@@ -160,8 +160,8 @@ const inConversation = (id: string): boolean => chain.some((m) => m.sessionId ==
 const continuousOpen = (): boolean => unstarted || (currentId !== null && currentId === headId());
 
 /** One chain's sessions; none named is the first chain. A link to no chain is its 404, said in the pane. */
-async function loadChain(id: string | null): Promise<{ chainId: string; chain: ChainMember[]; rotateAt: number }> {
-  const res = await fetch(id ? `/api/continuous?chain=${encodeURIComponent(id)}` : "/api/continuous");
+async function loadChain(id: string | null, signal?: AbortSignal): Promise<{ chainId: string; chain: ChainMember[]; rotateAt: number }> {
+  const res = await fetch(id ? `/api/continuous?chain=${encodeURIComponent(id)}` : "/api/continuous", { signal });
   if (!res.ok) throw new Error(await failure(res, "Could not load the continuous conversation"));
   const { chainId, chain, rotateAt } = (await res.json()) as { chainId?: unknown; chain?: unknown; rotateAt?: unknown };
   if (typeof chainId !== "string" || !Array.isArray(chain) || typeof rotateAt !== "number" || !(rotateAt > 0)) {
@@ -224,20 +224,24 @@ async function openChain(id: string | null, problem: string | null = null, user 
   else openContinuous(false);
 }
 
+/** A page keeps the old pane up while it reads, and a coalesced refresh holds every later one behind it:
+ *  a read that never answers must hold neither, so it fails and is retried. */
+const READ_MS = 10_000;
+
 /** Each read numbered as it starts: two coalescers read the items, and an earlier read may answer last. */
 let openReads = 0;
 let openCommitted = 0;
 
-async function loadOpenItems(): Promise<{ seq: number; open: OpenItems }> {
+async function loadOpenItems(signal?: AbortSignal): Promise<{ seq: number; open: OpenItems }> {
   const seq = ++openReads;
-  const res = await fetch("/api/continuous/open");
+  const res = await fetch("/api/continuous/open", { signal });
   if (!res.ok) throw new Error(await failure(res, "Could not load the open items"));
   return { seq, open: (await res.json()) as OpenItems };
 }
 
 // Thrown like refreshSessions', for the same reason.
 const refreshOpenItems = coalesce(async () => {
-  commitOpenItems(await loadOpenItems());
+  commitOpenItems(await loadOpenItems(AbortSignal.timeout(READ_MS)));
   renderDrawer();
 });
 
@@ -340,9 +344,6 @@ async function followHead(head: string): Promise<void> {
   if (!(await page(AUTO_PAGES))) await loadSession(head);
 }
 
-/** A page keeps the old pane up with no stream while it reads: a read that never answers must not hold it there. */
-const PAGE_READ_MS = 10_000;
-
 /** A head with fewer messages than this opens with up to `AUTO_PAGES` earlier sessions above it. */
 const SHORT_HEAD = 6;
 const AUTO_PAGES = 2;
@@ -351,7 +352,7 @@ const shortHead = (turns: ChatTurn[]): boolean => turns.filter((t) => t.role ===
 /** Earlier members' reads, oldest first as `earlier` holds them; a failed read is its entry's `error`. */
 async function readEarlier(members: ChainMember[]): Promise<typeof earlier> {
   const reads = await Promise.all(members.map((m) => getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
-    `/api/sessions/${m.sessionId}/history`, "Could not load the earlier session", { signal: AbortSignal.timeout(PAGE_READ_MS) })));
+    `/api/sessions/${m.sessionId}/history`, "Could not load the earlier session", { signal: AbortSignal.timeout(READ_MS) })));
   return reads.map((got, i) => {
     const member = members[i]!;
     return got.ok ? { member, turns: got.value.turns, runs: got.value.backgroundRuns } : { member, turns: [], runs: [], error: got.error };
@@ -372,7 +373,7 @@ async function page(count = 1): Promise<boolean> {
     const reads = await readEarlier(members);
     if (!current()) return true;
     // The reads belong to this navigation; keep the pane and its stream live until they can commit together.
-    const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session", { signal: AbortSignal.timeout(PAGE_READ_MS) });
+    const snapshot = await getJson<SessionSnapshot>(`/api/sessions/${head}/history`, "failed to load session", { signal: AbortSignal.timeout(READ_MS) });
     if (!current()) return true;
     earlier.unshift(...reads);
     // A head read that failed is read again as a plain load, its loading state on screen instead of the old pane.
@@ -423,11 +424,12 @@ function commitSessions(rows: SessionInfo[]): void {
 // coalesce retries it, so one dropped read does not strand the pane on an old head.
 const refreshSessions = coalesce(async () => {
   const reading = chainId ?? localStorage.getItem(LAST_CHAIN);
+  const signal = AbortSignal.timeout(READ_MS);
   const [rows, list, next, open] = await Promise.all([
-    mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"),
-    mustGetJson<ChainList>("/api/chains", "Could not load the chains"),
-    loadChain(reading),
-    loadOpenItems(),
+    mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions", { signal }),
+    mustGetJson<ChainList>("/api/chains", "Could not load the chains", { signal }),
+    loadChain(reading, signal),
+    loadOpenItems(signal),
   ]);
   const following = continuousOpen() && isChatVisible();
   const was = headId();
@@ -610,8 +612,9 @@ function connectWorkspace(): void {
       if (e.type === "task-run-changed") void refreshSessions();
       return;
     }
+    // The whole list: an item's held runs and its sessions' dots must come from one read.
     if (e.type === "open-items-changed") {
-      void refreshOpenItems();
+      void refreshSessions();
       return;
     }
     if (e.type === "notification") {
