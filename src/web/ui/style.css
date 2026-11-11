@@ -1023,9 +1023,9 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
   /* The one <select> skin: native chrome off, Lucide chevron on. Sits beside
      whatever size utilities the call site adds; the right padding keeps text
-     off the arrow. */
+     off the arrow. Disabled — itself or by its fieldset — it is a disabled .btn. */
   .select {
-    @apply cursor-pointer appearance-none bg-white pr-8 transition-colors;
+    @apply cursor-pointer appearance-none bg-white pr-8 transition-colors disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-neutral-200;
     background-image: var(--select-chevron);
     background-repeat: no-repeat;
     background-position: right 0.5rem center;

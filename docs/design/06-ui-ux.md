@@ -169,6 +169,8 @@ updates this document.
   toward reset). URL state, reset, Back and restored fields agree. Background
   refreshes preserve input, focus, scroll and in-progress interactions. Long
   labels or date controls never set the page's width.
+- A disabled control, a `.select` or one in a disabled fieldset included, wears
+  the disabled `.btn`'s material: faded and `not-allowed`.
 
 ## Motion
 
