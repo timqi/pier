@@ -21,10 +21,20 @@ delivery.
 - The run that made a session fixes its role for the session's life
   (`createdRole`, `TaskStore.roleOf`); when its session appears in the status panel is
   [03 §Bar and status panel](03-web-workbench.md#bar-and-status-panel-session-headerts-drawerts).
-- A worker opens without the `pier-tasks` skill and with `<pier>/worker.md`
-  (`WORKER`), its chat surface without buttons and attachments; a lead with
-  `<pier>/lead.md` (`lead(phase)`: the Design or the Build section, its phase
-  passed on `AgentLaunchOptions.phase`); neither on disk.
+- The preamble runs general to specific: Pier's baseline with the chat
+  surface (`surfacePrompt`, after `# Working style`), the user's `SYSTEM.md`,
+  then the role contract, its last block (`pierSystemPrompt`, `agent/pi.ts`);
+  the project context holds only real files, the cwd's `AGENTS.md` then
+  `AgentLaunchOptions.contextFiles` (a missing one skipped, an unreadable one
+  loaded as `(could not be read: …)` and logged).
+- Each contract opens `# You are …` and ends its opening paragraph on
+  `ROLE_GUARD`: a project's or a chain's `AGENTS.md`, read after it, never
+  lifts one of its "never"s.
+- A worker opens without the `pier-tasks` skill and with `WORKER`, its chat
+  surface without buttons and attachments; a lead with `lead(phase)` (the
+  Design or the Build section, its phase passed on `AgentLaunchOptions.phase`);
+  neither on disk. A reopened session gets its role, phase and context files
+  back from the factory's `roleOf`.
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes the head a callback (§Milestones); the head launches a new build lead on
   the doc in the design lead's worktree (`--cwd`, no `--worktree`), so it builds on
@@ -71,6 +81,7 @@ The role contracts, `reviewPrompt`, `fixPrompt` and Pier's `[Pier: …]` notes u
 | item | one `<open>` entry: its problem is the key, its stage where it stands | task, topic |
 | phase | a lead's: `design` or `build` | stage |
 | default | `MODEL_TABLE`'s missing `--thinking`: the tier's own level | the pin |
+| charter | a chain's `chains/<id>/AGENTS.md`: the user's standing instructions for it — focus, default repo, skills, models | profile, chain prompt |
 
 ### Milestones
 
@@ -115,9 +126,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   never records merge, push or restart state or a run's tool counts (git, run
   records and `pier task stats` hold them); an overturned line is replaced,
   not appended (`DISPATCHER`).
-- `<pier>/dispatcher.md` is injected beside `<pier>/AGENTS.md`
-  (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
-  the home.
+- `DISPATCHER` is the preamble's role contract (`agent/pi.ts`) only for a
+  session whose real cwd is the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
   is on demand: a message pointing at earlier work (a name, a date, "what we
   decided") is one fetch before the answer — `rg <q> memory chains/*/memory`
@@ -200,7 +210,9 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
 - Every system input appends; the head requests the 1h TTL, which is
   `CHAIN_IDLE_MS`.
 - Accepted one-time misses: a rotation, a settings change that edits the
-  prompt (skills, the home's `AGENTS.md`), the user switching model.
+  prompt (skills, the home's `AGENTS.md`), the user switching model, and an
+  upgrade that reorders the prompt — a session opened before it has its
+  `preamble` and `project_context` resent once on its next request.
 
 ## Open items
 

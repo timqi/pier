@@ -596,6 +596,8 @@ export interface AgentLaunchOptions {
   role?: AgentRole;
   /** A lead's, fixed by its creating run: it reads only the contract of that phase. */
   phase?: LeadPhase;
+  /** Instruction files loaded after the cwd's own, absolute paths; a missing one is skipped. */
+  contextFiles?: string[];
 }
 
 /** A session's system prompt as its transcript replays it — the text Pi puts
@@ -609,9 +611,11 @@ export interface SystemPrompt {
 }
 
 export interface SystemPromptBlock {
-  /** "Pier baseline", "SYSTEM.md", "Role prompt", a context file's name, "Skills", "Working directory", or Pi's section name. */
+  /** "Pier baseline", "SYSTEM.md", "Role · dispatcher" (`· lead · design|build`, `· worker`; "Role" unrecognised),
+   *  "Preamble" when the baseline is not recognised, a context file's name, "Skills", "Working directory", or Pi's
+   *  section name; an older transcript's Pier files are "Pier surface" and "Role · <role>". */
   label: string;
-  /** The file a context block was read from; `<pier>/…` for Pier's own. */
+  /** The file a context block was read from; `<pier>/…` for Pier's own in an older transcript. */
   path?: string;
   text: string;
 }

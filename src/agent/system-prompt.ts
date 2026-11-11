@@ -5,11 +5,45 @@
 
 import type { SystemPrompt, SystemPromptBlock } from "../core/types.js";
 import { textOf, type PiMessage } from "./events.js";
+import { ROLE_GUARD, SURFACE_END } from "./roles.js";
 
 export type PiSystemMessage = PiMessage & { sections?: Record<string, string | null> };
 
-/** Pier's own context files (agent/pi.ts) are the role prompts but one. */
-const PIER_INSTRUCTIONS = "<pier>/AGENTS.md";
+/** An older transcript's Pier files, injected as context files before the role moved into the preamble. */
+const PIER_FILES: Record<string, string> = {
+  "<pier>/AGENTS.md": "Pier surface",
+  "<pier>/dispatcher.md": "Role · dispatcher",
+  "<pier>/lead.md": "Role · lead",
+  "<pier>/worker.md": "Role · worker",
+};
+
+/** Each contract's H1 (roles.ts); a lead's phase is the one section it carries. */
+function roleLabel(contract: string): string {
+  const title = contract.split("\n", 1)[0] ?? "";
+  if (title.startsWith("# You are the main session")) return "Role · dispatcher";
+  if (title.startsWith("# You are a worker")) return "Role · worker";
+  if (!title.startsWith("# You are a feature lead")) return "Role";
+  return /^## Design$/m.test(contract) ? "Role · lead · design" : /^## Build$/m.test(contract) ? "Role · lead · build" : "Role · lead";
+}
+
+/** Cut by structure: the baseline ends on the surface's last sentence, the
+ *  role contract is the last `# You are` heading, the user's SYSTEM.md between.
+ *  A SYSTEM.md may head a section `# You are` too: a contract has a title
+ *  `roleLabel` knows or carries the guard. */
+function preamble(section: string): SystemPromptBlock[] {
+  const end = section.indexOf(SURFACE_END);
+  if (end < 0) return [{ label: "Preamble", text: section }];
+  const baseline = section.slice(0, end + SURFACE_END.length);
+  const rest = section.slice(baseline.length).replace(/^\n+/, "");
+  const last = [...rest.matchAll(/^# You are /gm)].at(-1)?.index;
+  const role = last !== undefined && (roleLabel(rest.slice(last)) !== "Role" || rest.includes(ROLE_GUARD, last)) ? last : undefined;
+  const own = (role === undefined ? rest : rest.slice(0, role)).replace(/\n+$/, "");
+  return [
+    { label: "Pier baseline", text: baseline },
+    ...(own ? [{ label: "SYSTEM.md", text: own }] : []),
+    ...(role === undefined ? [] : [{ label: roleLabel(rest.slice(role)), text: rest.slice(role) }]),
+  ];
+}
 
 const LABELS: Record<string, string> = {
   addendum: "APPEND_SYSTEM.md",
@@ -28,15 +62,13 @@ function contextFiles(section: string): SystemPromptBlock[] {
   const files = [...section.matchAll(/<project_instructions path="([^"]*)">\n([\s\S]*?)\n<\/project_instructions>(?=\n\n<project_instructions path="|$)/g)];
   if (files.length === 0) return [{ label: "project_context", text: section }];
   return files.map(([, path = "", text = ""]) => ({
-    label: path === PIER_INSTRUCTIONS ? "Pier instructions" : path.startsWith("<pier>/") ? "Role prompt" : path.split("/").pop() ?? path,
+    label: PIER_FILES[path] ?? (path.startsWith("<pier>/") ? "Role" : path.split("/").pop() ?? path),
     path,
     text,
   }));
 }
 
-/** `baselines` are the preambles Pier opens with, one per role; what follows
- *  the one found is the user's SYSTEM.md. */
-export function replaySystemPrompt(messages: readonly PiSystemMessage[], baselines: readonly string[]): SystemPrompt | null {
+export function replaySystemPrompt(messages: readonly PiSystemMessage[]): SystemPrompt | null {
   const system = messages.filter((m) => m.role === "system");
   if (system.length === 0) return null;
   const content: string[] = [];
@@ -52,13 +84,7 @@ export function replaySystemPrompt(messages: readonly PiSystemMessage[], baselin
   const blocks: SystemPromptBlock[] = content.map((text) => ({ label: "System message", text }));
   for (const [name, section] of sections) {
     if (name === "preamble") {
-      const baseline = baselines.find((b) => section.startsWith(b));
-      if (baseline === undefined) {
-        blocks.push({ label: "Preamble", text: section });
-        continue;
-      }
-      const own = section.slice(baseline.length).replace(/^\n\n/, "");
-      blocks.push({ label: "Pier baseline", text: baseline }, ...(own ? [{ label: "SYSTEM.md", text: own }] : []));
+      blocks.push(...preamble(section));
     } else if (name === "project_context") {
       blocks.push(...contextFiles(unwrap(name, section)));
     } else {

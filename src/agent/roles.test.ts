@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DISPATCHER, lead, MODEL_TABLE, RUN_RESULT, surfacePrompt, WORKER } from "./roles.js";
+import { DISPATCHER, lead, MODEL_TABLE, ROLE_GUARD, RUN_RESULT, SURFACE_END, surfacePrompt, WORKER } from "./roles.js";
 
 // What code or the CLI parses back out of these prompts, not their sentences.
 const instance = { publicUrl: "", skillsDir: "/opt/pier/skills" };
@@ -69,6 +69,24 @@ describe("the model table", () => {
     for (const contract of [DISPATCHER, lead("build")]) expect(contract.split(MODEL_TABLE)).toHaveLength(2);
     for (const contract of [lead("design"), WORKER]) expect(contract).not.toContain("`--model` is required");
     for (const tier of ["`hardest`", "`balanced`", "`cheap`", "`high`", "`medium`"]) expect(MODEL_TABLE).toContain(tier);
+    expect(MODEL_TABLE.split("\n").at(-1)).toBe("A model the user or the charter names wins.");
+  });
+});
+
+describe("every role contract", () => {
+  // system-prompt.ts finds the role by its heading; the project context
+  // follows the preamble, so the guard ends the opening paragraph.
+  it("opens on `# You are ` and ends its opening paragraph on the guard", () => {
+    for (const contract of [DISPATCHER, WORKER, lead("design"), lead("build")]) {
+      expect(contract).toMatch(/^# You are /);
+      expect(contract.split("\n\n")[1]?.endsWith(ROLE_GUARD)).toBe(true);
+      expect(contract.split(ROLE_GUARD)).toHaveLength(2);
+    }
+  });
+
+  it("gives only the dispatcher the charter, which a chain's AGENTS.md is", () => {
+    expect(DISPATCHER).toContain("## Charter\n- A `chains/<id>/AGENTS.md` in the project context is this chain's charter");
+    for (const contract of [WORKER, lead("design"), lead("build")]) expect(contract).not.toContain("## Charter");
   });
 });
 
@@ -145,15 +163,26 @@ describe("the surface prompt", () => {
     for (const gone of ["Next-step buttons", "file://", "[re assistant", "name<id>", "[item:"]) expect(worker).not.toContain(gone);
     for (const kept of ["<silent>why</silent>", "[lang=zh]", "`lang=`", "apply_patch"]) expect(worker).toContain(kept);
   });
+
+  // It is part of the baseline's top level, and a replayed baseline ends on its last sentence.
+  it("heads its sections like the baseline's and ends on SURFACE_END", () => {
+    for (const role of [undefined, "lead", "worker"] as const) {
+      const prompt = surfacePrompt(instance, role);
+      expect(prompt).toMatch(/^# Pier chat surface\n/);
+      expect(prompt).toContain("\n# This Pier instance\n");
+      expect(prompt).not.toMatch(/^## /m);
+      expect(prompt.endsWith(SURFACE_END)).toBe(true);
+    }
+  });
 });
 
 // Ceilings in the sense of AGENTS.md Budgets rule 5, chars/4 like the Console:
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 1_840],
-    ["WORKER", WORKER, 360],
-    ['lead("build")', lead("build"), 530],
+    ["DISPATCHER", DISPATCHER, 2_000],
+    ["WORKER", WORKER, 395],
+    ['lead("build")', lead("build"), 560],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);

@@ -151,7 +151,7 @@ holds it, else the first chain's.
 
 ## Chat surface
 
-`<pier>/AGENTS.md`'s message-header paragraph gains one sentence: a message
+The chat surface's (`surfacePrompt`) message-header paragraph gains one sentence: a message
 whose first line is `[item: <problem>]` is about that open item, written by
 the item view, never typed by the sender.
 

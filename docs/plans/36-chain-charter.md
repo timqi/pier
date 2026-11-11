@@ -153,9 +153,9 @@ interface AgentLaunchOptions {
 | --- | --- | --- |
 | baseline + surface | `Pier baseline` | preamble 开头到 surface 的固定末句（`roles.ts` 导出的常量） |
 | 用户的 | `SYSTEM.md` | 两者之间 |
-| 角色 | `Role · dispatcher` \| `Role · lead · design` \| `Role · lead · build` \| `Role · worker` | preamble 里最后一个行首 `# You are ` 到段尾；名字按三份契约的 H1 对，认不出就 `Role` |
+| 角色 | `Role · dispatcher` \| `Role · lead · design` \| `Role · lead · build` \| `Role · worker` | preamble 里最后一个行首 `# You are ` 到段尾，且它是三份契约的 H1 之一或其后带守规则那一句（`SYSTEM.md` 自己的 `# You are …` 标题仍归 `SYSTEM.md`）；名字按三份契约的 H1 对，认不出就 `Role` |
 | 项目文件 | 文件名 + 路径（不变） | `<project_instructions path>` |
-| 章程 | `Chain charter` + 路径 | 路径是 `…/chains/<id>/AGENTS.md`（标签在 `web/ui/system-prompt.ts` 换，`agent/` 不知道 chain） |
+| 章程 | `Chain charter` + 路径 | 路径是 `…/chains/<id>/AGENTS.md`，且不在会话 cwd 或其上级目录（那是项目自己的文件）（标签在 `web/ui/system-prompt.ts` 换，`agent/` 不知道 chain） |
 | 其余 | `APPEND_SYSTEM.md`、`Skills`、`Working directory`（不变） | |
 
 - 不再传 `baselines`：按结构切，不按当前代码渲染出来的字节比，F3 随之消失。

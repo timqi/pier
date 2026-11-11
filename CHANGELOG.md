@@ -6,6 +6,8 @@
 
 - Chains are always on: the "Chain mode" switch is gone from the ⋯ menu, and `/chain new` no longer turns anything on. An instance that never turned it on now titles the conversation by its chain (`Main`) and, from 64rem, shows the sidebar with Chains and Items — ⌘B hides it and remembers. The seed lists `## Chains` only while two or more chains are active.
 - `GET /api/continuous/items/:problem/turns`, the item route without a chain, is gone; `/items/:chain/:problem/turns` stays.
+- System prompt: ordered general to specific — Pier's baseline with the chat surface, `SYSTEM.md`, then the role contract, then the project's `AGENTS.md`; Pier's instructions no longer pose as `<pier>/…` project files. A session opened before the upgrade resends its prompt once.
+- Web: the System prompt dialog labels the role (`Role · dispatcher`, `Role · lead · build`, …) and lists its blocks in a row that jumps to each.
 
 ### Upgrade
 

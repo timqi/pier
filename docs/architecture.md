@@ -38,13 +38,14 @@ src/
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), system-prompt.ts (the
-               transcript's system messages replayed, split by source),
+               transcript's system messages replayed, cut by structure),
                listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, config-sync.ts (the credential-blind
                configuration projection), credentials.ts (sealed store +
                auth.json import), models.ts, roles.ts (the dispatcher's,
-               feature lead's and worker's contracts and the run result's,
-               injected from code)
+               feature lead's and worker's contracts, the preamble's last
+               block, the run result's and the chat surface Pier's
+               baseline carries, injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
                (backend + auth over agent's `WebContext`), anthropic.ts /

@@ -1,8 +1,8 @@
-// The dialog opens before the read lands, draws one block per source, and
-// copies the whole text — never a block's share of it.
+// The dialog opens before the read lands, draws one block per source under a
+// row that jumps to each, and copies the whole text — never a block's share of it.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SystemPrompt } from "../../core/types.js";
-import { button, fake, installDom, walk } from "./dom.testkit.js";
+import { button, fake, installDom, labelled, walk } from "./dom.testkit.js";
 
 const api = vi.hoisted(() => ({ mustGetJson: vi.fn() }));
 vi.mock("./api.js", () => api);
@@ -13,7 +13,9 @@ const prompt: SystemPrompt = {
   tokens: 1234,
   blocks: [
     { label: "Pier baseline", text: "base" },
-    { label: "Role prompt", path: "<pier>/worker.md", text: "# You are a worker" },
+    { label: "Role · dispatcher", text: "# You are the main session" },
+    { label: "AGENTS.md", path: "/repo/chains/tools/AGENTS.md", text: "repo rules" },
+    { label: "AGENTS.md", path: "/p/home/chains/c1/AGENTS.md", text: "Focus: parsers" },
   ],
 };
 
@@ -31,7 +33,7 @@ afterEach(() => {
   clipboard.written.length = 0;
 });
 
-const session = { id: "s1", title: "fix parser", cwd: "/w" };
+const session = { id: "s1", title: "fix parser", cwd: "/repo/chains/tools/src" };
 
 it("opens at once, then shows the blocks, the total and a copy of the whole", async () => {
   let land: (p: SystemPrompt) => void = () => {};
@@ -45,12 +47,21 @@ it("opens at once, then shows the blocks, the total and a copy of the whole", as
 
   land(prompt);
   await vi.waitFor(() => expect(copy.disabled).toBe(false));
-  expect(dialog.textContent).toContain("~1.2k tokens · 2 blocks");
-  expect(walk(dialog).filter((el) => el.localName === "h3").map((el) => el.textContent)).toEqual(["Pier baseline", "Role prompt"]);
-  expect(walk(dialog).filter((el) => el.localName === "pre").map((el) => el.textContent)).toEqual(["base", "# You are a worker"]);
-  expect(dialog.textContent).toContain("<pier>/worker.md");
+  expect(dialog.textContent).toContain("~1.2k tokens · 4 blocks");
+  // agent/ knows no chain: the charter is named here, by its path — a project's own
+  // `chains/<x>/AGENTS.md`, read because the session works below it, keeps its name.
+  expect(walk(dialog).filter((el) => el.localName === "h3").map((el) => el.textContent)).toEqual(["Pier baseline", "Role · dispatcher", "AGENTS.md", "Chain charter"]);
+  expect(walk(dialog).filter((el) => el.localName === "pre").map((el) => el.textContent)).toEqual(["base", "# You are the main session", "repo rules", "Focus: parsers"]);
+  expect(dialog.textContent).toContain("/p/home/chains/c1/AGENTS.md");
   await copy.onclick?.(new Event("click"));
   expect(clipboard.written).toEqual([prompt.text]);
+
+  const toc = labelled(dialog, "Blocks")!;
+  expect(walk(toc).filter((el) => el.localName === "button").map((el) => el.textContent)).toEqual(["Pier baseline ~1", "Role · dispatcher ~7", "AGENTS.md ~3", "Chain charter ~4"]);
+  const sections = walk(dialog).filter((el) => el.localName === "section");
+  const scrolled = vi.spyOn(sections[3]!, "scrollIntoView");
+  button(toc, /^Chain charter/)!.onclick?.(new Event("click"));
+  expect(scrolled).toHaveBeenCalledWith({ block: "start" });
 
   walk(dialog).find((el) => el.getAttribute("aria-label") === "Close system prompt")!.onclick?.(new Event("click"));
   expect(dialog.open).toBe(false);

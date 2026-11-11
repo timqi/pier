@@ -4,7 +4,7 @@
 // Plus the one rule that decides which copy of a bundled extension runs, and
 // the runtime state that must remain private to one session.
 
-import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -251,20 +251,26 @@ describe("the pier package's skills off-list", () => {
       { name: "pier-tasks", filePath: "/pier/skills/pier-tasks/SKILL.md" },
       { name: "pier-help", filePath: "/pier/skills/pier-help/SKILL.md" },
     ];
+    // The preamble runs general to specific: baseline, its surface after
+    // Working style, the user's SYSTEM.md, then the contract; no Pier file
+    // poses as a project's.
     const opened = async (session: Promise<{ dispose(): Promise<void> }>) => {
       await (await session).dispose();
       const loader = loaders.at(-1)!;
-      const files = loader.agentsFilesOverride({ agentsFiles: [] }).agentsFiles;
-      const section = files.find((f) => f.path === "<pier>/lead.md")?.content.match(/^## (\w+)/m)?.[1];
-      return [...loader.skillsOverride({ skills }).skills.map((s) => s.name), ...files.map((f) => f.path === "<pier>/AGENTS.md" ? f.content : f.path), ...(section ? [section] : [])];
+      expect(loader.agentsFilesOverride({ agentsFiles: [] }).agentsFiles).toEqual([]);
+      const prompt = loader.systemPromptOverride("user rules");
+      const surface = prompt.match(/\n\n(surface for \w+)\n\nuser rules/)?.[1];
+      expect(prompt.indexOf("# Working style")).toBeLessThan(prompt.indexOf("surface for"));
+      const contract = prompt.split("\n\nuser rules")[1]?.replace(/^\n\n/, "") ?? "";
+      return [...loader.skillsOverride({ skills }).skills.map((s) => s.name), surface, contract.split("\n")[0], contract.match(/^## (Design|Build)$/m)?.[1]].filter(Boolean);
     };
-    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual(["pier-help", "surface for worker", "<pier>/worker.md"]);
-    expect(await opened(factory.resume("worker-1"))).toEqual(["pier-help", "surface for worker", "<pier>/worker.md"]);
-    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead", phase: "design" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Design"]);
-    expect(await opened(factory.resume("lead-1"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Design"]);
-    expect(await opened(factory.resume("lead-2"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Build"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual(["pier-help", "surface for worker", "# You are a worker"]);
+    expect(await opened(factory.resume("worker-1"))).toEqual(["pier-help", "surface for worker", "# You are a worker"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead", phase: "design" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "# You are a feature lead", "Design"]);
+    expect(await opened(factory.resume("lead-1"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "# You are a feature lead", "Design"]);
+    expect(await opened(factory.resume("lead-2"))).toEqual(["pier-tasks", "pier-help", "surface for lead", "# You are a feature lead", "Build"]);
     // A lead with no recorded phase builds.
-    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "<pier>/lead.md", "Build"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "surface for lead", "# You are a feature lead", "Build"]);
     expect(await opened(factory.create({ cwd: "/tmp/wt" }))).toEqual(["pier-tasks", "pier-help", "surface for anyone"]);
   });
 });
@@ -665,14 +671,37 @@ describe("the continuous conversation's seam", () => {
   const injected = async (cwd: string, role?: "worker"): Promise<string[]> => {
     const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined, () => ({ skillsOff: [] }));
     await (await factory.create({ cwd, role })).dispose();
-    return loaders.at(-1)!.agentsFilesOverride({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
+    const loader = loaders.at(-1)!;
+    const contract = loader.systemPromptOverride().split("\n").find((line) => line.startsWith("# You are ")) ?? "no contract";
+    return [contract, ...loader.agentsFilesOverride({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path)];
   };
 
-  it("injects the dispatcher contract only into a session in the home", async () => {
+  it("gives the dispatcher contract only to a session in the home, and the project context only real files", async () => {
     const home = join(process.env.PIER_HOME!, "home");
-    expect(await injected(home)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
-    expect(await injected("/tmp/elsewhere")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
-    expect(await injected(home, "worker")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/worker.md"]);
+    expect(await injected(home)).toEqual(["# You are the main session of Pier's continuous conversation", "/repo/AGENTS.md"]);
+    expect(await injected("/tmp/elsewhere")).toEqual(["no contract", "/repo/AGENTS.md"]);
+    expect(await injected(home, "worker")).toEqual(["# You are a worker", "/repo/AGENTS.md"]);
+  });
+
+  it("appends the launch's context files after the cwd's own, created or reopened", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pier-context-"));
+    const charter = join(dir, "AGENTS.md");
+    writeFileSync(charter, "charter");
+    // A directory cannot be read as a file: it stands for any unreadable one.
+    const contextFiles = [join(dir, "missing.md"), charter, dir];
+    const factory = new PiAgentFactory(() => "", [], undefined, undefined, undefined, () => ({ skillsOff: [] }), undefined, {
+      scan: async () => [{ id: "head-1", path: join(dir, "f.jsonl"), cwd: "/tmp/home", created: 1, modified: 2 }],
+    }, (id) => (id === "head-1" ? { contextFiles } : {}));
+    const files = async (open: Promise<{ dispose(): Promise<void> }>) => {
+      await (await open).dispose();
+      return loaders.at(-1)!.agentsFilesOverride({ agentsFiles: [{ path: "/home/AGENTS.md", content: "home" }] }).agentsFiles;
+    };
+    for (const open of [() => factory.create({ cwd: "/tmp/home", contextFiles }), () => factory.resume("head-1")]) {
+      const loaded = await files(open());
+      expect(loaded.map((f) => f.path)).toEqual(["/home/AGENTS.md", charter, dir]);
+      expect(loaded[1]?.content).toBe("charter");
+      expect(loaded[2]?.content).toMatch(/^\(could not be read: EISDIR/);
+    }
   });
 
   it("compacts a main session at 100K, a worker at 180K and a lead at 200K, and no other session", async () => {

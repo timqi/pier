@@ -2,7 +2,7 @@
 // Implements the AgentFactory/AgentSession seam from src/core/types.ts on the
 // Pi SDK. No Pi type may appear in an exported signature.
 
-import { existsSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import {
   createAgentSession,
@@ -163,7 +163,7 @@ ${VERBATIM_RULES}
 /** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows
  *  it. A worker's replies are read by an agent (roles.ts), so its
  *  Communication holds only the rules that are not about a human's screen. */
-const pierBaseline = (role: AgentRole | undefined): string => `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
+const pierBaseline = (role: AgentRole | undefined, surface: string): string => `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
 
 # Communication
 ${role === "worker" ? VERBATIM_RULES : CHAT_RULES}
@@ -176,10 +176,23 @@ ${role === "worker" || role === "lead" ? toolCalls : ""}# Working style
 - Do exactly what was asked. No unrequested refactors, no extra files, no README updates.
 - A shell command starts in a fresh shell in the working directory, the \`<cwd>\` at the end of this prompt.
 - Destructive or irreversible actions on things you didn't create — deleting user files, force push, migrations, deploys, service restarts: ask first; unattended, don't do them and report what you would have done. The one exception: a step your prompt names on an \`Approved: <step>\` line was asked and answered — take that step, and only that one.
-- Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.`;
+- Say plainly when something failed, was skipped, or is unverified. Never claim a test passed without running it.${surface ? `\n\n${surface.trim()}` : ""}`;
 
-export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole): string =>
-  userPrompt ? `${pierBaseline(role)}\n\n${userPrompt}` : pierBaseline(role);
+/** General to specific: Pier's baseline with its chat surface, the user's
+ *  SYSTEM.md, then the session's role contract, the preamble's last block. */
+export const pierSystemPrompt = (userPrompt?: string, role?: AgentRole, surface = "", contract = ""): string =>
+  [pierBaseline(role, surface), userPrompt, contract].filter(Boolean).join("\n\n");
+
+/** A missing file is skipped; an unreadable one still shows, saying why. */
+function contextFile(path: string): { path: string; content: string } | undefined {
+  try {
+    return { path, content: readFileSync(path, "utf8") };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    log.warn(`context file ${path} could not be read`, err);
+    return { path, content: `(could not be read: ${err instanceof Error ? err.message : String(err)})` };
+  }
+}
 
 /** Patching the call keeps the built-in's shell settings. */
 const bashTimeoutDefault = (pi: ExtensionAPI) => {
@@ -566,9 +579,9 @@ export class PiSession implements AgentSession {
 
 export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   constructor(
-    /** Read per session open, so a Console change reaches the next session
-     *  without a restart; appended as a context file so the user's own
-     *  instructions still win. */
+    /** The chat surface, read per session open, so a Console change reaches
+     *  the next session without a restart; part of Pier's baseline, so the
+     *  user's own instructions still win. */
     private readonly instructions: (role?: AgentRole) => string = () => "",
     /** Loaded per session, never installed into the user's skill directories. */
     private readonly skillPaths: string[] = [],
@@ -582,8 +595,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
-    /** A reopened session's role and a lead's phase, which only its runs record (tasks/). */
-    private readonly roleOf: (sessionId: string) => Pick<AgentLaunchOptions, "role" | "phase"> = () => ({}),
+    /** A reopened session's role, a lead's phase and its context files, which
+     *  only its runs and its chain record (tasks/, core/). */
+    private readonly roleOf: (sessionId: string) => Pick<AgentLaunchOptions, "role" | "phase" | "contextFiles"> = () => ({}),
   ) {}
 
   /** Catalogs are global, not per session. */
@@ -804,14 +818,16 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
   }
 
-  private async resourceLoader(cwd: string, { role, phase }: Pick<AgentLaunchOptions, "role" | "phase">, dispatcher: boolean): Promise<DefaultResourceLoader> {
+  private async resourceLoader(cwd: string, { role, phase, contextFiles = [] }: Pick<AgentLaunchOptions, "role" | "phase" | "contextFiles">, dispatcher: boolean): Promise<DefaultResourceLoader> {
+    // A lead with no recorded phase builds: `design` is the flagged one.
+    const contract = dispatcher ? DISPATCHER : role === "lead" ? lead(phase ?? "build") : role === "worker" ? WORKER : "";
     // A worker never delegates (tasks/operations.ts refuses it), so it is not taught how.
     const skillsOff = role === "worker" ? [...this.pier().skillsOff, "pier-tasks"] : this.pier().skillsOff;
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(),
       // The user's SYSTEM.md is appended after Pier's baseline, so it still wins.
-      systemPromptOverride: (user) => pierSystemPrompt(user, role),
+      systemPromptOverride: (user) => pierSystemPrompt(user, role, this.instructions(role), contract),
       additionalSkillPaths: this.skillPaths,
       // Only Pier's own skills answer to the off-list; a user's skill of the
       // same name is Pi's to switch (settings.json).
@@ -824,19 +840,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         { name: "pier-chat-commands", factory: chatCommandsOffContext, hidden: true },
       ],
-      agentsFilesOverride: (current) => {
-        const content = this.instructions(role);
-        return {
-          agentsFiles: [
-            ...current.agentsFiles,
-            ...(content ? [{ path: "<pier>/AGENTS.md", content }] : []),
-            ...(dispatcher ? [{ path: "<pier>/dispatcher.md", content: DISPATCHER }] : []),
-            // A lead with no recorded phase builds: `design` is the flagged one.
-            ...(role === "lead" ? [{ path: "<pier>/lead.md", content: lead(phase ?? "build") }] : []),
-            ...(role === "worker" ? [{ path: "<pier>/worker.md", content: WORKER }] : []),
-          ],
-        };
-      },
+      agentsFilesOverride: (current) => ({
+        agentsFiles: [...current.agentsFiles, ...contextFiles.flatMap((path) => contextFile(path) ?? [])],
+      }),
     });
     await loader.reload();
     return loader;
@@ -847,7 +853,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   }
 
   private async openSnapshot(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
-    const { cwd, role, phase } = opts;
+    const { cwd, role, phase, contextFiles } = opts;
     // The home is where the continuous conversation's sessions run: only they
     // dispatch, and they compact at main's cap. A role is a run's, never main's.
     const main = !role && realPath(cwd) === realPath(pierPath("home"));
@@ -874,7 +880,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       sessionManager,
       settingsManager,
       modelRuntime: runtime,
-      resourceLoader: await this.resourceLoader(cwd, { role, phase }, main),
+      resourceLoader: await this.resourceLoader(cwd, { role, phase, contextFiles }, main),
     });
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
@@ -932,7 +938,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const info = await this.locate(sessionId);
     if (!info) return undefined;
     const { messages } = SessionManager.open(info.path).buildSessionContext();
-    return replaySystemPrompt(messages as PiSystemMessage[], [pierBaseline("worker"), pierBaseline(undefined)]);
+    return replaySystemPrompt(messages as PiSystemMessage[]);
   }
 
   async find(sessionId: string): Promise<SessionSummary | undefined> {

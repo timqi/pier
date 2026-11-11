@@ -2,22 +2,27 @@
 // back off the transcript and compared with the wire, on a real Pi session and
 // Anthropic's provider, fetch stubbed so nothing leaves the process.
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { Secrets } from "../secrets.js";
 import { PiConfigStore } from "./config.js";
 import { CredentialStore } from "./credentials.js";
-import { PiAgentFactory } from "./pi.js";
+import { PiAgentFactory, pierSystemPrompt } from "./pi.js";
+import { DISPATCHER, lead, ROLE_GUARD, surfacePrompt, WORKER } from "./roles.js";
 import { replaySystemPrompt } from "./system-prompt.js";
+
+const instance = { publicUrl: "", skillsDir: "/opt/pier/skills" };
 
 /** The `system` text of every request, in order. */
 const sent: string[] = [];
 /** The `messages` of every request, as JSON. */
 const wire: string[] = [];
 let factory: PiAgentFactory;
+/** What `roleOf` hands a reopened session, as main.ts reads a head's chain. */
+const reopened = new Map<string, { contextFiles: string[] }>();
 
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "pier-system-prompt-"));
@@ -34,7 +39,8 @@ beforeAll(async () => {
   });
   const secrets = new Secrets(join(dir, "master.key"));
   await secrets.unlock();
-  factory = new PiAgentFactory(() => "instance rules", [], new CredentialStore(openDb(":memory:"), secrets, dir), new PiConfigStore(dir));
+  factory = new PiAgentFactory((role) => surfacePrompt(instance, role), [], new CredentialStore(openDb(":memory:"), secrets, dir), new PiConfigStore(dir),
+    undefined, undefined, undefined, undefined, (id) => reopened.get(id) ?? {});
 });
 
 afterAll(() => {
@@ -55,14 +61,15 @@ describe("a session's system prompt", () => {
     expect(first?.tokens).toBe(Math.ceil(sent[0]!.length / 4));
     expect(first?.blocks.map((b) => [b.label, b.path])).toEqual([
       ["Pier baseline", undefined],
+      ["Role · worker", undefined],
       ["AGENTS.md", join(cwd, "AGENTS.md")],
-      ["Pier instructions", "<pier>/AGENTS.md"],
-      ["Role prompt", "<pier>/worker.md"],
       ["Working directory", undefined],
     ]);
-    expect(first?.blocks[1]?.text).toBe("project rules v1");
-    expect(first?.blocks[2]?.text).toBe("instance rules");
+    expect(first?.blocks[0]?.text).toBe(pierSystemPrompt(undefined, "worker", surfacePrompt(instance, "worker")));
+    expect(first?.blocks[1]?.text).toBe(WORKER);
+    expect(first?.blocks[2]?.text).toBe("project rules v1");
     expect(first?.blocks.at(-1)?.text).toBe(cwd);
+    expect(first?.text).not.toContain("<pier>/");
     await session.dispose();
 
     // A resumed session carries today's files, patched onto the prompt it had.
@@ -73,8 +80,31 @@ describe("a session's system prompt", () => {
     const second = await factory.readSystemPrompt(session.id);
     expect(sent).toHaveLength(2);
     expect(second?.text).toBe(sent[1]);
-    expect(second?.blocks[1]?.text).toBe("project rules v2");
+    expect(second?.blocks.find((b) => b.label === "AGENTS.md")?.text).toBe("project rules v2");
     await resumed.dispose();
+  });
+
+  // Two chains' heads in one home: the home's AGENTS.md, then the session's own charter and no other's.
+  it("carries a launch's context files after the cwd's own, each session only its own, reopened too", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pier-system-prompt-home-"));
+    writeFileSync(join(home, "AGENTS.md"), "home rules");
+    const files = (text: string) => [...text.matchAll(/<project_instructions path="([^"]*)">\n(.*)\n<\/project_instructions>/g)].map((m) => m.slice(1));
+    for (const chain of ["alpha", "beta"]) {
+      const charter = join(home, "chains", chain, "AGENTS.md");
+      mkdirSync(dirname(charter), { recursive: true });
+      writeFileSync(charter, `charter of ${chain}`);
+      const session = await factory.create({ cwd: home, model: { provider: "anthropic", id: "claude-sonnet-4-5" }, contextFiles: [charter] });
+      reopened.set(session.id, { contextFiles: [charter] });
+      await session.prompt("hello").catch(() => {});
+      expect(files(sent.at(-1)!)).toEqual([[join(home, "AGENTS.md"), "home rules"], [charter, `charter of ${chain}`]]);
+      await session.dispose();
+
+      writeFileSync(charter, `charter of ${chain}, edited`);
+      const resumed = await factory.resume(session.id);
+      await resumed.prompt("again").catch(() => {});
+      expect(files(sent.at(-1)!)).toEqual([[join(home, "AGENTS.md"), "home rules"], [charter, `charter of ${chain}, edited`]]);
+      await resumed.dispose();
+    }
   });
 
   it("is unknown for a session that does not exist", async () => {
@@ -91,7 +121,7 @@ describe("a session's system prompt", () => {
     await session.systemInput("do the task", { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null }, "prompt").catch(() => {});
     expect(sent).toHaveLength(before + 1);
     expect(sent[before]).toContain(`<cwd>\n${cwd}\n</cwd>`);
-    expect(sent[before]).toContain("<pier>/worker.md");
+    expect(sent[before]).toContain("# You are a worker");
     expect((await factory.readSystemPrompt(session.id))?.text).toBe(sent[before]);
     // The timeline row the run's input renders as is still the custom message.
     expect((await session.history())[0]).toMatchObject({ role: "system", text: "do the task", origin: { kind: "task-delegation", runId: "r" } });
@@ -136,14 +166,14 @@ describe("a session holding only Pier's input", () => {
 
 describe("replaySystemPrompt", () => {
   it("is null before any request carried one", () => {
-    expect(replaySystemPrompt([{ role: "user", content: "hi" }], ["base"])).toBeNull();
+    expect(replaySystemPrompt([{ role: "user", content: "hi" }])).toBeNull();
   });
 
   it("drops a removed section, and names a preamble that is not Pier's", () => {
     const prompt = replaySystemPrompt([
       { role: "system", content: "", sections: { preamble: "custom", skills: "<skills>\nlist\n</skills>", cwd: "<cwd>\n/w\n</cwd>" } },
       { role: "system", content: "", sections: { skills: null } },
-    ], ["base"]);
+    ]);
     expect(prompt).toEqual({
       text: "custom\n\n<cwd>\n/w\n</cwd>",
       tokens: 6,
@@ -151,8 +181,43 @@ describe("replaySystemPrompt", () => {
     });
   });
 
-  it("splits Pier's baseline from the user's SYSTEM.md", () => {
-    const prompt = replaySystemPrompt([{ role: "system", content: "", sections: { preamble: "base\n\nmine" } }], ["base"]);
-    expect(prompt?.blocks).toEqual([{ label: "Pier baseline", text: "base" }, { label: "SYSTEM.md", text: "mine" }]);
+  const replayed = (preamble: string, projectContext?: string) =>
+    replaySystemPrompt([{ role: "system", content: "", sections: { preamble, ...(projectContext ? { project_context: projectContext } : {}) } }])?.blocks;
+
+  it("cuts the preamble by structure, for every role, with and without SYSTEM.md", () => {
+    const roles = [
+      [undefined, "", undefined],
+      ["worker", WORKER, "Role · worker"],
+      ["lead", lead("design"), "Role · lead · design"],
+      ["lead", lead("build"), "Role · lead · build"],
+      [undefined, DISPATCHER, "Role · dispatcher"],
+    ] as const;
+    for (const [role, contract, label] of roles) {
+      const baseline = pierSystemPrompt(undefined, role, surfacePrompt(instance, role));
+      // A SYSTEM.md may carry headings of its own, `# You are …` ones too: with no role it stays the user's whole.
+      for (const user of [undefined, "# Mine\nlocal rules", "# You are terse\nlocal rules"]) {
+        expect(replayed(pierSystemPrompt(user, role, surfacePrompt(instance, role), contract))).toEqual([
+          { label: "Pier baseline", text: baseline },
+          ...(user ? [{ label: "SYSTEM.md", text: user }] : []),
+          ...(label ? [{ label, text: contract }] : []),
+        ]);
+      }
+    }
+  });
+
+  it("names an unrecognised role Role, and a baseline without the surface's end Preamble", () => {
+    const baseline = pierSystemPrompt(undefined, undefined, surfacePrompt(instance));
+    expect(replayed(`${baseline}\n\n# You are a reviewer\n\nrules. ${ROLE_GUARD}`)?.map((b) => b.label)).toEqual(["Pier baseline", "Role"]);
+    expect(replayed(`base\n\n${WORKER}`)).toEqual([{ label: "Preamble", text: `base\n\n${WORKER}` }]);
+    // A contract is known by its title too, whatever its guard read when the transcript was written.
+    expect(replayed(`${baseline}\n\n${WORKER.replace(ROLE_GUARD, "an older sentence.")}`)?.map((b) => b.label)).toEqual(["Pier baseline", "Role · worker"]);
+  });
+
+  it("labels an older transcript's Pier files by what they were", () => {
+    const file = (path: string, text: string) => `<project_instructions path="${path}">\n${text}\n</project_instructions>`;
+    const context = ["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md", "<pier>/lead.md", "<pier>/worker.md", "<pier>/other.md"]
+      .map((path) => file(path, "x")).join("\n\n");
+    expect(replayed("base", `<project_context>\n# Project Context\n\n${context}\n</project_context>`)?.map((b) => b.label))
+      .toEqual(["Preamble", "AGENTS.md", "Pier surface", "Role · dispatcher", "Role · lead", "Role · worker", "Role"]);
   });
 });

@@ -207,7 +207,7 @@ improvising.
 ## The rest of the surface
 
 - Chat conventions — next-step buttons, `file://` attachments, staying
-  silent, `[name<id> time place]` sender headers — are in `<pier>/AGENTS.md`,
-  already in your context.
+  silent, `[name<id> time place]` sender headers — are in `# Pier chat surface`,
+  already in your system prompt.
 - Delegating and scheduling work: the pier-tasks skill. Reading and posting
   Slack: pier-slack. A command that needs a token or key: pier-vault.
