@@ -609,6 +609,9 @@ main {
 /* A run session's running log (turn-activity.ts) fills the pane between the
    bar and the dock, less its bubble's padding and chip row. */
 .activity-log[data-tall] { max-height: max(16rem, calc(100dvh - var(--head-h) - var(--dock-h, 4rem) - 5rem)); }
+/* showModal() focuses the dialog itself; a ring round the whole surface marks
+   nothing. Its controls keep theirs. */
+#files-dialog:focus-visible { outline: none; }
 /* One selection vocabulary: the command list's rows and the Files dialog's. */
 .list-row.bg-indigo-50, #files-dialog button.bg-indigo-50 {
   color: var(--color-indigo-700);

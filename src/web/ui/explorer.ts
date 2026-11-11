@@ -5,7 +5,8 @@
 
 import { ArrowDown, ArrowUp, FoldVertical, Funnel, GitBranch, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { mustGetJson } from "./api.js";
+import type { ChainList } from "../types.js";
+import { getJson, mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
 import { $, addCodeCopy, basename, detailsRow, h, markdownBox } from "./dom.js";
@@ -167,6 +168,14 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   let pendingSelect: string | null = null;
   /** The line a reference named, revealed once the selected file renders. */
   let pendingLine: number | undefined;
+  /** A `chains/` folder lists chains by id; read once per open, so a rename
+   *  shows on the next. */
+  let chainNames: Promise<Map<string, string>> | null = null;
+  const namesOfChains = (): Promise<Map<string, string>> =>
+    (chainNames ??= getJson<ChainList>("/api/chains", "Files could not name the chains").then((got) => {
+      if (!got.ok) console.warn(got.error); // the folders keep their ids
+      return new Map(got.ok ? got.value.chains.map((c) => [c.id, c.name]) : []);
+    }));
 
   // flex-nowrap: two chips and a ✕ is one line at every width, and the head's
   // wrap exists for a tab row this view does not have.
@@ -216,7 +225,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   };
 
   /** Phantom rows for deleted paths, so every change stays reachable. */
-  function rowsFor(path: string, entries: Entry[]): HTMLElement[] {
+  function rowsFor(path: string, entries: Entry[], chains?: Map<string, string>): HTMLElement[] {
     const names = new Set(entries.map((e) => e.name));
     const prefix = path ? `${path}/` : "";
     for (const [p, c] of changes) {
@@ -234,21 +243,27 @@ function createFilesDialog(root: HTMLDialogElement): Show {
         e.dir ? changesUnder(`${prefix}${e.name}`) > 0 : changes.has(`${prefix}${e.name}`),
       );
     }
-    list.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+    const label = (e: Entry): string => (e.dir && chains?.get(e.name)) || e.name;
+    // A memory folder's files are its days: the newest is the one wanted.
+    const newestFirst = basename(path) === "memory";
+    list.sort((a, b) =>
+      Number(b.dir) - Number(a.dir) ||
+      (newestFirst && !a.dir ? b.name.localeCompare(a.name) : label(a).localeCompare(label(b))));
     if (pendingSelect && parentOf(pendingSelect) === path && !names.has(basename(pendingSelect))) {
       viewer.replaceChildren(placeholder(`No such file: ${pendingSelect}`));
       pendingSelect = null;
     }
-    return list.map((e) => (e.dir ? dirNode(`${prefix}${e.name}`, e.name) : fileRow(`${prefix}${e.name}`, e.name)));
+    return list.map((e) =>
+      e.dir ? dirNode(`${prefix}${e.name}`, e.name, chains?.get(e.name)) : fileRow(`${prefix}${e.name}`, e.name));
   }
 
   async function entriesInto(box: HTMLElement, path: string): Promise<void> {
     try {
-      const { entries } = await mustGetJson<{ entries: Entry[] }>(
-        fsApi("ls", { path }),
-        "could not list this folder",
-      );
-      box.replaceChildren(...rowsFor(path, entries));
+      const [{ entries }, chains] = await Promise.all([
+        mustGetJson<{ entries: Entry[] }>(fsApi("ls", { path }), "could not list this folder"),
+        basename(path) === "chains" ? namesOfChains() : undefined,
+      ]);
+      box.replaceChildren(...rowsFor(path, entries, chains));
       if (!box.childElementCount) box.append(note(filtering() ? "No changes." : "Empty."));
     } catch (err) {
       // A directory deleted in the working tree still has diffable children.
@@ -258,9 +273,12 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     }
   }
 
-  function dirNode(path: string, name: string): HTMLElement {
+  /** `chain`: the folder is that chain's, shown by its name with the id beside it. */
+  function dirNode(path: string, name: string, chain?: string): HTMLElement {
     const n = changesUnder(path);
-    const label = [h("span", "truncate", name)];
+    const label = chain
+      ? [h("span", "truncate", chain), h("span", "flex-none font-mono text-[10.5px] text-neutral-400", name)]
+      : [h("span", "truncate", name)];
     if (n) label.push(h("span", "ml-auto flex-none rounded-full bg-amber-100/80 px-1.5 font-mono text-[10px] font-semibold text-amber-700", String(n)));
     const { el, summary } = detailsRow("", label);
     summary.className += " rounded-lg px-2 py-1 transition-colors hover:bg-neutral-100";
@@ -893,7 +911,10 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     const id = s?.id ?? "";
     // Already open when a chat reference or the folder chip asked again:
     // showModal() on an open dialog throws.
-    if (!root.open) root.showModal();
+    if (!root.open) {
+      chainNames = null;
+      root.showModal();
+    }
     // No first-project fallback: landing in somebody else's repository is
     // worse than the empty chip that asks which folder you meant.
     const next = dir?.startsWith("/")

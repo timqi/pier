@@ -598,7 +598,10 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   session): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to
   `MAX_AUTO_EXPAND` folders); elsewhere only the root's own folders unfold —
-  one level down may be `node_modules`. A selected path opens with its
+  one level down may be `node_modules`. A folder under `chains/` shows its
+  chain's name with the id beside it (`GET /api/chains`, read once per open);
+  a `memory` folder lists its files newest first. The dialog's own surface
+  draws no focus ring when opening focuses it; its controls keep theirs. A selected path opens with its
   ancestors unfolded, its row marked and the diff filter off. Without a
   repository (`GET /api/explorer/git` answers `branch: null`) the branch chip,
   the whole compare band, the changed-only funnel and the diff stepper are
