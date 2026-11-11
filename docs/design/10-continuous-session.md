@@ -364,7 +364,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   reads `run <id> — not in the ledger` (`NOT_IN_LEDGER`); a lead run's carries all
   its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
   and running runs in no item's session; no listing window or cap applies.
-- Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem, on every surface.
+- Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem. Every surface titles an item by its problem, the name its topic tags carry; that name is the presentation's `runName`, a tooltip only, and an unlisted run's row its title.
 - A design lead is an item only through the head's `<open>` naming its run; `<done>` is its end.
 - Optional `designSessionId` is the first associated run target whose design lead has not reported `Design final:` (`TaskStore.leads` `designOpen`), independent of status or `waitsIn`; it changes navigation only.
 - Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading

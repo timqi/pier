@@ -96,7 +96,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     title.textContent = item.title;
     phrase.textContent = stagePhrase(item);
     // Title and phrase are short; the head's full wording stays one hover away.
-    const full = [item.title !== item.problem ? item.problem : "", phrase.textContent !== item.stage ? stageLine(item) : ""];
+    const full = [item.title !== item.problem ? item.problem : item.runName ?? "", phrase.textContent !== item.stage ? stageLine(item) : ""];
     if (full.some(Boolean)) main.title = full.filter(Boolean).join("\n");
     else main.removeAttribute("title");
     // A grouped card's head already says `Waiting on you`.

@@ -324,7 +324,7 @@ function paintLead(): void {
   leadTitle.textContent = p.title;
   leadStage.textContent = stagePhrase(p);
   leadCount.textContent = String(ordered.length);
-  lead.title = `${p.title} — ${stageLine(p)}`;
+  lead.title = `${p.title}${p.runName ? ` (${p.runName})` : ""} — ${stageLine(p)}`;
   lead.setAttribute("aria-label", `Status: ${ordered.length} open — ${lead.title}`);
   next.textContent = `${at + 1}/${ordered.length}`;
 }

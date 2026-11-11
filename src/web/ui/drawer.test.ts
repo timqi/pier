@@ -141,8 +141,10 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
     { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0 },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(labels()).toEqual(["稳定标题", "free", "merged", "gone", "auth review", "Queued one", "queued"]);
-  expect([shown("#status-item-title"), next().textContent]).toEqual(["稳定标题", "1/7"]);
+  expect(labels()).toEqual(["原始完整问题", "free", "merged", "gone", "auth", "Queued one", "queued"]);
+  expect([shown("#status-item-title"), next().textContent]).toEqual(["原始完整问题", "1/7"]);
+  // An item is titled by its problem, its topic tags' name; the runs' name is the tooltip's.
+  expect(lead().title).toBe("原始完整问题 (稳定标题) — waiting on you · 10m · 是否合并？授权只限本分支。");
   // The question's first clause beside the status; the wait and the rest are the tooltip's.
   const status = (key: string) => item(key).querySelector(".open-item-status")!;
   const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
@@ -166,15 +168,15 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
   expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
-  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
-  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
+  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
+  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
   expect(menu.closeMenu).toHaveBeenCalled();
   drawer.openDrawer();
   const view = item("item:auth").querySelector(".item-view-open")!;
-  expect(view.getAttribute("aria-label")).toBe("Item view — auth review");
+  expect(view.getAttribute("aria-label")).toBe("Item view — auth");
   view.onclick?.();
   expect(itemView).toHaveBeenCalledWith("auth", undefined);
 });
@@ -192,7 +194,7 @@ it("keeps controls and focus on problem identity across title and state refreshe
   drawer.renderDrawer();
   expect(item("item:second")).toBe(second);
   expect(doc.activeElement).toBe(control);
-  expect(second.querySelector(".open-item-title")!.textContent).toBe("short");
+  expect(second.querySelector(".open-item-title")!.textContent).toBe("second");
   second.querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "second", runs: [{ runId: "r2", targetSessionId: "s-r" }] }), undefined);
   expect(second.querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
@@ -206,14 +208,14 @@ it("retains same-titled designs on refresh, focus and navigation", () => {
   })), unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(next().textContent).toBe("1/3");
-  expect(labels()).toEqual([name, name, name]);
+  expect(labels()).toEqual(["held", "first", "second"]);
   const first = item("item:first");
   const control = first.querySelector(".session-open")!;
   control.focus();
   open.items[1] = { ...open.items[1]!, runs: [run("followup", { name: "New steering title", state: "succeeded", targetSessionId: "first" })] };
   open.items.reverse();
   drawer.renderDrawer();
-  expect(labels()).toEqual([name, name, name]);
+  expect(labels()).toEqual(["second", "first", "held"]);
   expect(item("item:first")).toBe(first);
   expect(doc.activeElement).toBe(control);
   for (const id of ["first", "second", "held"]) {
@@ -235,7 +237,7 @@ it("says where a design's wait is answered: the phrase when nothing else is, the
   const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
   expect(phrase("item:rail")).toBe("two layouts");
   expect(phrase("item:bare")).toBe("in the design session");
-  expect(item("item:rail").querySelector(".session-open")!.title).toBe("rail\nwaiting on you · in the design session · 2h · two layouts");
+  expect(item("item:rail").querySelector(".session-open")!.title).toBe("r\nwaiting on you · in the design session · 2h · two layouts");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -246,7 +248,7 @@ it("forwards design and waiting entrances without inferring a current session fr
   button.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }), undefined);
   expect(button.getAttribute("aria-current")).toBe("page");
-  expect(shown("#status-item-title")).toBe("first");
+  expect(shown("#status-item-title")).toBe("d");
 });
 
 it("marks a row current where its click lands: the newest run's session, never a run of an item answered in the chat", () => {
