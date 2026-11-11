@@ -24,6 +24,8 @@ interface ChainsDeps {
   anchor: () => HTMLElement;
   /** The docked sidebar came on or went off screen: the bar's title changes shape (session-header.ts). */
   docked: () => void;
+  /** An item open in the chain is running or queued, as the open items say. */
+  running: (id: string) => boolean;
 }
 
 let deps: ChainsDeps;
@@ -54,11 +56,12 @@ let notice: string | null = null;
 const active = (): ChainInfo[] => deps.list()?.chains.filter((c) => c.archivedAt === undefined) ?? [];
 const archived = (): ChainInfo[] => deps.list()?.chains.filter((c) => c.archivedAt !== undefined) ?? [];
 
-/** Sky: the head is replying; amber: something waits on you there. */
+/** Sky: the head is replying; amber: something waits on you there; a still sky running dot: an item of it is under way. */
 function dotOf(c: ChainInfo): HTMLElement {
   const dot = h("span", "chain-dot h-2 w-2 flex-none rounded-full");
   if (c.head?.state === "streaming") dot.classList.add("bg-sky-500");
   else if (c.waiting > 0 || c.unread) dot.classList.add("bg-amber-500");
+  else if (deps.running(c.id)) dot.classList.add("bg-sky-500", "running-dot");
   return dot;
 }
 
@@ -224,7 +227,7 @@ export function openChains(): void {
   const root = h("div", "chain-list w-[min(20rem,calc(100vw-2rem))] max-sm:w-full font-sans");
   floated = root;
   fill(root);
-  openPanel(anchor, root).setAttribute("aria-label", "Chains");
+  openPanel(anchor, root, "Chains").setAttribute("aria-label", "Chains");
   root.querySelector<HTMLElement>("[aria-current]")?.focus({ preventScroll: true });
 }
 

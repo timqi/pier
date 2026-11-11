@@ -32,6 +32,8 @@ const chain = (id: string, over: Partial<ChainInfo> = {}): ChainInfo =>
   ({ id, name: id, createdAt: 1, unread: false, waiting: 0, ...over });
 let list: ChainList | null;
 let current: string | null;
+/** Chains with an open item running or queued (main.ts reads the open items). */
+let running: string[] = [];
 const go = vi.fn();
 const refresh = vi.fn();
 const retitle = vi.fn();
@@ -52,8 +54,10 @@ beforeEach(async () => {
   list = { chains: [chain("main", { waiting: 2 }), chain("ops", { createdAt: 2, head: { sessionId: "h", state: "streaming" } }),
     chain("old", { archivedAt: 3 })] };
   current = "main";
+  running = [];
   chains = await import("./chains.js");
-  chains.initChains({ list: () => list, current: () => current, go, refresh, anchor: () => document.querySelector("#chat-title")!, docked: retitle });
+  chains.initChains({ list: () => list, current: () => current, go, refresh, anchor: () => document.querySelector("#chat-title")!, docked: retitle,
+    running: (id) => running.includes(id) });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -70,6 +74,8 @@ it("lists the active chains in the server's order with their marks, the rail onc
   const rail = fake(document.querySelector("#chain-rail"));
   expect(rail.hasAttribute("data-on")).toBe(true);
   chains.openChains();
+  // Titled, so a phone's sheet is named and closable as the menus' are (menu.ts).
+  expect(menu.openPanel).toHaveBeenLastCalledWith(document.querySelector("#chat-title"), expect.anything(), "Chains");
   expect(names(floated())).toEqual(["main", "ops"]);
   expect(inRow("main", ".chain-open").getAttribute("aria-current")).toBe("page");
   expect(inRow("main", ".chain-open").textContent).toContain("2 waiting");
@@ -89,6 +95,21 @@ it("lists the active chains in the server's order with their marks, the rail onc
 });
 
 // New chain…: ↵ posts with a pending row, a refusal stays in the field with its sentence, Esc cancels.
+// An item under way marks its chain with the still running dot, under what the head and the waiting say.
+it("marks a chain with a running item by a still sky dot, below streaming, waiting and unread", () => {
+  list = { chains: [chain("main", { waiting: 2 }), chain("ops", { head: { sessionId: "h", state: "streaming" } }),
+    chain("seen", { unread: true }), chain("busy"), chain("idle")] };
+  running = ["main", "ops", "seen", "busy"];
+  chains.openChains();
+  const dot = (id: string) => inRow(id, ".chain-dot").classList;
+  expect(dot("busy").contains("bg-sky-500") && dot("busy").contains("running-dot")).toBe(true);
+  for (const id of ["main", "ops", "seen", "idle"]) expect(dot(id).contains("running-dot")).toBe(false);
+  expect(dot("main").contains("bg-amber-500")).toBe(true);
+  expect(dot("seen").contains("bg-amber-500")).toBe(true);
+  expect(dot("ops").contains("bg-sky-500")).toBe(true);
+  expect(dot("idle").contains("bg-sky-500") || dot("idle").contains("bg-amber-500")).toBe(false);
+});
+
 it("creates a chain inline, its refusal said under the field, and navigates to it", async () => {
   chains.openChains();
   button(floated(), "New chain…").onclick?.();

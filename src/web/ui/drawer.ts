@@ -436,7 +436,7 @@ export function openDrawer(): void {
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fillPanel();
-  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list)).setAttribute("aria-label", "Status");
+  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list), "Status").setAttribute("aria-label", "Status");
   // A finger opening the panel is reading it: the field would raise the keyboard over the rows.
   if (matchMedia("(pointer: coarse)").matches) list.querySelector("button")?.focus({ preventScroll: true });
 }
