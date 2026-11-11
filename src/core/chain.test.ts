@@ -264,23 +264,32 @@ describe("the continuous conversation's chain", () => {
     expect(r.sessions.get("h1")!.prompts).toEqual([]);
   });
 
-  it("starts every new head — first, rotated, /new — on the Settings default model and reasoning, read each time", async () => {
+  it("starts a chain's first head on the Settings default and hands every later head — rotated, /new — the previous one's", async () => {
     const r = rig();
     r.defaults.value = { defaultModel: { provider: "p", id: "default" }, defaultThinkingLevel: "medium" };
     await r.say("hello");
     expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "medium" }]);
 
-    // The head was switched by hand; the next head still starts from Settings, as saved now.
+    // The head was switched by hand; the next head keeps that, whatever Settings say now.
     r.sessions.get("m1")!.setThinkingLevel("high");
     r.defaults.value = { defaultModel: { provider: "p", id: "newer" }, defaultThinkingLevel: "xhigh" };
     r.clock.now += 2 * IDLE_MS;
     expect(await r.say("later")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
-    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "xhigh" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "high" });
 
-    // Only the reasoning set: the model is the previous head's.
-    r.defaults.value = { defaultModel: null, defaultThinkingLevel: "minimal" };
     expect(await r.say("/new")).toMatchObject({ sessionId: "m3" });
-    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "newer" }, thinking: "minimal" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "high" });
+  });
+
+  it("hands the next head a model the user picked on the previous one", async () => {
+    const r = rig();
+    const strong = { provider: "p", id: "strong" }, fast = { provider: "p", id: "fast" };
+    r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: strong, models: [strong, fast], thinkingLevel: "low" });
+    await r.sessions.get("h1")!.setModel(fast);
+    r.sessions.get("h1")!.setThinkingLevel("high");
+    r.defaults.value = { defaultModel: strong, defaultThinkingLevel: "medium" };
+    expect(await r.say("new day")).toMatchObject({ sessionId: "m1", rotated: "idle" });
+    expect(r.created).toEqual([{ cwd: r.home, model: fast, thinking: "high" }]);
   });
 
   it("stamps the seed with the language the previous head's user wrote in", async () => {

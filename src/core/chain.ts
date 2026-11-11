@@ -60,7 +60,8 @@ interface ChainDeps {
   /** A `/chain` command switched to, created, renamed or archived a chain, from any surface:
    *  every chain list re-read (`chains-changed`). */
   changed: () => void;
-  /** The operator's Settings default model and reasoning, read at each new head. */
+  /** The operator's Settings default model and reasoning, read at each new head;
+   *  a head with a live predecessor keeps that one's instead. */
   defaults: () => Promise<AgentDefaults>;
   now?: () => number;
 }
@@ -446,17 +447,18 @@ export class MainChain {
       log.warn("the continuous conversation's next session could not be seeded", err);
       throw new Error(`a new session could not start — its seed failed: ${String(err)}`);
     });
-    // An unset or unreadable default keeps the previous head's choice, then Pi's model at low effort.
+    // The user's pick on the previous head (web or IM) outlives it; Settings only start a chain
+    // or replace a lost head, then Pi's model at low effort.
     const defaults = await this.deps.defaults().catch((err: unknown) => {
-      log.warn("the Settings defaults could not be read — the next main session keeps the previous one's model", err);
+      log.warn("the Settings defaults could not be read — the next main session starts on Pi's model", err);
       return { defaultModel: null, defaultThinkingLevel: null };
     });
-    const model = defaults.defaultModel ?? open?.model;
+    const model = open?.model ?? defaults.defaultModel;
     mkdirSync(this.deps.home, { recursive: true });
     const session = await this.deps.factory.create({
       cwd: this.deps.home,
       ...(model ? { model } : {}),
-      thinking: defaults.defaultThinkingLevel ?? open?.thinkingLevel ?? "low",
+      thinking: open?.thinkingLevel ?? defaults.defaultThinkingLevel ?? "low",
     });
     this.deps.router.attach(webKey(session.id), session);
     // The surface the send came from, before the seed: a web send posts no card in the chat.
