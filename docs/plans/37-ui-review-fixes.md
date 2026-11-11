@@ -134,3 +134,5 @@ review 之后修了（`2b808d0`，只跑了 check/lint/test，未再 review、�
 - 下拉触发器（`CONTROL_TRIGGER`）粗指针下 44px，与同行的目录字段等高；Settings 的 Default model、Title model 一并变高 `4e34503`。
 - `.reach-row` 与 `.chip-row` 相同的两条规则合成一个选择器 `aa551d4`；随 `.chip-row` 的查询，窄于 48rem 的细指针下 `.reach-row` 也带上 `isolation`，那里没有热区可排。
 - 换行叠放的开关粗指针下行距 1.75rem，两个热区各自完整（平板 44px、手机 49.5px）`cc28966`。算下来 `.reach-row` 的「从邻居下面穿过」已不再被用到，未实测，留着。
+
+变基：分支变基到 `ec43b80`（main 合入语音输入之后），本文里的 sha 都是变基前的，按提交标题找。冲突三处，两边都留：06 的 Composer 行与 Mic 行、Menus 行，03 的浮动按钮段，AGENTS.md 的 `web/` 行。`web/` 14927，上限 14.95k（main 的 14.8k 加上本分支的净增）。check/lint/test 全绿（2397），没有浏览器实测。
