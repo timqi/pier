@@ -41,10 +41,13 @@ let chainId: string | null = null;
 const openItem = vi.fn();
 const itemView = vi.fn();
 const reopen = vi.fn();
+const onWindow = new Map<string, () => void>();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
   doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  onWindow.clear();
+  vi.stubGlobal("window", { addEventListener: (name: string, fn: () => void) => onWindow.set(name, fn) });
   drawer = await import("./drawer.js");
   sessions = []; chain = []; current = null; open = null; chains = []; chainId = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
@@ -422,13 +425,19 @@ it("tags a found closed item with its chain", async () => {
   vi.useRealTimers();
 });
 
-// The panel's Close: the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
-it("closes an item row at once from its Close, keeps focus in the list, and restores it with the error on a refusal", async () => {
+/** A Close's Undo window running out (drawer.ts UNDO_MS). */
+const lapse = () => vi.advanceTimersByTime(5000);
+const undoOf = (li: { querySelector: (s: string) => unknown }) => fake(li.querySelector(".item-undo"));
+
+// The panel's Close waits out its Undo, then the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
+it("defers an item row's Close behind Undo, keeps focus in the list, and restores it with the error on a refusal", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
   let answer: { ok: boolean; status: number; json: () => Promise<unknown> } = { ok: true, status: 200, json: async () => ({ closed: "auth" }) };
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; }));
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; });
+  vi.stubGlobal("fetch", fetcher);
   open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "sign in", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
@@ -437,15 +446,37 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   expect(close("session:solo")).toBeNull();
   close("item:a/auth").focus();
   close("item:a/auth").onclick?.();
+  // In place, nothing sent: the row reads `Closed — Undo`, its Undo focused, the bar no longer counting it.
+  expect(item("item:a/auth").textContent).toBe("Closed \u2014Undo");
+  expect(undoOf(item("item:a/auth")).getAttribute("aria-label")).toBe("Undo closing auth");
+  expect(doc.activeElement).toBe(undoOf(item("item:a/auth")));
+  expect(doc.querySelector("[role='status']")!.textContent).toBe("auth closed \u2014 Undo for 5 seconds.");
+  expect(shown("#status-item-count")).toBe("2");
+  vi.advanceTimersByTime(4999);
+  expect(asked).toEqual([]);
+  vi.advanceTimersByTime(1);
   expect(labels()).toEqual(["sign in", "solo"]);
+  expect(panel().querySelector(".item-undo")).toBeNull();
   expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
   await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  expect(fetcher).toHaveBeenCalledWith("/api/continuous/items/a/auth/close", { method: "POST", keepalive: true });
   open = { items: [open.items[1]!], unlisted: [] };
   drawer.renderDrawer();
   expect(labels()).toEqual(["sign in", "solo"]);
 
+  // Undo sends nothing and gives the row, and the focus, back.
+  close("item:a/sign in").focus();
+  close("item:a/sign in").onclick?.();
+  undoOf(item("item:a/sign in")).onclick?.();
+  expect(labels()).toEqual(["sign in", "solo"]);
+  expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
+  expect(doc.querySelector("[role='status']")!.textContent).toBe("sign in kept open.");
+  lapse();
+  expect(asked).toHaveLength(1);
+
   answer = { ok: false, status: 404, json: async () => ({ error: "no open item \"sign in\"" }) };
   close("item:a/sign in").onclick?.();
+  lapse();
   expect(labels()).toEqual(["solo"]);
   await vi.waitFor(() => expect(labels()).toEqual(["sign in", "solo"]));
   const list = panel().querySelector("[data-list]")!;
@@ -458,13 +489,51 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   drawer.renderDrawer();
   close("item:a/sign in").focus();
   close("item:a/sign in").onclick?.();
+  expect(panel().querySelector("[data-list]")!.children[0]!.textContent).toBe("Closed \u2014Undo");
+  lapse();
   expect(labels()).toEqual(["deploy", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/deploy").querySelector(".session-open"));
+  vi.useRealTimers();
+});
+
+// Each Close keeps its own Undo window; a page that hides or leaves sends every waiting one at once.
+it("times each deferred Close on its own and sends the waiting ones when the page hides or leaves", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => { asked.push(url.split("/")[5]!); return { ok: true, status: 200, json: async () => ({}) }; }));
+  const items = ["one", "two", "three", "four"].map((problem) => ({ problem, stage: "", status: "running" as const, runs: [], chain: c }));
+  open = { items, unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  const close = (problem: string) => item(`item:a/${problem}`).querySelector(".item-close")!.onclick?.();
+  close("one");
+  vi.advanceTimersByTime(2000);
+  close("two");
+  expect(rail().querySelectorAll(".item-undo")).toHaveLength(2);
+  vi.advanceTimersByTime(3000);
+  expect(asked).toEqual(["one"]);
+  vi.advanceTimersByTime(2000);
+  expect(asked).toEqual(["one", "two"]);
+  close("three");
+  let hidden = false;
+  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => hidden ? "hidden" : "visible" });
+  doc.dispatchEvent(new Event("visibilitychange"));
+  expect(asked).toEqual(["one", "two"]);
+  hidden = true;
+  doc.dispatchEvent(new Event("visibilitychange"));
+  expect(asked).toEqual(["one", "two", "three"]);
+  close("four");
+  onWindow.get("pagehide")!();
+  vi.advanceTimersByTime(5000);
+  expect(asked).toEqual(["one", "two", "three", "four"]);
+  vi.useRealTimers();
 });
 
 // The sidebar's Items section is the panel's list drawn again (§侧边栏): the same rows in the
 // same order, each surface its own nodes, one Close for both, a refusal said where it was asked.
 it("fills the rail's Items section with the panel's rows, closes on both surfaces from either, and refuses on the asking one", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
@@ -493,10 +562,14 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   open = { ...open, items: [{ ...open.items[0]!, stage: "signing in" }, open.items[1]!] };
   drawer.renderDrawer();
   expect([railItem("item:a/auth"), item("item:a/auth")]).toEqual(before);
-  // Close from the rail: gone from both at once; focus stays in the rail's list.
+  // Close from the rail: `Closed — Undo` on both, then gone from both at once; focus stays in the rail's list.
   const close = railItem("item:a/auth").querySelector(".item-close")!;
   close.focus();
   close.onclick?.();
+  expect([railItem("item:a/auth").textContent, item("item:a/auth").textContent]).toEqual(["Closed \u2014Undo", "Closed \u2014Undo"]);
+  expect(shown("#rail-items-head")).toBe("Items · 2");
+  expect(doc.activeElement).toBe(undoOf(railItem("item:a/auth")));
+  lapse();
   expect(railRows()).toEqual(["asks", "solo"]);
   expect(labels()).toEqual(["asks", "solo"]);
   expect(doc.activeElement).toBe(railItem("session:solo").querySelector(".session-open"));
@@ -505,6 +578,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   menu.closeMenu();
   answer = { ok: false, status: 409, json: async () => ({ error: "auth is still running" }) };
   railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   expect(railRows()).toEqual(["solo"]);
   await vi.waitFor(() => expect(railRows()).toEqual(["asks", "solo"]));
   const list = rail().querySelector("[data-list]")!;
@@ -520,18 +594,22 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   open = kept;
   drawer.renderDrawer();
   railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   await vi.waitFor(() => expect(rail().querySelector("[data-list]")!.children[0]!.textContent).toBe("auth is still running"));
   // The panel's next Close takes the rail's refusal down too.
   drawer.openDrawer();
   expect(panel().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
   answer = { ok: true, status: 200, json: async () => ({ closed: "asks" }) };
   item("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   expect(railRows()).toEqual(["solo"]);
   expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
+  vi.useRealTimers();
 });
 
 // Without hover the sidebar's row folds its two actions into one ⋯ (style.css); the panel's keeps both.
 it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's none", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
@@ -550,12 +628,15 @@ it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's
   entries[0]!.onSelect();
   expect(itemView).toHaveBeenCalledWith("auth", "a");
   entries[1]!.onSelect();
+  lapse();
   expect(railRows()).toEqual(["solo"]);
   await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  vi.useRealTimers();
 });
 
 // The rail's last row closed leaves `Nothing open` and no list to keep the focus in: the current chain's row above takes it.
 it("moves the focus to the current chain's row when the rail's last item row closes", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ closed: "auth" }) })));
@@ -567,8 +648,10 @@ it("moves the focus to the current chain's row when the rail's last item row clo
   const close = rail().querySelector("[data-row-key='item:a/auth']")!.querySelector(".item-close")!;
   close.focus();
   close.onclick?.();
+  lapse();
   expect(rail().textContent).toContain("Nothing open");
   expect(doc.activeElement).toBe(chainRow);
+  vi.useRealTimers();
 });
 
 // A search's open match is its panel row: a row the stream drops leaves the results too, not left behind as a detached node.

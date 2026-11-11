@@ -326,7 +326,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   meant an item above, <done> that item's key)`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
 - The user closes an item too: `/done <item>` (§Chat commands) and the status
-  panel's **Close** both call `TaskService.closeItem`, which closes it as a
+  panel's **Close** (sent once its 5s Undo has passed) both call `TaskService.closeItem`, which closes it as a
   `<done>` does (`TaskStore.closeOpenItem`) and broadcasts `open-items-changed`.
   `/done` resolves its words among the chain's open keys — exact in any case,
   else the one key that contains every word, in any case; several are refused `/done <q> matches <a>, <b> —
