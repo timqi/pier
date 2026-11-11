@@ -60,7 +60,8 @@ updates this document.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset. `+` and send/stop stay on the draft's row at every length, 44px on a coarse pointer, bottom-aligned beside it, while the text grows upward between them; its height is read again when the width changes.
 - **Mic**: `#attach`'s size, circle and neutral icon, left of stop/send. Idle a `Mic`; starting a `Mic` and recording a `Square`, both on the `indigo-50` tint with `aria-pressed="true"`; finishing a `Square`, grey and disabled. While a take runs an `X` cancel in the same material sits left of it, its hint naming Esc. `title` names the state. No level meter and no animation: the state is the icon, the tint and the text arriving in the draft.
 - **Menus**: labels align without a reserved selection column; only selectable
-  options reserve checkmarks; restrained separators; secondary hints truncate;
+  options reserve checkmarks; restrained separators; secondary hints truncate,
+  a keyboard shortcut's hidden on a coarse pointer;
   focus leaving a nonmodal menu dismisses it. Phone sheets name the target
   session, provide a close control, and have a backdrop that dismisses without
   activating controls beneath.

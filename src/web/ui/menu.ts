@@ -9,6 +9,8 @@ import { h } from "./dom.js";
 export interface MenuItem {
   label: string;
   hint?: string; // right-aligned secondary text
+  /** A keyboard shortcut's label, in the hint's place; hidden on a coarse pointer. */
+  chord?: string;
   checked?: boolean;
   separatorBefore?: boolean;
   /** Shown, not offered; the hint says why. Skipped by the arrow keys. */
@@ -190,9 +192,11 @@ function menuItem(item: MenuItem): HTMLElement {
     ...(item.checked === undefined ? [] : [icon(Check, `h-3 w-3 text-indigo-600 ${item.checked ? "" : "invisible"}`)]),
     h("span", "min-w-0 truncate", item.label),
   );
-  if (item.hint) {
-    const hint = h("span", "ml-auto max-w-28 shrink-[999] truncate text-[13px] text-neutral-500", item.hint);
-    hint.title = item.hint;
+  const hintText = item.hint ?? item.chord;
+  if (hintText) {
+    const hint = h("span", "ml-auto max-w-28 shrink-[999] truncate text-[13px] text-neutral-500", hintText);
+    hint.title = hintText;
+    if (!item.hint) hint.classList.add("menu-chord");
     row.append(hint);
   }
   if (item.disabled) {

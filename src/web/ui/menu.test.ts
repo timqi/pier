@@ -115,3 +115,19 @@ describe("closing", () => {
     expect(isOpen()).toBe(false);
   });
 });
+
+// A chord is only worth showing where a keyboard is: the class lets a coarse pointer hide it in CSS.
+it("marks a shortcut's label for a coarse pointer to hide, and leaves other hints alone", async () => {
+  vi.resetModules();
+  const doc = installPage();
+  vi.stubGlobal("window", Object.assign(new EventTarget(), { innerWidth: 1280, innerHeight: 800 }));
+  const menu = await import("./menu.js");
+  menu.openMenu(doc.querySelector("#chat-menu") as never, [
+    { label: "Sidebar", chord: "⌘B", onSelect: () => {} },
+    { label: "Model", hint: "gpt", onSelect: () => {} },
+  ]);
+  const hints = [...doc.querySelectorAll("span.ml-auto")].map(fake);
+  expect(hints.map((s) => [s.textContent, s.classList.contains("menu-chord")])).toEqual([["⌘B", true], ["gpt", false]]);
+  menu.closeMenu();
+  vi.unstubAllGlobals();
+});

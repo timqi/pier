@@ -924,6 +924,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 @starting-style {
   :is(.popover, .download-note) { opacity: 0; transform: var(--menu-shift); }
 }
+/* A touch screen usually has no keyboard to press the chord with. */
+@media (pointer: coarse) { .menu-chord { display: none; } }
 /* Native disclosure state stays authoritative, including keyboard activation.
    Engines without details-content/interpolate-size retain instant expansion. */
 :is(#turns, #files-dialog) details::details-content {

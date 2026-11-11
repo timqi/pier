@@ -211,7 +211,7 @@ it("offers the sidebar in the ⋯ menu always, and no Chain mode", async () => {
   const items = await menuItems();
   expect(items.find((i) => i.label === "Chain mode")).toBeUndefined();
   const sidebar = items.find((i) => i.label === "Sidebar")!;
-  expect(sidebar).toMatchObject({ hint: "⌘B", separatorBefore: true });
+  expect(sidebar).toMatchObject({ chord: "⌘B", separatorBefore: true });
   expect(sidebar).not.toHaveProperty("disabled");
   sidebar.onSelect();
   expect(chains.toggleSidebar).toHaveBeenCalledOnce();

@@ -466,7 +466,7 @@ function barMenu(anchor: HTMLElement): void {
     },
     {
       label: "Browse files",
-      hint: chordLabel(FILES_KEY),
+      chord: chordLabel(FILES_KEY),
       onSelect: () => {
         closeMenu();
         deps.openFiles();
@@ -491,7 +491,7 @@ function barMenu(anchor: HTMLElement): void {
     {
       label: "Sidebar",
       separatorBefore: !chain,
-      hint: chordLabel(SIDEBAR_KEY),
+      chord: chordLabel(SIDEBAR_KEY),
       onSelect: () => {
         closeMenu();
         toggleSidebar();
