@@ -33,7 +33,7 @@ interface Outcome {
   text: string;
 }
 
-const STATUS = "text-[11.5px] text-neutral-400";
+const STATUS = "text-[12px] text-neutral-400";
 const KIND_BADGE = "bg-neutral-50 text-neutral-500 ring-neutral-200";
 /** Pi's own security note, in front of every install. */
 const SECURITY_NOTE =
@@ -94,7 +94,7 @@ export function createRegistry(deps: RegistryDeps) {
 
   /** Under a title band, so a phone has its ‹ back from the failure too. */
   const renderError = (name: string, message: string): void => {
-    deps.pane.replaceChildren(deps.paneBar(name), h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
+    deps.pane.replaceChildren(deps.paneBar(name), h("p", "px-4 py-3 text-[13px] leading-relaxed text-red-600", message));
   };
   const body = (...children: (HTMLElement | string)[]): HTMLElement =>
     h("div", "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4", ...children);
@@ -122,7 +122,7 @@ export function createRegistry(deps: RegistryDeps) {
       "div",
       "flex min-w-0 flex-1 flex-col gap-0.5",
       h("span", "flex flex-wrap items-center gap-2", name, badge(r.kind, KIND_BADGE)),
-      ...(r.state ? [h("span", "text-[11.5px] leading-snug text-amber-700", r.state)] : []),
+      ...(r.state ? [h("span", "text-[12px] leading-snug text-amber-700", r.state)] : []),
     );
     return h("div", "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0", line, switchFor(pkg, r, "", "", after));
   }
@@ -171,7 +171,7 @@ export function createRegistry(deps: RegistryDeps) {
       };
       facts.push(...fact("Updates", h("span", "flex flex-wrap items-center gap-2",
         h("span", pkg.updateAvailable ? "text-emerald-700" : "", pkg.updateAvailable ? `update available (${checked})` : checked), check), false));
-      const update = btn("Update", "btn text-[12.5px]");
+      const update = btn("Update", "btn text-[13px]");
       update.disabled = busy;
       update.onclick = () => {
         update.disabled = true;
@@ -190,7 +190,7 @@ export function createRegistry(deps: RegistryDeps) {
       actions.push(update);
     }
     if (!isBuiltIn(pkg)) {
-      const remove = btn("Remove", "btn text-[12.5px] text-neutral-600 hover:text-red-600");
+      const remove = btn("Remove", "btn text-[13px] text-neutral-600 hover:text-red-600");
       remove.disabled = busy;
       remove.onclick = () => {
         // Pi deletes what it installed; a directory of yours it only forgets.
@@ -270,12 +270,12 @@ export function createRegistry(deps: RegistryDeps) {
       content,
     );
     if (path.startsWith("<inline:")) {
-      content.append(h("p", "px-4 py-3 text-[12.5px] text-neutral-400", "Loaded from inside Pier — there is no file to show."));
+      content.append(h("p", "px-4 py-3 text-[13px] text-neutral-400", "Loaded from inside Pier — there is no file to show."));
       return;
     }
     const text = await readFile(path);
     if (!deps.live(ticket)) return;
-    if (!text.ok) return content.append(h("p", "px-4 py-3 text-[12.5px] text-red-600", text.error));
+    if (!text.ok) return content.append(h("p", "px-4 py-3 text-[13px] text-red-600", text.error));
     const lang = await langFor(path);
     if (!deps.live(ticket)) return;
     content.append(codePane(fileRows(text.value), lang));
@@ -301,7 +301,7 @@ export function createRegistry(deps: RegistryDeps) {
     if (note) setStatus(status, note.state, note.text);
     let typed = draft;
     const input = textInput(draft, "npm:@scope/name · git:github.com/owner/repo · /path/to/package", (v) => (typed = v), true);
-    const install = btn("Install", "btn btn-primary text-[12.5px]");
+    const install = btn("Install", "btn btn-primary text-[13px]");
     const start = (): void => {
       const source = typed.trim();
       if (!source) return setStatus(status, "failed", "A package source is required.");
@@ -342,7 +342,7 @@ export function createRegistry(deps: RegistryDeps) {
           "div",
           "flex max-w-2xl flex-col gap-3",
           field("Source", input, { hint: "What `pi install` takes: an npm package, a git URL (both may pin @version), or a directory on this machine." }),
-          h("p", "text-[12.5px] leading-relaxed text-amber-800", SECURITY_NOTE),
+          h("p", "text-[13px] leading-relaxed text-amber-800", SECURITY_NOTE),
           h("div", "flex items-center gap-3", install, status),
         ),
       ),

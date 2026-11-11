@@ -349,7 +349,7 @@ function trimRows(): void {
   if (trimmed) foldSilence(turnsPane); // the fold line may have gone off the top without its rows
   if (!trimmedRows) return;
   if (!trimNotice) {
-    trimNotice = h("div", "px-5 py-1.5 text-center text-[11.5px] italic text-neutral-400");
+    trimNotice = h("div", "px-5 py-1.5 text-center text-[12px] italic text-neutral-400");
     trimNotice.dataset.kind = "trim"; // every row in the pane names its kind
   }
   trimNotice.textContent = `${trimmedRows}${trimmedAtLeast ? "+" : ""} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
@@ -431,7 +431,7 @@ export function appendTurn(
   }
   if (kind === "user" || kind === "assistant") row.append(rowGestures(row, rowTools(kind, row, node), node));
   if (stamp !== undefined) {
-    const time = h("div", "my-4 text-center text-[11.5px] text-neutral-400");
+    const time = h("div", "my-4 text-center text-[12px] text-neutral-400");
     time.dataset.kind = "time";
     time.dataset.at = String(stamp);
     paintTime(time);
@@ -460,7 +460,7 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
   // `place` appears only on a change, so the session's channel names it.
   const channel = deps.sessionChannel();
   if (channel && channel !== "web") {
-    line.append(h("span", "text-[10px] uppercase tracking-wide opacity-60", channel));
+    line.append(h("span", "text-[11px] uppercase tracking-wide opacity-60", channel));
   }
   return line;
 }
@@ -506,8 +506,8 @@ function quoteBlock(quote: Quote): HTMLElement {
   const block = h("button", "quote-block mb-1.5 block w-full cursor-pointer text-left");
   block.setAttribute("type", "button");
   block.append(
-    h("div", "font-mono text-[10.5px] leading-tight opacity-70", `${quote.role} · ${quote.when.slice(11)}`),
-    h("div", "quote-excerpt text-[12.5px] leading-snug opacity-85", excerptText(quote.excerpt, quote.role)),
+    h("div", "font-mono text-[11px] leading-tight opacity-70", `${quote.role} · ${quote.when.slice(11)}`),
+    h("div", "quote-excerpt text-[13px] leading-snug opacity-85", excerptText(quote.excerpt, quote.role)),
   );
   block.onclick = () => {
     const source = quoteSource(quote);
@@ -685,7 +685,7 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
   if (dropped) {
     controls.append(h(
       "div",
-      "mr-auto text-[11.5px] text-neutral-500",
+      "mr-auto text-[12px] text-neutral-500",
       `sending drops the ${dropped} message${dropped === 1 ? "" : "s"} after this one`,
     ));
   }
@@ -863,7 +863,7 @@ function renderAssistant(
 function renderSilence(node: HTMLElement, reason: string | undefined): void {
   node.classList.remove("md", "whitespace-pre-wrap");
   node.replaceChildren(
-    h("span", "text-[12.5px] italic text-neutral-400", reason ? `Stayed silent — ${reason}` : "Stayed silent."),
+    h("span", "text-[13px] italic text-neutral-400", reason ? `Stayed silent — ${reason}` : "Stayed silent."),
   );
 }
 

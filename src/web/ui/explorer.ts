@@ -76,7 +76,7 @@ const writePrefs = (sessionId: string, p: Prefs): void => {
 
 /** The head's chips — folder and branch — in the meta-chip vocabulary the chat
  *  heading's model chip already wears. */
-const CHIP = "flex min-w-0 flex-none items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11.5px]";
+const CHIP = "flex min-w-0 flex-none items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[12px]";
 
 const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonElement =>
   btn(
@@ -182,10 +182,10 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   const header = h("header", "pagehead flex-nowrap");
   const compare = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
   const tree = h("div", "min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5");
-  const left = h("aside", `${PANE} w-64 flex-none text-[12.5px] leading-5 max-md:h-1/2 max-md:w-full`, compare, tree);
+  const left = h("aside", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:h-1/2 max-md:w-full`, compare, tree);
   /** The viewer's own title band — outside the scroller, so a path over code
    *  needs no sticky layer and the pane's material stays one surface. */
-  const bar = h("div", `${BAND} flex-wrap gap-2 px-4 py-2.5 font-mono text-[11.5px] text-neutral-500`);
+  const bar = h("div", `${BAND} flex-wrap gap-2 px-4 py-2.5 font-mono text-[12px] text-neutral-500`);
   const viewer = h("div", "h-full min-w-0 overflow-auto");
   // pointer-events: only the marks catch clicks — the strip sits over the
   // viewer's scrollbar, which must stay draggable through it.
@@ -206,7 +206,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     `/api/fs/${ep}?${new URLSearchParams({ root: cwd, ...params })}`;
 
   const note = (text: string, tone = "text-neutral-400"): HTMLElement =>
-    h("p", `px-3 py-2 text-[12.5px] ${tone}`, text);
+    h("p", `px-3 py-2 text-[13px] ${tone}`, text);
 
   /** A whole pane's worth of nothing — the Console's placeholder, centred. */
   const placeholder = (text: string): HTMLElement =>
@@ -277,9 +277,9 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   function dirNode(path: string, name: string, chain?: string): HTMLElement {
     const n = changesUnder(path);
     const label = chain
-      ? [h("span", "truncate", chain), h("span", "flex-none font-mono text-[10.5px] text-neutral-400", name)]
+      ? [h("span", "truncate", chain), h("span", "flex-none font-mono text-[11px] text-neutral-400", name)]
       : [h("span", "truncate", name)];
-    if (n) label.push(h("span", "ml-auto flex-none rounded-full bg-amber-100/80 px-1.5 font-mono text-[10px] font-semibold text-amber-700", String(n)));
+    if (n) label.push(h("span", "ml-auto flex-none rounded-full bg-amber-100/80 px-1.5 font-mono text-[11px] font-semibold text-amber-700", String(n)));
     const { el, summary } = detailsRow("", label);
     summary.className += " rounded-lg px-2 py-1 transition-colors hover:bg-neutral-100";
     const children = h("div", "pl-3");
@@ -316,7 +316,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   function fileRow(path: string, name: string): HTMLElement {
     const status = changes.get(path)?.status;
     const row = h("button", "flex w-full cursor-pointer items-center gap-1.5 rounded-lg py-1 pl-6 pr-2 text-left transition-colors hover:bg-neutral-100", h("span", "truncate", name));
-    if (status) row.append(h("span", `ml-auto flex-none font-mono text-[10.5px] font-semibold ${STATUS_TONE[status] ?? "text-neutral-500"}`, status));
+    if (status) row.append(h("span", `ml-auto flex-none font-mono text-[11px] font-semibold ${STATUS_TONE[status] ?? "text-neutral-500"}`, status));
     row.title = path;
     if (path === selectedPath) markSelected(row);
     if (path === pendingSelect) {
@@ -339,8 +339,8 @@ function createFilesDialog(root: HTMLDialogElement): Show {
 
   /** "+n −m" — the counts as color, no prose. */
   const countChips = (add: number, del: number): HTMLElement[] => [
-    ...(add ? [h("span", "flex-none font-mono text-[10.5px] font-semibold text-emerald-600", `+${add}`)] : []),
-    ...(del ? [h("span", "flex-none font-mono text-[10.5px] font-semibold text-red-600", `−${del}`)] : []),
+    ...(add ? [h("span", "flex-none font-mono text-[11px] font-semibold text-emerald-600", `+${add}`)] : []),
+    ...(del ? [h("span", "flex-none font-mono text-[11px] font-semibold text-red-600", `−${del}`)] : []),
   ];
 
   /** The band over the viewer: which file, what changed in it, what may be
@@ -445,7 +445,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
    *  loads from disk beside it; a URL opens in a new tab (markdownBox). */
   function mdPane(text: string, path: string): HTMLElement {
     const box = markdownBox(text);
-    box.className = "md mx-auto max-w-3xl px-6 py-5 text-[14px] leading-relaxed";
+    box.className = "md mx-auto max-w-3xl px-6 py-5 text-sm leading-relaxed";
     void highlightCode(box);
     addCodeCopy(box);
     const dir = `${cwd}/${parentOf(path)}`; // resolveRef drops the empty segments
@@ -606,7 +606,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     let segs: Segment[] = [];
     let rowEls: HTMLElement[] = [];
     let idx = -1;
-    const counter = h("span", "flex-none text-[10.5px] text-neutral-400");
+    const counter = h("span", "flex-none text-[11px] text-neutral-400");
     const go = (d: number): void => {
       if (!segs.length) return;
       idx = (idx + d + segs.length) % segs.length;

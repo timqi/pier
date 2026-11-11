@@ -8,7 +8,7 @@ import { h, prose } from "./dom.js";
 
 /** `.btn`/`.btn-primary` are the only custom classes style.css declares. */
 export const button = (label: string, primary = false): HTMLButtonElement =>
-  btn(label, `${primary ? "btn btn-primary" : "btn"} text-[12.5px]`);
+  btn(label, `${primary ? "btn btn-primary" : "btn"} text-[13px]`);
 
 /** For the clickable things that are not buttons: tabs, menu rows, inline
  *  links. Reach for `button()` first. */
@@ -135,7 +135,7 @@ export const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 export function card(title: string, subtitle: string | Node, ...body: HTMLElement[]): HTMLElement {
   const el = h("section", PANEL);
   const head = h("div", `rounded-t-[10px] ${PANEL_HEAD} px-5 py-4`);
-  head.append(h("h2", "text-[14px] font-semibold text-neutral-800", title));
+  head.append(h("h2", "text-sm font-semibold text-neutral-800", title));
   if (subtitle) head.append(h("p", "mt-1 text-[12px] leading-normal text-neutral-500", subtitle));
   el.append(head, h("div", "flex flex-col gap-4 px-5 py-5", ...body));
   return el;
@@ -153,14 +153,14 @@ export function field(label: string, control: HTMLElement, opts: FieldOptions = 
   const head = h("div", "flex items-center gap-1.5", h("span", "field-label", label));
   if (opts.help) head.append(opts.help);
   box.append(head, control);
-  if (opts.hint) box.append(h("span", "text-[11.5px] leading-snug text-neutral-400", opts.hint));
+  if (opts.hint) box.append(h("span", "text-[12px] leading-snug text-neutral-400", opts.hint));
   return box;
 }
 
 /** The one control skin. Exported so a control that is not an `<input>` — a
  * dropdown trigger, say — stays in step instead of copying the string. */
 export const CONTROL =
-  "w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3 py-2.5 text-[12.5px] transition-colors placeholder:text-neutral-400 hover:border-neutral-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none";
+  "w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3 py-2.5 text-[13px] transition-colors placeholder:text-neutral-400 hover:border-neutral-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none";
 
 /** The skin a dropdown trigger wears: it must read as the input beside it, so
  *  it is CONTROL plus what makes it clickable. The call site adds the layout
@@ -232,7 +232,7 @@ export function toggle(
     const head = h("span", "flex items-center gap-1.5", h("span", "text-[13px] text-neutral-700", label));
     if (help) head.append(help);
     const text = h("span", "flex min-w-0 flex-col", head);
-    if (hint) text.append(h("span", "text-[11.5px] leading-snug text-neutral-400", hint));
+    if (hint) text.append(h("span", "text-[12px] leading-snug text-neutral-400", hint));
     row.append(text);
   }
   return row;
@@ -249,7 +249,7 @@ export const STATUS_TONE: Record<SaveState, string> = {
 };
 
 export function setStatus(el: HTMLElement, state: SaveState, text: string): void {
-  el.className = `text-[11.5px] ${STATUS_TONE[state]}`;
+  el.className = `text-[12px] ${STATUS_TONE[state]}`;
   el.textContent = text;
 }
 
@@ -258,7 +258,7 @@ export function setStatus(el: HTMLElement, state: SaveState, text: string): void
 export const badge = (text: string, cls: string, dot?: string): HTMLElement =>
   h(
     "span",
-    `inline-flex flex-none items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ring-1 ${cls}`,
+    `inline-flex flex-none items-center gap-1 rounded-full px-1.5 py-px text-[11px] font-medium uppercase tracking-wide ring-1 ${cls}`,
     ...(dot ? [h("span", `inline-block h-1.5 w-1.5 flex-none rounded-full ${dot}`)] : []),
     text,
   );
@@ -266,7 +266,7 @@ export const badge = (text: string, cls: string, dot?: string): HTMLElement =>
 /** A row's secondary action: quiet until its `group` row is hovered, always
  *  visible where there is no hover to reveal it. `tone` is the hover colour. */
 export const rowActionClass = (tone = "hover:text-red-600"): string =>
-  `flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity ${tone} group-hover:opacity-100 pointer-coarse:opacity-100`;
+  `flex-none cursor-pointer text-[12px] text-neutral-400 opacity-0 transition-opacity ${tone} group-hover:opacity-100 pointer-coarse:opacity-100`;
 
 /** One device in a Console list — Security's signed-in browsers and
  *  Notifications' subscribed ones are the same row: name, a dim second line,
@@ -283,10 +283,10 @@ export function deviceRow(
     h(
       "span",
       "flex min-w-0 items-center gap-2",
-      h("span", "truncate text-[12.5px] text-neutral-700", name),
+      h("span", "truncate text-[13px] text-neutral-700", name),
       ...(opts.tag ? [opts.tag] : []),
     ),
-    h("span", "truncate text-[11.5px] text-neutral-400", meta),
+    h("span", "truncate text-[12px] text-neutral-400", meta),
   );
   if (opts.title) line.title = opts.title;
   return h(
@@ -300,7 +300,7 @@ export function deviceRow(
 export const empty = (text: string | Node): HTMLElement =>
   h(
     "p",
-    "rounded-lg border border-dashed border-neutral-200 px-3 py-4 text-center text-[12.5px] text-neutral-400",
+    "rounded-lg border border-dashed border-neutral-200 px-3 py-4 text-center text-[13px] text-neutral-400",
     text,
   );
 
@@ -324,7 +324,7 @@ export function helpBadge(title: string, steps: (string | HTMLElement)[]): HTMLE
     "span",
     "flex flex-col gap-2 rounded-[10px] border border-(--line) bg-white p-3.5 shadow-(--shadow-pop) text-[12px] font-normal normal-case leading-[1.55] tracking-normal text-neutral-600",
   );
-  panel.append(h("span", "text-[12.5px] font-semibold text-neutral-800", title));
+  panel.append(h("span", "text-[13px] font-semibold text-neutral-800", title));
   const list = h("ol", "flex list-decimal flex-col gap-1.5 pl-4");
   for (const step of steps) {
     const li = h("li", "marker:text-neutral-400");

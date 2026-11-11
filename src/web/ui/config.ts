@@ -171,7 +171,7 @@ export function createConfigView(
       "div",
       `${BAND} flex-wrap gap-3 px-4 py-2.5`,
       back,
-      h("span", "font-mono text-[12.5px] text-neutral-500", name),
+      h("span", "font-mono text-[13px] text-neutral-500", name),
       ...rest,
     );
   };
@@ -255,20 +255,20 @@ export function createConfigView(
   function navSection(title: string, action?: HTMLElement): HTMLElement {
     return h(
       "div",
-      "flex items-center justify-between gap-2 px-3 pb-1 pt-3 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400",
+      "flex items-center justify-between gap-2 px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-neutral-400",
       h("span", "", title),
       ...(action ? [action] : []),
     );
   }
 
   const navBadge = (text: string): HTMLElement =>
-    h("span", "flex-none rounded bg-neutral-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500", text);
+    h("span", "flex-none rounded bg-neutral-100 px-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500", text);
 
   /** A switch that is on, said in the nav so the list can be scanned. */
   const onBadge = (): HTMLElement =>
     h(
       "span",
-      "flex-none rounded bg-emerald-50 px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700",
+      "flex-none rounded bg-emerald-50 px-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700",
       "on",
     );
 
@@ -339,7 +339,7 @@ export function createConfigView(
     for (const [title, kind] of [["extensions", "extension"], ["skills", "skill"]] as const) {
       const found = pkg.resources.filter((r) => r.kind === kind);
       if (!found.length) continue;
-      const group = h("div", "py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
+      const group = h("div", "py-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400", title);
       group.style.paddingLeft = "34px";
       rows.push(group);
       for (const r of found) {
@@ -355,7 +355,7 @@ export function createConfigView(
   /** The managed binaries, a section of their own because ubix installs them,
    *  not Pi: each tool once, dim when off, its install error as the second line. */
   function toolRows(isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
-    if (catalogError) return [h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError)];
+    if (catalogError) return [h("p", "py-1 pl-5 pr-3 text-[13px] text-red-600", catalogError)];
     return catalog.map((t) => {
       const sel: Selection = { type: "tool", name: t.name };
       return navRow(t.name, isActive(sel), !t.enabled, () => open(sel), {
@@ -369,7 +369,7 @@ export function createConfigView(
     nav.classList.toggle("max-md:hidden", selection !== null);
     pane.classList.toggle("max-md:hidden", selection === null);
     if (!index) {
-      navList.replaceChildren(...(error ? [h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", error)] : []));
+      navList.replaceChildren(...(error ? [h("p", "px-4 py-3 text-[13px] leading-relaxed text-red-600", error)] : []));
       return;
     }
     const isActive = (sel: Selection): boolean => JSON.stringify(sel) === JSON.stringify(selection);
@@ -410,7 +410,7 @@ export function createConfigView(
     };
     rows.push(navSection("Tools", action("Add tool", { type: "tools" })), ...toolRows(isActive, open));
     rows.push(navSection("Packages", action("Add package", { type: "add" })));
-    if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
+    if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[13px] text-red-600", registry.error));
     for (const pkg of registry.registry?.packages ?? []) rows.push(...packageRows(pkg, isActive, open));
     navList.replaceChildren(...rows);
   }
@@ -429,7 +429,7 @@ export function createConfigView(
 
   /** Under the item's own title band, so a phone has its ‹ back from the failure too. */
   function renderError(name: string, message: string): void {
-    pane.replaceChildren(paneBar(name), h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
+    pane.replaceChildren(paneBar(name), h("p", "px-4 py-3 text-[13px] leading-relaxed text-red-600", message));
   }
 
   /** A `readonly` file is Pier's to write, a `managed` one the subscription
@@ -449,8 +449,8 @@ export function createConfigView(
     const { content } = got.value;
     let expected = content;
 
-    const status = h("span", "text-[11.5px] text-neutral-400", "");
-    const save = h("button", "btn btn-primary text-[12.5px]", "Save") as HTMLButtonElement;
+    const status = h("span", "text-[12px] text-neutral-400", "");
+    const save = h("button", "btn btn-primary text-[13px]", "Save") as HTMLButtonElement;
     const editor = document.createElement("textarea");
     editor.className =
       "block min-h-0 flex-1 resize-none bg-white p-4 font-mono text-[13px] leading-relaxed focus:outline-none";
@@ -490,15 +490,15 @@ export function createConfigView(
     // Opens in the shared viewer (code.ts); Edit swaps in the textarea. The
     // viewer renders the editor's own text, so switching back never hides an
     // unsaved line.
-    const edit = h("button", "btn text-[12.5px]", "Edit") as HTMLButtonElement;
-    const view = h("button", "btn text-[12.5px]", "View") as HTMLButtonElement;
+    const edit = h("button", "btn text-[13px]", "Edit") as HTMLButtonElement;
+    const view = h("button", "btn text-[13px]", "View") as HTMLButtonElement;
     const actions = (...rest: HTMLElement[]): HTMLElement =>
       h("div", "ml-auto flex flex-none items-center gap-2", ...rest);
     /** The file's purpose, and for one the editor does not take, where it is written instead. */
     const about = (note: string | null): HTMLElement[] => {
       const lines = [FILE_PURPOSE[name], note].filter((line): line is string => !!line);
       return lines.length
-        ? [h("div", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500", ...lines.map((line) => h("p", "", line)))]
+        ? [h("div", "border-b border-neutral-200 px-4 py-2 text-[13px] leading-relaxed text-neutral-500", ...lines.map((line) => h("p", "", line)))]
         : [];
     };
     const showEdit = (): void => {
@@ -560,7 +560,7 @@ export function createConfigView(
   function openTools(note?: SaveOutcome, draft = { name: "", toml: "" }): void {
     paneRequest++;
     const marked = selection?.type === "tool" ? selection.name : null;
-    const status = h("span", "text-[11.5px] text-neutral-400", "");
+    const status = h("span", "text-[12px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
 
     const row = (tool: CatalogEntry): HTMLElement => {
@@ -573,7 +573,7 @@ export function createConfigView(
           h("span", "font-mono", tool.name),
           ...(isCustom(tool) ? [badge("yours", "bg-neutral-50 text-neutral-500 ring-neutral-200")] : []),
         ),
-        h("span", "text-[11.5px] leading-snug text-neutral-400", tool.summary || binaryLine(tool)),
+        h("span", "text-[12px] leading-snug text-neutral-400", tool.summary || binaryLine(tool)),
         ...(tool.summary
           ? [h(
             "span",
@@ -617,7 +617,7 @@ export function createConfigView(
     bodyField.value = typed.toml;
     bodyField.placeholder = `spec = "github:owner/repo"\nexe = "tool"`;
     bodyField.oninput = () => (typed.toml = bodyField.value);
-    const add = h("button", "btn btn-primary text-[12.5px]", "Add") as HTMLButtonElement;
+    const add = h("button", "btn btn-primary text-[13px]", "Add") as HTMLButtonElement;
     add.onclick = () => {
       const entry = { name: typed.name.trim(), toml: typed.toml.trim() };
       if (!entry.name || !entry.toml) {
@@ -641,21 +641,21 @@ export function createConfigView(
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
         h(
           "p",
-          "max-w-2xl text-[12.5px] leading-relaxed text-neutral-500",
+          "max-w-2xl text-[13px] leading-relaxed text-neutral-500",
           "Installed by ",
           ubixLink(),
           ", which resolves a spec like ",
-          h("span", "font-mono text-[11.5px]", "github:owner/repo"),
+          h("span", "font-mono text-[12px]", "github:owner/repo"),
           " to this machine's release asset, verifies it and upgrades in place. Pier writes its config from the "
             + "switches below and keeps its files under Pier's own directory; your own ubix setup is untouched.",
         ),
         catalogError
-          ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
+          ? h("p", "max-w-2xl text-[13px] text-red-600", catalogError)
           : h("div", "flex max-w-2xl flex-col", ...rows),
         h(
           "div",
           "flex max-w-2xl flex-col gap-2 border-t border-neutral-200 pt-4",
-          h("span", "text-[12.5px] font-medium text-neutral-600", "Add one of your own"),
+          h("span", "text-[13px] font-medium text-neutral-600", "Add one of your own"),
           field("Name", nameField),
           field("The block Pier writes under the header", bodyField, {
             hint: "A line that opens a section of its own is refused, because it could rewrite the rest of the file.",

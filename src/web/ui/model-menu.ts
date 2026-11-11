@@ -42,10 +42,10 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   // the entry, not its key: one model may be pinned on several rows.
   let focusAfter: { at: MenuEntry; step: -1 | 1 } | null = null;
 
-  const status = h("span", "text-[11.5px]", "");
-  const titleStatus = h("span", "text-[11.5px]", "");
+  const status = h("span", "text-[12px]", "");
+  const titleStatus = h("span", "text-[12px]", "");
   const titleBox = h("div", "flex items-center gap-3");
-  const defaultStatus = h("span", "text-[11.5px]", "");
+  const defaultStatus = h("span", "text-[12px]", "");
   const defaultBox = h("div", "flex flex-col gap-1.5");
   const save = button("Save menu", true);
   const listBox = h("div", "flex min-w-0 flex-col gap-2");
@@ -215,7 +215,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         onThinkingPick: () => {},
         onPick: save,
       });
-      const off = btn(TITLE_OFF, "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
+      const off = btn(TITLE_OFF, "w-full cursor-pointer px-3 py-1.5 text-left text-[13px] text-neutral-500 hover:bg-neutral-100");
       off.onclick = () => save(null);
       const wrap = h("div", "flex flex-col");
       wrap.append(panel, h("div", "border-t border-neutral-200"), off);

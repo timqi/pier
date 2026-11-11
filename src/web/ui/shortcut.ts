@@ -36,7 +36,7 @@ export const modalOpen = (own?: Element): boolean =>
 const SHIFTED: Record<string, string | undefined> = { "[": "{", "]": "}" };
 
 const CARD =
-  "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
+  "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[12px] text-neutral-100 shadow-lg";
 
 /** Hover card naming a control and its chord. Follows the anchor, clamped to
  *  the viewport the way menu.ts clamps its panel. */
@@ -53,7 +53,7 @@ function hint(el: HTMLElement, label: string, chord: string): void {
     // goes away; those pointers get the aria-label and nothing else.
     if (ev.pointerType !== "mouse") return;
     hide();
-    card = h("div", CARD, label, h("kbd", "rounded bg-white/15 px-1 py-px font-sans text-[10.5px]", chord));
+    card = h("div", CARD, label, h("kbd", "rounded bg-white/15 px-1 py-px font-sans text-[11px]", chord));
     // Inside a modal dialog's top layer, or no z-index shows it.
     (el.closest("dialog[open]") ?? document.body).append(card);
     const r = el.getBoundingClientRect();

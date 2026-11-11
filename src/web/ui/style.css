@@ -39,7 +39,7 @@ html {
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
   --color-neutral-300: oklch(83% 0.012 260);
-  --color-neutral-400: oklch(55% 0.018 260);
+  --color-neutral-400: oklch(53.5% 0.018 260);
   --color-neutral-500: oklch(49% 0.02 260);
   --color-neutral-600: oklch(43% 0.022 260);
   --color-neutral-700: oklch(36% 0.024 260);
@@ -75,7 +75,7 @@ html[data-theme="dark"] {
   --color-neutral-100: oklch(29% 0 none);
   --color-neutral-200: oklch(34% 0 none);
   --color-neutral-300: oklch(39% 0 none);
-  --color-neutral-400: oklch(62% 0 none);
+  --color-neutral-400: oklch(63.5% 0 none);
   --color-neutral-500: oklch(70% 0 none);
   --color-neutral-600: oklch(78% 0 none);
   --color-neutral-700: oklch(85% 0 none);
@@ -276,10 +276,10 @@ html[data-theme="dark"][data-accent="violet"] {
    utilities are rem-based, so the root size scales padding, row heights and
    icons along with the type.
 
-   The type itself is written as `text-[13px]` literals in ~170 places, which rem
+   The type itself is written as `text-[13px]` literals in ~260 places, which rem
    cannot reach — so those utilities are redefined here at their rem equivalent
-   (n/16) instead of being rewritten at every call site. New code should use the
-   named scale (`text-sm`) and this block should shrink, not grow. */
+   (n/16) instead of being rewritten at every call site. These five and
+   `text-sm` are the whole scale (06 §Foundations); no step between them. */
 html {
   font-size: 112.5%; /* 18px base: a phone's chrome is read at arm's length and pressed with a thumb */
   --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -296,20 +296,11 @@ html {
 @media (width >= 48rem) {
   html { font-size: 100%; }
 }
-.text-\[9px\] { font-size: 0.5625rem; }
-.text-\[10px\] { font-size: 0.625rem; }
-.text-\[10\.5px\] { font-size: 0.65625rem; }
 .text-\[11px\] { font-size: 0.6875rem; }
-.text-\[11\.5px\] { font-size: 0.71875rem; }
 .text-\[12px\] { font-size: 0.75rem; }
-.text-\[12\.5px\] { font-size: 0.78125rem; }
 .text-\[13px\] { font-size: 0.8125rem; }
-.text-\[13\.5px\] { font-size: 0.84375rem; }
-.text-\[14px\] { font-size: 0.875rem; }
 .text-\[15px\] { font-size: 0.9375rem; }
 .text-\[16px\] { font-size: 1rem; }
-.text-\[17px\] { font-size: 1.0625rem; }
-.text-\[20px\] { font-size: 1.25rem; }
 
 /* Prose gives every <img> 2em of vertical margin — right for an article, wrong
    for a 64px tile in a flex strip. Unlayered, so it outranks the prose layer
@@ -1044,7 +1035,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   @starting-style { .fab[data-show] { transform: none; } }
 }
 
-.field-label { font-size: 0.71875rem; font-weight: 500; color: var(--color-neutral-600); }
+.field-label { font-size: 0.75rem; font-weight: 500; color: var(--color-neutral-600); }
 
 /* Zoomed (attachments.ts sets the flag and the pixel size): the stage turns
    into the scroll box, so panning is the platform's own. Centring has to go
@@ -1114,7 +1105,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     display: none;
   }
   .chev {
-    @apply inline-block flex-none text-[10px] transition-transform duration-150;
+    @apply inline-block flex-none text-[11px] transition-transform duration-150;
   }
   details[open] > summary .chev,
   .chev-open .chev {
@@ -1158,7 +1149,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* Inline prose in a help bubble: the walkthroughs are markdown strings, so
      `code` and links need the styling their hand-built versions carried. */
   .help code {
-    @apply rounded bg-neutral-100 px-1 py-px font-mono text-[11.5px] text-neutral-700;
+    @apply rounded bg-neutral-100 px-1 py-px font-mono text-[12px] text-neutral-700;
   }
   .help a {
     @apply text-indigo-600 underline;

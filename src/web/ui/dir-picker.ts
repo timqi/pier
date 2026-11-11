@@ -176,7 +176,7 @@ const writer =
 function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
   // Sized off the control beside it, not the form's default button: the two are
   // one field, so they share a height and a radius.
-  const button = btn("Browse…", "btn flex-none self-stretch rounded-xl px-3 text-[12.5px] text-neutral-600");
+  const button = btn("Browse…", "btn flex-none self-stretch rounded-xl px-3 text-[13px] text-neutral-600");
   // Start where the field points, falling back to the user's home directory.
   button.onclick = () => openBrowser(button, input.value.trim() || undefined, writer(input, onPick));
   return button;

@@ -27,9 +27,9 @@ export function openCharter(chain: { id: string; name: string }): HTMLDialogElem
   /** The file as last read or saved; null until the read lands, and after a failed one. */
   let stored: string | null = null;
   let saving = false;
-  // CONTROL's `text-[12.5px]` is redefined unlayered (style.css) and would beat a phone
+  // CONTROL's `text-[13px]` is redefined unlayered (style.css) and would beat a phone
   // override: swapped, so iOS gets the ≥ 16px that keeps it from zooming in.
-  const size = CONTROL.replace("text-[12.5px]", "text-base md:text-[12.5px]");
+  const size = CONTROL.replace("text-[13px]", "text-base md:text-[13px]");
   const area = h("textarea", `${size} min-h-0 flex-1 resize-none font-mono leading-5`) as HTMLTextAreaElement;
   area.setAttribute("aria-label", `Charter of ${chain.name}`);
   area.placeholder = PLACEHOLDER;

@@ -61,7 +61,7 @@ interface RunHead {
 /** Quiet card body; the coloured edge and labelled chip carry type/status. */
 export const runCard = (tone: string): HTMLElement => h("div", `system-card relative rounded-xl px-3 py-2.5 ${tone}`);
 export const runBody = (text: string): HTMLElement =>
-  h("div", "mt-1.5 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
+  h("div", "mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-normal text-neutral-500", text);
 
 /** `/status`'s text names a run as `run <id8>…` (core/reply.ts `openRunText`);
  *  each one whose session `sessions` carries opens it — in the chat card and the Status panel. */
@@ -96,9 +96,9 @@ export function runHead(o: RunHead): HTMLElement {
   if (o.label) head.append(h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
   // subagent's name is its whole prompt line.
-  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
+  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[13px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
   if (o.failure) {
-    const failure = h("span", `run-failure min-w-0 truncate text-[12.5px] ${o.labelCls}`, o.failure);
+    const failure = h("span", `run-failure min-w-0 truncate text-[13px] ${o.labelCls}`, o.failure);
     failure.title = o.failure;
     head.append(failure);
   }
@@ -409,7 +409,7 @@ function ensureActivity(ts: number, running = true): Activity {
   if (activity) return activity;
   const statusIcon = statusIconEl("running");
   // Caps at ~10 step rows, then scrolls: an opened log can't swallow the chat.
-  const rowsEl = h("div", "activity-log flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain rounded-xl px-2 py-1.5 text-[11.5px] leading-normal ring-1 ring-inset ring-neutral-200 bg-black/[0.02] dark:bg-neutral-100");
+  const rowsEl = h("div", "activity-log flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain rounded-xl px-2 py-1.5 text-[12px] leading-normal ring-1 ring-inset ring-neutral-200 bg-black/[0.02] dark:bg-neutral-100");
   const el = chip({ glyph: statusIcon, label: "working…", labelCls: STATUS_STYLE.running }, rowsEl);
   const headline = el.lastElementChild as HTMLElement;
   headline.classList.add("min-w-0", "truncate");
@@ -449,7 +449,7 @@ export function activityProgress(ts: number, text: string): void {
 }
 
 function progressRow(text: string): HTMLElement {
-  const node = h("div", "whitespace-pre-wrap break-words text-[12.5px] text-neutral-600", text);
+  const node = h("div", "whitespace-pre-wrap break-words text-[13px] text-neutral-600", text);
   // 2px edge + pl-5 lands the text on the tool rows' column (px-1 + h-3 chevron + gap-1.5);
   // the hairline is the one mark that says the model is speaking.
   const row = h("div", "border-l-2 border-neutral-200 py-0.5 pl-5", node);
@@ -566,7 +566,7 @@ function toolRow(group: HTMLElement, id: string, name: string, args: unknown): T
   // min-w-0, or a flex item's min-content floor keeps an unbreakable argument
   // (a path, a URL) at full width and truncate never gets to run.
   const preview = h("span", "min-w-0 truncate text-neutral-500", argsPreview(args, argsText));
-  const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
+  const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[13px] hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
     h("span", "flex-none font-semibold", name),
     preview,
     statusEl,
@@ -627,7 +627,7 @@ export function activityThinking(ts: number, text: string): void {
 }
 
 function thinkingRow(): { el: HTMLElement; row: Thinking } {
-  const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
+  const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[13px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
     h("span", "min-w-0 truncate", "thinking…"),
   ]);
   const pre = h("div", "mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");

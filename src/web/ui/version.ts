@@ -45,13 +45,13 @@ function panel(): HTMLElement {
   const say = (failed: boolean, text: string): void => setStatus(status$, failed ? "failed" : "idle", text);
   const actions = h("div", "flex items-center gap-2 px-3 py-1.5");
   box.append(
-    line(available ? `Pier ${latest} is out` : `Pier ${current}`, "px-3 py-1 text-[12.5px] font-medium text-neutral-700"),
+    line(available ? `Pier ${latest} is out` : `Pier ${current}`, "px-3 py-1 text-[13px] font-medium text-neutral-700"),
     // Not silence (§5): "no news" and "we could not ask" are different
     // facts, and only one of them means you might be out of date.
     line(available ? `You are running ${current}.`
       : latest === null ? "The registry could not be reached, so this may not be the latest." : "This is the latest release."),
   );
-  if (problem) box.append(line(problem, "mx-3 my-1 rounded-md bg-red-50 px-2 py-1.5 text-[11.5px] leading-snug text-red-700"));
+  if (problem) box.append(line(problem, "mx-3 my-1 rounded-md bg-red-50 px-2 py-1.5 text-[12px] leading-snug text-red-700"));
   if (available && canApply && !problem) {
     const now = button("Update now", true);
     now.onclick = () => void (async () => {
@@ -63,7 +63,7 @@ function panel(): HTMLElement {
     })();
     actions.append(now);
   }
-  actions.append(Object.assign(h("a", "btn text-[12.5px] no-underline", "Source"), {
+  actions.append(Object.assign(h("a", "btn text-[13px] no-underline", "Source"), {
     href: available ? `${SOURCE}/releases` : SOURCE, target: "_blank", rel: "noreferrer", title: "Pier is free software (AGPL-3.0)",
   }));
   box.append(actions, h("div", "px-3", status$));

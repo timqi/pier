@@ -107,7 +107,7 @@ export function createSettingsView(
   const urlInput = input();
   urlInput.placeholder = "https://pier.example.com";
   urlInput.autocomplete = "off";
-  const urlStatus = h("span", "text-[11.5px]", "");
+  const urlStatus = h("span", "text-[12px]", "");
   const urlSave = button("Save", true);
 
   async function saveUrl(): Promise<void> {
@@ -143,7 +143,7 @@ export function createSettingsView(
   // ramps repaint the whole workbench from that one attribute.
 
   const accentBox = h("div", "");
-  const accentStatus = h("span", "text-[11.5px]", "");
+  const accentStatus = h("span", "text-[12px]", "");
   const applyAccent = (accent: string): void => {
     if (accent) document.documentElement.dataset.accent = accent;
     else delete document.documentElement.dataset.accent;
@@ -184,7 +184,7 @@ export function createSettingsView(
   const next = input("", "password");
   const confirm = input("", "password");
   for (const el of [current, next, confirm]) el.autocomplete = "off";
-  const pwStatus = h("span", "text-[11.5px]", "");
+  const pwStatus = h("span", "text-[12px]", "");
   const pwSave = button("Change password", true);
 
   async function savePassword(): Promise<void> {
@@ -222,7 +222,7 @@ export function createSettingsView(
   // For the changes the Console never saw: a file edited over ssh.
 
   const reload = button("Reload", true);
-  const reloadStatus = h("span", "text-[11.5px]", "");
+  const reloadStatus = h("span", "text-[12px]", "");
 
   reload.onclick = () => {
     reload.disabled = true;
@@ -249,7 +249,7 @@ export function createSettingsView(
   // --- Security: signed-in devices -----------------------------------------------------
 
   const devicesBody = h("div", "flex flex-col gap-2");
-  const devicesStatus = h("span", "text-[11.5px]", "");
+  const devicesStatus = h("span", "text-[12px]", "");
   /** One sign-out call, and the sentence when it did not happen — a refusal
    *  and a dead network both have to reach the page (§5), and the two buttons
    *  below would otherwise each have their own idea of that. */
@@ -387,7 +387,7 @@ export function createSettingsView(
 
   function renderSecurity(status: SecretsStatus, note?: string): void {
     const locked = status.state === "locked";
-    const keyStatus = h("span", "text-[11.5px]", "");
+    const keyStatus = h("span", "text-[12px]", "");
     if (note) setStatus(keyStatus, "saved", note);
 
     const stateLine = h(
@@ -399,7 +399,7 @@ export function createSettingsView(
       ),
       h(
         "span",
-        "text-[12.5px] text-neutral-600",
+        "text-[13px] text-neutral-600",
         locked
           ? "Stored credentials cannot be read until the key is unlocked."
           : status.mode === "vt"
@@ -430,7 +430,7 @@ export function createSettingsView(
 
     if (locked) {
       // The reason is the repair instruction; hiding it would leave only "locked".
-      body.push(h("p", "text-[12.5px] leading-snug text-red-600", status.reason ?? "No reason reported."));
+      body.push(h("p", "text-[13px] leading-snug text-red-600", status.reason ?? "No reason reported."));
       const unlock = button("Unlock", true);
       unlock.onclick = () => {
         setStatus(keyStatus, "saving", "unlocking… (vt mode waits on your approval)");
@@ -471,7 +471,7 @@ export function createSettingsView(
     // vt's own diagnosis, only where it can be the answer: a locked instance,
     // or vt mode that could lock on the next start.
     if (locked || status.mode === "vt") {
-      const report = h("pre", "hidden overflow-x-auto rounded-lg bg-neutral-50 p-3 text-[11.5px] leading-snug text-neutral-700");
+      const report = h("pre", "hidden overflow-x-auto rounded-lg bg-neutral-50 p-3 text-[12px] leading-snug text-neutral-700");
       const doctor = button("vt doctor");
       doctor.onclick = () => {
         doctor.disabled = true;

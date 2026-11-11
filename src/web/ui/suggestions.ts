@@ -10,7 +10,7 @@ let live: HTMLElement | null = null;
 
 // max-w-full + break-words: the labels are written by the agent, and a long one
 // is a pill wider than the pane rather than a pill on two lines.
-const PILL = "max-w-full cursor-pointer break-words rounded-full border px-2.5 py-0.5 text-left text-[12.5px] transition-colors";
+const PILL = "max-w-full cursor-pointer break-words rounded-full border px-2.5 py-0.5 text-left text-[13px] transition-colors";
 const LIVE = `${PILL} border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100`;
 const EARLIER = `${PILL} border-neutral-300 text-neutral-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700`;
 

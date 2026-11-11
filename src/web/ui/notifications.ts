@@ -178,7 +178,7 @@ interface PushDevice {
 }
 
 export function createNotificationsCard(): { el: HTMLElement; load(): void } {
-  const status = h("span", "text-[11.5px]", "");
+  const status = h("span", "text-[12px]", "");
   const test = button("Send a test notification");
   const controls = h("div", "flex items-center gap-3", test, status);
   const body = h("div", "flex flex-col gap-4");
@@ -190,7 +190,7 @@ export function createNotificationsCard(): { el: HTMLElement; load(): void } {
   // from the desktop.
 
   const devicesBody = h("div", "flex flex-col gap-2");
-  const devicesStatus = h("span", "text-[11.5px]", "");
+  const devicesStatus = h("span", "text-[12px]", "");
   const devices = h("div", "flex flex-col gap-2", devicesBody, devicesStatus);
 
   /** Forget it on the server; when it is this browser's own row, in the
@@ -319,7 +319,7 @@ export function createNotificationsCard(): { el: HTMLElement; load(): void } {
       install,
       h(
         "span",
-        "text-[11.5px] leading-snug text-neutral-500",
+        "text-[12px] leading-snug text-neutral-500",
         "Its own window and icon — and where notifications look like an app's.",
       ),
     )];
@@ -330,7 +330,7 @@ export function createNotificationsCard(): { el: HTMLElement; load(): void } {
     if (why) {
       body.replaceChildren(
         ...installRow(),
-        h("p", "text-[12.5px] leading-snug text-neutral-500", why),
+        h("p", "text-[13px] leading-snug text-neutral-500", why),
         devices,
       );
       return;

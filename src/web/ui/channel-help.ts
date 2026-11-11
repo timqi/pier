@@ -69,7 +69,7 @@ export function slackTokenHelp(): HTMLElement {
   openApp.classList.add("inline-flex", "items-center", "gap-1.5");
   openApp.classList.add("mt-1", "w-fit");
   openApp.onclick = () => window.open(slackManifestUrl(), "_blank", "noreferrer");
-  const copyManifest = copyBtn("btn w-fit text-[12.5px]", () => JSON.stringify(SLACK_MANIFEST, null, 2));
+  const copyManifest = copyBtn("btn w-fit text-[13px]", () => JSON.stringify(SLACK_MANIFEST, null, 2));
   return helpBadge("Creating a Slack app", [
     withControl(
       "Opens Slack with every scope, event and Socket Mode already filled in. Pick your workspace → Create.",

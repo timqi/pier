@@ -52,7 +52,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   // Segmented, not a second pill strip: two rows of the same chrome read as
   // two levels of one navigation. Sticky, so a long page still names the
   // platform being edited.
-  const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[11.5px]");
+  const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[12px]");
   // top-[-8px] is the strip's own inset, so it sticks flush against the scrollport.
   const tabs = h("div", "pagehead pagehead-hug sticky top-[-8px] z-30", statusBox);
   const pane = h("div", "px-4 pb-5 pt-4");
@@ -86,7 +86,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   function showStatus(state: "clean" | "saving" | "saved" | "failed"): void {
     statusBox.replaceChildren();
     if (state === "clean") return;
-    statusBox.className = `ml-auto flex items-center gap-1.5 text-[11.5px] ${STATUS_TONE[state]}`;
+    statusBox.className = `ml-auto flex items-center gap-1.5 text-[12px] ${STATUS_TONE[state]}`;
     if (state === "saving") {
       statusBox.append(h("span", "", "Saving…"));
     } else if (state === "saved") {
@@ -202,9 +202,9 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const codeText = h("span", "font-mono text-[15px] font-semibold tracking-widest");
     const codeBox = h(
       "div",
-      "hidden items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-[12.5px] text-indigo-800",
+      "hidden items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-[13px] text-indigo-800",
       codeText,
-      h("span", "text-[11.5px] text-indigo-500", "DM the bot /bind <code> · expires in 10 min"),
+      h("span", "text-[12px] text-indigo-500", "DM the bot /bind <code> · expires in 10 min"),
     );
     const issue = button("Generate bind code");
     issue.onclick = async () => {
@@ -228,7 +228,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         "group flex items-center gap-2.5 border-b border-neutral-100 py-2 last:border-0",
         h("span", "flex h-6 w-6 flex-none items-center justify-center rounded-full bg-neutral-100 text-[11px] font-semibold text-neutral-500", (user.name[0] ?? "?").toUpperCase()),
         h("span", "min-w-0 flex-1 truncate text-[13px] text-neutral-700", user.name),
-        h("span", "flex-none font-mono text-[11.5px] text-neutral-400", user.id),
+        h("span", "flex-none font-mono text-[12px] text-neutral-400", user.id),
         remove,
       ));
     }
@@ -340,7 +340,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         field("Working directory", h("div", "flex min-h-8 items-center", value(parent.cwd))),
         field("Model & reasoning", model),
       ),
-      ...(parent.error ? [h("span", "text-[12.5px] text-amber-700", `Could not read the Settings default: ${parent.error}`)] : []),
+      ...(parent.error ? [h("span", "text-[13px] text-amber-700", `Could not read the Settings default: ${parent.error}`)] : []),
     ]).el;
   }
 
@@ -402,7 +402,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (stale) {
       out.push(h(
         "span",
-        "text-[12.5px] text-amber-700",
+        "text-[13px] text-amber-700",
         chat.botId
           ? `Stale: last seen under bot ${chat.botId}${cfg.botId ? `, not the current ${cfg.botId}` : ""} — a message here makes it current again.`
           : "Stale: no message since Pier started recording bot identities — a message here makes it current again.",

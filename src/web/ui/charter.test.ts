@@ -54,7 +54,7 @@ it("opens at once on the chain's file, and saves nothing until the text changes"
   expect(area(dialog).disabled).toBe(true);
   expect(area(dialog).placeholder).toBe("Focus: …\nDefault repo: …\nSkills: …\nModels: …");
   // CONTROL's size, swapped for a phone's: a CONTROL of another size would leave the swap undone, and iOS zooming.
-  expect(area(dialog).className.split(" ").filter((c) => c.includes("text-"))).toEqual(["text-base", "md:text-[12.5px]", "placeholder:text-neutral-400"]);
+  expect(area(dialog).className.split(" ").filter((c) => c.includes("text-"))).toEqual(["text-base", "md:text-[13px]", "placeholder:text-neutral-400"]);
   expect(button(dialog, "Save")!.disabled).toBe(true);
 
   land({ ok: true, value: { text: "Focus: parsers" } });

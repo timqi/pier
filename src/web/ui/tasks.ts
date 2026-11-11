@@ -53,7 +53,7 @@ function runRow(run: TaskRun): HTMLElement {
   const row = h("details", "rounded-lg border border-neutral-200") as HTMLDetailsElement;
   const summary = h(
     "summary",
-    "flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11.5px] text-neutral-500",
+    "flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[12px] text-neutral-500",
     runBadge(run),
     h("span", "", stampTime(run.queuedAt)),
     h("span", "text-neutral-400", run.triggerSource),
@@ -65,11 +65,11 @@ function runRow(run: TaskRun): HTMLElement {
   row.ontoggle = () => {
     if (!row.open || body.childElementCount) return;
     if (run.targetSessionId) {
-      const link = h("a", "text-[11.5px] text-indigo-600 hover:underline", "Open the run's session");
+      const link = h("a", "text-[12px] text-indigo-600 hover:underline", "Open the run's session");
       (link as HTMLAnchorElement).href = `#/session/${encodeURIComponent(run.targetSessionId)}`;
       body.append(link);
     }
-    body.append(h("pre", "max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-snug text-neutral-700", runLog(run)));
+    body.append(h("pre", "max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-snug text-neutral-700", runLog(run)));
   };
   row.append(body);
   return row;
@@ -77,7 +77,7 @@ function runRow(run: TaskRun): HTMLElement {
 
 export function createTasksPane(): { el: HTMLElement; show(): void } {
   const listBox = h("div", "flex flex-col gap-2");
-  const status = h("span", "text-[11.5px]", "");
+  const status = h("span", "text-[12px]", "");
   /** Which task's runs are open, so a reload after a toggle keeps them open. */
   const open = new Set<string>();
 
@@ -94,9 +94,9 @@ export function createTasksPane(): { el: HTMLElement; show(): void } {
     const runsBox = h("div", "flex flex-col gap-1.5");
     const runsBtn = button("Runs");
     const drawRuns = async (): Promise<void> => {
-      runsBox.replaceChildren(h("span", "text-[11.5px] text-neutral-400", "loading…"));
+      runsBox.replaceChildren(h("span", "text-[12px] text-neutral-400", "loading…"));
       const got = await getJson<TaskRun[]>(`/api/tasks/${encodeURIComponent(task.id)}/runs`, "Could not load runs");
-      if (!got.ok) return void runsBox.replaceChildren(h("span", "text-[11.5px] text-red-600", got.error));
+      if (!got.ok) return void runsBox.replaceChildren(h("span", "text-[12px] text-red-600", got.error));
       runsBox.replaceChildren(...(got.value.length ? got.value.map(runRow) : [empty("No runs yet.")]));
     };
     runsBtn.onclick = () => {
@@ -113,9 +113,9 @@ export function createTasksPane(): { el: HTMLElement; show(): void } {
       "div",
       "flex min-w-0 flex-col gap-1",
       h("span", "flex min-w-0 flex-wrap items-center gap-2",
-        h("span", "truncate text-[12.5px] font-medium text-neutral-700", task.name),
+        h("span", "truncate text-[13px] font-medium text-neutral-700", task.name),
         ...(last ? [runBadge(last), h("span", "text-[11px] text-neutral-400", agoLabel(last.queuedAt))] : [])),
-      h("span", "truncate font-mono text-[11.5px] text-neutral-400", meta.join(" · ")),
+      h("span", "truncate font-mono text-[12px] text-neutral-400", meta.join(" · ")),
     );
     if (task.description) head.title = task.description;
     const controls = h("div", "flex flex-none items-center gap-3");

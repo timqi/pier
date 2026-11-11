@@ -325,7 +325,7 @@ function card(url: string, name: string): HTMLElement {
   );
   const fileType = h(
     "span",
-    "flex h-7 w-7 flex-none items-center justify-center rounded-md bg-indigo-50 text-[10px] font-semibold uppercase text-indigo-600",
+    "flex h-7 w-7 flex-none items-center justify-center rounded-md bg-indigo-50 text-[11px] font-semibold uppercase text-indigo-600",
     ext.slice(0, 4) || "file",
   );
   const label = h("span", "min-w-0 truncate text-[13px] font-medium text-neutral-800", name);

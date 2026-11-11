@@ -201,9 +201,9 @@ export function renderQueue(steering: string[], followUp: string[], parkedNow = 
       // Plain queued rows need no badge: the panel's own label already says so;
       // a steer deviates from it, a parked row names whose it is.
       if (r.mode === "steer") {
-        li.append(h("span", "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-indigo-700", r.mode));
+        li.append(h("span", "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-700", r.mode));
       } else if (r.mode !== "queued") {
-        li.append(h("span", "max-w-[40%] flex-none truncate rounded bg-neutral-100 px-1 py-0.5 text-[10.5px] font-semibold text-neutral-600", r.mode));
+        li.append(h("span", "max-w-[40%] flex-none truncate rounded bg-neutral-100 px-1 py-0.5 text-[11px] font-semibold text-neutral-600", r.mode));
       }
       // Pi's queue holds the routed prompt, its sender header above the item line: read as a bubble is.
       li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", splitItem(splitSpeaker(r.text).text).text));
@@ -237,7 +237,7 @@ function renderFileStrip(): void {
       const body = f.preview
         ? imageThumb(f.preview)
         : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.file.name || "file");
-      const remove = h("button", "absolute -right-1.5 -top-1.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", icon(X, "h-3 w-3"));
+      const remove = h("button", "absolute -right-1.5 -top-1.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-neutral-700 text-[11px] leading-none text-white hover:bg-red-600", icon(X, "h-3 w-3"));
       remove.setAttribute("type", "button");
       remove.setAttribute("aria-label", `Remove ${f.file.name || "attachment"}`);
       remove.onclick = () => {
@@ -263,7 +263,7 @@ export function setQuote(source: QuoteSource | null): void {
     quoteStrip.replaceChildren();
     return;
   }
-  const excerpt = h("div", "quote-excerpt min-w-0 flex-1 text-[12.5px] leading-snug text-neutral-600", excerptText(source.text.slice(0, QUOTE_CHARS), source.role));
+  const excerpt = h("div", "quote-excerpt min-w-0 flex-1 text-[13px] leading-snug text-neutral-600", excerptText(source.text.slice(0, QUOTE_CHARS), source.role));
   const remove = h("button", "flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(X, "h-3.5 w-3.5"));
   remove.setAttribute("type", "button");
   remove.setAttribute("aria-label", "Remove quote");
@@ -380,7 +380,7 @@ function pickCommand(row: CommandRow): void {
 function renderCommandMenu(): void {
   const matches = commandMatches();
   commandRows = matches.map((row) => {
-    const li = h("li", "list-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-[14px] leading-5 text-neutral-800",
+    const li = h("li", "list-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-sm leading-5 text-neutral-800",
       h("span", "font-mono", row.word),
       h("span", "min-w-0 truncate text-[13px] text-neutral-500", row.line));
     li.setAttribute("role", "option");

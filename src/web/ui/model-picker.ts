@@ -55,7 +55,7 @@ function modelRow(opts: {
     icon(Check, `h-3 w-3 text-indigo-600 ${opts.checked ? "" : "invisible"}`),
     h("span", "truncate", opts.label),
   );
-  if (opts.hint) pick.append(h("span", "ml-auto flex-none text-[11.5px] text-neutral-400", opts.hint));
+  if (opts.hint) pick.append(h("span", "ml-auto flex-none text-[12px] text-neutral-400", opts.hint));
   pick.onclick = () => opts.onSelect();
   return pick;
 }
@@ -76,7 +76,7 @@ export function modelPicker({
   search.placeholder = "Search models";
   search.setAttribute("aria-label", "Search models");
   search.className =
-    "w-full rounded-md border border-neutral-300 px-2 py-1.5 text-[12.5px] focus:border-indigo-400 focus:outline-none";
+    "w-full rounded-md border border-neutral-300 px-2 py-1.5 text-[13px] focus:border-indigo-400 focus:outline-none";
   controls.append(search);
 
   if (thinkingLevels.length) {
@@ -122,7 +122,7 @@ export function modelPicker({
       );
     if (!rows.length) return;
     listWrap.append(
-      h("div", "px-3 pb-0.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", "Pinned"),
+      h("div", "px-3 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400", "Pinned"),
       ...rows.map(({ e, model }) =>
         modelRow({
           label: model.id,
@@ -150,7 +150,7 @@ export function modelPicker({
       listWrap.append(
         h(
           "div",
-          "px-3 py-2 text-[12.5px] text-neutral-400",
+          "px-3 py-2 text-[13px] text-neutral-400",
           models.length ? "No matching models." : "No models available.",
         ),
       );
@@ -162,7 +162,7 @@ export function modelPicker({
       group.open = holdsCurrent || normalized.length > 0;
       const summary = h(
         "summary",
-        "flex cursor-pointer select-none items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400 hover:bg-neutral-100",
+        "flex cursor-pointer select-none items-center gap-1.5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400 hover:bg-neutral-100",
         icon(ChevronRight, "chev h-3 w-3"),
         h("span", "truncate", provider),
         h("span", "ml-auto flex-none normal-case text-neutral-300", String(list.length)),
@@ -253,7 +253,7 @@ export function launchField(
         onChange(choice);
       },
     });
-    const clear = btn(inherited ? "Default" : "Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
+    const clear = btn(inherited ? "Default" : "Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[13px] text-neutral-500 hover:bg-neutral-100");
     clear.onclick = () => {
       closeMenu();
       onChange({ model: null, thinking: null });

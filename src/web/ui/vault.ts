@@ -33,7 +33,7 @@ export function createVaultPane(): { el: HTMLElement; show(query?: string): void
   // --- the table ---------------------------------------------------------------
 
   const listBox = h("div", "flex flex-col gap-2");
-  const listStatus = h("span", "text-[11.5px]", "");
+  const listStatus = h("span", "text-[12px]", "");
 
   function row(entry: VaultRow): HTMLElement {
     const remove = button("Remove");
@@ -53,10 +53,10 @@ export function createVaultPane(): { el: HTMLElement; show(query?: string): void
     const line = h(
       "div",
       "flex min-w-0 flex-col gap-1",
-      h("span", "truncate font-mono text-[12.5px] text-neutral-700", entry.name),
+      h("span", "truncate font-mono text-[13px] text-neutral-700", entry.name),
       h(
         "span",
-        "flex items-center gap-1.5 text-[11.5px] text-neutral-400",
+        "flex items-center gap-1.5 text-[12px] text-neutral-400",
         badge(entry.level, LEVEL_STYLE[entry.level]),
         `updated ${agoLabel(entry.updatedAt)}`,
       ),
@@ -90,9 +90,9 @@ export function createVaultPane(): { el: HTMLElement; show(query?: string): void
   const value = input("", "password");
   value.placeholder = "paste the secret";
   value.autocomplete = "new-password";
-  const note = h("span", "text-[11.5px] leading-snug text-neutral-400", LEVEL_NOTE[level]);
+  const note = h("span", "text-[12px] leading-snug text-neutral-400", LEVEL_NOTE[level]);
   const levelBox = h("div", "flex flex-col gap-1.5");
-  const addStatus = h("span", "text-[11.5px]", "");
+  const addStatus = h("span", "text-[12px]", "");
   const save = button("File secret", true);
 
   function renderLevel(): void {

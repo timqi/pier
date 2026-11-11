@@ -90,10 +90,10 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
     h(
       "div",
       "flex flex-col gap-1",
-      h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title),
+      h("span", "text-[11px] font-semibold uppercase tracking-wide text-neutral-400", title),
       h(
         "pre",
-        "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-50 p-2 font-mono text-[11.5px] leading-relaxed text-neutral-600",
+        "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-50 p-2 font-mono text-[12px] leading-relaxed text-neutral-600",
         text,
       ),
     );
@@ -138,7 +138,7 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       state.title = endpoint;
       // Its own line under the row: the two halves of an exchange are not
       // something that fits in a column.
-      const status = h("span", "text-[11.5px]", "");
+      const status = h("span", "text-[12px]", "");
       const line = h("div", "col-span-full hidden flex-col gap-2 px-4 pb-3", status);
       const actions = h("div", "flex flex-wrap justify-end gap-1.5 max-sm:col-span-full");
       // Which model to probe is the operator's call and nothing else's: an
@@ -263,7 +263,7 @@ function openSetup(
   const auth = document.createElement("select");
   auth.className = `${CONTROL} select`;
   const fields = h("div", "flex flex-col gap-4");
-  const status = h("span", "text-[11.5px] text-red-600", "");
+  const status = h("span", "text-[12px] text-red-600", "");
   const cancel = button("Cancel");
   const save = button(existing ? "Save" : "Add", true);
   save.type = "submit";
@@ -318,7 +318,7 @@ function openSetup(
         field("Model capabilities", h(
           "div", "flex flex-wrap items-center gap-3",
           h(
-            "label", "flex items-center gap-2 text-[12.5px] text-neutral-600",
+            "label", "flex items-center gap-2 text-[13px] text-neutral-600",
             reasoning, h("span", "", "Reasoning"),
           ),
           effort,
@@ -407,7 +407,7 @@ function openSetup(
   };
 
   dialog.append(
-    h("div", "border-b border-neutral-200 px-4 py-2.5 text-[14px] font-semibold", existing ? `Edit ${existing.name}` : "Add provider"),
+    h("div", "border-b border-neutral-200 px-4 py-2.5 text-sm font-semibold", existing ? `Edit ${existing.name}` : "Add provider"),
     form,
   );
   dialog.onclose = () => dialog.remove();

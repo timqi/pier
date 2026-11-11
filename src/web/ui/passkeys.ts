@@ -27,7 +27,7 @@ const text = (buf: ArrayBuffer): string =>
 
 export function createPasskeysCard(): { el: HTMLElement; load(): Promise<boolean> } {
   const list = h("div", "flex flex-col gap-2");
-  const status = h("span", "text-[11.5px]", "");
+  const status = h("span", "text-[12px]", "");
   const label = input();
   label.placeholder = "Label, e.g. MacBook Touch ID";
   label.autocomplete = "off";
@@ -35,7 +35,7 @@ export function createPasskeysCard(): { el: HTMLElement; load(): Promise<boolean
   const add = button("Add a passkey", true);
   const addRow = h("div", "flex flex-wrap items-center gap-3", label, add, status);
   // Says why the form is gone: hiding it alone would read as a missing feature.
-  const note = h("p", "hidden text-[12.5px] leading-snug text-neutral-600");
+  const note = h("p", "hidden text-[13px] leading-snug text-neutral-600");
   const off = h("p", "hidden text-[12px] text-neutral-400");
 
   function render(got: PasskeyList): void {

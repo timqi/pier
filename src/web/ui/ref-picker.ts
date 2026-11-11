@@ -73,7 +73,7 @@ export function hoverHint(el: HTMLElement, text: () => string): void {
     hideHint();
     const t = text();
     if (!t) return;
-    tip = h("div", "pointer-events-none fixed z-50 max-w-96 whitespace-pre-wrap rounded-lg bg-neutral-800/95 px-3 py-2 font-sans text-[11.5px] leading-snug text-neutral-100 shadow-lg");
+    tip = h("div", "pointer-events-none fixed z-50 max-w-96 whitespace-pre-wrap rounded-lg bg-neutral-800/95 px-3 py-2 font-sans text-[12px] leading-snug text-neutral-100 shadow-lg");
     tip.textContent = t;
     (el.closest("dialog[open]") ?? document.body).append(tip);
     // mouseleave never fires if the hovered row is removed or its panel closes
@@ -99,11 +99,11 @@ function pointRow(o: PointOption, current: string, onPick: (v: string) => void):
     "button",
     "flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left hover:bg-neutral-100",
     icon(Check, `h-3 w-3 text-indigo-600 ${o.value === current ? "" : "invisible"}`),
-    h("span", "inline-flex flex-none items-center gap-1.5 font-mono text-[11.5px] text-neutral-800", o.label ?? o.value),
+    h("span", "inline-flex flex-none items-center gap-1.5 font-mono text-[12px] text-neutral-800", o.label ?? o.value),
   );
   if (o.subject) row.append(h("span", "min-w-0 truncate text-[11px] text-neutral-400", o.subject));
   if (o.author) {
-    row.append(h("span", "ml-auto flex-none pl-1.5 text-[10.5px] text-neutral-400", `${o.author} · ${o.at ? relTime(o.at) : ""}`));
+    row.append(h("span", "ml-auto flex-none pl-1.5 text-[11px] text-neutral-400", `${o.author} · ${o.at ? relTime(o.at) : ""}`));
   }
   hoverHint(row, () => commitHint(o));
   row.onclick = () => onPick(o.value); // the pointerdown already retired the hint
@@ -138,7 +138,7 @@ export function openDiffPicker(
     const tab = (label: string, m: typeof mode): HTMLElement => {
       const el = h(
         "button",
-        `cursor-pointer rounded-full px-2.5 py-0.5 text-[11.5px] ${
+        `cursor-pointer rounded-full px-2.5 py-0.5 text-[12px] ${
           mode === m ? "bg-indigo-50 font-medium text-indigo-700" : "text-neutral-500 hover:bg-neutral-100"
         }`,
         label,
@@ -153,7 +153,7 @@ export function openDiffPicker(
       h(
         "div",
         "flex min-w-0 flex-1 flex-col",
-        h("div", "flex-none px-2 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
+        h("div", "flex-none px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400", label),
         h("div", "min-h-0 flex-1 overflow-y-auto", ...opts.map((o) => pointRow(o, current, pick))),
       );
     const body =

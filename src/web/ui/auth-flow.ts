@@ -42,15 +42,15 @@ export function openAuthFlow(
     "m-auto w-[min(32rem,92vw)] rounded-[10px] border border-(--line) bg-white p-0 shadow-(--shadow-pop)";
   const events = h("div", "flex flex-col gap-2");
   const promptPane = h("div", "flex flex-col gap-2");
-  const status = h("p", "text-[12.5px] text-neutral-400", "Starting…");
+  const status = h("p", "text-[13px] text-neutral-400", "Starting…");
   const cancel = button("Cancel");
   // One spelling for the status tones — the same table Config/Settings use.
   const setFlowStatus = (state: SaveState, text: string): void => {
-    status.className = `text-[12.5px] ${STATUS_TONE[state]}`;
+    status.className = `text-[13px] ${STATUS_TONE[state]}`;
     status.textContent = text;
   };
   dialog.append(
-    h("div", "border-b border-neutral-200 px-4 py-2.5 text-[14px] font-semibold", providerName),
+    h("div", "border-b border-neutral-200 px-4 py-2.5 text-sm font-semibold", providerName),
     h("div", "flex max-h-[65vh] flex-col gap-3 overflow-y-auto px-4 py-3", events, promptPane, status),
     h("div", "flex justify-end border-t border-neutral-200 px-4 py-2.5", cancel),
   );
@@ -102,23 +102,23 @@ export function openAuthFlow(
 
   const renderEvent = (event: ProviderAuthEvent): HTMLElement => {
     if (event.type === "auth_url") {
-      const box = h("div", "flex flex-col gap-1 text-[12.5px] text-neutral-600");
+      const box = h("div", "flex flex-col gap-1 text-[13px] text-neutral-600");
       if (event.instructions) box.append(h("p", "", event.instructions));
       box.append(safeLink(event.url, "Open authorization page") ?? h("span", "text-red-600", "Invalid authorization URL"));
       return box;
     }
     if (event.type === "device_code") {
-      const box = h("div", "flex flex-col gap-2 text-[12.5px] text-neutral-600");
+      const box = h("div", "flex flex-col gap-2 text-[13px] text-neutral-600");
       box.append(h(
         "div",
         "flex items-center gap-2",
-        h("code", "font-mono text-[17px] font-semibold text-neutral-800", event.userCode),
+        h("code", "font-mono text-[16px] font-semibold text-neutral-800", event.userCode),
         copyBtn("btn text-[11px]", () => event.userCode),
       ));
       box.append(safeLink(event.verificationUri, "Open verification page") ?? h("span", "text-red-600", "Invalid verification URL"));
       return box;
     }
-    const box = h("div", "text-[12.5px] text-neutral-600", event.message);
+    const box = h("div", "text-[13px] text-neutral-600", event.message);
     if (event.type === "info") {
       for (const item of event.links ?? []) {
         const link = safeLink(item.url, item.label ?? item.url);
@@ -144,12 +144,12 @@ export function openAuthFlow(
       control = field;
     }
     control.className =
-      `${control.tagName === "SELECT" ? "select " : ""}w-full rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-[12.5px] focus:border-indigo-400 focus:outline-none`;
+      `${control.tagName === "SELECT" ? "select " : ""}w-full rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-[13px] focus:border-indigo-400 focus:outline-none`;
     const submit = button("Continue", true);
     submit.type = "submit";
     const form = h(
       "form", "flex flex-col gap-2",
-      h("label", "text-[12.5px] font-medium text-neutral-700", prompt.message),
+      h("label", "text-[13px] font-medium text-neutral-700", prompt.message),
       control,
       h("div", "flex justify-end", submit),
     ) as HTMLFormElement;
