@@ -207,8 +207,14 @@ export interface SpanEdit { from: number; to: number; text: string; span: Span |
 
 export const spanAt = (caret: number): Span => ({ start: caret, mid: caret, end: caret });
 
-/** `partial` replaces the tail; `final` turns it into settled text. */
-export function spanText(span: Span, event: "partial" | "final", text: string): SpanEdit {
+// A letter or digit of a script that puts spaces between its words.
+const SPACED = /^(?![\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}])[\p{L}\p{N}]/u;
+
+/** `partial` replaces the tail; `final` turns it into settled text. `prev` is
+ *  the draft's character before the tail: a recognizer sends its sentences
+ *  bare, and a spaced script after a word or its punctuation needs the space. */
+export function spanText(span: Span, event: "partial" | "final", text: string, prev = ""): SpanEdit {
+  if ((SPACED.test(prev) || /[.,!?;:]/.test(prev)) && SPACED.test(text)) text = ` ${text}`;
   const end = span.mid + text.length;
   return { from: span.mid, to: span.end, text, span: { start: span.start, mid: event === "final" ? end : span.mid, end } };
 }
@@ -218,6 +224,14 @@ export const spanError = (span: Span): SpanEdit => ({ from: span.mid, to: span.e
 
 /** A cancel removes what the take still owns. */
 export const spanCancel = (span: Span): SpanEdit => ({ from: span.start, to: span.end, text: "", span: null });
+
+/** Where a caret at `p` is after the edit: at or past the replaced text it
+ *  moves with it, so one at the take's end stays at its end; inside, it stops
+ *  at the new text's end. `setRangeText`'s "preserve" leaves the first behind. */
+export function caretAfter(e: SpanEdit, p: number): number {
+  const end = e.from + e.text.length;
+  return p >= e.to ? p + end - e.to : Math.min(p, end);
+}
 
 /** The span after the user turned `before` into `after`, the caret at `caret`:
  *  moved by an edit wholly before it, kept by one after it, and given up — its

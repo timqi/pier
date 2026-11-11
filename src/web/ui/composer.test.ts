@@ -794,24 +794,30 @@ describe("the chat-command completion", () => {
 });
 
 describe("voice input", () => {
-  type Draft = FakeElement & { selectionEnd: number; setRangeText: (text: string, from: number, to: number, mode: string) => void };
+  type Draft = FakeElement & { selectionStart: number; selectionEnd: number; setRangeText: (text: string, from: number, to: number) => void };
   let input: Draft;
-  /** The textarea's caret and `setRangeText(…, "preserve")`, which the DOM double lacks. */
+  /** The textarea's selection and `setRangeText`'s default "preserve", as HTML specifies it: the DOM double lacks both. */
   beforeEach(async () => {
     input = node("#input") as Draft;
-    input.selectionEnd = 0;
+    input.selectionStart = input.selectionEnd = 0;
     input.setRangeText = (text, from, to) => {
       const v = input.value;
       input.value = v.slice(0, from) + text + v.slice(to);
-      if (input.selectionEnd >= to) input.selectionEnd += text.length - (to - from);
+      if (input.selectionStart > to) input.selectionStart += text.length - (to - from);
+      else if (input.selectionStart > from) input.selectionStart = from;
+      if (input.selectionEnd > to) input.selectionEnd += text.length - (to - from);
       else if (input.selectionEnd > from) input.selectionEnd = from + text.length;
     };
+    Object.assign(input, { setSelectionRange: (from: number, to: number) => {
+      input.selectionStart = from;
+      input.selectionEnd = to;
+    } });
     take.on = null;
     await settled(); // the availability check
   });
   const typeAt = (text: string, caret: number) => {
     input.value = text;
-    input.selectionEnd = caret;
+    input.selectionStart = input.selectionEnd = caret;
     input.oninput!();
   };
   const startAt = (text: string, caret: number) => {
@@ -850,6 +856,54 @@ describe("voice input", () => {
     take.on!.onEvent({ type: "done" });
     take.on!.onState("idle");
     expect(input.value).toBe("Then ask: Hello. moreplease");
+  });
+
+  it("keeps a caret at the take's end at its end, and spaces bare Latin sentences apart", () => {
+    startAt("Typed", 5);
+    say("partial", "fir");
+    say("final", "First.");
+    say("final", "Second one.");
+    expect(input.value).toBe("Typed First. Second one.");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([24, 24]);
+  });
+
+  it("holds its writes while an IME composes, and lands them at the commit even after the take ended", () => {
+    startAt("", 0);
+    say("final", "One.");
+    input.dispatchEvent(new Event("compositionstart"));
+    say("partial", "tw");
+    say("final", "Two.");
+    take.on!.onEvent({ type: "done" });
+    take.on!.onState("idle");
+    expect(input.value).toBe("One.");
+    typeAt("你好One.", 2); // the commit, before the take's text
+    input.dispatchEvent(new Event("compositionend"));
+    expect(input.value).toBe("你好One. Two.");
+    expect(drafts.get("pier.draft.a")).toBe("你好One. Two.");
+  });
+
+  it("drops a held write on a session switch instead of landing it in the next draft", () => {
+    drafts.set("pier.draft.b", "other");
+    startAt("mine", 4);
+    input.dispatchEvent(new Event("compositionstart"));
+    say("final", "late");
+    select("b");
+    input.dispatchEvent(new Event("compositionend"));
+    expect(input.value).toBe("other");
+    expect(drafts.get("pier.draft.a")).toBe("mine");
+  });
+
+  it("drops the writes a composition still holds when the session changes after the take ended", () => {
+    drafts.set("pier.draft.b", "other");
+    startAt("mine", 4);
+    input.dispatchEvent(new Event("compositionstart"));
+    say("final", "late");
+    take.on!.onEvent({ type: "done" });
+    take.on!.onState("idle");
+    select("b");
+    input.dispatchEvent(new Event("compositionend"));
+    expect(input.value).toBe("other");
+    expect(drafts.get("pier.draft.a")).toBe("mine");
   });
 
   it("cancels by removing only what the take still owns", () => {

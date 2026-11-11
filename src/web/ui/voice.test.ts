@@ -1,6 +1,6 @@
 // The take's lifecycle over fake audio, fetch and EventSource; the draft span's rules as pure edits.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Span, type SpanEdit, spanAt, voiceAvailable, spanCancel, spanEdited, spanError, spanText, startTake, type TakeState, type VoiceEvent } from "./voice.js";
+import { caretAfter, type Span, type SpanEdit, spanAt, voiceAvailable, spanCancel, spanEdited, spanError, spanText, startTake, type TakeState, type VoiceEvent } from "./voice.js";
 
 vi.mock("./voice-worklet.ts?worker&url", () => ({ default: "/app/assets/voice-worklet.js" }));
 
@@ -25,6 +25,22 @@ describe("draft span", () => {
     const { text, span } = run("ab|cd", 3, partial("hel"), final("Hello."), partial("wor"), final("World."), partial("ag"));
     expect(text).toBe("ab|Hello.World.agcd");
     expect(span).toEqual({ start: 3, mid: 15, end: 17 });
+  });
+
+  it("puts the space a bare sentence lacks between spaced scripts, and none beside CJK or a space", () => {
+    expect(spanText(spanAt(4), "final", "Été.", "é").text).toBe(" Été.");
+    expect(spanText(spanAt(4), "final", "Привет", "!").text).toBe(" Привет");
+    expect(spanText(spanAt(6), "final", "How are you?", ".").text).toBe(" How are you?");
+    expect(spanText(spanAt(5), "partial", "wor", "o")).toEqual({ from: 5, to: 5, text: " wor", span: { start: 5, mid: 5, end: 9 } });
+    for (const [prev, text] of [[" ", "next"], ["\n", "next"], ["。", "next"], [".", "你好"], ["か", "next"], [".", " spaced"], ["a", ", then"], [undefined, "first"]] as const)
+      expect(spanText(spanAt(3), "final", text, prev).text).toBe(text);
+  });
+
+  it("carries a caret at or past the replaced text, the take's end included, and leaves one before it", () => {
+    const grow = spanText({ start: 4, mid: 7, end: 9 }, "partial", "three"); // [7, 9) → 5 chars
+    expect([2, 7, 8, 9, 12].map((p) => caretAfter(grow, p))).toEqual([2, 7, 8, 12, 15]);
+    const cancel = spanCancel({ start: 4, mid: 7, end: 9 });
+    expect([2, 6, 9, 12].map((p) => caretAfter(cancel, p))).toEqual([2, 4, 4, 7]);
   });
 
   it("drops the partial on an error and everything it owns on a cancel", () => {

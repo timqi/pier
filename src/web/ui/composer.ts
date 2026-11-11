@@ -12,7 +12,7 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, splitItem, splitSpeaker, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { type Span, type SpanEdit, spanAt, spanCancel, spanEdited, spanError, spanText, startTake, type Take, type TakeState, type VoiceEvent, voiceAvailable } from "./voice.js";
+import { caretAfter, type Span, type SpanEdit, spanAt, spanCancel, spanEdited, spanError, spanText, startTake, type Take, type TakeState, type VoiceEvent, voiceAvailable } from "./voice.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
@@ -643,18 +643,23 @@ let take: Take | null = null;
 let takeSession: string | null = null;
 let span: Span | null = null;
 let spanDraft = "";
+// A write under an IME's candidate ends the composition: it waits for the commit.
+let composing = false;
+const heldWrites: ((span: Span) => SpanEdit)[] = [];
 
 function spanSync(): void {
   if (span && input.value !== spanDraft) span = spanEdited(span, spanDraft, input.value, input.selectionEnd);
   spanDraft = input.value;
 }
 
-/** `setRangeText` with "preserve" keeps the user's caret where it was. */
 function voiceWrite(edit: (span: Span) => SpanEdit): void {
+  if (composing) return void heldWrites.push(edit);
   spanSync();
   if (!span) return;
   const e = edit(span);
-  input.setRangeText(e.text, e.from, e.to, "preserve");
+  const [from, to] = [caretAfter(e, input.selectionStart), caretAfter(e, input.selectionEnd)];
+  input.setRangeText(e.text, e.from, e.to);
+  input.setSelectionRange(from, to);
   span = e.span;
   spanDraft = input.value;
   autosize();
@@ -662,7 +667,7 @@ function voiceWrite(edit: (span: Span) => SpanEdit): void {
 }
 
 function voiceEvent(e: VoiceEvent): void {
-  if (e.type === "partial" || e.type === "final") voiceWrite((s) => spanText(s, e.type, e.text));
+  if (e.type === "partial" || e.type === "final") voiceWrite((s) => spanText(s, e.type, e.text, input.value[s.mid - 1]));
   if (e.type !== "error") return;
   voiceWrite(spanError);
   appendTurn("error", `voice input: ${e.message}`);
@@ -672,7 +677,11 @@ const VOICE_TITLE: Record<TakeState, string> = { idle: "Voice input", starting: 
 
 /** The look of each state is style.css's, keyed on `aria-pressed` and `disabled`. */
 function voiceState(state: TakeState): void {
-  if (state === "idle") take = span = null;
+  if (state === "idle") {
+    take = null;
+    // Writes held by a composition still need the span; its end releases it.
+    if (!composing) span = null;
+  }
   const live = state !== "idle";
   const stopping = state === "recording" || state === "finishing";
   voiceBtn.disabled = state === "finishing";
@@ -685,6 +694,7 @@ function voiceState(state: TakeState): void {
 
 function toggleVoice(): void {
   if (take) return take.stop();
+  heldWrites.length = 0;
   takeSession = deps.sessionId();
   spanDraft = input.value;
   span = spanAt(input.selectionEnd);
@@ -696,8 +706,10 @@ function toggleVoice(): void {
   }
 }
 
-function cancelVoice(): void {
-  if (!take) return;
+export function cancelVoice(): void {
+  // A span that outlived its take is one a composition held: its writes must not land in the next draft.
+  if (!take) return void (span = null);
+  composing = false; // leaving waits for no composition
   voiceWrite(spanCancel);
   take.cancel();
 }
@@ -709,6 +721,14 @@ async function offerVoice(): Promise<void> {
   voiceBtn.onclick = toggleVoice;
   voiceCancel.onclick = cancelVoice;
   window.addEventListener("pagehide", cancelVoice);
+  input.addEventListener("compositionstart", () => {
+    composing = true;
+  });
+  input.addEventListener("compositionend", () => {
+    composing = false;
+    for (const edit of heldWrites.splice(0)) voiceWrite(edit);
+    if (!take) span = null;
+  });
 }
 
 // --- wiring ----------------------------------------------------------------------------

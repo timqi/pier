@@ -52,8 +52,9 @@ interface Take {
 }
 
 /** Scripted recognition: each body advances the script by its byte count,
- *  deterministic and timer-free, for tests and keyless manual runs. */
-export const MOCK_SCRIPT = ["Pier heard you.", " This is the mock recognizer."];
+ *  deterministic and timer-free, for tests and keyless manual runs. Sentences
+ *  come bare, as a recognizer sends them. */
+export const MOCK_SCRIPT = ["Pier heard you.", "This is the mock recognizer."];
 const MOCK_BYTES_PER_CHAR = 3_200; // 100 ms of 16 kHz PCM16
 
 export const mockAsr: AsrProvider = {
