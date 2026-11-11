@@ -3,7 +3,7 @@
 // frame at a time; `flush` posts the short last frame, then `flushed`.
 
 /*! Resampling after Avibe's capture worklet. Copyright (c) 2026 The Vibe Remote
-    Authors, MIT licence: src/web/ui/voice.LICENSE-avibe. */
+    Authors, MIT licence: /app/voice.LICENSE-avibe, shipped beside this bundle. */
 
 // The AudioWorkletGlobalScope, which TypeScript's DOM lib does not declare;
 // scoped to this module by the `export {}` below.

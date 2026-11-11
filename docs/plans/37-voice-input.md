@@ -15,7 +15,8 @@
 - 交互：点麦克风开始，再点结束；实时文字进草稿，可编辑后再发；可取消。不自动发送。
 - 参考 Avibe（`~/code/ref/avibe`，MIT，Copyright (c) 2026 The Vibe Remote Authors）。
   从 `ui/src/lib/voiceRealtime.ts`、`voiceRecording.ts` 复制实质代码的文件，在文件头
-  保留该版权行与 MIT 许可声明（全文放 `src/web/ui/voice.LICENSE-avibe` 一份，文件头指向它）。
+  保留该版权行与 MIT 许可声明（全文放 `src/web/ui/public/voice.LICENSE-avibe` 一份，
+  随 bundle 发布在 `/app/voice.LICENSE-avibe`，文件头指向它）。
 - 无新运行时依赖：服务端用 Node 24 的全局 `WebSocket`（`new WebSocket(url, { headers })`，
   已在本机验证构造可用）；浏览器用 AudioWorklet、`fetch`、`EventSource`。
 
