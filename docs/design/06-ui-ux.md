@@ -124,7 +124,8 @@ updates this document.
   touch hit area) or by a jump to a folded reply. A silent reply with a
   failed, interrupted or in-flight chip is not folded.
 - A chip is its fold: the button (`aria-expanded`, Enter/Space, a visible
-  focus ring; on touch a 44px hit area that does not grow the chip) whose
+  focus ring; on touch a 44px hit area that does not grow the chip and
+  stays under a neighbouring chip's face and a link's or code span's) whose
   open state is a ring, laying its detail — the cause's neutral card, the
   steps log, the run's head and prompt — under the row, at the bubble's
   width, in chip order. Every chip starts closed and opens only by its own
