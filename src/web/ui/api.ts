@@ -117,9 +117,10 @@ export async function refused(
   url: string,
   method: "POST" | "DELETE",
   fallback: string,
+  keepalive = false,
 ): Promise<string | undefined> {
   try {
-    const res = await fetch(url, { method });
+    const res = await fetch(url, keepalive ? { method, keepalive } : { method });
     return res.ok ? undefined : await failure(res, fallback);
   } catch (err) {
     return `${fallback}: ${String(err)}`;

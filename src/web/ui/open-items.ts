@@ -1,11 +1,12 @@
 // The open-item row used by the status panel, its lead in the bar and fixed command cards.
 
-import { Check, CircleAlert, CircleCheck, Clock, MessagesSquare, X, type IconNode } from "lucide";
+import { Check, CircleAlert, CircleCheck, Clock, Ellipsis, MessagesSquare, X, type IconNode } from "lucide";
 import { openItemDestination, openItemGroups, UNMATCHED_DONE } from "../../core/open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
 import { agoLabel, h } from "./dom.js";
 import { icon } from "./icons.js";
+import { closeMenu, openMenu } from "./menu.js";
 import { topicColour } from "./topics.js";
 import { runningDot } from "./turn-activity.js";
 
@@ -17,6 +18,8 @@ interface Actions {
   panelView?: (problem: string) => void;
   /** The status panel's alone: an item row's second secondary action, closing it. */
   panelClose?: (problem: string) => void;
+  /** The sidebar's: both secondary actions also behind one ⋯, the row's only action without hover (style.css). */
+  folded?: boolean;
   /** The status panel's: the chain a row of another chain belongs to. */
   tag?: string;
   /** An archived chain's row: unarchive it and open the item there. */
@@ -63,6 +66,8 @@ export function paintDot(dot: HTMLElement, item: OpenItemPresentation): void {
   dot.title = item.status;
 }
 
+const OPENS_SESSION = "Opens its session";
+
 const updates = new WeakMap<HTMLElement, (p: OpenItemPresentation, actions: Actions) => void>();
 
 /** Reuse the row while facts change: a refresh between pointerdown and click must still activate it. */
@@ -74,6 +79,9 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const dot = h("span", "open-item-dot h-2 w-2 flex-none rounded-full");
   const title = h("span", "open-item-title block min-w-0 text-sm text-neutral-900");
   const tag = chainChip();
+  // Where the click goes, said in the label: a sighted reader sees ↗ before leaving the conversation.
+  const away = h("span", "open-item-away flex-none text-sm leading-[1.35] text-neutral-500", "\u2197");
+  away.setAttribute("aria-hidden", "true");
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
   const age = h("span", "open-item-age flex-none text-neutral-500");
@@ -82,7 +90,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
   const main = h("button", "session-open flex w-full min-w-0 items-start gap-2 text-left", dot,
-    h("span", "min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, tag), stage, metadata));
+    h("span", "open-item-text min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, away, tag), stage, metadata));
   main.setAttribute("type", "button");
   const column = h("div", "min-w-0 flex-1", main);
   const li = h("li", "open-item", column);
@@ -91,12 +99,18 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   if (view) li.append(view);
   const close = actions.panelClose && p.key.startsWith("item:") ? closeButton() : null;
   if (close) li.append(close);
+  const more = view && close && actions.folded ? moreButton() : null;
+  if (more) li.append(more);
   updates.set(li, (item, a) => {
     li.dataset.rowKey = item.key;
     title.textContent = item.title;
     phrase.textContent = stagePhrase(item);
+    const to = openItemDestination(item);
+    const leaves = !to.topic && !!to.session && to.session !== a.currentId;
+    away.classList.toggle("hidden", !leaves);
     // Title and phrase are short; the head's full wording stays one hover away.
-    const full = [item.title !== item.problem ? item.problem : "", phrase.textContent !== item.stage ? stageLine(item) : ""];
+    const full = [item.title !== item.problem ? item.problem : item.runName ?? "", phrase.textContent !== item.stage ? stageLine(item) : "",
+      leaves ? OPENS_SESSION : ""];
     if (full.some(Boolean)) main.title = full.filter(Boolean).join("\n");
     else main.removeAttribute("title");
     // A grouped card's head already says `Waiting on you`.
@@ -112,8 +126,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
-    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}`);
-    const to = openItemDestination(item);
+    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}${leaves ? ` · ${OPENS_SESSION.toLowerCase()}` : ""}`);
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");
     else main.removeAttribute("aria-current");
     main.onclick = () => a.openItem(item);
@@ -125,6 +138,13 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
       close.setAttribute("aria-label", `Close — ${item.title}`);
       close.onclick = () => a.panelClose?.(item.problem);
     }
+    if (more) {
+      more.setAttribute("aria-label", `Actions for ${item.title}`);
+      more.onclick = () => openMenu(more, [
+        { label: "Item view", onSelect: () => { closeMenu(); a.panelView?.(item.problem); } },
+        { label: "Close", onSelect: () => { closeMenu(); a.panelClose?.(item.problem); } },
+      ], item.title);
+    }
   });
   updates.get(li)!(p, actions);
   return li;
@@ -134,6 +154,12 @@ function viewButton(): HTMLElement {
   const b = h("button", "item-view-open flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(MessagesSquare));
   b.setAttribute("type", "button");
   b.title = "Item view — this item's conversation alone";
+  return b;
+}
+
+function moreButton(): HTMLElement {
+  const b = h("button", "item-more h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(Ellipsis));
+  b.setAttribute("type", "button");
   return b;
 }
 

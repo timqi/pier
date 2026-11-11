@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { withItem } from "./identity.js";
-import { itemTurns } from "./open-items.js";
+import { itemTurns, openItemPresentation } from "./open-items.js";
 import type { ChatTurn } from "./types.js";
 
 const user = (text: string): ChatTurn => ({ role: "user", text });
@@ -57,5 +57,20 @@ describe("itemTurns", () => {
       reply("Merged."), callback("r5"), reply("Unrelated run done."), callback("r0"), user("and?"), reply("Nothing more."),
     ];
     expect(itemTurns([{ sessionId: "h1", turns }], ["CI"], ["r0"])[0]!.turns.map((t) => t.index)).toEqual([1, 3, 6]);
+  });
+});
+
+describe("openItemPresentation", () => {
+  const MIN = 60_000;
+  const run = (queuedAt: number) => ({ runId: "r", name: "r", state: "running", targetSessionId: "s", cwd: null, queuedAt, finishedAt: null });
+  const shown = (openedAt: number, queuedAt: number) => {
+    const p = openItemPresentation({ problem: "p", stage: "", status: "running", runs: [run(queuedAt)], openedAt }, 30 * MIN);
+    return [p.age, ...p.metadata];
+  };
+
+  it("reads one age when a lone run started with its item, both when they differ", () => {
+    expect(shown(26 * MIN, 26 * MIN + 30_000)).toEqual(["open 4m"]);
+    expect(shown(0, 50 * 1000)).toEqual(["open 30m"]);
+    expect(shown(0, 20 * MIN)).toEqual(["open 30m", "elapsed 10m"]);
   });
 });

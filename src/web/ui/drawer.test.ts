@@ -14,6 +14,7 @@ const menu = vi.hoisted(() => ({
     menu.panel = panel;
     return panel;
   }),
+  openMenu: vi.fn(),
 }));
 vi.mock("./menu.js", async (actual) => ({ ...(await actual<typeof import("./menu.js")>()), ...menu }));
 const badge = vi.hoisted(() => vi.fn());
@@ -40,10 +41,13 @@ let chainId: string | null = null;
 const openItem = vi.fn();
 const itemView = vi.fn();
 const reopen = vi.fn();
+const onWindow = new Map<string, () => void>();
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); chords.clear();
   doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  onWindow.clear();
+  vi.stubGlobal("window", { addEventListener: (name: string, fn: () => void) => onWindow.set(name, fn) });
   drawer = await import("./drawer.js");
   sessions = []; chain = []; current = null; open = null; chains = []; chainId = null;
   drawer.initDrawer({ sessions: () => sessions, currentId: () => current, chain: () => chain,
@@ -141,8 +145,10 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
     { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0 },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(labels()).toEqual(["稳定标题", "free", "merged", "gone", "auth review", "Queued one", "queued"]);
-  expect([shown("#status-item-title"), next().textContent]).toEqual(["稳定标题", "1/7"]);
+  expect(labels()).toEqual(["原始完整问题", "free", "merged", "gone", "auth", "Queued one", "queued"]);
+  expect([shown("#status-item-title"), next().textContent]).toEqual(["原始完整问题", "1/7"]);
+  // An item is titled by its problem, its topic tags' name; the runs' name is the tooltip's.
+  expect(lead().title).toBe("原始完整问题 (稳定标题) — waiting on you · 10m · 是否合并？授权只限本分支。");
   // The question's first clause beside the status; the wait and the rest are the tooltip's.
   const status = (key: string) => item(key).querySelector(".open-item-status")!;
   const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
@@ -166,15 +172,15 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
   expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
-  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("原始完整问题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
-  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth");
+  expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
+  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nOpens its session");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
   expect(menu.closeMenu).toHaveBeenCalled();
   drawer.openDrawer();
   const view = item("item:auth").querySelector(".item-view-open")!;
-  expect(view.getAttribute("aria-label")).toBe("Item view — auth review");
+  expect(view.getAttribute("aria-label")).toBe("Item view — auth");
   view.onclick?.();
   expect(itemView).toHaveBeenCalledWith("auth", undefined);
 });
@@ -192,7 +198,7 @@ it("keeps controls and focus on problem identity across title and state refreshe
   drawer.renderDrawer();
   expect(item("item:second")).toBe(second);
   expect(doc.activeElement).toBe(control);
-  expect(second.querySelector(".open-item-title")!.textContent).toBe("short");
+  expect(second.querySelector(".open-item-title")!.textContent).toBe("second");
   second.querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "second", runs: [{ runId: "r2", targetSessionId: "s-r" }] }), undefined);
   expect(second.querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
@@ -206,14 +212,14 @@ it("retains same-titled designs on refresh, focus and navigation", () => {
   })), unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(next().textContent).toBe("1/3");
-  expect(labels()).toEqual([name, name, name]);
+  expect(labels()).toEqual(["held", "first", "second"]);
   const first = item("item:first");
   const control = first.querySelector(".session-open")!;
   control.focus();
   open.items[1] = { ...open.items[1]!, runs: [run("followup", { name: "New steering title", state: "succeeded", targetSessionId: "first" })] };
   open.items.reverse();
   drawer.renderDrawer();
-  expect(labels()).toEqual([name, name, name]);
+  expect(labels()).toEqual(["second", "first", "held"]);
   expect(item("item:first")).toBe(first);
   expect(doc.activeElement).toBe(control);
   for (const id of ["first", "second", "held"]) {
@@ -235,7 +241,7 @@ it("says where a design's wait is answered: the phrase when nothing else is, the
   const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
   expect(phrase("item:rail")).toBe("two layouts");
   expect(phrase("item:bare")).toBe("in the design session");
-  expect(item("item:rail").querySelector(".session-open")!.title).toBe("rail\nwaiting on you · in the design session · 2h · two layouts");
+  expect(item("item:rail").querySelector(".session-open")!.title).toBe("r\nwaiting on you · in the design session · 2h · two layouts\nOpens its session");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -246,7 +252,7 @@ it("forwards design and waiting entrances without inferring a current session fr
   button.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ designSessionId: "design", waitsIn: "answer" }), undefined);
   expect(button.getAttribute("aria-current")).toBe("page");
-  expect(shown("#status-item-title")).toBe("first");
+  expect(shown("#status-item-title")).toBe("d");
 });
 
 it("marks a row current where its click lands: the newest run's session, never a run of an item answered in the chat", () => {
@@ -258,6 +264,28 @@ it("marks a row current where its click lands: the newest run's session, never a
   drawer.renderDrawer(); drawer.openDrawer();
   expect(item("item:work").querySelector(".session-open")!.getAttribute("aria-current")).toBe("page");
   expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
+});
+
+// A row whose click leaves the conversation for a session says so: ↗ beside the title, the label and tooltip in words.
+it("marks a row whose click opens a session, never one answered in the chat, run-less or already shown", () => {
+  current = "s-here";
+  open = { items: [
+    { problem: "work", stage: "", status: "running", runs: [run("w")] },
+    { problem: "ask", stage: "waiting on you: which?", status: "waiting on you", runs: [run("a", { state: "succeeded" })] },
+    { problem: "bare", stage: "", status: "wrapping up", runs: [] },
+    { problem: "here", stage: "", status: "running", runs: [run("h", { targetSessionId: "s-here" })] },
+  ], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const away = (key: string) => !item(key).querySelector(".open-item-away")!.classList.contains("hidden");
+  expect(["item:work", "item:ask", "item:bare", "item:here", "session:solo"].map(away)).toEqual([true, false, false, false, true]);
+  expect(item("item:work").querySelector(".open-item-away")!.getAttribute("aria-hidden")).toBe("true");
+  const main = item("item:work").querySelector(".session-open")!;
+  expect(main.getAttribute("aria-label")).toBe("work · in progress · opens its session");
+  expect(main.title).toBe("w\nOpens its session");
+  expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-label")).toBe("ask · waiting on you");
+  main.onclick?.();
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "work" }), undefined);
 });
 
 it("opens the panel from the lead and ⌘⇧P, closing on a second press", () => {
@@ -397,13 +425,19 @@ it("tags a found closed item with its chain", async () => {
   vi.useRealTimers();
 });
 
-// The panel's Close: the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
-it("closes an item row at once from its Close, keeps focus in the list, and restores it with the error on a refusal", async () => {
+/** A Close's Undo window running out (drawer.ts UNDO_MS). */
+const lapse = () => vi.advanceTimersByTime(5000);
+const undoOf = (li: { querySelector: (s: string) => unknown }) => fake(li.querySelector(".item-undo"));
+
+// The panel's Close waits out its Undo, then the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
+it("defers an item row's Close behind Undo, keeps focus in the list, and restores it with the error on a refusal", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
   let answer: { ok: boolean; status: number; json: () => Promise<unknown> } = { ok: true, status: 200, json: async () => ({ closed: "auth" }) };
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; }));
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; });
+  vi.stubGlobal("fetch", fetcher);
   open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "sign in", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
@@ -412,15 +446,37 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   expect(close("session:solo")).toBeNull();
   close("item:a/auth").focus();
   close("item:a/auth").onclick?.();
+  // In place, nothing sent: the row reads `Closed — Undo`, its Undo focused, the bar no longer counting it.
+  expect(item("item:a/auth").textContent).toBe("Closed \u2014Undo");
+  expect(undoOf(item("item:a/auth")).getAttribute("aria-label")).toBe("Undo closing auth");
+  expect(doc.activeElement).toBe(undoOf(item("item:a/auth")));
+  expect(doc.querySelector("[role='status']")!.textContent).toBe("auth closed \u2014 Undo for 5 seconds.");
+  expect(shown("#status-item-count")).toBe("2");
+  vi.advanceTimersByTime(4999);
+  expect(asked).toEqual([]);
+  vi.advanceTimersByTime(1);
   expect(labels()).toEqual(["sign in", "solo"]);
+  expect(panel().querySelector(".item-undo")).toBeNull();
   expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
   await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  expect(fetcher).toHaveBeenCalledWith("/api/continuous/items/a/auth/close", { method: "POST", keepalive: true });
   open = { items: [open.items[1]!], unlisted: [] };
   drawer.renderDrawer();
   expect(labels()).toEqual(["sign in", "solo"]);
 
+  // Undo sends nothing and gives the row, and the focus, back.
+  close("item:a/sign in").focus();
+  close("item:a/sign in").onclick?.();
+  undoOf(item("item:a/sign in")).onclick?.();
+  expect(labels()).toEqual(["sign in", "solo"]);
+  expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
+  expect(doc.querySelector("[role='status']")!.textContent).toBe("sign in kept open.");
+  lapse();
+  expect(asked).toHaveLength(1);
+
   answer = { ok: false, status: 404, json: async () => ({ error: "no open item \"sign in\"" }) };
   close("item:a/sign in").onclick?.();
+  lapse();
   expect(labels()).toEqual(["solo"]);
   await vi.waitFor(() => expect(labels()).toEqual(["sign in", "solo"]));
   const list = panel().querySelector("[data-list]")!;
@@ -433,13 +489,51 @@ it("closes an item row at once from its Close, keeps focus in the list, and rest
   drawer.renderDrawer();
   close("item:a/sign in").focus();
   close("item:a/sign in").onclick?.();
+  expect(panel().querySelector("[data-list]")!.children[0]!.textContent).toBe("Closed \u2014Undo");
+  lapse();
   expect(labels()).toEqual(["deploy", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/deploy").querySelector(".session-open"));
+  vi.useRealTimers();
+});
+
+// Each Close keeps its own Undo window; a page that hides or leaves sends every waiting one at once.
+it("times each deferred Close on its own and sends the waiting ones when the page hides or leaves", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => { asked.push(url.split("/")[5]!); return { ok: true, status: 200, json: async () => ({}) }; }));
+  const items = ["one", "two", "three", "four"].map((problem) => ({ problem, stage: "", status: "running" as const, runs: [], chain: c }));
+  open = { items, unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  const close = (problem: string) => item(`item:a/${problem}`).querySelector(".item-close")!.onclick?.();
+  close("one");
+  vi.advanceTimersByTime(2000);
+  close("two");
+  expect(rail().querySelectorAll(".item-undo")).toHaveLength(2);
+  vi.advanceTimersByTime(3000);
+  expect(asked).toEqual(["one"]);
+  vi.advanceTimersByTime(2000);
+  expect(asked).toEqual(["one", "two"]);
+  close("three");
+  let hidden = false;
+  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => hidden ? "hidden" : "visible" });
+  doc.dispatchEvent(new Event("visibilitychange"));
+  expect(asked).toEqual(["one", "two"]);
+  hidden = true;
+  doc.dispatchEvent(new Event("visibilitychange"));
+  expect(asked).toEqual(["one", "two", "three"]);
+  close("four");
+  onWindow.get("pagehide")!();
+  vi.advanceTimersByTime(5000);
+  expect(asked).toEqual(["one", "two", "three", "four"]);
+  vi.useRealTimers();
 });
 
 // The sidebar's Items section is the panel's list drawn again (§侧边栏): the same rows in the
 // same order, each surface its own nodes, one Close for both, a refusal said where it was asked.
 it("fills the rail's Items section with the panel's rows, closes on both surfaces from either, and refuses on the asking one", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
@@ -468,10 +562,14 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   open = { ...open, items: [{ ...open.items[0]!, stage: "signing in" }, open.items[1]!] };
   drawer.renderDrawer();
   expect([railItem("item:a/auth"), item("item:a/auth")]).toEqual(before);
-  // Close from the rail: gone from both at once; focus stays in the rail's list.
+  // Close from the rail: `Closed — Undo` on both, then gone from both at once; focus stays in the rail's list.
   const close = railItem("item:a/auth").querySelector(".item-close")!;
   close.focus();
   close.onclick?.();
+  expect([railItem("item:a/auth").textContent, item("item:a/auth").textContent]).toEqual(["Closed \u2014Undo", "Closed \u2014Undo"]);
+  expect(shown("#rail-items-head")).toBe("Items · 2");
+  expect(doc.activeElement).toBe(undoOf(railItem("item:a/auth")));
+  lapse();
   expect(railRows()).toEqual(["asks", "solo"]);
   expect(labels()).toEqual(["asks", "solo"]);
   expect(doc.activeElement).toBe(railItem("session:solo").querySelector(".session-open"));
@@ -480,6 +578,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   menu.closeMenu();
   answer = { ok: false, status: 409, json: async () => ({ error: "auth is still running" }) };
   railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   expect(railRows()).toEqual(["solo"]);
   await vi.waitFor(() => expect(railRows()).toEqual(["asks", "solo"]));
   const list = rail().querySelector("[data-list]")!;
@@ -495,18 +594,49 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   open = kept;
   drawer.renderDrawer();
   railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   await vi.waitFor(() => expect(rail().querySelector("[data-list]")!.children[0]!.textContent).toBe("auth is still running"));
   // The panel's next Close takes the rail's refusal down too.
   drawer.openDrawer();
   expect(panel().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
   answer = { ok: true, status: 200, json: async () => ({ closed: "asks" }) };
   item("item:b/asks").querySelector(".item-close")!.onclick?.();
+  lapse();
   expect(railRows()).toEqual(["solo"]);
   expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
+  vi.useRealTimers();
+});
+
+// Without hover the sidebar's row folds its two actions into one ⋯ (style.css); the panel's keeps both.
+it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's none", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return { ok: true, status: 200, json: async () => ({}) }; }));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
+  expect(item("item:a/auth").querySelector(".item-more")).toBeNull();
+  expect(railItem("session:solo").querySelector(".item-more")).toBeNull();
+  const more = railItem("item:a/auth").querySelector(".item-more")!;
+  expect(more.getAttribute("aria-label")).toBe("Actions for auth");
+  more.onclick?.();
+  const [anchor, entries, title] = menu.openMenu.mock.calls[0]! as [unknown, { label: string; onSelect: () => void }[], string];
+  expect([anchor, entries.map((e) => e.label), title]).toEqual([more, ["Item view", "Close"], "auth"]);
+  entries[0]!.onSelect();
+  expect(itemView).toHaveBeenCalledWith("auth", "a");
+  entries[1]!.onSelect();
+  lapse();
+  expect(railRows()).toEqual(["solo"]);
+  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  vi.useRealTimers();
 });
 
 // The rail's last row closed leaves `Nothing open` and no list to keep the focus in: the current chain's row above takes it.
 it("moves the focus to the current chain's row when the rail's last item row closes", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ closed: "auth" }) })));
@@ -518,8 +648,10 @@ it("moves the focus to the current chain's row when the rail's last item row clo
   const close = rail().querySelector("[data-row-key='item:a/auth']")!.querySelector(".item-close")!;
   close.focus();
   close.onclick?.();
+  lapse();
   expect(rail().textContent).toContain("Nothing open");
   expect(doc.activeElement).toBe(chainRow);
+  vi.useRealTimers();
 });
 
 // A search's open match is its panel row: a row the stream drops leaves the results too, not left behind as a detached node.

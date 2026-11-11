@@ -32,7 +32,7 @@ let sessions: Row[] = [];
 beforeEach(async () => {
   vi.resetModules();
   doc = installPage();
-  vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
+  vi.stubGlobal("window", { addEventListener: vi.fn(), matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   drawer = await import("./drawer.js");
   Object.assign(state, { chain: [], current: null, items: null });

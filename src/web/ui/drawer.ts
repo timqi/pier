@@ -196,6 +196,11 @@ type Surface = "panel" | "rail";
 const rowNodes: Record<Surface, Map<string, HTMLElement>> = { panel: new Map(), rail: new Map() };
 /** Items a Close took off the list, until the stream's re-read drops them too. Shared: a row closed on one surface leaves both. */
 const closing = new Set<string>();
+/** Closes not yet sent, by item key: each row reads `Closed — Undo` on both surfaces until its own timer sends it. */
+const pending = new Map<string, { problem: string; chain: string; from: Surface; timer: ReturnType<typeof setTimeout> }>();
+const UNDO_MS = 5000;
+/** In place of a row whose Close waits: Undo is the only control, the row's key kept so focus and search find it. */
+const undoNodes: Record<Surface, Map<string, HTMLElement>> = { panel: new Map(), rail: new Map() };
 /** A render's rows in order, and the chain of each item row by key. */
 interface Listed { ordered: OpenItemPresentation[]; chainOf: Map<string, OpenItem["chain"]> }
 
@@ -226,19 +231,35 @@ function rowsOn(surface: Surface, { ordered, chainOf }: Listed): HTMLElement[] {
   const nodes = rowNodes[surface];
   const keys = new Set(ordered.map((p) => p.key));
   for (const [key, node] of nodes) if (!keys.has(key)) { node.remove(); nodes.delete(key); }
+  for (const [key, node] of undoNodes[surface]) if (!pending.has(key)) { node.remove(); undoNodes[surface].delete(key); }
   return ordered.map((p) => {
+    if (pending.has(p.key)) return undoRow(surface, p);
     const chain = chainOf.get(p.key);
     const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
       panelView: (problem) => toView(problem, chain?.id),
       ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id, surface) } : {}),
+      folded: surface === "rail",
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
     }, nodes.get(p.key));
     nodes.set(p.key, node);
     return node;
   });
+}
+
+function undoRow(surface: Surface, p: OpenItemPresentation): HTMLElement {
+  const known = undoNodes[surface].get(p.key);
+  if (known) return known;
+  const undo = h("button", "item-undo cursor-pointer rounded px-1 text-sm text-indigo-700 hover:underline", "Undo");
+  undo.setAttribute("type", "button");
+  undo.setAttribute("aria-label", `Undo closing ${p.title}`);
+  undo.onclick = () => undoClose(p.key, surface);
+  const li = h("li", "open-item flex items-center gap-1.5 px-1.5 py-2 text-sm text-neutral-500", h("span", "", "Closed \u2014"), undo);
+  li.dataset.rowKey = p.key;
+  undoNodes[surface].set(p.key, li);
+  return li;
 }
 
 // --- the lead and the panel -------------------------------------------------------------
@@ -266,7 +287,7 @@ let topKey: string | null = null;
 /** Short-circuit: a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${[...closing].join("\0")}\n${deps.currentId() ?? ""}\n${deps.chainId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
+  `${[...closing].join("\0")}\n${[...pending.keys()].join("\0")}\n${deps.currentId() ?? ""}\n${deps.chainId() ?? ""}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.chains())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
 let drawn = "";
 
@@ -275,7 +296,8 @@ export function renderDrawer(): void {
   if (key === drawn) return;
   drawn = key;
   const got = listed(Date.now());
-  ordered = got.ordered;
+  // A row waiting on its Close is no longer what the bar leads with or counts.
+  ordered = got.ordered.filter((p) => !pending.has(p.key));
   const sessions = got.sessions;
   rows = rowsOn("panel", got);
   railRows = rowsOn("rail", got);
@@ -283,7 +305,7 @@ export function renderDrawer(): void {
   closeError = standing(closeError);
   railError = standing(railError);
   // A search's open match whose row left — closed here or in the stream — leaves the results with it.
-  found &&= found.filter((r) => rows.includes(r) || !r.dataset.rowKey || r.dataset.rowKey.startsWith("closed:"));
+  found &&= found.map((r) => rows.find((n) => n.dataset.rowKey && n.dataset.rowKey === r.dataset.rowKey) ?? r).filter((r) => rows.includes(r) || !r.dataset.rowKey || r.dataset.rowKey.startsWith("closed:"));
   if (found?.length === 0) found = [note("No item matches.")];
   // The app icon counts a turn to look at — an unread one —
   // plus each chain's unread head reply, which the bar and the chain list stand for instead of a row.
@@ -302,7 +324,7 @@ const standing = (error: HTMLElement | null): HTMLElement | null =>
 
 /** `Items · N` over the rows, or `Nothing open`; N is the lead's count. */
 function fillRail(): void {
-  railHead.textContent = railRows.length ? `Items \u00b7 ${railRows.length}` : "Items";
+  railHead.textContent = ordered.length ? `Items \u00b7 ${ordered.length}` : "Items";
   fill(railList, [...(railError ? [railError] : []), ...railRows]);
   railItems.replaceChildren(railHead, railRows.length || railError ? railList : railEmpty);
 }
@@ -324,7 +346,7 @@ function paintLead(): void {
   leadTitle.textContent = p.title;
   leadStage.textContent = stagePhrase(p);
   leadCount.textContent = String(ordered.length);
-  lead.title = `${p.title} — ${stageLine(p)}`;
+  lead.title = `${p.title}${p.runName ? ` (${p.runName})` : ""} — ${stageLine(p)}`;
   lead.setAttribute("aria-label", `Status: ${ordered.length} open — ${lead.title}`);
   next.textContent = `${at + 1}/${ordered.length}`;
 }
@@ -350,10 +372,45 @@ const toView = (problem: string, chain?: string): void => { closeMenu(); deps.it
 /** The last panel Close's refusal, atop the list until the next Close or opening. */
 let closeError: HTMLElement | null = null;
 
-/** Optimistic: the row leaves both surfaces at once and `open-items-changed` reconciles; a refusal puts it back
- *  under its sentence on the surface that asked — the panel reopened if its last row's leaving closed it. */
-async function closeItem(problem: string, chain: string, from: Surface): Promise<void> {
+/** Says a Close and its Undo to a screen reader; the row's own change is not announced. */
+const announcer = h("p", "sr-only");
+announcer.setAttribute("role", "status");
+
+/** Deferred: the row reads `Closed — Undo` on both surfaces and nothing is sent until its timer ends, or the page hides. */
+function closeItem(problem: string, chain: string, from: Surface): void {
   const key = itemKey(problem, chain);
+  if (pending.has(key)) return;
+  const root = from === "rail" ? railList : list;
+  const focused = !!root && [...root.children].some((li) => (li as HTMLElement).dataset.rowKey === key && li.contains(document.activeElement));
+  pending.set(key, { problem, chain, from, timer: setTimeout(() => void sendClose(key), UNDO_MS) });
+  closeError = railError = null;
+  renderDrawer();
+  if (focused) undoNodes[from].get(key)?.querySelector("button")?.focus({ preventScroll: true });
+  if (!announcer.isConnected) document.body.append(announcer);
+  announcer.textContent = `${problem} closed \u2014 Undo for ${UNDO_MS / 1000} seconds.`;
+}
+
+function undoClose(key: string, from: Surface): void {
+  const close = pending.get(key);
+  if (!close) return;
+  clearTimeout(close.timer);
+  pending.delete(key);
+  renderDrawer();
+  rowNodes[from].get(key)?.querySelector("button")?.focus({ preventScroll: true });
+  announcer.textContent = `${close.problem} kept open.`;
+}
+
+/** A page leaving sends every waiting Close now: `keepalive` outlives the page. */
+const sendAll = (): void => { for (const key of pending.keys()) void sendClose(key); };
+
+/** Optimistic from here: the row leaves both surfaces at once and `open-items-changed` reconciles; a refusal puts it back
+ *  under its sentence on the surface that asked — the panel reopened if its last row's leaving closed it. */
+async function sendClose(key: string): Promise<void> {
+  const close = pending.get(key);
+  if (!close) return;
+  const { problem, chain, from, timer } = close;
+  clearTimeout(timer);
+  pending.delete(key);
   const root = from === "rail" ? railList : list;
   const row = root ? [...root.children].findIndex((li) => (li as HTMLElement).dataset.rowKey === key) : -1;
   const focused = row >= 0 && root!.children[row]!.contains(document.activeElement);
@@ -370,7 +427,7 @@ async function closeItem(problem: string, chain: string, from: Surface): Promise
       : from === "rail" ? $("#rail-chains").querySelector<HTMLElement>("[aria-current]") ?? $("#rail-chains").querySelector("button") : null;
     to?.focus({ preventScroll: true });
   }
-  const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item");
+  const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(problem)}/close`, "POST", "Could not close the item", true);
   if (refusal === undefined) return;
   closing.delete(key);
   renderDrawer();
@@ -447,4 +504,6 @@ export function initDrawer(d: DrawerDeps): void {
   next.onclick = cycleLead;
   // Stands down under a modal: it is in the top layer, so this panel would open behind it.
   chord("shift+p", openDrawer, modalOpen);
+  window.addEventListener("pagehide", sendAll);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sendAll(); });
 }

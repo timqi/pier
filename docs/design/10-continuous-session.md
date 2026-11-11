@@ -326,7 +326,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   meant an item above, <done> that item's key)`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
 - The user closes an item too: `/done <item>` (§Chat commands) and the status
-  panel's **Close** both call `TaskService.closeItem`, which closes it as a
+  panel's **Close** (sent once its 5s Undo has passed) both call `TaskService.closeItem`, which closes it as a
   `<done>` does (`TaskStore.closeOpenItem`) and broadcasts `open-items-changed`.
   `/done` resolves its words among the chain's open keys — exact in any case,
   else the one key that contains every word, in any case; several are refused `/done <q> matches <a>, <b> —
@@ -364,7 +364,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   reads `run <id> — not in the ledger` (`NOT_IN_LEDGER`); a lead run's carries all
   its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
   and running runs in no item's session; no listing window or cap applies.
-- Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem, on every surface.
+- Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem. Every surface titles an item by its problem, the name its topic tags carry; that name is the presentation's `runName`, a tooltip only, and an unlisted run's row its title.
 - A design lead is an item only through the head's `<open>` naming its run; `<done>` is its end.
 - Optional `designSessionId` is the first associated run target whose design lead has not reported `Design final:` (`TaskStore.leads` `designOpen`), independent of status or `waitsIn`; it changes navigation only.
 - Each item's `status` is `openStatus` (`tasks/open-items.ts`), the one reading
@@ -399,7 +399,7 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   | wrapping up / stopped | `Wrapping up · <stage>` / `Stopped · <stage>` |
 
   Grouped cards and IM's `Waiting on you` group omit `Needs you`, keeping `in the design session`.
-- A single queued/running run reads `elapsed <age>` from queuedAt; an ended run reads `<state> <age> ago`, replaced while its goal is live by the goal's wording and `elapsed <age>` from the goal's creation (`review 1/1 · elapsed 40m`); a waiting item whose newest run ended reads none, its `<wait>` (`2h`, the age since that run ended) on the second line instead; multiple runs read `N runs · <newest run's time>`.
+- A single queued/running run reads `elapsed <age>` from queuedAt, none when it was queued within a minute of the item's opening or reads its `open <age>`, which stands for both; an ended run reads `<state> <age> ago`, replaced while its goal is live by the goal's wording and `elapsed <age>` from the goal's creation (`review 1/1 · elapsed 40m`); a waiting item whose newest run ended reads none, its `<wait>` (`2h`, the age since that run ended) on the second line instead; multiple runs read `N runs · <newest run's time>`.
 - An item reads `open <age>` from its first `<open>` (`opened_at`), kept across stage updates, and a rename (the earlier of the two), started again by a reopen; it leads the metadata line in text and IM, and rides the second line on the web, the sidebar's included. A row written before the record takes its earliest run's queue time, else reads none.
 - Goal wording names review/fix progress, clean review, findings at the cap, decisions, failure and legacy merge; nonempty decision/failure reasons wrap, initial work adds no redundant review label, and worker metadata names only running, failed and interrupted workers.
 - `openItemsStatus` returns compact `text`, a `seed` and a version-1 presentation `snapshot`, all from one read; no items yields `Nothing open.`.

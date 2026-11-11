@@ -54,11 +54,14 @@ const goalAsk = (g: Goal): string =>
   g.outcome === "decision" ? (g.reason ? `decision: ${g.reason}` : "decision") : g.outcome === "cap" ? goalText(g) : "";
 
 /** Titles arrive resolved by tasks; neither session lookup nor free-text stage guessing belongs here.
+ *  An item is titled by its problem, the name its topic tags carry; the runs' name is its `runName`.
  *  A waiting item's stage answers what the user is needed for: the stage's question, else an ended
  *  goal's ask, prefixed by where it is answered when that is a design session. */
 export function openItemPresentation(i: Item, now: number, key = `item:${i.problem}`): OpenItemPresentation {
-  const title = i.title || i.runs.find((r) => r.state !== NOT_IN_LEDGER && r.targetSessionId)?.name
+  const named = i.title || i.runs.find((r) => r.state !== NOT_IN_LEDGER && r.targetSessionId)?.name
     || i.runs.find((r) => r.state !== NOT_IN_LEDGER)?.name || i.problem;
+  const item = key.startsWith("item:");
+  const title = item ? i.problem : named;
   const waiting = waitsOnYou(i.status);
   const question = waiting ? i.stage.replace(/^waiting on you:\s*/i, "") : i.stage;
   const asked = waiting && !i.waitsIn && !/\bwaiting on you\b/i.test(i.stage) ? i.runs.map((r) => (r.goal ? goalAsk(r.goal) : "")).find(Boolean) ?? "" : "";
@@ -72,9 +75,12 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
   // An ended root's time is no news while its goal's review runs elsewhere: the goal's own elapsed time stands for it.
   const reviewing = (r: Run): boolean => r.goal?.outcome === null && r.state !== "running" && r.state !== "queued";
   const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) || waited ? [] : [time(runs[0]!, now)])] : [];
+  // A lone run started with its item reads the item's `open` age twice: the age stands for both.
+  const twin = (r: Run): boolean => i.openedAt !== undefined && (r.state === "queued" || r.state === "running")
+    && (Math.abs(r.queuedAt - i.openedAt) < 60_000 || since(r.queuedAt, now) === since(i.openedAt, now));
   for (const r of i.runs) {
     const goal = r.goal ? goalText(r.goal) : "";
-    if (i.runs.length === 1 && !reviewing(r) && !waited) metadata.push(time(r, now));
+    if (i.runs.length === 1 && !reviewing(r) && !waited && !twin(r)) metadata.push(time(r, now));
     const moved = !!asked && !!r.goal && goalAsk(r.goal) === asked;
     if (goal && goal !== "waiting on you" && !moved && !metadata.includes(goal)) metadata.push(goal);
     if (r === runs[0] && reviewing(r) && !waited) metadata.push(`elapsed ${since(r.goal!.createdAt, now)}`);
@@ -83,7 +89,7 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
       if (Object.values(important).some((n) => n > 0)) metadata.push(`workers: ${workerCounts(important)}`);
     }
   }
-  return { key, problem: i.problem, title, status: i.status, statusLabel: LABELS[i.status], stage, metadata,
+  return { key, problem: i.problem, title, ...(item && named !== i.problem ? { runName: named } : {}), status: i.status, statusLabel: LABELS[i.status], stage, metadata,
     ...(i.openedAt === undefined ? {} : { age: `open ${since(i.openedAt, now)}` }),
     runs: runs.map(({ runId, targetSessionId }) => ({ runId, targetSessionId })),
     ...(i.designSessionId ? { designSessionId: i.designSessionId } : {}), ...(i.waitsIn ? { waitsIn: i.waitsIn } : {}) };
@@ -131,7 +137,7 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
   return record(value) && value.version === 1 && (value.unmatched === undefined || strings(value.unmatched)) && optional(value, "chain") && Array.isArray(value.items) && value.items.every((i: unknown) =>
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
-    && optional(i, "designSessionId") && optional(i, "waitsIn") && optional(i, "age") && (i.direct === undefined || typeof i.direct === "boolean")
+    && optional(i, "designSessionId") && optional(i, "waitsIn") && optional(i, "age") && optional(i, "runName") && (i.direct === undefined || typeof i.direct === "boolean")
     && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
 }
 

@@ -218,7 +218,10 @@ export interface OpenItemTarget {
 /** Browser-safe, already worded content shared by IM, live rows and command history. */
 export interface OpenItemPresentation extends OpenItemTarget {
   key: string;
+  /** An item's problem; a run's or a session's own name. */
   title: string;
+  /** An item's runs' name (the task layer's creation name, else a run's) where it differs from the problem: a tooltip, never a heading. */
+  runName?: string;
   statusLabel: string;
   stage: string;
   metadata: string[];

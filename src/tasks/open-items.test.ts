@@ -115,7 +115,7 @@ describe("the open items", () => {
     expect(open.unlisted).toEqual([]);
     expect(r.workerReads).toEqual([["lead1"]]);
     expect(openItemsStatus(open, now).text).toBe([
-      "In progress · 1", "", "lead open items", "lead designing", "elapsed 23m · workers: 1 running", "",
+      "In progress · 1", "", "open items 视图", "lead designing", "elapsed 23m · workers: 1 running", "",
       "Other open · 1", "", "model menu 重选 · Stopped", "merged, restart pending", "not in the ledger",
     ].join("\n"));
   });
@@ -137,7 +137,7 @@ describe("the open items", () => {
     expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-queued"]);
     expect(openItemsStatus(open, now).text).toBe([
       "In progress · 2", "", "Build it", "elapsed 5m", "", "Next · Queued", "elapsed 1m", "",
-      "Other open · 1", "", "Named · Stopped", "failed just now",
+      "Other open · 1", "", "the problem · Stopped", "failed just now",
     ].join("\n"));
   });
 
@@ -153,7 +153,7 @@ describe("the open items", () => {
     const open = r.list();
     expect(open.items[0]!.runs.map((x) => [x.runId, x.context])).toEqual([["k4k3jz55", "peak 45% of the compaction point, 1 compaction"]]);
     expect(open.unlisted).toEqual([]);
-    expect(openItemsStatus(open, now).text).toBe("In progress · 1\n\nlead again\nlead building\nelapsed 2m");
+    expect(openItemsStatus(open, now).text).toBe("In progress · 1\n\nstatus 归并\nlead building\nelapsed 2m");
   });
 
   it("follows a session of 250 runs to its newest, past any listing's cap", () => {
@@ -286,7 +286,7 @@ describe("the open items", () => {
     r.item("original multi-run question", "Authorized scope", ["root", "failed", "queued"], 1);
     const status = openItemsStatus(r.list(), r.now);
     // The newest run, by queue time, stands for the rest: no line per run.
-    expect(status.text).toBe("In progress · 1\n\nReviewed work\nAuthorized scope\n3 runs · elapsed 1m · review 1/3");
+    expect(status.text).toBe("In progress · 1\n\noriginal multi-run question\nAuthorized scope\n3 runs · elapsed 1m · review 1/3");
     expect(status.snapshot.items[0]!.runs.map((r) => r.runId)).toEqual(["queued", "failed", "root"]);
     expect(status.seed).toBe("- original multi-run question — Authorized scope (run root · session root-session, run failed, run queued) · running");
     // The newest a goal's root under review elsewhere: its finish is not the item's time.
@@ -324,7 +324,7 @@ describe("the open items", () => {
       "Waiting on you · 3", "",
       "stage wait", "<1m · 60K or 80K?", "",
       "goal wait", "<1m · decision", "",
-      "Rail redesign", "in the design session · <1m · lead proposed two layouts",
+      "rail", "in the design session · <1m · lead proposed two layouts",
     ].join("\n"));
   });
 
@@ -342,7 +342,7 @@ describe("the open items", () => {
     const [item] = r.list().items;
     expect(item).toMatchObject({ problem: "held", status: "stopped", designSessionId: "s-held" });
     expect(item!.waitsIn).toBeUndefined();
-    expect(openItemsStatus(r.list(), now).text).toBe("Other open · 1\n\nHeld design · Stopped\nfailed 1m ago");
+    expect(openItemsStatus(r.list(), now).text).toBe("Other open · 1\n\nheld · Stopped\nfailed 1m ago");
   });
 
   it("groups a lead whose turn ended under In progress while its workers run, and a succeeded item under Waiting on you only by its stage", () => {
@@ -803,7 +803,7 @@ describe("the open items", () => {
     expect(r.titleReads).toEqual([["worker-session-full"]]);
     expect(open.items[0]!.runs.map((v) => v.title)).toEqual(["Open items", "Worker title"]);
     const status = openItemsStatus(open, r.now);
-    expect(status.snapshot.items[0]).toMatchObject({ key: `item:${original}`, title: "Open items", problem: original, designSessionId: "design-session-full" });
+    expect(status.snapshot.items[0]).toMatchObject({ key: `item:${original}`, title: original, runName: "Open items", problem: original, designSessionId: "design-session-full" });
     expect(status.text).toContain("是否合并？授权只限当前分支。");
     expect(status.text).not.toContain("steering-design-full");
     for (const full of [original, "steering-design-full", "steering-worker-full", "design-session-full", "worker-session-full"]) expect(status.seed).toContain(full);

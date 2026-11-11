@@ -68,7 +68,7 @@ it("draws the same links from a reloaded transcript, and none for an answer with
   expect(card().textContent).toContain(text);
 });
 
-it("replays fixed status rows as one control each, the full problem as its tooltip, without guessing ambiguous old links", () => {
+it("replays fixed status rows as one control each, titled by the problem, the run name its tooltip, without guessing ambiguous old links", () => {
   const p = openItemPresentation({ problem: "original problem", title: "Stable title", stage: "waiting on you: merge only this branch?",
     status: "waiting on you", designSessionId: "full-design-session", runs: [{ runId: "full-run", name: "a later prompt", state: "running", targetSessionId: "full-design-session", queuedAt: 0, finishedAt: null, cwd: "/repo" }] }, 120_000);
   const origin: SystemInputOrigin = { kind: "chat-command", command: "status", statusSnapshot: { version: 1, items: [p] } };
@@ -78,7 +78,9 @@ it("replays fixed status rows as one control each, the full problem as its toolt
   expect(card().querySelector(".open-item-stage")!.textContent).toBe("merge only this branch?");
   expect(card().querySelector(".open-item-meta")!.textContent).toBe("elapsed 2m");
   expect(card().querySelector(".open-item")!.querySelectorAll("button").length).toBe(1);
-  expect(card().querySelector(".session-open")!.title).toBe("original problem");
+  expect(card().querySelector(".open-item-title")!.textContent).toBe("original problem");
+  expect(card().querySelector(".session-open")!.title).toBe("Stable title\nOpens its session");
+  expect(isOpenItemsSnapshot({ version: 1, items: [{ ...p, runName: 7 }] })).toBe(false);
   card().querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(p);
   chat.appendSystemInput("run shared12… failed", { kind: "chat-command", command: "status", sessions: { "shared12-first": "one", "shared12-second": "two" } });
