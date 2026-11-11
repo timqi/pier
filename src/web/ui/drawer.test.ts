@@ -445,9 +445,11 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   expect(close("item:a/auth").getAttribute("aria-label")).toBe("Close — auth");
   expect(close("session:solo")).toBeNull();
   close("item:a/auth").focus();
+  Object.defineProperty(item("item:a/auth"), "offsetHeight", { value: 52 });
   close("item:a/auth").onclick?.();
-  // In place, nothing sent: the row reads `Closed — Undo`, its Undo focused, the bar no longer counting it.
+  // In place and as tall, nothing sent: the row reads `Closed — Undo`, its Undo focused, the bar no longer counting it.
   expect(item("item:a/auth").textContent).toBe("Closed \u2014Undo");
+  expect(item("item:a/auth").style.minHeight).toBe("52px");
   expect(undoOf(item("item:a/auth")).getAttribute("aria-label")).toBe("Undo closing auth");
   expect(doc.activeElement).toBe(undoOf(item("item:a/auth")));
   expect(doc.querySelector("[role='status']")!.textContent).toBe("auth closed \u2014 Undo for 5 seconds.");

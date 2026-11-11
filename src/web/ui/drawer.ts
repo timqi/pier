@@ -258,6 +258,9 @@ function undoRow(surface: Surface, p: OpenItemPresentation): HTMLElement {
   undo.onclick = () => undoClose(p.key, surface);
   const li = h("li", "open-item flex items-center gap-1.5 px-1.5 py-2 text-sm text-neutral-500", h("span", "", "Closed \u2014"), undo);
   li.dataset.rowKey = p.key;
+  // As tall as the row it stands in for, so the rows under it hold still.
+  const was = rowNodes[surface].get(p.key)?.offsetHeight;
+  if (was) li.style.minHeight = `${was}px`;
   undoNodes[surface].set(p.key, li);
   return li;
 }
