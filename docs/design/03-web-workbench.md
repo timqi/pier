@@ -460,7 +460,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   an IME composes and land at its commit. `done` releases the span. Cancel
   (×, Esc), leaving the session and `pagehide` remove what the span holds and
   `DELETE` the take; Send ends the take and sends the draft as it stands,
-  later text dropped. `error` and a refused or missing microphone keep the
+  later text dropped. A Console view over the chat and a head rotation the
+  user did not make `DELETE` the take and keep its text, the partial
+  included, in the draft it was spoken into. `error` and a refused or missing microphone keep the
   final sentences, drop the partial and post an error row
   `voice input: <reason>`.
 - **Completion**: a draft

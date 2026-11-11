@@ -43,7 +43,7 @@ vi.mock("./chat.js", () => ({
   resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
-  cancelVoice: vi.fn(), clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), focusInput: vi.fn(),
+  cancelVoice: vi.fn(), clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), endVoice: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
@@ -905,10 +905,14 @@ describe("the continuous conversation", () => {
     h.history.mockImplementation((url) => url.includes("/h2/") ? head.promise : Promise.resolve(earlier(url.split("/")[3]!)));
     const paints = h.resetChat.mock.calls.length;
     const loadings = vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length;
+    const { endVoice, restoreDraft } = vi.mocked(await import("./composer.js"));
+    expect(endVoice).not.toHaveBeenCalled(); // opening the conversation was the user's
     chain = [member("h2", "new", 7), member("h1"), member("h0", "first")];
     h.composer.headMoved?.();
     await settled(); await settled();
     expect(h.header.currentId()).toBe("h2");
+    // Not the user's switch: a voice take ends with its text kept, before the draft changes hands.
+    expect(endVoice.mock.invocationCallOrder[0]).toBeLessThan(restoreDraft.mock.invocationCallOrder.at(-1)!);
     expect(h.content).toEqual(["head"]);
     left.message(1, "stale", "h1");
     head.resolve(snapshot("new head"));
@@ -1064,6 +1068,26 @@ describe("the continuous conversation", () => {
       expect(latest().url).toContain("/h2/");
       expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
     });
+  });
+
+  it("ends a voice take with its text kept when a read-only answer, not the re-list's follow, moves the pane to the head", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    const { endVoice } = vi.mocked(await import("./composer.js"));
+    const visible = vi.mocked((await import("./views.js")).isChatVisible);
+    try {
+      // Nothing follows a rotation read behind Settings; back in the chat, h1's reload answers read-only.
+      visible.mockReturnValue(false);
+      chain = [member("h2"), member("h1"), member("h0", "first")];
+      h.composer.headMoved?.();
+      await settled();
+    } finally {
+      visible.mockReturnValue(true);
+    }
+    expect(endVoice).not.toHaveBeenCalled();
+    latest().reset();
+    for (let i = 0; i < 3; i++) await settled();
+    expect(endVoice).toHaveBeenCalledOnce();
+    expect(h.header.currentId()).toBe("h2");
   });
 
   it("follows a head rotated past while its snapshot was read, instead of drawing it", async () => {

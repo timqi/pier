@@ -2,7 +2,7 @@
 // elements hide while one is open, and the address bar's copy of "where am I".
 
 import { turnsPane } from "./chat.js";
-import { syncQueuePanel } from "./composer.js";
+import { endVoice, syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import type { SessionInfo } from "./drawer.js";
 
@@ -62,6 +62,7 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   setHash({ kind: "console", name, arg, query });
   openName = name;
   for (const el of chatEls) el.classList.add("hidden");
+  endVoice(); // no microphone behind a draft nobody can see
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
   void openView(name, arg, query, ++openRequest);

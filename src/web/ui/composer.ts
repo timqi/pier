@@ -714,6 +714,15 @@ export function cancelVoice(): void {
   take.cancel();
 }
 
+/** The draft went out of sight, or to another session unasked: the take ends
+ *  with its text kept, a composition's held writes landed, and writes no more. */
+export function endVoice(): void {
+  composing = false; // leaving waits for no composition
+  for (const edit of heldWrites.splice(0)) voiceWrite(edit);
+  span = null;
+  take?.cancel();
+}
+
 /** Shown only where the server can transcribe and the browser can capture. */
 async function offerVoice(): Promise<void> {
   if (!(await voiceAvailable())) return;

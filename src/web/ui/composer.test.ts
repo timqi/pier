@@ -935,6 +935,36 @@ describe("voice input", () => {
     expect(drafts.get("pier.draft.a")).toBe("draft ");
   });
 
+  it("ends with its text kept where the draft leaves unasked, and writes nothing into the next one", () => {
+    drafts.set("pier.draft.b", "other");
+    startAt("draft ", 6);
+    say("final", "Spoken.");
+    say("partial", "and mo");
+    composer.endVoice();
+    expect(take.cancel).toHaveBeenCalledOnce();
+    take.on!.onState("idle"); // the take's own answer to its cancel
+    expect(node("#voice").getAttribute("aria-pressed")).toBe("false");
+    say("final", "And more."); // a take that ended sends none; were one late, it has no span
+    expect(input.value).toBe("draft Spoken. and mo");
+    select("b"); // the rotation's own restoreDraft finds no take to cancel
+    say("final", "And more.");
+    expect(take.cancel).toHaveBeenCalledOnce();
+    expect(input.value).toBe("other");
+    expect(drafts.get("pier.draft.a")).toBe("draft Spoken. and mo");
+  });
+
+  it("lands the writes a composition held when it ends that way", () => {
+    startAt("", 0);
+    say("final", "One.");
+    input.dispatchEvent(new Event("compositionstart"));
+    say("final", "Two.");
+    composer.endVoice();
+    expect(input.value).toBe("One. Two.");
+    expect(drafts.get("pier.draft.a")).toBe("One. Two.");
+    input.dispatchEvent(new Event("compositionend"));
+    expect(input.value).toBe("One. Two.");
+  });
+
   it("cancels when the page goes away", () => {
     startAt("", 0);
     state.pagehide!();

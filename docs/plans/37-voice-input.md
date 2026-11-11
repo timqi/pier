@@ -107,6 +107,8 @@ take 开始时记下光标处，之后维护一个 span `[start, end)`：定稿�
 - 结束（`done`）：span 解除，文字留下，走现有 `saveDraft`/autosize/`updateComposer`。
 - 取消（取消按钮或 Esc）：删掉当前 span 里的文字（已归用户的不动），停麦克风，`DELETE`。
 - 切换会话、页面隐藏卸载：等同取消。点发送：等同结束后照常发送当前草稿，不等 `done`。
+- composer 离开屏幕（打开 Settings）、会话头不是用户自己切的（轮换）：take 就地结束，已写入的
+  文字连同当前 partial 留在原草稿，之后不再写入，`DELETE`。
 - `error`：停麦克风，已写入的定稿留下，尾巴的 partial 删掉，错误显示在 composer 现有的
   提示位置。麦克风被拒/没有设备同样显示在那里。
 

@@ -34,6 +34,7 @@ import {
   clearOptimistic,
   dropParked,
   dropStaged,
+  endVoice,
   focusInput,
   initComposer,
   markOptimisticUser,
@@ -444,7 +445,10 @@ const refreshSessions = coalesce(async () => {
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
   // Not awaited: the move's reads, guarded by their own generation, must not hold every later refresh behind them.
   const head = headId();
-  if (following && head && head !== was) void (item ? select(head, false, item) : followHead(head));
+  if (following && head && head !== was) {
+    endVoice(); // not the user's switch: the take's text stays in the draft it was spoken into
+    void (item ? select(head, false, item) : followHead(head));
+  }
 });
 
 /** The window's own focus/blur, beside `hasFocus()`: a window behind another
@@ -772,7 +776,10 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
     void refreshSessions().finally(() => {
       // A follow or a newer navigation took the pane meanwhile.
       if (currentId !== id || generation !== loadSeq) return;
-      if (headId() !== id) return void select(id, false);
+      if (headId() !== id) {
+        endVoice(); // a rotation, as refreshSessions' own follow
+        return void select(id, false);
+      }
       // The chain is unread or still names it: said, not left loading; the retried re-list follows.
       chatLoading(false);
       appendTurn("error", "This session is no longer the conversation's head, and the new head could not be read yet.");

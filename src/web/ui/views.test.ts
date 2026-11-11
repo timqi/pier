@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
   return { settings: view(), openFiles: vi.fn(), toggleFiles: vi.fn(), settingsArgs: [] as unknown[] };
 });
 vi.mock("./chat.js", () => ({ turnsPane: document.querySelector("#turns") }));
-vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
+vi.mock("./composer.js", () => ({ endVoice: vi.fn(), syncQueuePanel: vi.fn() }));
 vi.mock("./settings.js", () => ({ createSettingsView: (...args: unknown[]) => { mocks.settingsArgs = args; return mocks.settings; } }));
 vi.mock("./explorer.js", () => ({ openFiles: mocks.openFiles, toggleFiles: mocks.toggleFiles }));
 const el = (selector: string): FakeElement => fake(document.querySelector(selector));
@@ -42,6 +42,9 @@ it("opens Settings as an overlay over the chat and closes back to where it was o
   views.showConsole("settings"); await settled();
   expect(location.hash).toBe("#/settings");
   expect(shown(el("#bar"))).toBe(false);
+  // The composer is hidden with it: a voice take does not go on behind the overlay.
+  expect(shown(el("#composer"))).toBe(false);
+  expect((await import("./composer.js")).endVoice).toHaveBeenCalledOnce();
   const close = mocks.settingsArgs.at(-1) as () => void;
   close();
   expect(location.hash).toBe("#/session/s1");
