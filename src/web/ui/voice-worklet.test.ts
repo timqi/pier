@@ -47,6 +47,14 @@ it("resamples 44.1 kHz exactly and clamps to the PCM16 range", async () => {
   expect(out[0]![0]).toBe(-32768);
 });
 
+it("repeats samples under 16 kHz, so a second in is still a second out", async () => {
+  const p = await load(8_000);
+  feed(p, 1, 8_000, 0.5);
+  const out = frames(p);
+  expect(out.map((f) => f.length)).toEqual([4000, 4000, 4000, 4000]);
+  expect(out[3]!.every((s) => s === Math.round(0.5 * 32767))).toBe(true);
+});
+
 it("posts the short last frame and then `flushed` on a flush", async () => {
   const p = await load(16_000);
   feed(p, 0.1, 16_000, 0.25);

@@ -49,12 +49,15 @@ registerProcessor("pier-voice", class extends AudioWorkletProcessor {
       this.count++;
       this.phase += RATE;
       if (this.phase < sampleRate) continue;
-      this.phase -= sampleRate;
       const sample = Math.max(-1, Math.min(1, this.sum / this.count));
-      this.frame[this.filled++] = Math.round(sample < 0 ? sample * 32768 : sample * 32767);
+      const pcm = Math.round(sample < 0 ? sample * 32768 : sample * 32767);
       this.sum = 0;
       this.count = 0;
-      if (this.filled === FRAME) this.post(this.frame);
+      // More than once only under 16 kHz (a narrowband headset): the sample repeats to keep the clock.
+      for (; this.phase >= sampleRate; this.phase -= sampleRate) {
+        this.frame[this.filled++] = pcm;
+        if (this.filled === FRAME) this.post(this.frame);
+      }
     }
     return true;
   }
