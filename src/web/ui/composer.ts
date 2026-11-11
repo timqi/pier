@@ -112,13 +112,16 @@ function trackWidth(): void {
 
 /** The dock floats over the transcript, so the pane pads its tail by the dock's
  *  live height. Border-box: a content-box round is not delivered when only
- *  padding changes, and the home-indicator inset is padding. */
+ *  padding changes, and the home-indicator inset is padding. The pane's
+ *  scrollbar gutters (style.css #turns) come out of its inset, so the column
+ *  keeps the dock's edges; any width they change resizes the dock too. */
 function trackDock(): void {
   const main = composer.parentElement!;
   const parts = [queuePanel, composer];
   const sync = (): void => {
     const height = parts.reduce((sum, el) => sum + el.offsetHeight, 0);
     main.style.setProperty("--dock-h", `${String(height)}px`);
+    main.style.setProperty("--gutter", `${String((turnsPane.offsetWidth - turnsPane.clientWidth) / 2)}px`);
   };
   const ro = new ResizeObserver(sync);
   for (const el of parts) ro.observe(el, { box: "border-box" });

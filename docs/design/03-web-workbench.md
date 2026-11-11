@@ -212,10 +212,14 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   plain text.
 - Auto-scroll sticks to the bottom only when already near it; own sends
   force-scroll.
+- A switch to another chain and back, in memory per chain (`main.ts`
+  `leaveChain`): a reader who left away from the tail returns to the row they
+  left, ↓ dotted when a message landed since; one who left at the tail, or
+  whose row is gone, returns pinned to it, following.
 - Two floating buttons stack above the dock's right end: ↓ (`Scroll to the end`) shows
   once follow is released away from the tail, wears a dot when a message
   lands after that — a turn's reply once, however its row is redrawn — and its click scrolls smoothly to the end and re-arms follow;
-  ⌂ (`Back to the conversation`) shows off the conversation and opens the current chain's `#/chain/<id>`.
+  ⌂ (`Back to the conversation`) shows off the conversation, but not in an item view below md, and opens the current chain's `#/chain/<id>`.
 
 ### Bar and status panel (`session-header.ts`, `drawer.ts`)
 
@@ -271,7 +275,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`N steps · <secs>`, one per stretch of work, a steered input between two;
   live `⟳ N steps · <secs> · writing…`; `failed · …` red, `interrupted · …`
   amber, `restarted · …` grey, `restarted · <secs>` for a turn cut before
-  any step), a launched run. Under the row the body: the reply, `Stayed silent
+  any step), a launched run. On a phone the row is one line that scrolls
+  sideways under the table's edge shades, each chip's 2.75rem reach inside it.
+  Under the row the body: the reply, `Stayed silent
   — <reason>`, an error on its own material, or nothing for a turn cut short
   before it spoke. The bubble opens at the tail with its first chip or delta;
   the body fills it; a run launched after the reply joins the row's end; a
@@ -376,11 +382,14 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
     under it until it ends untagged; a divider shows; a clock follows the
     row it stamps; every other row is hidden (`data-item-hidden`), never
     removed from the pane's transcript. A head rotation re-reads the view.
+    A tag of the view's own item (its problem or an alias) is only its
+    waiting dot, gone when not waiting; another item's tag is as in the pane.
   - A 404 reads the server's `No item "<problem>"` with a Back to the
     conversation button; any other failure reads its error the same way.
   - Bar: the item's dot (`topicColour`) and problem as the title, `×`
     beside it, and ‹; `×`, ‹ and Esc (after a running turn's Stop) return to
-    the chain at its tail.
+    the chain at its tail. Below md `×` is the one way back: ‹, ⌂ and the
+    context chip hide (`#bar[data-item]`), so the title has the bar.
   - Composer: a send is `withItem(problem, text)` — `[item: <problem>]` on
     the first line, above a quote block — to `POST /api/continuous/messages`;
     a chat command or skill ask goes unstamped. Every user bubble and queue

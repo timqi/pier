@@ -543,6 +543,19 @@ it("keeps a reader put above the tail after a re-render, and follows one who was
   expect(pane.scrollTop).toBe(2000);
 });
 
+// A chain returned to (main.ts returnTo) is the same rows redrawn, unless one landed while the reader was away.
+it("dots the to-bottom button for a redraw that holds a message the reader has not seen", () => {
+  const pane = doc.querySelector("#turns")!;
+  const button = fake(doc.querySelector("#to-bottom"));
+  Object.defineProperties(pane, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
+  chat.renderSnapshot([{ role: "user", text: "hello" }], "idle", []);
+  chat.keepScroll(1990);
+  expect([button.hasAttribute("data-show"), button.hasAttribute("data-unread")]).toEqual([true, false]);
+  chat.renderSnapshot([{ role: "user", text: "hello" }, { role: "user", text: "while away" }], "idle", []);
+  chat.keepScroll(1990, true);
+  expect([button.hasAttribute("data-show"), button.hasAttribute("data-unread")]).toEqual([true, true]);
+});
+
 // The final reply replaces the streamed block: the pin taken between the two
 // sees the shorter pane, and its scroll event lands after the reply grew it back.
 describe("tail follow across the final render", () => {

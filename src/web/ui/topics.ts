@@ -26,8 +26,16 @@ export const runTopic = (runId: string): string | undefined => runTopics.get(run
 /** A tag's click: the item view of its problem (docs/design/15-item-view.md). */
 type ToView = (problem: string) => void;
 
+/** The item view's problem and aliases: the view names its item, so its tags keep only the dot (style.css). */
+let viewKeys: ReadonlySet<string> = new Set();
+
+export function setViewTopics(keys: ReadonlySet<string>): void {
+  viewKeys = keys;
+}
+
 function paintTag(label: HTMLElement, problem: string, waiting: boolean): void {
   label.toggleAttribute("data-waiting", waiting);
+  label.toggleAttribute("data-own", viewKeys.has(problem));
   label.title = waiting ? `${problem} \u00b7 waiting on you` : problem;
   label.setAttribute("aria-label", `${label.title} \u2014 open its item view`);
 }

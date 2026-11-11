@@ -266,11 +266,11 @@ export function followTail(): void {
 
 /** A re-render with rows added above the reader puts them back `fromBottom`
  *  px above the end; follow stays armed only if that is the end, or the next
- *  repin would take them to the tail. */
-export function keepScroll(fromBottom: number): void {
+ *  repin would take them to the tail. `unread`: the redraw holds a message the reader has not seen. */
+export function keepScroll(fromBottom: number, unread = false): void {
   setTop(turnsPane.scrollHeight - fromBottom);
   follow = atBottom();
-  seenSeq = landedSeq; // the same rows redrawn, nothing new
+  seenSeq = landedSeq - Number(unread);
   paintToBottom();
 }
 

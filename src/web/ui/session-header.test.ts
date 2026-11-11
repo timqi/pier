@@ -303,8 +303,12 @@ it("names the item view's problem with its dot and ×, each way out opening the 
   conversation = true;
   header.renderHeader();
   expect(close.classList.contains("hidden")).toBe(true);
+  const bar = fake(document.querySelector("#bar"));
+  expect(bar.hasAttribute("data-item")).toBe(false);
   viewing = "auth review";
   header.renderHeader();
+  // Below md the × is the one way back: the bar's mark hides ‹, ⌂ and the context chip (style.css).
+  expect(bar.hasAttribute("data-item")).toBe(true);
   expect(title().textContent).toBe("auth review");
   expect(title().querySelector("span")!.style.background).toBe(topicColour("auth review"));
   expect(close.classList.contains("hidden")).toBe(false);
@@ -323,6 +327,7 @@ it("names the item view's problem with its dot and ×, each way out opening the 
   header.renderHeader();
   expect(title().textContent).toBe("Pier");
   expect(close.classList.contains("hidden")).toBe(true);
+  expect(bar.hasAttribute("data-item")).toBe(false);
 });
 
 // The floating home button is the same way back, there only off the conversation.

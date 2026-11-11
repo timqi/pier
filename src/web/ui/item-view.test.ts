@@ -54,6 +54,8 @@ it("draws each session's rows, then shows only the live rows tagged with a key, 
   // The stamped turn reads without its item line and carries the item's tag instead.
   const stamped = pane().querySelectorAll("[data-kind='user']")[1]!;
   expect(stamped.querySelector(".topic-tag")!.textContent).toBe("auth");
+  // The view's own item, under its key or an alias: its tags keep only the waiting dot (style.css).
+  expect(pane().querySelectorAll(".topic-tag").every((t) => t.hasAttribute("data-own"))).toBe(true);
   expect(pane().querySelector("[data-kind='divider']")).not.toBeNull();
   // Another item's exchange arrives on the head's stream: in the pane, not shown.
   chat.appendTurn("user", "deploy now?", false, 10 * 3_600_000); // after a gap: a clock above it
@@ -73,6 +75,7 @@ it("draws each session's rows, then shows only the live rows tagged with a key, 
   expect(pane().children.length).toBeGreaterThan(drawn + 4);
   const live = shown().slice(-3);
   expect(live.map((r) => r.dataset.kind)).toEqual(["user", "assistant", "divider"]);
+  expect(pane().querySelectorAll(".topic-tag").filter((t) => !t.hasAttribute("data-own")).map(text)).toEqual(["deploy", "deploy"]);
   expect(text(live[0]!)).toContain("and the tests?");
   expect(text(live[1]!)).toContain("Green.");
   const hidden = pane().children.filter((r) => r.hasAttribute("data-item-hidden"));

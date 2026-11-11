@@ -657,8 +657,10 @@ main {
 #turns {
   padding:
     var(--head-h)
-    var(--col-pad)
+    max(0px, calc(var(--col-pad) - var(--gutter, 0px)))
     calc(var(--dock-h, 4rem) - 0.5rem);
+  /* Centred whether a classic scrollbar shows or not; composer.ts measures --gutter. */
+  scrollbar-gutter: stable both-edges;
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts reveal). */
   scroll-padding-block: calc(var(--head-h) + var(--turn-gap)) calc(var(--dock-h, 4rem) - 0.5rem + var(--turn-gap));
@@ -773,6 +775,10 @@ main {
 .topic-tag:focus-visible { outline: 2px solid var(--color-indigo-400); outline-offset: 1px; }
 /* Waiting on you, unanswered: the status panel's `waiting on you` amber-700, not the unread dot's. */
 .topic-tag[data-waiting]::after { content: ""; flex: none; width: 0.375rem; height: 0.375rem; border-radius: 9999px; background: var(--color-amber-700); }
+/* The item view's own tag (topics.ts data-own): the bar names the item, so only a waiting dot stays. */
+.topic-tag[data-own]:not([data-waiting]), .chip-row:has(> .topic-tag[data-own]:not([data-waiting]):only-child) { display: none; }
+.topic-tag[data-own] { background: none; padding: 0; }
+.topic-tag[data-own] > .topic-text { display: none; }
 /* The item view's live rows of other items (item-view.ts): still in the pane, not shown. */
 #turns > [data-item-hidden] { display: none; }
 #turns > [data-kind="user"]:has(textarea) { width: 76%; }
@@ -976,12 +982,29 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #bar #session-meta:not([data-urgent]) { display: none; }
   /* The conversation's one chip is the context, short enough to stay beside the title. */
   #bar #session-meta[data-inline]:not(.hidden) { display: flex; order: 0; flex-basis: auto; height: auto; padding-left: 0; }
+  /* The item view's way back is its × alone, which Esc shares; the title takes the room. */
+  #bar[data-item] #bar-back, #bar[data-item] #session-meta[data-inline]:not(.hidden) { display: none; }
+  main:has(#bar[data-item]) #to-main { display: none; }
   /* A reply is the reading: on a phone it has no side to give away. */
   #turns > [data-kind="assistant"] { max-width: 100%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
   /* The gutter is the pencil's here; a time in it would scroll the pane sideways. */
   #turns > [data-time]::after { content: none; }
+  /* A chip row is one line that scrolls sideways under the edge shades; its
+     padding holds the chips' 2.75rem reach and focus ring, which the
+     scroller would clip, and the negative margins give that room back. */
+  .chip-row {
+    --reach: 0.75rem;
+    flex-wrap: nowrap;
+    overflow: auto hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding: var(--reach) 3px;
+    margin: calc(-1 * var(--reach)) -3px calc(0.5rem - var(--reach));
+    background-clip: content-box;
+  }
+  .chip-row > * { flex: none; }
   #input { font-size: max(16px, 1rem); }
 }
 /* After the phone's size: a thumb's floor at any width. */
@@ -1231,23 +1254,27 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
   /* In chat a table is in its own scroll box (chat.ts mdBox) and keeps the
      table layout: columns as wide as their text, a cell's line bounded so one
-     long cell does not stretch a row past reading. The edge fades are the
-     scroll-shadow pattern: covers in the bubble's colour scroll with the
-     content, so a shade shows only on the side that has more. */
+     long cell does not stretch a row past reading. */
   .md .table-scroll {
-    --cover: var(--color-white);
-    --shade: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
     width: fit-content;
     max-width: 100%;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+  }
+  /* The edge fades of a table and of a phone's chip row are the scroll-shadow
+     pattern: covers in the bubble's colour scroll with the content, so a shade
+     shows only on the side that has more. */
+  :is(.md .table-scroll, .chip-row) {
+    --cover: var(--color-white);
+    --shade: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
     background:
       linear-gradient(to right, var(--cover) 40%, transparent) left / 1.5rem 100% no-repeat local,
       linear-gradient(to left, var(--cover) 40%, transparent) right / 1.5rem 100% no-repeat local,
       linear-gradient(to right, var(--shade), transparent) left / 0.75rem 100% no-repeat scroll,
       linear-gradient(to left, var(--shade), transparent) right / 0.75rem 100% no-repeat scroll;
   }
-  .system-card .md .table-scroll { --cover: var(--color-neutral-100); }
+  .system-card :is(.md .table-scroll, .chip-row) { --cover: var(--color-neutral-100); }
+  [data-kind="error"] > .chip-row { --cover: var(--color-red-50); }
   .md .table-scroll > table {
     display: table;
     max-width: none;
