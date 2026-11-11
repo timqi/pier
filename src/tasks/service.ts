@@ -489,11 +489,10 @@ export class TaskService {
 
   /** `chainId`'s items, or every chain's in the chain list's order; each row names its chain. */
   openItems(chainId?: string): OpenItems {
-    const each = this.instance.chains.list().filter((c) => chainId === undefined || c.id === chainId).map((c) => {
-      const open = openItems(this.store, this.router, this.instance.continuous.members(c.id).map((m) => m.sessionId), c.id);
-      const chain = { id: c.id, name: c.name, archived: c.archivedAt !== null };
-      return { items: open.items.map((i) => ({ ...i, chain })), unlisted: open.unlisted };
-    });
+    const rows = this.instance.chains.list().filter((c) => chainId === undefined || c.id === chainId);
+    const each = openItems(this.store, this.router, rows.map((c) => ({
+      id: c.id, members: this.instance.continuous.members(c.id).map((m) => m.sessionId), named: { id: c.id, name: c.name, archived: c.archivedAt !== null },
+    }))).map(({ chain, items, unlisted }) => ({ items: items.map((i) => ({ ...i, chain: chain.named })), unlisted }));
     return { items: each.flatMap((o) => o.items), unlisted: each.flatMap((o) => o.unlisted) };
   }
 

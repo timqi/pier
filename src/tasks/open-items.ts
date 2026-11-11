@@ -57,28 +57,35 @@ export function openStatus(
 /** The store reads the list is joined against. */
 export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
-/** `chainId`'s items; `members`: that chain, newest first. */
-export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">, members: string[], chainId: string): OpenItems {
+/** Each of `chains`' items, in their order, beside the chain they were read for; `members`: that chain, newest first. */
+export function openItems<C extends { id: string; members: string[] }>(store: OpenItemReads, router: Pick<Router, "stateOf">, chains: readonly C[]): (OpenItems & { chain: C })[] {
   // A session's newest run stands for it, so a lead woken again stays the same item.
   const newest = (sessionId: string | null) => (sessionId ? store.latestRunForTarget(sessionId) : undefined);
-  const tracked = new Set<string>();
-  const items = store.openItems(chainId).map((row): Unrated => {
-    const named = row.runIds.map((id): OpenRun => {
-      const own = store.getRun(id);
-      tracked.add(own?.targetSessionId ?? id);
-      return own ? ledgerRun(newest(own.targetSessionId) ?? own) : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
-    }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
-    return { problem: row.problem, stage: row.stage, runs: named, ...(row.openedAt === undefined ? {} : { openedAt: row.openedAt }) };
+  // The reads below every chain shares are read once for the list: a read per chain grows with the chains.
+  const inFlight = store.inFlightRuns();
+  const each = chains.map((chain) => {
+    const { id: chainId, members } = chain;
+    const tracked = new Set<string>();
+    const items = store.openItems(chainId).map((row): Unrated => {
+      const named = row.runIds.map((id): OpenRun => {
+        const own = store.getRun(id);
+        tracked.add(own?.targetSessionId ?? id);
+        return own ? ledgerRun(newest(own.targetSessionId) ?? own) : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
+      }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
+      return { problem: row.problem, stage: row.stage, runs: named, ...(row.openedAt === undefined ? {} : { openedAt: row.openedAt }) };
+    });
+    const unlisted = inFlight.filter((r) => members.includes(r.invokedBySessionId ?? "") && !tracked.has(r.targetSessionId ?? r.id)).map(ledgerRun);
+    return { chain, items, unlisted };
   });
-  const unlisted = store.inFlightRuns().filter((r) => members.includes(r.invokedBySessionId ?? "") && !tracked.has(r.targetSessionId ?? r.id)).map(ledgerRun);
+  const listed = each.flatMap(({ items, unlisted }) => [...items.flatMap((i) => i.runs), ...unlisted]);
   const leads = store.leads();
   const awaiting = new Set([...leads].flatMap(([id, lead]) => (lead.designOpen ? [id] : [])));
-  const targets = [...new Set([...items.flatMap((i) => i.runs), ...unlisted].flatMap((r) => r.targetSessionId ?? []))].filter((id) => !leads.has(id));
+  const targets = [...new Set(listed.flatMap((r) => r.targetSessionId ?? []))].filter((id) => !leads.has(id));
   const titles = targets.length ? store.creationTitles(targets) : new Map<string, string>();
   for (const [id, lead] of leads) titles.set(id, lead.title);
   // Every shown lead's workers in one read: a read per lead grows with the list.
   const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
-  const shown = new Set([...items.flatMap((i) => i.runs), ...unlisted].flatMap((r) => leadOf(r) ?? []));
+  const shown = new Set(listed.flatMap((r) => leadOf(r) ?? []));
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
   const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
@@ -93,7 +100,8 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
     };
   };
   const session = { streaming: (id: string) => router.stateOf(id) === "streaming", designOpen: (id: string) => awaiting.has(id) };
-  return {
+  return each.map(({ chain, items, unlisted }) => ({
+    chain,
     items: items.map((i) => {
       const rated = { ...i, runs: i.runs.map(joined) };
       const title = i.runs.map((r) => titles.get(r.targetSessionId ?? "")).find(Boolean);
@@ -101,7 +109,7 @@ export function openItems(store: OpenItemReads, router: Pick<Router, "stateOf">,
       return { ...rated, ...openStatus(rated, session), ...(title ? { title } : {}), ...(designSessionId ? { designSessionId } : {}) };
     }),
     unlisted: unlisted.map(joined),
-  };
+  }));
 }
 
 /** The head's reply's markers, written by `sessionId`, which every item the reply is about records

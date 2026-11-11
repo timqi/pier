@@ -12,7 +12,7 @@ import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type
 import { openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, unmatchedNote, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { Goal, OpenRun, TaskDefinition, TaskRun } from "./types.js";
+import type { Goal, OpenItems, OpenRun, TaskDefinition, TaskRun } from "./types.js";
 import { fakeChains } from "./chain.testkit.js";
 
 const warn = vi.hoisted(() => vi.fn());
@@ -53,14 +53,15 @@ function rig() {
   const now = Date.now();
   const workerReads: string[][] = [];
   const titleReads: string[][] = [];
+  const sharedReads: string[] = [];
   const reads: OpenItemReads = {
     creationTitles: (ids) => { titleReads.push(ids); return store.creationTitles(ids); },
     getRun: (id) => store.getRun(id),
     goalOf: (id) => store.goalOf(id),
     latestRunForTarget: (id) => store.latestRunForTarget(id),
-    inFlightRuns: () => store.inFlightRuns(),
-    leads: () => store.leads(),
-    openItems: () => store.openItems("main"),
+    inFlightRuns: () => { sharedReads.push("inFlightRuns"); return store.inFlightRuns(); },
+    leads: () => { sharedReads.push("leads"); return store.leads(); },
+    openItems: (chainId) => store.openItems(chainId),
     workerCounts: (ids) => {
       workerReads.push(ids);
       return store.workerCounts(ids);
@@ -71,14 +72,18 @@ function rig() {
   const workers = (lead: string, state: TaskRunState, n = 1, ago = MIN) => save(...Array.from({ length: n }, (_, i) =>
     saved(`w-${lead}-${state}-${i}`, { invokedBySessionId: lead, state, finishedAt: state === "queued" || state === "running" ? null : now - ago })));
   const router = new Router(new EventHub(), () => Promise.reject(new Error("no session")));
-  const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
-    db.prepare("INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at) VALUES ('main', ?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
-  const list = (members = ["h1"]) => openItems(reads, router, members, "main");
+  const item = (problem: string, stage: string, runIds: string[], updatedAt: number, chainId = "main") =>
+    db.prepare("INSERT INTO open_items(chain_id, problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?, ?)").run(chainId, problem, stage, JSON.stringify(runIds), updatedAt);
+  const lists = (chains: { id: string; members: string[] }[]) => openItems(reads, router, chains);
+  const list = (members = ["h1"]): OpenItems => {
+    const { items, unlisted } = lists([{ id: "main", members }])[0]!;
+    return { items, unlisted };
+  };
   const goal = (rootRunId: string, over: Partial<Goal> = {}) => store.saveGoal({
     id: `g-${rootRunId}`, rootRunId, supervisorSessionId: "h1", cap: 3, round: 0, step: "work", currentRunId: rootRunId,
     outcome: null, reason: null, reviewModel: null, createdAt: 0, finishedAt: null, ...over,
   });
-  return { now, store, save, workers, workerReads, titleReads, router, item, list, goal };
+  return { now, db, store, save, workers, workerReads, titleReads, sharedReads, router, item, list, lists, goal };
 }
 
 /** A TaskService over `store` whose chain `main` has the attached head `h0`; `end` ends one of its turns. */
@@ -363,6 +368,29 @@ describe("the open items", () => {
     expect(text).toContain("手动重启还是派 worker");
     expect(text).toContain("workers: 3 running");
     expect(text).toContain("Other open · 1");
+  });
+
+  it("reads what every chain shares once for the whole list, however many chains", () => {
+    const r = rig();
+    r.save(
+      saved("a", { lead: true, targetSessionId: "l1", queuedAt: 1 }),
+      saved("b", { name: "design worker", sessionMode: "fresh", targetSessionId: "w2", invokedBySessionId: "d1", queuedAt: 2 }),
+      saved("c", { targetSessionId: "w3", invokedBySessionId: "d1", state: "queued", queuedAt: 3 }),
+    );
+    r.workers("l1", "running");
+    r.db.exec("INSERT INTO chains VALUES ('design', 'design', 1, NULL)");
+    r.item("main's", "", ["a"], 1);
+    r.item("design's", "", ["b"], 2, "design");
+    const [main, design, empty] = r.lists([{ id: "main", members: ["h1"] }, { id: "design", members: ["d1"] }, { id: "idle", members: [] }]);
+    expect(r.sharedReads.sort()).toEqual(["inFlightRuns", "leads"]);
+    expect(r.titleReads).toEqual([["w2", "w3"]]);
+    expect(r.workerReads).toEqual([["l1"]]);
+    expect(main!.items.map((i) => [i.problem, i.status, i.runs[0]!.workers?.running])).toEqual([["main's", "running", 1]]);
+    expect(main!.unlisted).toEqual([]);
+    expect(design!.items.map((i) => [i.problem, i.title])).toEqual([["design's", "design worker"]]);
+    expect(design!.unlisted.map((u) => u.runId)).toEqual(["c"]);
+    expect([main, design, empty].map((o) => o!.chain.id)).toEqual(["main", "design", "idle"]);
+    expect(empty).toMatchObject({ items: [], unlisted: [] });
   });
 
   it("reads every shown lead's workers in one read, three leads or one", () => {
