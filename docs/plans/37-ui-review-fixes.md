@@ -22,7 +22,7 @@ fable UI 审查 28 条（`/tmp/pier-ui-review/REPORT.md`，截图同目录，行
 | --- | --- | --- | --- |
 | 1 | chip/话题标签/折叠行热区写反 | `inset-block: calc((100% - 2.75rem) / 2)`，粗指针下热区 ≥44px；折行的 chip 行里相邻热区平分间距（28–36px），等 #9 单行滚动后补齐 | done `4c6b4ab` |
 | 2 | 手机顶栏 `#chat-title`、`#chat-menu` 不到 44px | 进粗指针 44px 名单；composer 的 `+` 和发送键补到 44px | done `c56e7e5` |
-| 3 | 同一事项两个名字 | 需用户取舍，见「待用户取舍」 | ask |
+| 3 | 同一事项两个名字 | 方案 A，见「决定记录」 | wip `ui-fix-items` |
 | 4 | 运行中的 worker 会话页面空 | 子会话唯一的气泡仍在运行时步骤 chip 默认展开，日志高度跟随面板；手动收起在该会话内记住（内存，F5 后重开）；同步 06 | done `09ecf96` |
 | 5 | 工具行预览是 JSON 外壳 | 单键参数显示值，多键 `key=value`（值截 48 字符） | done `8b36394` |
 | 6 | 顶栏状态 lead 像当前会话的状态 | 侧栏停靠时 lead 收成「图标 + 数量」；lead 与标题之间一条细线，所有宽度和视图都有 | done `52159d2` |
@@ -38,8 +38,8 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 | 9 | 手机 chip 行单行横向滚动 | todo |
 | 10 | 手机状态面板：元数据独占一行无前导分隔符，短语优先占宽 | todo |
 | 11 | 无 hover 的停靠侧栏：事项行两个动作收进一个 ⋯ | todo |
-| 12 | Close 撤销 | ask |
-| 13 | 事项行去向标记 | ask |
+| 12 | Close 撤销（方案 B） | wip `ui-fix-items` |
+| 13 | 事项行去向标记（方案 A） | wip `ui-fix-items` |
 | 14 | chain 行显示进行中事项（静止圆点或 `N open`） | todo |
 | 15 | `#turns` `scrollbar-gutter: stable both-edges` | todo |
 | 16 | chain 列表和状态面板的手机 sheet 加标题和关闭按钮 | todo |
@@ -69,4 +69,19 @@ M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是�
 
 ## 决定记录
 
-（用户答复后写在这里。）
+- **#3 → A**：侧栏/面板/顶栏的事项标题固定用 problem（与话题标签一致），run 名进 tooltip。只改 `core/open-items.ts` 的取值，不动 tasks 数据。
+- **#12 → B**：Close 延迟提交。行原位变成「Closed — Undo」几秒，期间不发 close 请求，Undo 只是取消；到时、或页面隐藏/离开（`pagehide`/`visibilitychange`）时立即发出（`keepalive`）。不动服务端。
+- **#13 → A**：行上加去向标记（跳子会话时 ↗），点击行为不变。
+
+## M2/M3 分工
+
+并行 worktree（都基于 `0c2ab81` 之后的本分支）；worker 不改 AGENTS.md 的上限行，报净增行数，lead 合并时统一抬。
+
+| 分支 | 条目 |
+| --- | --- |
+| `ui-fix-items` | #3 #10 #11 #12 #13 #25 |
+| `ui-fix-itemview` | #7 #8 #9 #15 #28，并复测 M1 的 #1 #2 #6 |
+| `ui-fix-sheets` | #14 #16 #17 #20 |
+| `ui-fix-settings` | #18 #19 #23 #27 |
+| `ui-fix-misc` | #21 #24 #26 |
+| 本树、最后串行 | #22（字号收敛，横跨全部文件） |
