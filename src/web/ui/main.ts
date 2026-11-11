@@ -30,6 +30,7 @@ import {
   turnsPane,
 } from "./chat.js";
 import {
+  cancelVoice,
   clearOptimistic,
   dropParked,
   dropStaged,
@@ -294,6 +295,7 @@ function openContinuous(user = true): void {
     return setConversationHash();
   }
   ++loadSeq;
+  cancelVoice(); // no restoreDraft on this path, and the take is its session's
   saveDraft();
   showChat();
   source?.close();

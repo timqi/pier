@@ -43,7 +43,7 @@ vi.mock("./chat.js", () => ({
   resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
-  clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), focusInput: vi.fn(),
+  cancelVoice: vi.fn(), clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
@@ -1160,6 +1160,8 @@ describe("the continuous conversation", () => {
     expect(h.composer.sessionId()).toBeNull();
     expect(h.composer.continuous()).toBe(true);
     expect(h.content).toContain("The continuous conversation — your first message starts it.");
+    // No draft is restored on this path, so the voice take is ended by name.
+    expect((await import("./composer.js")).cancelVoice).toHaveBeenCalled();
     // Before the first message is when a charter is written.
     const hint = fake(h.appendTurn.mock.results.at(-1)!.value);
     const charter = hint.nextElementSibling!;
