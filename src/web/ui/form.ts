@@ -109,6 +109,8 @@ export function pill(label: string, active: boolean, onClick: () => void): HTMLB
         : "text-neutral-600 hover:bg-neutral-200"
     }`,
   );
+  // A tab is a route (#/settings/<topic>), so the open one is the current page, as a chain row is.
+  if (active) el.setAttribute("aria-current", "page");
   el.onclick = onClick;
   return el;
 }

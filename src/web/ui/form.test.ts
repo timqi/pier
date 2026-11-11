@@ -54,3 +54,13 @@ it("moves the pick with the arrows, wrapping, and reports it once per move", () 
   expect(onChange).toHaveBeenLastCalledWith("teal");
   expect(checked(group)).toEqual(["teal"]);
 });
+
+it("marks the open tab as the current page, by more than its colour", () => {
+  const onClick = vi.fn();
+  const open = fake(form.pill("Models", true, onClick));
+  const other = fake(form.pill("Vault", false, onClick));
+  expect(open.getAttribute("aria-current")).toBe("page");
+  expect(other.hasAttribute("aria-current")).toBe(false);
+  other.onclick!();
+  expect(onClick).toHaveBeenCalledOnce();
+});

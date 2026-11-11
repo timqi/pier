@@ -549,7 +549,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Console views
 
-Settings is an overlay route: it opens over its origin, and ✕ or Esc returns to it. It is a full-column view whose header carries `#version` and `#theme-toggle`; `views.ts` owns the route. Files is a modal `<dialog>`, not a route: it stacks over the chat or Settings, and ✕ or Esc leaves what is under it as it was.
+Settings is an overlay route: it opens over its origin, and ✕ or Esc returns to it. It is a full-column view whose header carries its topic tabs, `#version` and `#theme-toggle`; `views.ts` owns the route, and the open tab, the route's topic, is `aria-current="page"`. Files is a modal `<dialog>`, not a route: it stacks over the chat or Settings, and ✕ or Esc leaves what is under it as it was.
 
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
   switch, sticky in the topic's scroller; the chats card names the current bot
