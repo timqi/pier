@@ -4,7 +4,7 @@
 
 import type { CommandResult, TaskDefinition, TaskRow, TaskRun } from "../../tasks/types.js";
 import { getJson, refused } from "./api.js";
-import { h, relTime, stampTime } from "./dom.js";
+import { agoLabel, h, prose, stampTime } from "./dom.js";
 import { badge, button, card, empty, setStatus, toggle } from "./form.js";
 
 /** One tint per outcome, so a list of runs reads by colour before by word. */
@@ -114,7 +114,7 @@ export function createTasksPane(): { el: HTMLElement; show(): void } {
       "flex min-w-0 flex-col gap-1",
       h("span", "flex min-w-0 flex-wrap items-center gap-2",
         h("span", "truncate text-[12.5px] font-medium text-neutral-700", task.name),
-        ...(last ? [runBadge(last), h("span", "text-[11px] text-neutral-400", relTime(last.queuedAt))] : [])),
+        ...(last ? [runBadge(last), h("span", "text-[11px] text-neutral-400", agoLabel(last.queuedAt))] : [])),
       h("span", "truncate font-mono text-[11.5px] text-neutral-400", meta.join(" · ")),
     );
     if (task.description) head.title = task.description;
@@ -139,13 +139,13 @@ export function createTasksPane(): { el: HTMLElement; show(): void } {
     if (!got.ok) return void listBox.replaceChildren(empty(got.error));
     listBox.replaceChildren(...(got.value.length
       ? got.value.map(row)
-      : [empty("No tasks yet. Ask an agent to schedule one — `pier task` saves it.")]));
+      : [empty(prose("No tasks yet. Ask an agent to schedule one — `pier task` saves it."))]));
   }
 
   // The column every Settings topic sits in (vault.ts).
   const el = h("div", "mx-auto flex w-full min-w-0 max-w-3xl flex-col", card(
     "Tasks",
-    "Saved tasks and their runs. A paused task keeps its definition and stops firing; defining or editing one is `pier task`'s job.",
+    prose("Saved tasks and their runs. A paused task keeps its definition and stops firing; defining or editing one is `pier task`'s job."),
     listBox,
     status,
   ));

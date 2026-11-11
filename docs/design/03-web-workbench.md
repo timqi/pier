@@ -572,7 +572,7 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   no reveal, filing an existing name replaces it. `?name=X` opens with the
   name filled and the value field focused: the link an agent's `no secret
   named X` error carries. Tasks (`#/settings/tasks`): one row per task —
-  name, last run's state and age, trigger and next run — with the pause switch
+  name, last run's state and `<age> ago`, trigger and next run — with the pause switch
   (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
   time, source, duration) whose log (error, result, probe, a link to the run's
   session) unfolds in place; defining a task stays `pier task`'s. Agent: two panels (what a session is

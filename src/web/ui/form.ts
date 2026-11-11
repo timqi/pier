@@ -130,7 +130,7 @@ export const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 /** A titled panel. The subtitle carries the "why", so fields need fewer words. */
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.
-export function card(title: string, subtitle: string, ...body: HTMLElement[]): HTMLElement {
+export function card(title: string, subtitle: string | Node, ...body: HTMLElement[]): HTMLElement {
   const el = h("section", PANEL);
   const head = h("div", `rounded-t-[10px] ${PANEL_HEAD} px-5 py-4`);
   head.append(h("h2", "text-[14px] font-semibold text-neutral-800", title));
@@ -295,7 +295,7 @@ export function deviceRow(
   );
 }
 
-export const empty = (text: string): HTMLElement =>
+export const empty = (text: string | Node): HTMLElement =>
   h(
     "p",
     "rounded-lg border border-dashed border-neutral-200 px-3 py-4 text-center text-[12.5px] text-neutral-400",
