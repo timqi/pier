@@ -1,7 +1,7 @@
 // The two moves a list answers to, in one place: the anchored menus and the
 // composer's command list must not drift on which keys walk them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
+import { fake, installPage, labelled, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 import { listStep } from "./menu.js";
 
 const key = (init: Partial<KeyboardEvent>): KeyboardEvent => init as KeyboardEvent;
@@ -103,6 +103,36 @@ describe("closing", () => {
     anchor.removeAttribute("aria-haspopup");
     fire(doc, "pointerdown", anchor);
     expect(isOpen()).toBe(false);
+  });
+
+  // 06 §Menus: every phone sheet is named and closable — the menus', the chain list's and the status panel's alike.
+  it("heads a sheet with its title and a close control, a popover with neither, and focuses the content", () => {
+    const content = (): [FakeElement, FakeElement] => {
+      const box = doc.createElement("div");
+      const off = doc.createElement("button");
+      off.disabled = true; // Session info before the first reply
+      const first = doc.createElement("button");
+      box.append(off, first);
+      return [box, first];
+    };
+    const [box, first] = content();
+    const popover = fake(menu.openPanel(anchor as never, box as never, "Chains"));
+    expect(labelled(popover, "Close Chains")).toBeUndefined();
+    expect(popover.firstElementChild).toBe(box);
+    expect(doc.activeElement).toBe(first);
+    menu.closeMenu();
+    win.innerWidth = 390;
+    const [sheetBox, sheetFirst] = content();
+    const sheet = fake(menu.openPanel(anchor as never, sheetBox as never, "Chains"));
+    expect(sheet.dataset.presentation).toBe("sheet");
+    expect(sheet.firstElementChild!.textContent).toBe("Chains");
+    expect(doc.activeElement).toBe(sheetFirst);
+    labelled(sheet, "Close Chains")!.onclick!();
+    expect(isOpen()).toBe(false);
+    menu.openMenu(anchor as never, [{ label: "Rename…", onSelect: vi.fn() }], "pier");
+    const sheetMenu = fake(doc.querySelector('[data-menu="true"]'));
+    expect(sheetMenu.firstElementChild!.textContent).toBe("pier");
+    expect(labelled(sheetMenu, "Close menu")).toBeDefined();
   });
 
   it("leaves nothing listening once closed", () => {

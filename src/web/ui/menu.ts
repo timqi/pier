@@ -129,9 +129,19 @@ function anchorBox(anchor: HTMLElement): { top: number; left: number } {
  *  a sheet's rows are sized for a fingertip rather than a cursor. */
 const isSheet = (): boolean => window.innerWidth < 640;
 
+/** A sheet's head (06 §Menus): what it is for, and a close control a thumb reaches. */
+function sheetHead(title: string, closeLabel: string): HTMLElement {
+  const close = h("button", "icon-btn h-11 w-11", icon(X));
+  close.setAttribute("aria-label", closeLabel);
+  close.onclick = closeMenu;
+  return h("div", "flex items-center gap-3 border-b border-neutral-200 px-3 pb-1 mb-1",
+    h("span", "min-w-0 flex-1 truncate text-sm font-medium text-neutral-500", title), close);
+}
+
 /** Float arbitrary content under an anchor, clamped to the viewport. Returns
- *  the floated panel, for a caller that must know when the pointer leaves it. */
-export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElement {
+ *  the floated panel, for a caller that must know when the pointer leaves it.
+ *  `title` heads the panel when it is a sheet, beside its close control. */
+export function openPanel(anchor: HTMLElement, content: HTMLElement, title?: string, closeLabel = `Close ${title}`): HTMLElement {
   closeMenu();
   // Replacing a menu is one surface changing content, not stacked exits.
   document.querySelectorAll(".popover[data-closing]").forEach((el) => el.remove());
@@ -145,6 +155,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElemen
     }`,
   );
   panel.dataset.presentation = sheet ? "sheet" : "popover";
+  if (sheet && title) panel.append(sheetHead(title, closeLabel));
   panel.append(content);
   // A modal <dialog> paints in the top layer, above anything in the document —
   // so a panel anchored inside one has to live in that dialog, not on body,
@@ -170,7 +181,8 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElemen
   trigger = anchor;
   trigger.setAttribute("aria-expanded", "true");
   panel.tabIndex = -1;
-  (panel.querySelector<HTMLElement>("button, input, select, [tabindex='0']") ?? panel).focus({ preventScroll: true });
+  // The content's first live control, not the head's close: a disabled one takes no focus.
+  (content.querySelector<HTMLElement>("button:not(:disabled), input, select, [tabindex='0']") ?? panel).focus({ preventScroll: true });
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);
   document.addEventListener("focusin", onOutside, true);
@@ -206,18 +218,11 @@ function menuItem(item: MenuItem): HTMLElement {
 /** A list of actions; call from a click handler with the trigger element. */
 export function openMenu(anchor: HTMLElement, items: MenuItem[], title?: string): void {
   const content = h("div", "");
-  if (title && isSheet()) {
-    const close = h("button", "icon-btn h-11 w-11", icon(X));
-    close.setAttribute("aria-label", "Close menu");
-    close.onclick = closeMenu;
-    content.append(h("div", "flex items-center gap-3 border-b border-neutral-200 px-3 pb-1 mb-1",
-      h("span", "min-w-0 flex-1 truncate text-sm font-medium text-neutral-500", title), close));
-  }
   for (const item of items) {
     if (item.separatorBefore) content.append(h("hr", "my-2 border-neutral-200"));
     content.append(menuItem(item));
   }
-  openPanel(anchor, content);
+  openPanel(anchor, content, title, "Close menu");
   if (panel) {
     panel.dataset.menu = "true";
     panel.setAttribute("aria-label", title ? `Actions for ${title}` : "Actions");

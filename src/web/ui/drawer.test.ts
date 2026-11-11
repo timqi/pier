@@ -113,7 +113,7 @@ it("leads with the most urgent row, cycles with the counter, and is absent with 
   expect(doc.querySelector("#status-item-state")!.className).not.toContain("text-amber-700");
   expect(next().classList.contains("hidden")).toBe(true);
   lead().onclick?.(); expect(panelRows()).toHaveLength(1);
-  expect(menu.openPanel).toHaveBeenLastCalledWith(lead(), expect.anything());
+  expect(menu.openPanel).toHaveBeenLastCalledWith(lead(), expect.anything(), "Status");
   lead().onclick?.(); expect(menu.closeMenu).toHaveBeenCalledOnce();
   drawer.openDrawer();
   open = { items: [], unlisted: [] }; drawer.renderDrawer();

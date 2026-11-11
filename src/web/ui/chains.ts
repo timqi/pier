@@ -224,7 +224,7 @@ export function openChains(): void {
   const root = h("div", "chain-list w-[min(20rem,calc(100vw-2rem))] max-sm:w-full font-sans");
   floated = root;
   fill(root);
-  openPanel(anchor, root).setAttribute("aria-label", "Chains");
+  openPanel(anchor, root, "Chains").setAttribute("aria-label", "Chains");
   root.querySelector<HTMLElement>("[aria-current]")?.focus({ preventScroll: true });
 }
 

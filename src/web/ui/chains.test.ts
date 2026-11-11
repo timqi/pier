@@ -70,6 +70,8 @@ it("lists the active chains in the server's order with their marks, the rail onc
   const rail = fake(document.querySelector("#chain-rail"));
   expect(rail.hasAttribute("data-on")).toBe(true);
   chains.openChains();
+  // Titled, so a phone's sheet is named and closable as the menus' are (menu.ts).
+  expect(menu.openPanel).toHaveBeenLastCalledWith(document.querySelector("#chat-title"), expect.anything(), "Chains");
   expect(names(floated())).toEqual(["main", "ops"]);
   expect(inRow("main", ".chain-open").getAttribute("aria-current")).toBe("page");
   expect(inRow("main", ".chain-open").textContent).toContain("2 waiting");
