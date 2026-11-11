@@ -47,7 +47,7 @@ head 另有 seed ~5–8K（消息，不在 system prompt）。review 不是角�
 | F5 | 冲突时谁赢没写明，靠「后者胜」的隐含约定（`SYSTEM.md` 在 baseline 后「所以它赢」）。今天角色在项目文件后面；顺序改正后项目与章程在角色后面，需要一句话守住角色里的硬规则 | B1 的一句 |
 | F6 | baseline 用 `#`，surface 用 `##`（因为它寄居在项目文件里），同一层的内容两种标题级别 | B1 顺带 |
 | F7 | worker 的 surface 自相矛盾：注释说它的回复由 agent 读，正文仍说「Your replies render in a chat UI」并教它群聊里保持沉默，~100 tokens | §瘦身 O1 |
-| F8 | 本仓库 `AGENTS.md` 的 Budgets 表 ~1.9K tokens，占文件一半、占 worker 提示词 30%，内容是「past N 的那些行是什么」——文件自己的规则说历史归 `git log`。每个在本仓库跑的 run 都付 | 不在本改动；另起一项，需用户点头（那是仓库的原则文件） |
+| F8 | 本仓库 `AGENTS.md` 的 Budgets 表 ~1.9K tokens，占文件一半、占 worker 提示词 30%，内容是「past N 的那些行是什么」——文件自己的规则说历史归 `git log`。每个在本仓库跑的 run 都付 | §瘦身 O2 |
 | F9 | head 的 baseline 带 ~150 tokens 用不上的编辑规则（它只改 memory 文件） | 不做：再多一种 baseline 变体不值 |
 | F10 | `MODEL_TABLE` 在 `DISPATCHER` 和 `lead(build)` 各一份 | 合理：两个会话从不同时加载 |
 
@@ -209,12 +209,10 @@ chain 常开：列表、`/chain`、侧栏永远在；一条 chain 的实例就�
 | 升级那一次 | 每个开着的会话重发 `preamble` + `project_context` 一次 |
 | seed | 只有一条活跃 chain 时不列 `## Chains`；其余不变 |
 
-## 瘦身（用户已定：做，但不进本 build）
+## 瘦身（已实现，branch `prompt-slim`，和 build 分开）
 
-定稿后由主会话单独开一个 run（模型 fable）直接做，和 build 分开：
-
-- **O1** worker 的 surface 只留语言行和实例事实，去掉「chat UI」「Staying silent」两段（F7，−~100 tokens/worker）。动之前要确认 worker 的 `<silent>` 没有代码路径依赖。它和 B1 都改 `agent/roles.ts` 的 surface，后落地的一方 rebase。
-- **O2** 本仓库 `AGENTS.md` 的 Budgets 表瘦身（F8，−~1.5K tokens/run）。
+- **O1** worker 的 surface 只留语言行（标题 `# Reply language`）和实例事实，去掉「chat UI」「Staying silent」两段（F7，289 → 194 tokens）。`<silent>` 的三处解析（`tasks/agent.ts` 的 run 结果、`web/server.ts` 的未读、`web/push.ts`）对任何会话都照常，没有一处要求 worker 发它，Pier 发给 worker 的消息也没有一条要它。其余角色的 surface 逐字节不变。
+- **O2** 本仓库 `AGENTS.md` 的 Budgets 表每行只留「这个区域是什么」，ceiling 不变；「past N 的那些行」归抬 ceiling 的那次 commit（rule 5 加了这一句）。文件 ~4.1K → ~2.5K tokens。
 
 ## 不做
 
