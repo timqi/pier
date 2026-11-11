@@ -62,10 +62,12 @@ updates this document.
 - **Menus**: labels align without a reserved selection column; only selectable
   options reserve checkmarks; restrained separators; secondary hints truncate,
   a keyboard shortcut's hidden and a row 44px on a coarse pointer;
-  focus leaving a nonmodal menu dismisses it. Every phone sheet — a menu's,
-  the chain list's, the status panel's — is headed by its title (a menu's names
-  the target session) beside a 44px close control, opens with the focus on its
-  content's first enabled control, and has a backdrop that dismisses without activating controls beneath.
+  focus leaving a nonmodal menu dismisses it. Every phone sheet opens with the
+  focus on its content's first enabled control and has a backdrop that dismisses
+  without activating controls beneath. The bar menu's, a chain's, the chain
+  list's and the status panel's are headed by their title (a menu's names the
+  target session or chain) beside a 44px close control; the rest — a picker's, the version panel's, a
+  message's hold menu — have no head.
 - **Session info**: solid reading surface; grouped label/value fields; explicit
   navigation; monospace for identifiers only; copy controls reachable on touch.
   0.9375rem body at 1.5, 1.125rem titles, 0.8125rem supporting text; 26rem
