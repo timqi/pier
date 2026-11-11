@@ -680,10 +680,18 @@ fn set_badge(app: AppHandle, shell: State<'_, Shell>, webview: Webview, count: u
     surfaced(&app, known)
 }
 
-/// Titled `<dot> <instance>`, the session as macOS's subtitle: a session's own title says
-/// neither which instance spoke nor, in a chain's head, anything that lasts.
+/// Titled by the payload's `<host> · <chain>` headline, the item as macOS's subtitle; a Pier
+/// that sends no headline is titled `<dot> <instance>`, its session's title the subtitle.
 #[tauri::command]
-fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: String, tag: String) -> Res {
+fn notify(
+    app: AppHandle,
+    webview: Webview,
+    headline: Option<String>,
+    title: String,
+    body: String,
+    url: String,
+    tag: String,
+) -> Res {
     if !url.starts_with("/app/") {
         return surfaced(&app, Err(format!("not a workbench path: {url}")));
     }
@@ -692,8 +700,19 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     let shell = app.state::<Shell>();
     let mut live = shell.lock();
     let accent = accent_of(live.accent.get(webview.label()).map(String::as_str));
-    let name = live.instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
-    let (headline, subtitle) = name.map_or((title.clone(), None), |name| (format!("{} {name}", accent.1), Some(title)));
+    #[cfg(not(target_os = "macos"))]
+    let headed = headline.is_some();
+    let (headline, subtitle) = match headline {
+        // A reply about no item is titled by its chain, which the headline already ends on.
+        Some(headline) => {
+            let subtitle = (!headline.ends_with(&format!(" · {title}"))).then_some(title);
+            (headline, subtitle)
+        }
+        None => {
+            let name = live.instances.iter().find(|i| i.id == webview.label()).map(|i| i.name.clone());
+            name.map_or((title.clone(), None), |name| (format!("{} {name}", accent.1), Some(title)))
+        }
+    };
     let mut hasher = DefaultHasher::new();
     (webview.label(), &tag).hash(&mut hasher);
     let id = hasher.finish() as i32;
@@ -738,14 +757,21 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, url: St
     };
     #[cfg(not(target_os = "macos"))]
     let shown = {
-        drop(subtitle); // freedesktop has no subtitle line; the body carries the topic
+        // freedesktop has no subtitle line: the item leads the body, as in sw.js.
+        let body = match subtitle.filter(|_| headed) {
+            Some(subtitle) => format!("{subtitle}\n{body}"),
+            None => body,
+        };
         let notifications = app.notification();
         let shown = notifications
             .remove_active(vec![id])
             .and_then(|()| {
                 let builder = notifications.builder().id(id);
                 let builder = if ring { builder.sound(SOUND) } else { builder };
-                let builder = icon.map_or(builder, |icon| builder.icon(icon.to_string_lossy()));
+                let builder = match icon {
+                    Some(icon) => builder.icon(icon.to_string_lossy()),
+                    None => builder,
+                };
                 builder.title(headline).body(body).extra("instance", webview.label()).extra("url", url).show()
             })
             .map_err(|e| format!("notification: {e}"));
