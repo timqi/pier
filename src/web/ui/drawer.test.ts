@@ -169,7 +169,7 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
   expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
-  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review");
+  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nOpens its session");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
@@ -237,7 +237,7 @@ it("says where a design's wait is answered: the phrase when nothing else is, the
   const phrase = (key: string) => item(key).querySelector(".open-item-phrase")!.textContent;
   expect(phrase("item:rail")).toBe("two layouts");
   expect(phrase("item:bare")).toBe("in the design session");
-  expect(item("item:rail").querySelector(".session-open")!.title).toBe("r\nwaiting on you · in the design session · 2h · two layouts");
+  expect(item("item:rail").querySelector(".session-open")!.title).toBe("r\nwaiting on you · in the design session · 2h · two layouts\nOpens its session");
 });
 
 it("forwards design and waiting entrances without inferring a current session from a shared run", () => {
@@ -260,6 +260,28 @@ it("marks a row current where its click lands: the newest run's session, never a
   drawer.renderDrawer(); drawer.openDrawer();
   expect(item("item:work").querySelector(".session-open")!.getAttribute("aria-current")).toBe("page");
   expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
+});
+
+// A row whose click leaves the conversation for a session says so: ↗ beside the title, the label and tooltip in words.
+it("marks a row whose click opens a session, never one answered in the chat, run-less or already shown", () => {
+  current = "s-here";
+  open = { items: [
+    { problem: "work", stage: "", status: "running", runs: [run("w")] },
+    { problem: "ask", stage: "waiting on you: which?", status: "waiting on you", runs: [run("a", { state: "succeeded" })] },
+    { problem: "bare", stage: "", status: "wrapping up", runs: [] },
+    { problem: "here", stage: "", status: "running", runs: [run("h", { targetSessionId: "s-here" })] },
+  ], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const away = (key: string) => !item(key).querySelector(".open-item-away")!.classList.contains("hidden");
+  expect(["item:work", "item:ask", "item:bare", "item:here", "session:solo"].map(away)).toEqual([true, false, false, false, true]);
+  expect(item("item:work").querySelector(".open-item-away")!.getAttribute("aria-hidden")).toBe("true");
+  const main = item("item:work").querySelector(".session-open")!;
+  expect(main.getAttribute("aria-label")).toBe("work · in progress · opens its session");
+  expect(main.title).toBe("w\nOpens its session");
+  expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-label")).toBe("ask · waiting on you");
+  main.onclick?.();
+  expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "work" }), undefined);
 });
 
 it("opens the panel from the lead and ⌘⇧P, closing on a second press", () => {

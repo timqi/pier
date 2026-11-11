@@ -79,7 +79,7 @@ it("replays fixed status rows as one control each, titled by the problem, the ru
   expect(card().querySelector(".open-item-meta")!.textContent).toBe("elapsed 2m");
   expect(card().querySelector(".open-item")!.querySelectorAll("button").length).toBe(1);
   expect(card().querySelector(".open-item-title")!.textContent).toBe("original problem");
-  expect(card().querySelector(".session-open")!.title).toBe("Stable title");
+  expect(card().querySelector(".session-open")!.title).toBe("Stable title\nOpens its session");
   expect(isOpenItemsSnapshot({ version: 1, items: [{ ...p, runName: 7 }] })).toBe(false);
   card().querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(p);
