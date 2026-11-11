@@ -327,7 +327,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       badges: [badge("every chat", "bg-indigo-50 text-indigo-700 ring-indigo-200")],
       summary: () => launchSummary(NOTHING_SET, parent),
     }, () => [
-      h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. A chat left on Default launches in the workspace directory with the Settings default model and reasoning, read at every launch. DMs are always bound-users-only."),
+      h("p", "text-[12px] leading-normal text-neutral-500", "The two switches are copied into a group the first time the bot sees it and never touch one that exists. A chat left on Default launches in the workspace directory with the Settings default model and reasoning, read at every launch. The home chat's main conversation keeps the previous head's choice when it starts a new head; the Settings default is only its first head's. DMs are always bound-users-only."),
       h(
         "div",
         "flex flex-wrap items-center gap-x-6 gap-y-2",

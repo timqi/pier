@@ -14,7 +14,7 @@ delivery.
 
 | Role | Session | Delegates |
 | --- | --- | --- |
-| head | the newest session, the instance default model (the operator sets it to the `balanced` pin) at `low` | leads and workers |
+| head | the newest session; a chain's first head and a lost head's replacement on the instance default model (the operator sets it to the `balanced` pin) at `low`, every later one on the previous head's | leads and workers |
 | lead | a `--role lead` run's, cwd the feature's worktree, long-lived | workers only |
 | worker | any other run's launched from a session | never |
 

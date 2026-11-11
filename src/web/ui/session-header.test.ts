@@ -456,3 +456,20 @@ it("shows the reasoning level the model switch came back with", async () => {
   level();
   await vi.waitFor(() => expect(chips().map((c) => c.textContent)).toEqual([other.id, "high"]));
 });
+
+it("keeps the level picked in the selector when a read that left before it redraws the picker", async () => {
+  chip().onclick!();
+  await vi.waitFor(() => expect(picker.modelPicker).toHaveBeenCalledTimes(1));
+  const other: ModelRef = { provider: "test", id: "other" };
+  const answers: (() => void)[] = [];
+  vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
+    new Promise((resolve) => {
+      answers.push(() => resolve((url.endsWith("/models") ? [model, other] : { level: "high", levels }) as never));
+    }));
+  vi.mocked(api.sendJson).mockResolvedValue({ ok: true, json: async () => ({ level: "low" }) } as Response);
+  chip().onclick!();
+  vi.mocked(picker.modelPicker).mock.lastCall![0].onThinkingPick("low");
+  for (const answer of answers) answer();
+  await vi.waitFor(() => expect(picker.modelPicker).toHaveBeenCalledTimes(3));
+  expect(vi.mocked(picker.modelPicker).mock.lastCall![0]).toMatchObject({ models: [model, other], thinkingLevel: "low" });
+});

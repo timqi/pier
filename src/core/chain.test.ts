@@ -287,9 +287,12 @@ describe("the continuous conversation's chain", () => {
     r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: strong, models: [strong, fast], thinkingLevel: "low" });
     await r.sessions.get("h1")!.setModel(fast);
     r.sessions.get("h1")!.setThinkingLevel("high");
-    r.defaults.value = { defaultModel: strong, defaultThinkingLevel: "medium" };
+    // Both known from the previous head: Settings are not read, so an unreadable one warns nothing.
+    const read = vi.fn((): AgentDefaults => { throw new Error("settings.json is not JSON"); });
+    r.defaults.value = read;
     expect(await r.say("new day")).toMatchObject({ sessionId: "m1", rotated: "idle" });
     expect(r.created).toEqual([{ cwd: r.home, model: fast, thinking: "high" }]);
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("stamps the seed with the language the previous head's user wrote in", async () => {

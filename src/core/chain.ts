@@ -449,9 +449,10 @@ export class MainChain {
     });
     // The user's pick on the previous head (web or IM) outlives it; Settings only start a chain
     // or replace a lost head, then Pi's model at low effort.
-    const defaults = await this.deps.defaults().catch((err: unknown) => {
-      log.warn("the Settings defaults could not be read — the next main session starts on Pi's model", err);
-      return { defaultModel: null, defaultThinkingLevel: null };
+    const none = { defaultModel: null, defaultThinkingLevel: null };
+    const defaults = open?.model && open.thinkingLevel ? none : await this.deps.defaults().catch((err: unknown) => {
+      log.warn("the Settings defaults could not be read — the next main session starts on Pi's model at low effort", err);
+      return none;
     });
     const model = open?.model ?? defaults.defaultModel;
     mkdirSync(this.deps.home, { recursive: true });

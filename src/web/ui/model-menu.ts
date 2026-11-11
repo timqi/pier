@@ -326,7 +326,8 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     card(
       "New sessions",
       "The model and reasoning effort a session starts on when nothing names one — a channel, chat or task with " +
-        "its own launch choice overrides it. Pi default leaves the pick to Pi. Stored in settings.json; applies to sessions opened from now on.",
+        "its own launch choice overrides it. Pi default leaves the pick to Pi. Stored in settings.json; applies to sessions opened from now on. " +
+        "The main conversation uses it for a chain's first head only; each later head keeps the previous one's choice.",
       defaultFields,
     ),
     card(

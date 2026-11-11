@@ -328,13 +328,15 @@ async function pickModel(anchor: HTMLElement, id: string, fromMenu = false): Pro
   // A reconcile that changes nothing must not redraw: it would drop the search
   // the user typed and collapse the group they just opened.
   let drawn = "";
-  const draw = (models: ModelRef[], level: ThinkingLevel, levels: ThinkingLevel[]): void => {
+  // The selector's level is the user's choice for the model they pick next, re-applied after
+  // the switch: Pi clamps the level to the old model's, which may have lacked it. A read that
+  // left before the pick landed must not redraw it away.
+  let picked: ThinkingLevel | null = null;
+  const draw = (models: ModelRef[], read: ThinkingLevel, levels: ThinkingLevel[]): void => {
+    const level = picked ?? read;
     const state = JSON.stringify([models, level, levels]);
     if (state === drawn) return;
     drawn = state;
-    // The selector's level is the user's choice for the model they pick next, re-applied after
-    // the switch: Pi clamps the level to the old model's, which may have lacked it.
-    let picked = level;
     const picker = modelPicker({
       models,
       current: id === deps.currentId() ? currentModel : null,
@@ -342,7 +344,7 @@ async function pickModel(anchor: HTMLElement, id: string, fromMenu = false): Pro
       thinkingLevels: levels,
       onPick: (m, thinking) => {
         closeMenu();
-        void applyModel(id, m, thinking ?? picked);
+        void applyModel(id, m, thinking ?? picked ?? level);
       },
       onThinkingPick: (l) => {
         picked = l;
