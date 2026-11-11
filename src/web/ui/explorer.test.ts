@@ -143,3 +143,48 @@ describe("a Markdown file in Files", () => {
     expect(dialog.querySelectorAll(".bg-red-50").map((el) => el.textContent)).toEqual([expect.stringContaining("# Old")]);
   });
 });
+
+describe("Pier's home in Files", () => {
+  const ls: Record<string, { name: string; dir: boolean }[]> = {
+    "": [{ name: "chains", dir: true }, { name: "memory", dir: true }],
+    chains: [{ name: "61f51e91", dir: true }, { name: "main", dir: true }, { name: "gone", dir: true }],
+    memory: ["2026-09-30.md", "2026-10-02.md", "2026-10-01.md"].map((name) => ({ name, dir: false })),
+  };
+  const settled = async () => { for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 0)); };
+  let doc: FakeDocument;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    doc = installPage();
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/chains") return Response.json({ chains: [{ id: "61f51e91", name: "security" }, { id: "main", name: "Main" }] });
+      if (url.startsWith("/api/explorer/git")) return Response.json({ branch: null, refs: [], commits: [], worktrees: [] });
+      return Response.json({ entries: ls[new URLSearchParams(url.slice(url.indexOf("?") + 1)).get("path") ?? ""] ?? [] });
+    }));
+    const explorer = await import("./explorer.js");
+    explorer.openFiles({ id: "s", cwd: "/home" }, "/home", "chains/61f51e91");
+    await settled();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const rows = (dir: string): string[] => {
+    const dialog = doc.querySelector("#files-dialog")!;
+    const folder = dialog.querySelectorAll("summary").find((s) => s.textContent === dir)!.parentNode!;
+    return folder.children[1]!.children.map((row) => (row.localName === "details" ? row.children[0]! : row).textContent);
+  };
+
+  it("names a chain's folder by the chain, its id beside it, an unknown one by its id", () => {
+    expect(rows("chains")).toEqual(["gone", "Main" + "main", "security" + "61f51e91"]);
+  });
+
+  it("lists a memory folder's days newest first", async () => {
+    const dialog = doc.querySelector("#files-dialog")!;
+    const memory = dialog.querySelectorAll("summary").find((s) => s.textContent === "memory")!.parentNode as unknown as HTMLDetailsElement;
+    memory.open = true;
+    memory.ontoggle!(null as never);
+    await settled();
+    expect(rows("memory")).toEqual(["2026-10-02.md", "2026-10-01.md", "2026-09-30.md"]);
+  });
+});

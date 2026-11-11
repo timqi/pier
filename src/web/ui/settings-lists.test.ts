@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
 import { createTasksPane } from "./tasks.js";
 
+// The sanitizer wants a real DOM; the markdown it is handed is this file's own.
+vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
+
 let root: FakeElement;
 let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 let answers: Record<string, () => Response>;
@@ -56,6 +59,15 @@ describe("Settings → Tasks", () => {
     expect(text()).toContain("0 9 * * * (UTC)");
     expect(text()).toContain("failed");
     expect(checkbox().checked).toBe(true);
+  });
+
+  it("says the last run's age is an age, and shows a command as code, not backticks", async () => {
+    vi.useFakeTimers({ now: 1e12 + 10 * 3_600_000, toFake: ["Date"] });
+    await mount(createTasksPane());
+    vi.useRealTimers();
+    expect(text()).toContain("10h ago");
+    expect(text()).not.toContain("`");
+    expect(walk(root).filter((el) => el.localName === "code").map((el) => el.textContent)).toEqual(["pier task"]);
   });
 
   it("pauses through the API and redraws from the answer", async () => {

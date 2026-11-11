@@ -117,7 +117,9 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       content.replaceChildren(empty("No providers configured."));
       return;
     }
-    content.replaceChildren(...configured.map((provider) => {
+    // One set of column tracks for every row (each row a subgrid), so the
+    // status column starts at the same x whatever a row's name or actions.
+    content.replaceChildren(h("div", "grid grid-cols-[minmax(8rem,1fr)_auto_auto] gap-x-3 max-sm:grid-cols-[minmax(0,1fr)_auto]", ...configured.map((provider) => {
       const identity = h(
         "div", "min-w-0 flex-1",
         h("div", "truncate text-[13px] font-medium text-neutral-700", provider.name),
@@ -137,8 +139,8 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       // Its own line under the row: the two halves of an exchange are not
       // something that fits in a column.
       const status = h("span", "text-[11.5px]", "");
-      const line = h("div", "hidden flex-col gap-2 px-4 pb-3", status);
-      const actions = h("div", "flex flex-wrap justify-end gap-1.5");
+      const line = h("div", "col-span-full hidden flex-col gap-2 px-4 pb-3", status);
+      const actions = h("div", "flex flex-wrap justify-end gap-1.5 max-sm:col-span-full");
       // Which model to probe is the operator's call and nothing else's: an
       // answer about a model Pier picked is an answer about a different question.
       const ids = testable(provider);
@@ -151,7 +153,10 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
           [["Model to test…", ""], ...ids.map((id): [string, string] => [id, id])],
           "",
         );
-        models.classList.add("max-w-52", "text-[12px]");
+        // A fixed width, not w-full: the column is sized from this width, so
+        // where it has room the actions stay one line and a row one control tall.
+        models.classList.replace("w-full", "w-36");
+        models.classList.add("text-[12px]");
         const test = button("Test");
         test.disabled = true;
         models.onchange = () => (test.disabled = !models.value);
@@ -189,15 +194,11 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       }
       return h(
         "div",
-        "border-b border-neutral-100",
-        h(
-          "div",
-          "grid grid-cols-[minmax(8rem,1fr)_minmax(8rem,auto)_minmax(9rem,auto)] items-center gap-3 px-4 py-2.5 max-sm:grid-cols-[1fr_auto]",
-          identity, state, actions,
-        ),
+        "col-span-full grid grid-cols-subgrid border-b border-neutral-100",
+        h("div", "col-span-full grid grid-cols-subgrid items-center gap-y-3 px-4 py-2.5", identity, state, actions),
         line,
       );
-    }));
+    })));
   };
 
   await load();

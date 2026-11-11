@@ -572,7 +572,7 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   no reveal, filing an existing name replaces it. `?name=X` opens with the
   name filled and the value field focused: the link an agent's `no secret
   named X` error carries. Tasks (`#/settings/tasks`): one row per task —
-  name, last run's state and age, trigger and next run — with the pause switch
+  name, last run's state and `<age> ago`, trigger and next run — with the pause switch
   (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
   time, source, duration) whose log (error, result, probe, a link to the run's
   session) unfolds in place; defining a task stays `pier task`'s. Agent: two panels (what a session is
@@ -598,7 +598,10 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   session): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to
   `MAX_AUTO_EXPAND` folders); elsewhere only the root's own folders unfold —
-  one level down may be `node_modules`. A selected path opens with its
+  one level down may be `node_modules`. A folder under `chains/` shows its
+  chain's name with the id beside it (`GET /api/chains`, read once per open);
+  a `memory` folder lists its files newest first. The dialog's own surface
+  draws no focus ring when opening focuses it; its controls keep theirs. A selected path opens with its
   ancestors unfolded, its row marked and the diff filter off. Without a
   repository (`GET /api/explorer/git` answers `branch: null`) the branch chip,
   the whole compare band, the changed-only funnel and the diff stepper are
