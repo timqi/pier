@@ -75,9 +75,12 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
   // An ended root's time is no news while its goal's review runs elsewhere: the goal's own elapsed time stands for it.
   const reviewing = (r: Run): boolean => r.goal?.outcome === null && r.state !== "running" && r.state !== "queued";
   const metadata = runs.length > 1 ? [`${runs.length} runs`, ...(reviewing(runs[0]!) || waited ? [] : [time(runs[0]!, now)])] : [];
+  // A lone run started with its item reads the item's `open` age twice: the age stands for both.
+  const twin = (r: Run): boolean => i.openedAt !== undefined && (r.state === "queued" || r.state === "running")
+    && (Math.abs(r.queuedAt - i.openedAt) < 60_000 || since(r.queuedAt, now) === since(i.openedAt, now));
   for (const r of i.runs) {
     const goal = r.goal ? goalText(r.goal) : "";
-    if (i.runs.length === 1 && !reviewing(r) && !waited) metadata.push(time(r, now));
+    if (i.runs.length === 1 && !reviewing(r) && !waited && !twin(r)) metadata.push(time(r, now));
     const moved = !!asked && !!r.goal && goalAsk(r.goal) === asked;
     if (goal && goal !== "waiting on you" && !moved && !metadata.includes(goal)) metadata.push(goal);
     if (r === runs[0] && reviewing(r) && !waited) metadata.push(`elapsed ${since(r.goal!.createdAt, now)}`);
