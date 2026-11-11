@@ -233,6 +233,8 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
 - Channel tokens are vault rows too (`SLACK_TOKEN`, `SLACK_APP_TOKEN`,
   `LARK_APP_ID`, `LARK_APP_SECRET`): removing one there empties that channel's credential.
+- Voice input in the web composer reads `DASHSCOPE_API_KEY` as an `auto` row;
+  without it the mic is not shown.
 
 ## Remote access
 

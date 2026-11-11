@@ -37,10 +37,10 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `GET /api/voice` | *(voice input, `web/voice.ts`)* `{available}`: a recognition provider is configured and its key readable |
 | `POST /api/voice` | body `{language?}` → open a take, connect upstream, `{id}` (random); 503 `{error}` without a provider. One take per browser session: a new one closes the old |
-| `GET /api/voice/:id/events` | SSE, `data:` JSON: `{type:"ready"}` upstream ready (audio before it is buffered, 128 frames at most, then `error`); `{type:"partial", text}` the current sentence, replacing the last partial; `{type:"final", text}` a settled sentence, appended; `{type:"error", message}` or `{type:"done"}` (after `finish`), then the stream ends. Disconnecting cancels the take |
-| `POST /api/voice/:id/audio` | body raw PCM16LE, 16 kHz, mono, ≤ 256 KB (413 over); 202. Sent serially, so no sequence numbers |
-| `POST /api/voice/:id/finish` | no more audio; `done` follows once upstream has finished |
-| `DELETE /api/voice/:id` | cancel: close upstream, discard. A take lasts 5 minutes at most, closes with `error` after 15 s with neither audio nor `finish`, and is 404 to any other browser session |
+| `GET /api/voice/:id/events` | SSE, `data:` JSON: `{type:"ready"}` upstream ready (audio before it is buffered, 128 frames at most, then `error`); `{type:"partial", text}` the current sentence, replacing the last partial; `{type:"final", text}` a settled sentence, appended, with no separator of its own; `{type:"error", message}` or `{type:"done"}` (after `finish`), then the stream ends and the take is 404. Disconnecting cancels the take; 409 for a second stream. An `error` before the stream attached waits 15 s for it |
+| `POST /api/voice/:id/audio` | body raw PCM16LE, 16 kHz, mono, ≤ 256 KB (413 over); 202; 409 once the take has ended or is finishing. Sent serially, so no sequence numbers |
+| `POST /api/voice/:id/finish` | no more audio; 202, `done` follows once upstream has finished; 409 once the take has ended |
+| `DELETE /api/voice/:id` | cancel: close upstream, discard; 204. A take lasts 5 minutes at most, closes with `error` after 15 s with neither audio nor `finish`, and is 404 to any other browser session |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
@@ -444,18 +444,25 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   averaged to mono, 16 kHz PCM16, a 250 ms frame), `POST /api/voice`, the
   take's event stream; audio goes up one POST at a time, frames that queue
   meanwhile as one body (≤ 32 frames). The next click stops it: the last
-  frame, then `finish`; `done` ends it. The microphone and audio context are
-  released on every exit; text is never sent by itself.
+  frame, then `finish`; `done` ends it. A 404 or 409 for `audio` or `finish`
+  is the take over on the server: uploads stop and the stream's `error` is
+  the reason, the refusal itself only when none arrives within 2 s. The
+  microphone and audio context are released on every exit; text is never
+  sent by itself. The copied resampler's MIT notice is
+  `/app/voice.LICENSE-avibe`.
 - **Voice text in the draft**: the take holds a span from the caret where it
   started — its final sentences, then the partial. `partial` replaces the
   partial, `final` settles it. An edit wholly before the span moves it, one
   after leaves it, one touching it gives its text to the user and a new empty
-  span starts at the caret. Each write keeps the user's caret and saves the
-  draft. `done` releases the span. Cancel (×, Esc), a session switch and
-  `pagehide` remove what the span holds and `DELETE` the take; Send ends the
-  take and sends the draft as it stands, later text dropped. `error` and a
-  refused or missing microphone keep the final sentences, drop the partial and
-  post an error row `voice input: <reason>`.
+  span starts at the caret. Text of a spaced script (not CJK) set after a
+  word or its punctuation gets the space a bare sentence lacks. Each write saves the draft and keeps
+  the user's caret, one at the take's end moving with it; writes wait while
+  an IME composes and land at its commit. `done` releases the span. Cancel
+  (×, Esc), leaving the session and `pagehide` remove what the span holds and
+  `DELETE` the take; Send ends the take and sends the draft as it stands,
+  later text dropped. `error` and a refused or missing microphone keep the
+  final sentences, drop the partial and post an error row
+  `voice input: <reason>`.
 - **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (each line from `CHAT_COMMANDS`; the
