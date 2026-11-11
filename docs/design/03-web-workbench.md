@@ -307,7 +307,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   message stay plain text. The steps log: thinking,
   progress, tool rows; a tool row previews its arguments as a lone key's
   value or `key=value` pairs (non-objects as JSON) and reveals args/output, thinking rows
-  tail-capped text; an opened log scrolls independently and follows its
+  tail-capped text, the label its last line's last 90 characters started on a word (CJK on a character); an opened log scrolls independently and follows its
   tail; simple replies leave no empty log; interrupted work stays visible. A
   replayed settled log is drawn on its first open, and one whose detail is
   still on the server (`data-lazy`) fetches it then, once. A compaction (Pi's automatic one) leaves one

@@ -313,7 +313,15 @@ function drawThinking(row = think): void {
   // Markdown emphasis and heading marks on the label line read as noise.
   const line = (row.text.split("\n").filter(Boolean).pop() ?? "").replace(/^[\s*_#]+|[\s*_]+$/g, "") || "thinking…";
   const label = row.summary.lastElementChild as HTMLElement;
-  label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
+  label.textContent = line.length > 90 ? "…" + wordTail(line, 90) : line;
+}
+
+/** A cut inside a word moves on to the next word; CJK, written without spaces, is cut by character. */
+function wordTail(line: string, max: number): string {
+  const tail = line.slice(-max);
+  const space = tail.search(/\s/);
+  const midWord = /^(?:(?![\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}])[\p{L}\p{N}'’_-]){2}$/u.test(line.slice(-max - 1, -max + 1));
+  return (midWord && space >= 0 && space < max / 2 ? tail.slice(space) : tail).trimStart();
 }
 
 /** Leading-edge then coalesced, the same shape chat.ts paints text with. */

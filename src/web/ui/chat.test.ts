@@ -1707,6 +1707,22 @@ describe("the turn's bubble", () => {
     expect(log().children).toHaveLength(4);
   });
 
+  // The label is a long line's tail: it starts on a word, except in CJK, which has no spaces to start on.
+  it("starts a thinking label's tail at a word, and CJK at a character", () => {
+    const label = (text: string): string | null => {
+      chat.resetChat();
+      chat.appendTurn("user", "go", false, 1);
+      activity.activityThinking(1, text);
+      chat.completeTurn("Done.", { completedAt: 2, durationMs: 1, tokens: 1 });
+      return details()[0]!.children[0]!.querySelector("summary")!.lastElementChild!.textContent;
+    };
+    const english = "I could ask the user, but the answer is in the repo; the other one is further. So I'll rely on the docs I already have open here, and the plan they laid out for me.";
+    expect(english.slice(-90)).toMatch(/^her\. So /); // the cut the review saw, mid-word
+    expect(label(english)).toBe("…" + english.slice(english.indexOf("So I'll")));
+    const cjk = "先读仓库里的设计文档".repeat(10);
+    expect(label(cjk)).toBe("…" + cjk.slice(-90));
+  });
+
   it("opens each chip on its own click only; a replayed log fetches its detail on the first", async () => {
     const fetch = vi.fn(async () => Response.json({ steps: [{ kind: "tool", id: "c1", toolName: "bash", args: { cmd: "ls" }, done: true }] }));
     vi.stubGlobal("fetch", fetch);
