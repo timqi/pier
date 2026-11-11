@@ -20,12 +20,14 @@ fable UI 审查 28 条（`/tmp/pier-ui-review/REPORT.md`，截图同目录，行
 
 | # | 条目 | 定下的行为 | 状态 |
 | --- | --- | --- | --- |
-| 1 | chip/话题标签/折叠行热区写反 | `inset-block: calc((100% - 2.75rem) / 2)`，粗指针下热区 ≥44px | wip `ui-fix-header` |
-| 2 | 手机顶栏 `#chat-title`、`#chat-menu` 不到 44px | 进粗指针 44px 名单；composer 的 `+` 和发送键补到 44px | wip `ui-fix-header` |
+| 1 | chip/话题标签/折叠行热区写反 | `inset-block: calc((100% - 2.75rem) / 2)`，粗指针下热区 ≥44px；折行的 chip 行里相邻热区平分间距（28–36px），等 #9 单行滚动后补齐 | done `4c6b4ab` |
+| 2 | 手机顶栏 `#chat-title`、`#chat-menu` 不到 44px | 进粗指针 44px 名单；composer 的 `+` 和发送键补到 44px | done `c56e7e5` |
 | 3 | 同一事项两个名字 | 需用户取舍，见「待用户取舍」 | ask |
-| 4 | 运行中的 worker 会话页面空 | 子会话唯一的气泡仍在运行时步骤 chip 默认展开，日志高度跟随面板；同步 06 | wip `ui-fix-activity` |
-| 5 | 工具行预览是 JSON 外壳 | 单键参数显示值，多键 `key=value` | wip `ui-fix-activity` |
-| 6 | 顶栏状态 lead 像当前会话的状态 | 侧栏停靠时 lead 收成「图标 + 数量」；事项视图里 lead 与标题之间有明确分隔 | wip `ui-fix-header` |
+| 4 | 运行中的 worker 会话页面空 | 子会话唯一的气泡仍在运行时步骤 chip 默认展开，日志高度跟随面板；手动收起在该会话内记住（内存，F5 后重开）；同步 06 | done `09ecf96` |
+| 5 | 工具行预览是 JSON 外壳 | 单键参数显示值，多键 `key=value`（值截 48 字符） | done `8b36394` |
+| 6 | 顶栏状态 lead 像当前会话的状态 | 侧栏停靠时 lead 收成「图标 + 数量」；lead 与标题之间一条细线，所有宽度和视图都有 | done `52159d2` |
+
+M1 合入于 `d8df074`，check/lint/test 全绿（2301）。浏览器数字是各 worker 在自己分支上用注入的 DOM 量的（测试实例没有模型权限）；合并后的分支只跑了测试，未在浏览器复测，留给 M2 的 worker 顺带复测和最终 review。
 
 ### M2 — P2
 
