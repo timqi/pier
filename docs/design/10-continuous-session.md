@@ -113,8 +113,16 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   - chain, `chains/<id>/MEMORY.md` and `chains/<id>/memory/`: that chain's
     decisions and why, backlog, external facts in use; only its own heads
     seed it, the others reach it by `rg` or `pier search`.
-  An optional `AGENTS.md` is Pi's, loaded as the cwd's own; every head's cwd
-  is `home`, so the system prompt is the same bytes in every chain.
+  The user's instructions are layered the same way, beside the memory: an
+  optional global `AGENTS.md`, Pi's, loaded as the cwd's own (every head's cwd
+  is `home`), and a chain's charter `chains/<id>/AGENTS.md`, loaded after it
+  by that chain's heads only (`AgentLaunchOptions.contextFiles`, from
+  `MainChain.rotate` and on a resume from the factory's `roleOf`), so two
+  chains' head prompts differ by their charters alone. A charter applies from
+  the chain's next head, and sooner on a head Pier reopens (`factory.resume`
+  after a restart, `pier reload` or the router's idle eviction), which reads
+  it again; the web's Charter dialog writes it (4000 chars at most) or the
+  head edits it when asked; the runs it launches never load it.
 - A head reply's `<note>line</note>` is stripped like the open-item markers
   and appended as `- line` to today's `chains/<id>/memory/YYYY-MM-DD.md` of its
   chain, `<note global>line</note>` to today's `memory/YYYY-MM-DD.md`, on its

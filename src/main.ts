@@ -124,7 +124,8 @@ const factory = new PiAgentFactory(
   // Transcripts carry the speaker header core wrote for the model, and replies
   // the chat markup core strips before anyone sees them.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text, saidText),
-  (id) => ({ role: taskStore.roleOf(id), phase: taskStore.leadPhaseOf(id) }),
+  // `chain` is built after the factory; a session is only resumed once both are.
+  (id) => ({ role: taskStore.roleOf(id), phase: taskStore.leadPhaseOf(id), contextFiles: chain.contextFiles(id) }),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

@@ -310,6 +310,10 @@ export const LEDGER_WINDOW_MS = 24 * 60 * 60_000;
  *  rotation's one cache write pays back. */
 export const CHAIN_FULL_TOKENS = 60_000;
 
+/** The most a chain's charter saved from the web may hold; one the head or a
+ *  hand edit made longer is still read whole. */
+export const CHARTER_MAX_CHARS = 4_000;
+
 /** One session of the continuous conversation, as `GET /api/continuous` lists it. */
 export interface ChainMember {
   sessionId: string;

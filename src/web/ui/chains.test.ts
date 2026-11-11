@@ -25,6 +25,8 @@ const api = vi.hoisted(() => ({ sendJson: vi.fn<(url: string, body: unknown, met
 vi.mock("./api.js", async (actual) => ({ ...(await actual<typeof import("./api.js")>()), sendJson: api.sendJson }));
 const chords = vi.hoisted(() => new Map<string, () => void>());
 vi.mock("./shortcut.js", () => ({ chord: (key: string, run: () => void) => chords.set(key, run), modalOpen: () => false }));
+const charter = vi.hoisted(() => ({ openCharter: vi.fn() }));
+vi.mock("./charter.js", () => charter);
 
 const chain = (id: string, over: Partial<ChainInfo> = {}): ChainInfo =>
   ({ id, name: id, createdAt: 1, unread: false, waiting: 0, ...over });
@@ -122,12 +124,17 @@ it("creates a chain inline, its refusal said under the field, and navigates to i
 });
 
 // A row's ⋯: Rename in place; Archive asks with the open count, then forces, the pane leaving an archived current chain.
-it("renames in place and archives after the open count's confirm", async () => {
+it("renames in place, opens the charter, and archives after the open count's confirm", async () => {
   chains.openChains();
   const more = () => inRow("main", ".chain-more");
   more().onclick?.();
   expect(menu.openMenu).toHaveBeenLastCalledWith(more(), expect.anything(), "main");
-  expect([...menu.items.keys()]).toEqual(["Rename…", "Archive"]);
+  expect([...menu.items.keys()]).toEqual(["Rename…", "Charter…", "Archive"]);
+  menu.items.get("Charter…")!();
+  expect(menu.closeMenu).toHaveBeenCalled();
+  expect(charter.openCharter).toHaveBeenCalledWith(expect.objectContaining({ id: "main", name: "main" }));
+  chains.openChains();
+  more().onclick?.();
   // The menu took the floated list's panel; Rename… opens it again with the field in the row.
   menu.items.get("Rename…")!();
   const input = floated().querySelector("input")!;

@@ -48,6 +48,8 @@ import {
 import { initPush, isIOS } from "./notifications.js";
 import { initReport, report } from "./report.js";
 import { initChains, renderChains, unarchive } from "./chains.js";
+import { onCharterSaved, openCharter } from "./charter.js";
+import { button } from "./form.js";
 import { notify } from "./shell.js";
 import { noteDownloads } from "./dom.js";
 import { initHeader, noteTurnMeta, renderHeader, resetHeaderState, setHeaderState } from "./session-header.js";
@@ -298,7 +300,15 @@ function openContinuous(user = true): void {
   unstarted = true;
   earlier = [];
   resetPane();
-  appendTurn("system", "The continuous conversation — your first message starts it.");
+  const hint = appendTurn("system", "The continuous conversation — your first message starts it.");
+  // Before the first message is when a charter is written: the head it starts reads it.
+  const id = chainId;
+  if (id !== null) {
+    const charter = button("Charter…");
+    charter.classList.add("mt-2", "max-md:min-h-11");
+    charter.onclick = () => openCharter({ id, name: chainList?.chains.find((c) => c.id === id)?.name ?? id });
+    hint.after(charter);
+  }
   setConversationHash();
   renderDrawer();
   renderHeader();
@@ -866,6 +876,10 @@ initChains({
   refresh: () => void refreshSessions(),
   anchor: () => document.getElementById("chat-title")!,
   docked: renderHeader,
+});
+// A head keeps the charter it opened with: the pane says so where it is on screen.
+onCharterSaved((id, head) => {
+  if (head && id === chainId && continuousOpen()) appendTurn("system", "charter saved · applies from the next session — /new starts one");
 });
 initHeader({
   currentId: () => currentId,

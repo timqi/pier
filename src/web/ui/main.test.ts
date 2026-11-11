@@ -3,7 +3,7 @@
 // reporting run on index.html's body, so no browser, Pi session or network is needed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTurn } from "../../core/types.js";
-import { installPage } from "./dom.testkit.js";
+import { fake, installPage } from "./dom.testkit.js";
 
 const h = vi.hoisted(() => ({
   drawer: null as unknown as Parameters<typeof import("./drawer.js").initDrawer>[0],
@@ -29,7 +29,10 @@ const h = vi.hoisted(() => ({
   revealTopic: vi.fn(() => true),
   content: [] as string[],
   isIOS: vi.fn(() => false),
+  openCharter: vi.fn(),
+  charterSaved: (_id: string, _head: boolean): void => {},
 }));
+vi.mock("./charter.js", () => ({ openCharter: h.openCharter, onCharterSaved: (fn: typeof h.charterSaved) => { h.charterSaved = fn; } }));
 vi.mock("./auth.js", () => ({ bundleVersion: "test", guardFetch: vi.fn(), matchVersion: h.matchVersion, streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
   appendDivider: h.appendDivider, appendPager: h.appendPager,
@@ -101,6 +104,7 @@ const chainUrl = (url: string) => /^\/api\/continuous(\?|$)/.test(url);
 /** `GET /api/chains`: the one chain. */
 const chainList = () => Response.json({ chains: [{ id: "c1", name: "main", createdAt: 1, unread: false, waiting: 0 }] });
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+const saidSaved = "charter saved · applies from the next session — /new starts one";
 
 beforeEach(async () => {
   vi.resetModules();
@@ -110,7 +114,13 @@ beforeEach(async () => {
   h.history.mockReset().mockImplementation(() => Promise.resolve(snapshot("loaded")));
   h.revealTopic.mockReset().mockReturnValue(true);
   h.renderSnapshot.mockImplementation((turns: ChatTurn[]) => { h.content.push(...turns.flatMap((t) => t.text ? [t.text] : [])); });
-  h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
+  // The row's body, in a row of its own: the empty pane puts its Charter… after it.
+  h.appendTurn.mockImplementation((_role: string, text: string) => {
+    h.content.push(text);
+    const row = document.createElement("div");
+    row.append(document.createElement("div"));
+    return row.firstElementChild;
+  });
   vi.stubGlobal("EventSource", Stream);
   Object.assign(installPage(), { hidden: true, visibilityState: "hidden", hasFocus: () => false });
   // Listed oldest first, with `modified` the other way round: the client orders by birth.
@@ -1073,12 +1083,26 @@ describe("the continuous conversation", () => {
     expect(h.composer.sessionId()).toBeNull();
     expect(h.composer.continuous()).toBe(true);
     expect(h.content).toContain("The continuous conversation — your first message starts it.");
+    // Before the first message is when a charter is written.
+    const hint = fake(h.appendTurn.mock.results.at(-1)!.value);
+    const charter = hint.nextElementSibling!;
+    expect(charter.textContent).toBe("Charter…");
+    charter.click();
+    expect(h.openCharter).toHaveBeenCalledWith({ id: "c1", name: "main" });
+    // No head yet: the next session is the first, nothing to say.
+    h.charterSaved("c1", false);
+    expect(h.content).not.toContain(saidSaved);
     chain = [member("h1", "first")];
     h.composer.headMoved?.();
     await settled();
     await settled();
     expect(h.composer.sessionId()).toBe("h1");
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+    // The head keeps the charter it opened with; another chain's save is not this pane's to say.
+    h.charterSaved("c2", true);
+    expect(h.content).not.toContain(saidSaved);
+    h.charterSaved("c1", true);
+    expect(h.content.at(-1)).toBe(saidSaved);
   });
 });
 

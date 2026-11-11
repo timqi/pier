@@ -105,7 +105,7 @@ agent 写的记忆。两层对称：
 - **只给 head**：这条 chain 派出的 lead/worker 不加载它；该传下去的由 head 写进 run 的 prompt。
 - **谁改**：用户在 web 的章程对话框里改；或者在对话里让 head 改——head 的 cwd 是 `home`，直接编辑 `chains/<id>/AGENTS.md`，IM 上也走这条路。没有 `/chain` 命令写章程。
 - **大小**：web 的保存上限 4000 字符，超了拒绝并说明；head 改的和磁盘上手改的照读，不截断（`DISPATCHER` 要它守住 4K）。读不了的文件：该块正文为 `(could not be read: …)` 并记日志，会话照开。
-- **生效**：下一个 head 起（轮换或 `/new`）；web 的保存和 head 的回答都说明这一点。Pier 因重启、Reload 重开当前 head 时会更早生效（Pi 补一条 `project_context` 的更新）。保存不打断、不重开当前 head。
+- **生效**：下一个 head 起（轮换或 `/new`）；web 的保存和 head 的回答都说明这一点。Pier 因重启、`pier reload`、空闲 30 分钟回收而重开当前 head 时会更早生效（Pi 补一条 `project_context` 的更新）。保存不打断、不重开当前 head。
 - **`DISPATCHER` 加一节**（~90 tokens，措辞由 build 按 [10 §Prompt vocabulary](../design/10-continuous-session.md#prompt-vocabulary) 定，词表加 `charter`）：
 
 ```
@@ -142,8 +142,8 @@ interface AgentLaunchOptions {
 
 | Route | 行为 |
 | --- | --- |
-| `GET /api/chains/:id/charter` | `{text, path}`，没有文件时 `text: ""`；404 未知 chain |
-| `PUT /api/chains/:id/charter` | `{text}` → 写（空 = 删）；400 超过 4000 字符；404 未知 chain；答 `{text, path, head: boolean}` |
+| `GET /api/chains/:id/charter` | `{text}`，没有文件时 `text: ""`；404 未知 chain |
+| `PUT /api/chains/:id/charter` | `{text}` → 写（空 = 删）；400 超过 4000 字符；404 未知 chain；答 `{text, head: boolean}` |
 
 ## B3. System prompt 视图
 

@@ -29,6 +29,8 @@ const chains = vi.hoisted(() => ({ openChains: vi.fn(), toggleSidebar: vi.fn(), 
 vi.mock("./chains.js", () => chains);
 const systemPrompt = vi.hoisted(() => ({ openSystemPrompt: vi.fn() }));
 vi.mock("./system-prompt.js", () => systemPrompt);
+const charter = vi.hoisted(() => ({ openCharter: vi.fn() }));
+vi.mock("./charter.js", () => charter);
 
 const model: ModelRef = { provider: "test", id: "test-model" };
 const levels: ThinkingLevel[] = ["low", "high"];
@@ -236,6 +238,26 @@ it("offers the same ⋯ items on the conversation and on a child", async () => {
   conversation = false;
   header.renderHeader();
   expect((await menuItems()).map((i) => i.label)).toEqual(labels);
+});
+
+// The charter is the chain's: offered in its conversation only, before its first reply too.
+it("offers the chain's Charter… in its conversation, not on a child", async () => {
+  chain = { id: "c1", name: "Parsers", createdAt: 0, unread: false, waiting: 0 };
+  conversation = true;
+  header.renderHeader();
+  const items = await menuItems();
+  expect(items.map((i) => i.label)).toEqual(["Session info", "System prompt", "Browse files", "Model & reasoning…", "Charter…", "Sidebar", "Settings"]);
+  const entry = items.find((i) => i.label === "Charter…")!;
+  expect(entry).toMatchObject({ separatorBefore: true });
+  expect(entry).not.toHaveProperty("disabled");
+  expect(items.find((i) => i.label === "Sidebar")!.separatorBefore).toBe(false);
+  entry.onSelect();
+  expect(charter.openCharter).toHaveBeenCalledWith(chain);
+
+  conversation = false;
+  current = session(0);
+  header.renderHeader();
+  expect((await menuItems()).map((i) => i.label)).not.toContain("Charter…");
 });
 
 // Before the conversation's first reply there is no session to describe or

@@ -1,7 +1,7 @@
 // The continuous conversation's chain: which session a user message lands on,
 // when a new one starts, and what the new one is told.
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -105,7 +105,9 @@ function rig({
     return s;
   };
   const say = (text: string, chainId = "main") => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" }, chainId);
-  return { chain, chains, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, launcherAsked, existing, say, router, status, defaults, factory, restart };
+  // The main chain's charter, which every head of it is launched with.
+  const charter = join(home, "chains", "main", "AGENTS.md");
+  return { charter, chain, chains, changed: deps.changed as ReturnType<typeof vi.fn>, close: deps.close as ReturnType<typeof vi.fn>, db, home, clock, sessions, created, ledger, launcherAsked, existing, say, router, status, defaults, factory, restart };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -118,7 +120,7 @@ describe("the continuous conversation's chain", () => {
     writeFileSync(join(r.home, "memory", `${day(new Date(r.clock.now - 86_400_000))}.md`), "wrote the contract");
 
     expect(await r.say("hello")).toEqual({ sessionId: "m1", chainId: "main", rotated: "first" });
-    expect(r.created).toEqual([{ cwd: r.home, thinking: "low" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], thinking: "low" }]);
     expect(r.chain.members("main")).toEqual([{ sessionId: "m1", startedAt: r.clock.now, reason: "first" }]);
     const m1 = r.sessions.get("m1")!;
     const [seed] = m1.systemInputs;
@@ -245,7 +247,7 @@ describe("the continuous conversation's chain", () => {
     r.existing("h1", startedAt, { history: turns, model: { provider: "p", id: "strong" }, thinkingLevel: "high" });
 
     expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
-    expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "strong" }, thinking: "high" }]);
     expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
@@ -266,17 +268,17 @@ describe("the continuous conversation's chain", () => {
     const r = rig();
     r.defaults.value = { defaultModel: { provider: "p", id: "default" }, defaultThinkingLevel: "medium" };
     await r.say("hello");
-    expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "medium" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "default" }, thinking: "medium" }]);
 
     // The head was switched by hand; the next head keeps that, whatever Settings say now.
     r.sessions.get("m1")!.setThinkingLevel("high");
     r.defaults.value = { defaultModel: { provider: "p", id: "newer" }, defaultThinkingLevel: "xhigh" };
     r.clock.now += 2 * IDLE_MS;
     expect(await r.say("later")).toEqual({ sessionId: "m2", chainId: "main", rotated: "idle" });
-    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "high" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "default" }, thinking: "high" });
 
     expect(await r.say("/new")).toMatchObject({ sessionId: "m3" });
-    expect(r.created.at(-1)).toEqual({ cwd: r.home, model: { provider: "p", id: "default" }, thinking: "high" });
+    expect(r.created.at(-1)).toEqual({ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "default" }, thinking: "high" });
   });
 
   it("hands the next head a model the user picked on the previous one", async () => {
@@ -289,7 +291,7 @@ describe("the continuous conversation's chain", () => {
     const read = vi.fn((): AgentDefaults => { throw new Error("settings.json is not JSON"); });
     r.defaults.value = read;
     expect(await r.say("new day")).toMatchObject({ sessionId: "m1", rotated: "idle" });
-    expect(r.created).toEqual([{ cwd: r.home, model: fast, thinking: "high" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], model: fast, thinking: "high" }]);
     expect(read).not.toHaveBeenCalled();
   });
 
@@ -309,7 +311,7 @@ describe("the continuous conversation's chain", () => {
     r.existing("h1", r.clock.now - 3 * IDLE_MS, { model: { provider: "p", id: "strong" }, thinkingLevel: "high" });
     r.defaults.value = () => { throw new Error("settings.json is not JSON"); };
     expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
-    expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "strong" }, thinking: "high" }]);
   });
 
   it("starts a new head, named lost, when the head is gone from Pi, and drops the gone one from the chain", async () => {
@@ -317,7 +319,7 @@ describe("the continuous conversation's chain", () => {
     r.existing("h0", r.clock.now - 2);
     r.db.prepare("INSERT INTO main_chain(session_id, chain_id, started_at, reason) VALUES ('gone', 'main', ?, 'first')").run(r.clock.now - 1);
     expect(await r.say("hi")).toEqual({ sessionId: "m1", chainId: "main", rotated: "lost" });
-    expect(r.created).toEqual([{ cwd: r.home, thinking: "low" }]);
+    expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], thinking: "low" }]);
     expect(r.sessions.get("m1")!.systemInputs[0]!.origin).toEqual({ kind: "session-seed", reason: "lost", previousSessionId: "gone" });
     // Nothing on disk to page back to: a member left behind would be an unknown session forever.
     expect(r.chain.members("main").map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
@@ -980,5 +982,36 @@ describe("/chain", () => {
     expect(await r.say("/chain archive", design.id)).toEqual({ chainId: "main", switched: expect.objectContaining({ id: "main" }) });
     expect(r.chains.get(design.id)?.archivedAt).not.toBeNull();
     await expect(r.say("/chain archive")).rejects.toThrow("chain: Main is the only active chain");
+  });
+});
+
+describe("a chain's charter", () => {
+  it("is launched with every head of its own chain, and reopened with its members only", async () => {
+    const r = rig();
+    const design = r.chains.create("Design");
+    await r.say("hi", design.id);
+    const own = join(r.home, "chains", design.id, "AGENTS.md");
+    expect(r.created.at(-1)?.contextFiles).toEqual([own]);
+    // What main.ts's resume asks: the chain is looked up by the session.
+    expect(r.chain.contextFiles("m1")).toEqual([own]);
+    expect(r.chain.contextFiles("worker-1")).toEqual([]);
+  });
+
+  it("reads none as empty, writes it under the chain, and deletes it for blank text", async () => {
+    const r = rig();
+    expect(await r.chain.charter("main")).toBe("");
+    await r.chain.setCharter("main", "Focus: parsers\n");
+    expect(readFileSync(r.charter, "utf8")).toBe("Focus: parsers\n");
+    expect(await r.chain.charter("main")).toBe("Focus: parsers\n");
+    await r.chain.setCharter("main", "  \n");
+    expect(existsSync(r.charter)).toBe(false);
+    await r.chain.setCharter("main", "");
+    expect(await r.chain.charter("main")).toBe("");
+  });
+
+  it("says a charter it cannot read, never offers it as empty", async () => {
+    const r = rig();
+    mkdirSync(r.charter, { recursive: true });
+    await expect(r.chain.charter("main")).rejects.toThrow(/^charter: chains\/main\/AGENTS\.md could not be read: .*EISDIR/);
   });
 });

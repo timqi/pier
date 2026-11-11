@@ -7,6 +7,7 @@ import { $, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { closeMenu, listStep, openMenu, openPanel, walkRows } from "./menu.js";
 import { chord, modalOpen } from "./shortcut.js";
+import { openCharter } from "./charter.js";
 import type { ChainInfo, ChainList } from "../types.js";
 
 /** Everything the list needs from the orchestrator (main.ts). */
@@ -107,6 +108,7 @@ function row(c: ChainInfo, root: HTMLElement): HTMLElement {
   more.setAttribute("aria-label", `Actions for ${c.name}`);
   more.onclick = () => openMenu(more, [
     { label: "Rename…", onSelect: () => { closeMenu(); renaming = { id: c.id, value: c.name }; reopen(root); focusField(); } },
+    { label: "Charter…", onSelect: () => { closeMenu(); openCharter(c); } },
     { label: "Archive", onSelect: () => { closeMenu(); void archive(c, root); } },
   ], c.name);
   li.append(pick, more);

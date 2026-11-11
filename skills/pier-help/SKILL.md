@@ -40,6 +40,13 @@ truth.
 - It splits by hand into named chains, each with its own head, open items
   and memory in `chains/<id>/` beside the global one; the list is the web's
   sidebar and `/chain`, one row until a second chain is made.
+- A chain's charter, `chains/<id>/AGENTS.md` under `home`, is the user's
+  standing instructions for it — focus, default repo, skills, models — read
+  by that chain's heads only, from the next session (`/new` starts one) —
+  sooner when Pier reopens the current one: after a restart, `pier reload`
+  or 30 idle minutes.
+  Edited from the web's Charter… (the ⋯ menu, a chain row's ⋯) or by asking
+  the head; no `/chain` command writes it.
 - Recall: `rg <words> memory chains/*/memory`; `pier search --in main <words>`
   over what the user and Pier said, `--in chain:<name>` in one chain;
   `--since` narrows a time such as last week.

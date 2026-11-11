@@ -39,3 +39,10 @@ export interface ChainInfo {
 export interface ChainList {
   chains: ChainInfo[];
 }
+
+/** `GET` and `PUT /api/chains/:id/charter`: `text` empty for none; the `PUT` adds `head`,
+ *  whether the chain has a head, which keeps the old charter until the next. */
+export interface Charter {
+  text: string;
+  head?: boolean;
+}

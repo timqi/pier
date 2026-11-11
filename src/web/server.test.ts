@@ -2757,6 +2757,29 @@ describe("the continuous conversation's routes", () => {
       expect(await back.json()).not.toHaveProperty("archivedAt");
     });
 
+    it("reads and writes a chain's charter: blank deletes it, 400 past the limit, 404 for no chain", async () => {
+      const { app, post, send, chain } = chainRig();
+      const path = chain.charterPath("main");
+      expect(await (await app.request("/api/chains/main/charter")).json()).toEqual({ text: "" });
+      const saved = await send("/api/chains/main/charter", { text: "Focus: parsers\n" }, "PUT");
+      expect(await saved.json()).toEqual({ text: "Focus: parsers\n", head: false });
+      expect(readFileSync(path, "utf8")).toBe("Focus: parsers\n");
+      expect(await (await app.request("/api/chains/main/charter")).json()).toEqual({ text: "Focus: parsers\n" });
+      // The limit is the editor's: the file stays as it was.
+      const long = await send("/api/chains/main/charter", { text: "x".repeat(4001) }, "PUT");
+      expect(long.status).toBe(400);
+      expect(await long.json()).toEqual({ error: "charter: 4001 characters — at most 4000" });
+      expect((await send("/api/chains/main/charter", { text: "x".repeat(4000) }, "PUT")).status).toBe(200);
+      expect((await send("/api/chains/main/charter", {}, "PUT")).status).toBe(400);
+      // A head keeps the charter it opened with: the answer says so.
+      await post("/api/continuous/messages", { text: "hi" });
+      const cleared = await send("/api/chains/main/charter", { text: " \n" }, "PUT");
+      expect(await cleared.json()).toEqual({ text: "", head: true });
+      expect(existsSync(path)).toBe(false);
+      expect((await app.request("/api/chains/nope/charter")).status).toBe(404);
+      expect((await send("/api/chains/nope/charter", { text: "x" }, "PUT")).status).toBe(404);
+    });
+
     it("has no Chain mode switch to turn", async () => {
       const { send } = chainRig();
       expect((await send("/api/chains/mode", { chain: false, force: true }, "PUT")).status).toBe(404);

@@ -13,6 +13,7 @@ import { modelPicker } from "./model-picker.js";
 import { openChains, SIDEBAR_KEY, sidebarDocked, toggleSidebar } from "./chains.js";
 import type { ChainInfo } from "../types.js";
 import { openSystemPrompt } from "./system-prompt.js";
+import { openCharter } from "./charter.js";
 import { chord, chordLabel, escapeKey, modalOpen } from "./shortcut.js";
 import { topicColour } from "./topics.js";
 import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
@@ -446,6 +447,7 @@ function panelHead(anchor: HTMLElement, closeLabel: string): HTMLElement {
 function barMenu(anchor: HTMLElement): void {
   const s = deps.currentSession();
   const conversation = deps.continuousOpen();
+  const chain = conversation ? deps.chain() : undefined;
   const later = s ? {} : { disabled: true, hint: "after the first reply" };
   const items: MenuItem[] = [
     {
@@ -477,9 +479,18 @@ function barMenu(anchor: HTMLElement): void {
       onSelect: () => s && void pickModel(anchor, s.id, true),
       ...later,
     },
+    // The chain's, so only in its conversation.
+    ...(chain ? [{
+      label: "Charter…",
+      separatorBefore: true,
+      onSelect: () => {
+        closeMenu();
+        openCharter(chain);
+      },
+    }] : []),
     {
       label: "Sidebar",
-      separatorBefore: true,
+      separatorBefore: !chain,
       hint: chordLabel(SIDEBAR_KEY),
       onSelect: () => {
         closeMenu();
@@ -494,5 +505,5 @@ function barMenu(anchor: HTMLElement): void {
       },
     },
   ];
-  openMenu(anchor, items, conversation ? (deps.chain()?.name ?? "Pier") : s ? (s.title ?? untitled(s.cwd)) : "Session");
+  openMenu(anchor, items, conversation ? (chain?.name ?? "Pier") : s ? (s.title ?? untitled(s.cwd)) : "Session");
 }

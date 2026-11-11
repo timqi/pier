@@ -30,7 +30,7 @@ src/
                reply.ts, identity.ts, inbox.ts, inbound-file.ts, chains.ts
                (the chain register: names, archive, prefix resolve), chain.ts
                (each chain's Pier head: the `main_chain` table, rotation,
-               seed, `/chain`), search.ts (`pier search`, message recall
+               seed, charter, `/chain`), search.ts (`pier search`, message recall
                across chains and sessions, the caller's chain first)
   agent/       types.ts (the Pi-config seams the Console asks for: config
                files, packages, providers, config sync, `pier web`'s auth),

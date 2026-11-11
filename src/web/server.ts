@@ -37,7 +37,7 @@ import type {
   PackageStore,
   ProviderManager,
 } from "../agent/types.js";
-import { CHAIN_FULL_TOKENS, isThinkingLevel } from "../core/types.js";
+import { CHAIN_FULL_TOKENS, CHARTER_MAX_CHARS, isThinkingLevel } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { chainCounts, itemTurns } from "../core/open-items.js";
@@ -49,7 +49,7 @@ import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
 import type { PasskeyStore } from "./passkeys.js";
-import type { ChainInfo, ChainList, ToolsSyncNote } from "./types.js";
+import type { ChainInfo, ChainList, Charter, ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
@@ -613,6 +613,27 @@ export function createServer(
     } catch (err) {
       return chainRefused(c, err);
     }
+  });
+
+  // A chain's charter (docs/plans/36-chain-charter.md §B2): an unreadable one is onError's 500, never an empty editor.
+  app.get("/api/chains/:id/charter", async (c) => {
+    const id = c.req.param("id");
+    if (!chains.get(id)) return c.json({ error: `chain: no chain ${id}` }, 404);
+    return c.json({ text: await continuous.charter(id) } satisfies Charter);
+  });
+
+  app.put("/api/chains/:id/charter", async (c) => {
+    const id = c.req.param("id");
+    if (!chains.get(id)) return c.json({ error: `chain: no chain ${id}` }, 404);
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.text !== "string") return c.json({ error: "text required" }, 400);
+    const text = body.text as string;
+    if (text.length > CHARTER_MAX_CHARS) {
+      return c.json({ error: `charter: ${String(text.length)} characters — at most ${String(CHARTER_MAX_CHARS)}` }, 400);
+    }
+    await continuous.setCharter(id, text);
+    const saved = text.trim() ? text : "";
+    return c.json({ text: saved, head: continuous.members(id).length > 0 } satisfies Charter);
   });
 
   // One chain's sessions, newest first; the client pages back through them with /history. No chain: the first.

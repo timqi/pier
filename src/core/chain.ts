@@ -3,8 +3,8 @@
 // rotated lazily once idle past an hour or full (docs/design/10-continuous-session.md).
 
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentDefaults } from "../agent/types.js";
 import { transact } from "../db.js";
@@ -221,6 +221,35 @@ export class MainChain {
 
   lastUserAt(chainId: string): number | undefined {
     return this.lastUser.get(chainId);
+  }
+
+  /** A chain's charter, the user's: its heads load it after the home's own AGENTS.md. */
+  charterPath(chainId: string): string {
+    return join(this.deps.home, "chains", chainId, "AGENTS.md");
+  }
+
+  /** The instruction files a session reopens with: a chain member's charter, nothing for any other. */
+  contextFiles(sessionId: string): string[] {
+    const chainId = this.chainOf(sessionId)?.chainId;
+    return chainId === undefined ? [] : [this.charterPath(chainId)];
+  }
+
+  /** `""` for none; an unreadable one throws, so no editor offers it as empty to be saved over. */
+  async charter(chainId: string): Promise<string> {
+    try {
+      return await readFile(this.charterPath(chainId), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw new Error(`charter: chains/${chainId}/AGENTS.md could not be read: ${String(err)}`);
+    }
+  }
+
+  /** Blank text deletes it. The next head takes it; the current one is not reopened. */
+  async setCharter(chainId: string, text: string): Promise<void> {
+    const path = this.charterPath(chainId);
+    if (!text.trim()) return rm(path, { force: true });
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text);
   }
 
   /** The chain's current compact answer, complete seed and shared status presentation. */
@@ -446,6 +475,7 @@ export class MainChain {
     mkdirSync(this.deps.home, { recursive: true });
     const session = await this.deps.factory.create({
       cwd: this.deps.home,
+      contextFiles: [this.charterPath(chainId)],
       ...(model ? { model } : {}),
       thinking: open?.thinkingLevel ?? defaults.defaultThinkingLevel ?? "low",
     });
