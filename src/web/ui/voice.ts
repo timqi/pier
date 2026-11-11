@@ -3,7 +3,7 @@
 // the pure rules for where its text sits in the draft. No DOM.
 
 import workletUrl from "./voice-worklet.ts?worker&url";
-import { failure, getJson, refused, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 
 /** The take's SSE events, as the server sends them. */
 export type VoiceEvent =
@@ -21,6 +21,9 @@ export interface Take {
 const MAX_BODY = 32 * 8000;
 // A context that never rendered never answers the flush.
 const FLUSH_MS = 1000;
+// A 404 or 409 says the take is over on the server; its event stream says why,
+// and gets this long to, before the refusal itself is the reason.
+const GONE_MS = 2000;
 
 /** The server can transcribe and this browser can capture. */
 export async function voiceAvailable(): Promise<boolean> {
@@ -56,6 +59,7 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
   let id: string | undefined;
   let events: EventSource | undefined;
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  let gone: ReturnType<typeof setTimeout> | undefined;
   let stopping = false;
   let captured = false; // the last frame is queued and the microphone released
   let released = false;
@@ -77,14 +81,18 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
     released = true;
     context.close().catch((err: unknown) => console.warn("voice: audio context did not close", err));
   };
+  // The closed event stream cancels the take too, so a 404 is that having won.
   const remove = (take: string): void =>
-    void refused(`/api/voice/${take}`, "DELETE", "voice cancel failed").then((why) => {
-      // The closed event stream cancels the take too; this is only the prompt way.
-      if (why) console.warn(why);
-    });
+    void fetch(`/api/voice/${take}`, { method: "DELETE" }).then(
+      async (res) => {
+        if (!res.ok && res.status !== 404) console.warn(await failure(res, "voice cancel failed"));
+      },
+      (err: unknown) => console.warn(`voice cancel failed: ${String(err)}`),
+    );
   /** `server`: the stream ended it, so there is nothing to delete. */
   const end = (event?: VoiceEvent, server = false): void => {
     if (over()) return;
+    clearTimeout(gone);
     events?.close();
     release();
     if (!server && id) remove(id);
@@ -93,14 +101,26 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
   };
   const fail = (message: string): void => end({ type: "error", message });
 
+  /** True when the server took it. */
+  const post = async (path: "audio" | "finish", label: string, body?: Uint8Array<ArrayBuffer>): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/voice/${id}/${path}`, { method: "POST", ...(body && { headers: { "content-type": "application/octet-stream" }, body }) });
+      if (res.ok) return true;
+      const why = await failure(res, label);
+      if (res.status === 404 || res.status === 409) gone ??= setTimeout(() => fail(why), GONE_MS);
+      else fail(why);
+    } catch (err) {
+      fail(`${label}: ${String(err)}`);
+    }
+    return false;
+  };
   // Serial: one POST in flight, the frames that queue meanwhile go up as one body.
   const pump = async (): Promise<void> => {
-    if (uploading || !id || over()) return;
+    if (uploading || gone || !id || over()) return;
     if (!queue.length) {
       if (captured && !finished) {
         finished = true;
-        const why = await refused(`/api/voice/${id}/finish`, "POST", "voice finish failed");
-        if (why) fail(why);
+        await post("finish", "voice finish failed");
       }
       return;
     }
@@ -114,15 +134,9 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
       at += frame.length;
     }
     uploading = true;
-    try {
-      const res = await fetch(`/api/voice/${id}/audio`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body });
-      if (!res.ok) return fail(await failure(res, "voice upload failed"));
-    } catch (err) {
-      return fail(`voice upload failed: ${String(err)}`);
-    } finally {
-      uploading = false;
-    }
-    return pump();
+    const up = await post("audio", "voice upload failed", body);
+    uploading = false;
+    if (up) return pump();
   };
   const flushed = (): void => {
     if (captured) return;
@@ -175,14 +189,18 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
     events.onmessage = (ev: MessageEvent<string>) => receive(ev.data);
     // EventSource would reconnect, but a closed stream has already cancelled the take.
     events.onerror = () => fail("voice connection lost");
-    node = new AudioWorkletNode(context, "pier-voice");
-    node.port.onmessage = (ev: MessageEvent<ArrayBuffer | "flushed">) => {
-      if (ev.data === "flushed") return flushed();
-      queue.push(new Uint8Array(ev.data));
-      void pump();
-    };
-    // Into the destination as silence: a node nothing pulls may never render.
-    context.createMediaStreamSource(stream!).connect(node).connect(context.destination);
+    try {
+      node = new AudioWorkletNode(context, "pier-voice");
+      node.port.onmessage = (ev: MessageEvent<ArrayBuffer | "flushed">) => {
+        if (ev.data === "flushed") return flushed();
+        queue.push(new Uint8Array(ev.data));
+        void pump();
+      };
+      // Into the destination as silence: a node nothing pulls may never render.
+      context.createMediaStreamSource(stream!).connect(node).connect(context.destination);
+    } catch (err) {
+      return fail(micError(err));
+    }
     if (stopping) flush();
   })();
 

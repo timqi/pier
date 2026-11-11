@@ -223,6 +223,48 @@ describe("a take", () => {
     expect(released()).toBe(true);
   });
 
+  it("leaves a take the server says is over to its event stream's reason, and stops uploading", async () => {
+    start();
+    await settled();
+    frame(1);
+    frame(2);
+    audio[0]!.resolve(res(409, { error: "this voice take has ended" }));
+    await settled();
+    frame(3);
+    expect(events).toEqual([]);
+    expect(uploads()).toHaveLength(1);
+    send({ type: "error", message: "another voice take started in this browser" });
+    expect(events).toEqual([{ type: "error", message: "another voice take started in this browser" }]);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  it("fails with the refusal itself when the stream never gives the reason", async () => {
+    vi.useFakeTimers();
+    try {
+      start();
+      await settled();
+      frame(1);
+      audio[0]!.resolve(res(404, { error: "no such voice take" }));
+      await settled();
+      vi.advanceTimersByTime(1999);
+      expect(events).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(events).toEqual([{ type: "error", message: "no such voice take" }]);
+      expect(released()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends with an error, the microphone released, when the capture graph cannot be built", async () => {
+    vi.stubGlobal("AudioWorkletNode", class { constructor() { throw new Error("no such processor"); } });
+    start();
+    await settled();
+    expect(events).toEqual([{ type: "error", message: "voice input failed: no such processor" }]);
+    expect(states.at(-1)).toBe("idle");
+    expect(released()).toBe(true);
+  });
+
   it("treats a lost event stream as an error", async () => {
     start();
     await settled();
@@ -251,6 +293,24 @@ describe("a take", () => {
     expect(calls.at(-1)).toMatchObject({ url: "/api/voice/t1", method: "DELETE" });
     expect(sources[0]!.close).toHaveBeenCalled();
     expect(released()).toBe(true);
+  });
+
+  it("takes a 404 for the delete as the closed stream having cancelled first, and warns of any other refusal", async () => {
+    const warn = vi.spyOn(console, "warn").mockClear().mockImplementation(() => {});
+    const refuse = (status: number) => vi.mocked(fetch).mockImplementation(((url: string, init: RequestInit = {}) =>
+      Promise.resolve(init.method === "DELETE" ? res(status, { error: "refused" }) : res(200, { id: "t1" }))) as unknown as typeof fetch);
+    refuse(404);
+    start();
+    await settled();
+    sources[0]!.onerror!();
+    await settled();
+    expect(warn).not.toHaveBeenCalled();
+    refuse(500);
+    start();
+    await settled();
+    sources[1]!.onerror!();
+    await settled();
+    expect(warn).toHaveBeenCalledWith("refused");
   });
 
   it("says the microphone was refused and never opens a take", async () => {
