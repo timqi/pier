@@ -125,7 +125,7 @@ the area is.
 | root `src/*.ts` | 3.8k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
 | `native/` | 1.35k | the Tauri shell, Rust and the tab bar page: the instance store, one hidden-or-shown webview per open instance, badge and notification relay |
-| one module | 800 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `web/ui/chat.ts` at 840, the transcript pane |
+| one module | 800 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `web/ui/chat.ts` at 841, the transcript pane |
 | channel adapter file | 500 | transport, render and panel counted separately, each serving the thread and the home chat's main flow |
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
 

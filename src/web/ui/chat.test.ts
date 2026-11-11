@@ -31,7 +31,7 @@ beforeEach(async () => {
   for (const name of ["ResizeObserver", "MutationObserver"]) vi.stubGlobal(name, class { observe(): void {} });
   chat = await import("./chat.js");
   chat.initChat({
-    sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
+    sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle", continuous: () => true,
     select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
   });
   quote.mockClear();
@@ -569,7 +569,7 @@ describe("tail follow across the final render", () => {
     });
     chat = await import("./chat.js");
     chat.initChat({
-      sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming",
+      sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming", continuous: () => true,
       select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
     });
   });
@@ -738,7 +738,7 @@ describe("file references", () => {
 
   it("falls back to the cwds earlier callbacks carried, most recent first, when the session's own has nothing", async () => {
     const asked = disk(["/w/main/src/a.ts", "/w/one/src/b.ts", "/w/two/src/b.ts", "/w/one/src/c.ts"]);
-    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing };
+    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, continuous: () => true, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing };
     chat.initChat(deps);
     const callback = (cwd: string) => chat.appendSystemInput("Task \"t\" finished with state: succeeded\n\nok", {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s", source: { taskName: "t" }, state: "succeeded", cwd,
@@ -1081,6 +1081,56 @@ describe("the turn's bubble", () => {
     expect("reveal" in a2!.dataset).toBe(true);
     expect(chat.revealTopic("deploy")).toBe(false);
   });
+
+  describe("a run's session", () => {
+    let continuous = false;
+    beforeEach(() => {
+      continuous = false;
+      chat.initChat({
+        sessionId: () => "w1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming", continuous: () => continuous,
+        select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => null,
+      });
+    });
+    const log = () => details().find((d) => d.classList.contains("activity-log"))!;
+    const open = () => stepsChip().getAttribute("aria-expanded");
+    const running = [{ role: "user" as const, text: "go", at: 1 }, { role: "assistant" as const, text: "", steps }];
+
+    it("opens its one running bubble's steps at the pane's height, and a reader's close holds through steps, the end and a reload", () => {
+      chat.appendTurn("user", "go", false, 1);
+      activity.activityToolStart(1, "c1", "bash", { command: "ls" });
+      expect(open()).toBe("true");
+      expect(log().hidden).toBe(false);
+      expect("tall" in log().dataset).toBe(true);
+      stepsChip().onclick!();
+      activity.activityToolEnd("c1", false, "ok");
+      activity.activityToolStart(2, "c2", "bash", { command: "pwd" });
+      expect(open()).toBe("false");
+      chat.completeTurn("Done.", { completedAt: 5, durationMs: 1000, tokens: 1 });
+      expect(open()).toBe("false");
+      chat.resetChat();
+      chat.renderSnapshot(running, "streaming", []);
+      expect(open()).toBe("false");
+      // Opened again by hand, a reload opens it once more.
+      stepsChip().onclick!();
+      chat.resetChat();
+      chat.renderSnapshot(running, "streaming", []);
+      expect(open()).toBe("true");
+    });
+
+    it("stays closed for a settled turn, a second bubble and the conversation", () => {
+      chat.renderSnapshot([...running.slice(0, 1), { role: "assistant", text: "Done.", steps }], "idle", []);
+      expect(open()).toBe("false");
+      expect("tall" in log().dataset).toBe(false);
+      chat.appendTurn("user", "more", false, 2);
+      activity.activityToolStart(3, "c3", "bash", {});
+      expect(open()).toBe("false");
+      chat.resetChat();
+      continuous = true;
+      chat.renderSnapshot(running, "streaming", []);
+      expect(open()).toBe("false");
+    });
+  });
+
 
   describe("a topic waiting on the user", () => {
     const asks = "<open>auth — waiting on you: 60K or 80K?</open>\n60K or 80K?\n\n---\n[60K] | [80K]";

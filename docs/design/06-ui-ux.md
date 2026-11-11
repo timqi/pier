@@ -129,7 +129,11 @@ updates this document.
   steps log, the run's head and prompt — under the row, at the bubble's
   width, in chip order. Every chip starts closed and opens only by its own
   click, closing any other open chip in its row — one detail per bubble,
-  other bubbles untouched; there is no global open. Mode, model, duration
+  other bubbles untouched; there is no global open. The one exception is a
+  run's session, opened to watch it work: while its one bubble's turn runs,
+  the steps chip starts open and its log fills the pane between bar and
+  dock; a reader's close holds, reloads included, and the end of the turn
+  leaves the chip as it stands. Mode, model, duration
   and ids are the opened head's, never the chip's; a cause card's head does not
   repeat the chip's kind and state. Chat command answers stay open cards.
 - A quote is a neutral grey bar and two clamped lines at the top of the

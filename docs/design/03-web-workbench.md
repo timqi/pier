@@ -290,7 +290,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   the steps log, the run's head and prompt. Every chip starts closed and
   opens only by its click, closing the row's other open chip (one detail
   per bubble; other bubbles keep theirs); opened details persist across a
-  run's status updates. Cause chips: `↩ callback · <state> ·
+  run's status updates. Off the conversation (a run's session), the steps
+  chip of the pane's one bubble opens by itself while its turn runs, live
+  or replayed, its log (`data-tall`) the pane's height; closed by the
+  reader it stays closed in that session, reloads included. Cause chips: `↩ callback · <state> ·
   <run name>`, `↗ delegation · <run name>` (the glyphs are `ui/icons.ts`
   icons), a failed callback red, an interrupted one amber. Run chips: `run ·
   <state> · <run name>`, live across states. Mode, duration, `N queued`

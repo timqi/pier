@@ -844,6 +844,7 @@ initChat({
   sessionCwd: () => currentSession()?.cwd ?? null,
   sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
+  continuous: continuousOpen,
   openItem: (target) => void openItem(target),
   itemView: openItemView,
   item: () => item,

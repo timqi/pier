@@ -54,6 +54,8 @@ export interface ChatDeps {
   /** The IM channel answering this session, `"web"` or null when unknown. */
   sessionChannel: () => string | null;
   sessionState: () => SessionState;
+  /** The continuous conversation is what the pane shows, not a run's session. */
+  continuous: () => boolean;
   select: (id: string) => void;
   openItem: (target: OpenItemTarget) => void;
   /** A topic tag's click: that item's view. */

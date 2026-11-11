@@ -21,7 +21,7 @@ beforeEach(async () => {
   chat = await import("./chat.js");
   view = await import("./item-view.js");
   chat.initChat({
-    sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle",
+    sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle", continuous: () => true,
     select: vi.fn(), openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote: vi.fn(),
     itemView, item: () => "auth",
   });

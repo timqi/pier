@@ -134,7 +134,8 @@ export function runHead(o: RunHead): HTMLElement {
 // --- chips ------------------------------------------------------------------------
 // A chip is its fold: the button naming one thing the turn did, and while open
 // its detail lies under the chip row. Every chip starts closed and opens only
-// by its own click, closing any other open chip in its row: one detail per bubble.
+// by its own click, closing any other open chip in its row: one detail per bubble;
+// a run's session opens its running steps (ensureActivity).
 // A replayed steps log fetches its detail on the first one.
 
 /** What a chip says; a chip re-painted keeps its element, detail and state. */
@@ -284,6 +285,10 @@ interface Activity {
 
 let activity: Activity | null = null; // the live (running) group
 
+/** Run sessions whose reader closed the log that opened by itself: a reload
+ *  must not open it on them again. */
+const keptClosed = new Set<string>();
+
 // --- the thinking row -----------------------------------------------------------------
 // Painted on the stream's cadence like the reply text: per token it would
 // re-read and re-split the whole tail for a row most turns never open.
@@ -391,7 +396,8 @@ function statusIconEl(status: ActivityStatus): HTMLElement | SVGElement {
   return icon(STATUS_ICON[status], "h-3 w-3");
 }
 
-function ensureActivity(ts: number): Activity {
+/** `running`: a live turn's group, not a settled one replayed. */
+function ensureActivity(ts: number, running = true): Activity {
   if (activity) return activity;
   const statusIcon = statusIconEl("running");
   // Caps at ~10 step rows, then scrolls: an opened log can't swallow the chat.
@@ -403,6 +409,19 @@ function ensureActivity(ts: number): Activity {
   el.dataset.status = "running";
   tailFollow(el, rowsEl);
   turns.chip(el, rowsEl);
+  // A run's session is opened to watch it work: while its one bubble runs,
+  // the log is open and as tall as the pane.
+  if (running && !deps.continuous() && turns.el.querySelectorAll("[data-kind='assistant']").length === 1) {
+    rowsEl.dataset.tall = "";
+    const id = deps.sessionId();
+    if (!id || !keptClosed.has(id)) {
+      setChipOpen(el, true);
+      // A replay measures nothing (tailSteps); its tail lands once the snapshot is in.
+      queueMicrotask(() => {
+        if (!rowsEl.hidden && rowsEl.dataset.follow) rowsEl.scrollTop = rowsEl.scrollHeight;
+      });
+    }
+  }
   turns.scroll();
   activity = { chip: el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, tools: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
@@ -441,6 +460,11 @@ function tailFollow(el: HTMLElement, rowsEl: HTMLElement): void {
   const toggle = el.onclick;
   el.onclick = (ev) => {
     toggle?.call(el, ev);
+    const id = deps.sessionId();
+    if ("tall" in rowsEl.dataset && id) {
+      if (rowsEl.hidden) keptClosed.add(id);
+      else keptClosed.delete(id);
+    }
     if (rowsEl.hidden) return;
     rowsEl.scrollTop = rowsEl.scrollHeight;
     rowsEl.dataset.follow = "1";
@@ -615,7 +639,7 @@ export function replayActivity(
   const start = Date.now() - durationMs; // headline duration is now - startTs
   // Detail still on the server: fetched on the first open.
   const lazy = turnIndex !== undefined && steps.some((s) => s.kind === "tool" && s.args === undefined);
-  const a = ensureActivity(start);
+  const a = ensureActivity(start, live);
   const group = a.chip;
   if (lazy) group.dataset.lazy = "";
   // The turn still running keeps its group open, so the live stream counts on
@@ -683,6 +707,8 @@ function onFirstOpen(group: HTMLElement, open: () => void): void {
     lazyLoaders.delete(group);
     open();
   });
+  // Opened by itself before its rows were in (ensureActivity).
+  if (group.hasAttribute("data-open")) lazyLoaders.get(group)!();
 }
 
 async function fillDetail(group: HTMLElement, turnIndex: number, from?: string): Promise<void> {
