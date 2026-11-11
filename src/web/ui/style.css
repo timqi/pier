@@ -981,6 +981,20 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
   /* The gutter is the pencil's here; a time in it would scroll the pane sideways. */
   #turns > [data-time]::after { content: none; }
+  /* A chip row is one line that scrolls sideways under the edge shades; its
+     padding holds the chips' 2.75rem reach and focus ring, which the
+     scroller would clip, and the negative margins give that room back. */
+  .chip-row {
+    --reach: 0.75rem;
+    flex-wrap: nowrap;
+    overflow: auto hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding: var(--reach) 3px;
+    margin: calc(-1 * var(--reach)) -3px calc(0.5rem - var(--reach));
+    background-clip: content-box;
+  }
+  .chip-row > * { flex: none; }
   #input { font-size: max(16px, 1rem); }
 }
 /* After the phone's size: a thumb's floor at any width. */
@@ -1230,23 +1244,27 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
   /* In chat a table is in its own scroll box (chat.ts mdBox) and keeps the
      table layout: columns as wide as their text, a cell's line bounded so one
-     long cell does not stretch a row past reading. The edge fades are the
-     scroll-shadow pattern: covers in the bubble's colour scroll with the
-     content, so a shade shows only on the side that has more. */
+     long cell does not stretch a row past reading. */
   .md .table-scroll {
-    --cover: var(--color-white);
-    --shade: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
     width: fit-content;
     max-width: 100%;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+  }
+  /* The edge fades of a table and of a phone's chip row are the scroll-shadow
+     pattern: covers in the bubble's colour scroll with the content, so a shade
+     shows only on the side that has more. */
+  :is(.md .table-scroll, .chip-row) {
+    --cover: var(--color-white);
+    --shade: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
     background:
       linear-gradient(to right, var(--cover) 40%, transparent) left / 1.5rem 100% no-repeat local,
       linear-gradient(to left, var(--cover) 40%, transparent) right / 1.5rem 100% no-repeat local,
       linear-gradient(to right, var(--shade), transparent) left / 0.75rem 100% no-repeat scroll,
       linear-gradient(to left, var(--shade), transparent) right / 0.75rem 100% no-repeat scroll;
   }
-  .system-card .md .table-scroll { --cover: var(--color-neutral-100); }
+  .system-card :is(.md .table-scroll, .chip-row) { --cover: var(--color-neutral-100); }
+  [data-kind="error"] > .chip-row { --cover: var(--color-red-50); }
   .md .table-scroll > table {
     display: table;
     max-width: none;

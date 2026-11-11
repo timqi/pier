@@ -271,7 +271,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   (`N steps · <secs>`, one per stretch of work, a steered input between two;
   live `⟳ N steps · <secs> · writing…`; `failed · …` red, `interrupted · …`
   amber, `restarted · …` grey, `restarted · <secs>` for a turn cut before
-  any step), a launched run. Under the row the body: the reply, `Stayed silent
+  any step), a launched run. On a phone the row is one line that scrolls
+  sideways under the table's edge shades, each chip's 2.75rem reach inside it.
+  Under the row the body: the reply, `Stayed silent
   — <reason>`, an error on its own material, or nothing for a turn cut short
   before it spoke. The bubble opens at the tail with its first chip or delta;
   the body fills it; a run launched after the reply joins the row's end; a
