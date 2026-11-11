@@ -610,9 +610,10 @@ main {
      is 4px more than the floor says. */
   .chip::before, .topic-tag::before, .line-fold::before { content: ""; position: absolute; inset-inline: 0; inset-block: calc((100% - 2.75rem) / 2); }
   /* The reach passes under what it meets: a wrapped row's chips, 6px apart, and
-     a link or code span in the line below, positioned to stay on top. */
-  .chip-row { isolation: isolate; }
-  .chip-row > ::before { z-index: -1; }
+     a link or code span in the line below, positioned to stay on top. A form's
+     row of switches (`.reach-row`) is the same pair. */
+  :is(.chip-row, .reach-row) { isolation: isolate; }
+  :is(.chip-row, .reach-row) > ::before { z-index: -1; }
   .md :is(a, :not(pre) > code) { position: relative; }
   .activity-log details > summary { min-height: 28px; }
   .activity-log { gap: 0; max-height: 20rem; }
@@ -671,8 +672,6 @@ main {
   .btn { min-height: 44px; }
   .touch-reach { position: relative; }
   .touch-reach::before { content: ""; position: absolute; inset: min(0px, calc((100% - 2.75rem) / 2)); }
-  .reach-row { isolation: isolate; }
-  .reach-row > ::before { z-index: -1; }
 }
 /* The ends are under the chrome (grid above), so they pad by what covers them,
    and rows dissolve into the pane's edges instead of being cut at a chrome
