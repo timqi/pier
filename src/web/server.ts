@@ -51,6 +51,7 @@ import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from 
 import type { PasskeyStore } from "./passkeys.js";
 import type { ChainInfo, ChainList, Charter, ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
+import { type AsrProvider, registerVoiceRoutes } from "./voice.js";
 
 const log = logger("web");
 
@@ -185,6 +186,8 @@ interface WebDeps {
   /** The configuration subscription is on: what it carries is the source's,
    *  and the routes that would edit it locally refuse. */
   subscribed?: () => boolean;
+  /** Voice input's recognizer; absent, `GET /api/voice` answers unavailable. */
+  voice?: AsrProvider;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -248,6 +251,7 @@ export function createServer(
     channelOf,
     continuous,
     host,
+    voice,
   }: WebDeps,
 ): Hono {
   const app = new Hono();
@@ -889,6 +893,7 @@ export function createServer(
   registerPackageRoutes(app, { packages, onConfigWritten: () => recycle("the package registry") });
   registerFsRoutes(app);
   registerExplorerRoutes(app);
+  registerVoiceRoutes(app, voice);
 
   // serveStatic resolves `root` against the working directory, and an installed
   // Pier is started from wherever the operator happens to be.

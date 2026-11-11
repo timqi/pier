@@ -54,6 +54,8 @@ import { SessionStateStore } from "./web/session-state.js";
 import { untilUnlockSettled } from "./web/instance.js";
 import { createServer } from "./web/server.js";
 import { registerVaultRoutes } from "./web/vault.js";
+import { mockAsr } from "./web/voice.js";
+import { qwenAsr } from "./web/voice-qwen.js";
 
 const log = logger("pier");
 
@@ -429,6 +431,7 @@ app.route("/", createServer({
     return live && live.channelId !== "task" ? live.channelId : chatKeyOf(id)?.channelId;
   },
   continuous: chain,
+  voice: process.env.PIER_VOICE === "mock" ? mockAsr : qwenAsr(() => vault.get("DASHSCOPE_API_KEY")),
 }));
 
 const port = Number(process.env.PORT ?? 3141);
