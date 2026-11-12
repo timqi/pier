@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2
+
+### Fixed
+
+- Web: retry a read the network dropped (Safari's "Load failed") once before reporting a failure, and name which read failed instead of a bare TypeError.
+
 ## 1.3.1
 
 ### Fixed
