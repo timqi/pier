@@ -152,6 +152,29 @@ it("orders the sessions by birth, newest first, once for every surface", () => {
   expect(h.drawer.sessions().map((s) => s.id)).toEqual(["b", "a"]);
 });
 
+// A boot read cut short — a page suspended as it loaded — routes on the retry's data, not before it.
+it("routes at boot only once a read cut short has been retried", async () => {
+  vi.resetModules();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    let cut = 1;
+    vi.mocked(fetch).mockImplementation((url, init) => url === "/api/sessions" && cut-- > 0
+      ? Promise.reject(new DOMException("Fetch is aborted", "AbortError"))
+      : base(url, init));
+    const views = vi.mocked(await import("./views.js"));
+    views.applyRoute.mockClear();
+    await import("./main.js");
+    await settled();
+    expect(views.applyRoute).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(views.applyRoute).toHaveBeenCalledOnce();
+    expect(h.drawer.sessions().map((s) => s.id)).toEqual(["b", "a"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 describe("session loads", () => {
   it("hands the snapshot's skills to the composer, and clears them with the pane", async () => {
     const skills = [{ name: "pier-tasks", description: "Delegate." }];
@@ -1021,7 +1044,7 @@ describe("the continuous conversation", () => {
     });
   });
 
-  it("gives up on a re-list read that never answers, reports it and follows the head on the retry", async () => {
+  it("gives up on a re-list read that never answers, retries it unreported, and reports a second in a row", async () => {
     await boot([member("h1"), member("h0", "first")]);
     await catchingRejections(async (rejected) => {
       // AbortSignal.timeout runs on Node's own clock; this one is on the faked one.
@@ -1037,13 +1060,19 @@ describe("the continuous conversation", () => {
         chain = [member("h2"), member("h1"), member("h0", "first")];
         h.composer.headMoved?.();
         await vi.advanceTimersByTimeAsync(9_999);
-        expect(rejected).toEqual([]);
         expect(h.header.currentId()).toBe("h1");
         await vi.advanceTimersByTimeAsync(1);
+        // A deadline that fired on a suspended page's wake: the retry answers, nothing to report.
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(rejected).toEqual([]);
+        expect(h.header.currentId()).toBe("h2");
+        hangs = 2;
+        h.composer.headMoved?.();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(rejected).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1000 + 10_000);
         expect(rejected).toHaveLength(1);
         expect((rejected[0] as DOMException).name).toBe("TimeoutError");
-        await vi.advanceTimersByTimeAsync(1000);
-        expect(h.header.currentId()).toBe("h2");
       } finally {
         timeout.mockRestore();
       }

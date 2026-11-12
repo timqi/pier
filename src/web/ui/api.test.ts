@@ -2,7 +2,7 @@
 // failures: fifteen views answer with what these functions decided.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coalesce, getJson, mustGetJson, refused } from "./api.js";
+import { aborted, coalesce, getJson, mustGetJson, refused } from "./api.js";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -54,7 +54,7 @@ describe("getJson", () => {
   it("says so when the request never answered", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))) as unknown as typeof fetch;
     const got = await getJson("/api/x", "Could not load sessions");
-    expect(got).toEqual({ ok: false, error: "Could not load sessions: TypeError: Failed to fetch" });
+    expect(got).toEqual({ ok: false, error: "Could not load sessions: TypeError: Failed to fetch", cause: new TypeError("Failed to fetch") });
   });
 
   it("passes the caller's request options through", async () => {
@@ -70,6 +70,15 @@ describe("mustGetJson", () => {
     await expect(mustGetJson<{ branch: string }>("/api/explorer/git", "no repo")).resolves.toEqual({
       branch: "main",
     });
+  });
+
+  it("throws a read cut short under its sentence, caused by what the request threw", async () => {
+    const timedOut = new DOMException("signal timed out", "TimeoutError");
+    globalThis.fetch = vi.fn(() => Promise.reject(timedOut)) as unknown as typeof fetch;
+    const err: unknown = await mustGetJson("/api/sessions", "Could not load sessions").catch((e: unknown) => e);
+    expect(String(err)).toBe("Error: Could not load sessions: TimeoutError: signal timed out");
+    expect((err as Error).cause).toBe(timedOut);
+    expect(aborted(err)).toBe(true);
   });
 
   it("throws the sentence, not the response", async () => {
@@ -115,6 +124,49 @@ describe("coalesce", () => {
       expect(loads).toBe(5);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(loads).toBe(5); // succeeded: no more retries
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs a request asked for while a cut-short read waits for its retry, without waiting", async () => {
+    vi.useFakeTimers();
+    try {
+      let loads = 0;
+      const load = coalesce(async () => {
+        if (++loads === 1) throw new DOMException("Fetch is aborted", "AbortError");
+      });
+      const first = load();
+      await vi.advanceTimersByTimeAsync(0);
+      await load();
+      await first;
+      expect(loads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a read cut short once with its retry, and rejects for a second in a row", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcomes = ["abort", "ok", "abort", "abort"];
+      let loads = 0;
+      const load = coalesce(async () => {
+        loads++;
+        if (outcomes.shift() === "abort") throw new DOMException("signal timed out", "TimeoutError");
+      });
+      let settled = false;
+      const first = load().then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(999);
+      expect([loads, settled]).toEqual([1, false]); // not a success: the caller waits for the data
+      await vi.advanceTimersByTimeAsync(1);
+      await first;
+      expect(loads).toBe(2);
+      const second = load();
+      const caught = expect(second).rejects.toThrow("signal timed out");
+      await vi.advanceTimersByTimeAsync(1000);
+      await caught;
+      expect(loads).toBe(4);
     } finally {
       vi.useRealTimers();
     }
