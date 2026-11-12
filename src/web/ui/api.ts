@@ -2,13 +2,15 @@
 // write, the sentence a failure shows, the scheduling of a re-read. Nine
 // modules had grown their own copy of the method/headers/body triple.
 
+/** The wait before a failed request's first retry. */
+export const RETRY_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
 /** A burst of workspace events costs two fetches, not twenty. A failed load
  *  is retried with backoff until one succeeds: the event that asked for it
  *  will not come again, so the view would otherwise stay stale. It rejects
  *  once per failure until then, for report.ts, not once per retry. */
-export function coalesce(load: () => Promise<void>, retryMs = 1000): () => Promise<void> {
+export function coalesce(load: () => Promise<void>, retryMs = RETRY_MS): () => Promise<void> {
   let inflight: Promise<void> | undefined;
   let dirty = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
@@ -36,10 +38,10 @@ export function coalesce(load: () => Promise<void>, retryMs = 1000): () => Promi
             failed = { err };
           }
         }
-        // A read's deadline fires on wake when the page was suspended mid-read, so the first abort
-        // is retried before it is news — inside this promise, whose caller is owed the data, not a
-        // success; a second in a row is a server that does not answer.
-        if (!failed || cut || !aborted(failed.err)) break;
+        // A read's deadline fires, or the network is not back yet, on wake when the page was suspended
+        // mid-read, so the first cut-short read is retried before it is news — inside this promise, whose
+        // caller is owed the data, not a success; a second in a row is a server that does not answer.
+        if (!failed || cut || !cutShort(failed.err)) break;
         cut = true;
         await new Promise<void>((resolve) => {
           wake = resolve;
@@ -95,11 +97,16 @@ export async function failure(res: Response, fallback: string): Promise<string> 
   return body.error ?? `${fallback} (${res.status})`;
 }
 
-/** A request cut short by its signal — WebKit names even a timeout's `AbortError` — or an error carrying one. */
-export function aborted(err: unknown): boolean {
+/** What a fetch rejects with when the network dropped it: WebKit's, Chromium's and Firefox's wording. */
+const DROPPED = /^(?:Load failed|Failed to fetch|NetworkError\b)/;
+
+/** A request cut short by its signal — WebKit names even a timeout's `AbortError` — or dropped by
+ *  the network, which fetch says with a `TypeError`; or an error carrying one. */
+export function cutShort(err: unknown): boolean {
   if (!(err instanceof Error || err instanceof DOMException)) return false;
   if (err.name === "AbortError" || err.name === "TimeoutError") return true;
-  if (err instanceof Error) return aborted(err.cause);
+  if (err instanceof TypeError && DROPPED.test(err.message)) return true;
+  if (err instanceof Error) return cutShort(err.cause);
   return false;
 }
 

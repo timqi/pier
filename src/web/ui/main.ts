@@ -9,7 +9,7 @@ import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
 import { openItemDestination } from "../../core/open-items.js";
-import { coalesce, failure, getJson, mustGetJson } from "./api.js";
+import { coalesce, cutShort, getJson, mustGetJson, RETRY_MS } from "./api.js";
 import { bundleVersion, guardFetch, matchVersion, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -163,9 +163,8 @@ const continuousOpen = (): boolean => unstarted || (currentId !== null && curren
 
 /** One chain's sessions; none named is the first chain. A link to no chain is its 404, said in the pane. */
 async function loadChain(id: string | null, signal?: AbortSignal): Promise<{ chainId: string; chain: ChainMember[]; rotateAt: number }> {
-  const res = await fetch(id ? `/api/continuous?chain=${encodeURIComponent(id)}` : "/api/continuous", { signal });
-  if (!res.ok) throw new Error(await failure(res, "Could not load the continuous conversation"));
-  const { chainId, chain, rotateAt } = (await res.json()) as { chainId?: unknown; chain?: unknown; rotateAt?: unknown };
+  const { chainId, chain, rotateAt } = await mustGetJson<{ chainId?: unknown; chain?: unknown; rotateAt?: unknown }>(
+    id ? `/api/continuous?chain=${encodeURIComponent(id)}` : "/api/continuous", "Could not load the continuous conversation", { signal });
   if (typeof chainId !== "string" || !Array.isArray(chain) || typeof rotateAt !== "number" || !(rotateAt > 0)) {
     throw new Error("The continuous conversation's chain is malformed");
   }
@@ -265,9 +264,7 @@ let openCommitted = 0;
 
 async function loadOpenItems(signal?: AbortSignal): Promise<{ seq: number; open: OpenItems }> {
   const seq = ++openReads;
-  const res = await fetch("/api/continuous/open", { signal });
-  if (!res.ok) throw new Error(await failure(res, "Could not load the open items"));
-  return { seq, open: (await res.json()) as OpenItems };
+  return { seq, open: await mustGetJson<OpenItems>("/api/continuous/open", "Could not load the open items", { signal }) };
 }
 
 // Thrown like refreshSessions', for the same reason.
@@ -491,7 +488,18 @@ function maybeAckRead(): void {
   if (!s?.unread) return;
   s.unread = false;
   renderDrawer();
-  void fetch(`/api/sessions/${s.id}/read`, { method: "POST" });
+  void ackRead(s.id);
+}
+
+/** A page acks as it wakes, before the network is back: a dropped ack is sent once more before it is news. */
+async function ackRead(id: string, again = true): Promise<void> {
+  try {
+    await fetch(`/api/sessions/${id}/read`, { method: "POST" });
+  } catch (err) {
+    if (!again || !cutShort(err)) throw new Error(`Could not mark the session read: ${String(err)}`, { cause: err });
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+    return ackRead(id, false);
+  }
 }
 
 /** The selected session's persisted summary, when it exists. */

@@ -384,6 +384,27 @@ describe("session loads", () => {
   });
 });
 
+/** A failed refresh still rejects, for report.ts; here it is caught to be asserted.
+ *  Node's process, typed here: the web tsconfig has no Node types. */
+async function catchingRejections(body: (rejected: unknown[]) => Promise<void>): Promise<void> {
+  type Listener = (reason: unknown) => void;
+  const node = (globalThis as unknown as { process: {
+    listeners(event: string): Listener[]; removeAllListeners(event: string): void; on(event: string, fn: Listener): void;
+  } }).process;
+  const listeners = node.listeners("unhandledRejection");
+  const rejected: unknown[] = [];
+  node.removeAllListeners("unhandledRejection");
+  node.on("unhandledRejection", (reason) => rejected.push(reason));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await body(rejected);
+  } finally {
+    node.removeAllListeners("unhandledRejection");
+    for (const l of listeners) node.on("unhandledRejection", l);
+    vi.useRealTimers();
+  }
+}
+
 // A turn counts as seen only on a visible, focused page showing it (web/push.ts).
 describe("acking an unread session", () => {
   const page = { visibilityState: "visible", focus: true };
@@ -483,6 +504,36 @@ describe("acking an unread session", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     await settled();
     expect(fetcher.mock.calls.map(([url]) => url)).toContain("/api/continuous/open");
+  });
+
+  /** The next `times` acks are dropped by the network; the ones after them answer. */
+  const dropAcks = (times: number): void => {
+    const answer = fetcher.getMockImplementation() as (url: string) => Promise<Response>;
+    fetcher.mockImplementation((url: string) => url === "/api/sessions/a/read" && times-- > 0
+      ? Promise.reject(new TypeError("Load failed"))
+      : answer(url));
+  };
+
+  // A page acks as it wakes, before the network is back.
+  it("sends an ack the network dropped once more, unreported", async () => {
+    await catchingRejections(async (rejected) => {
+      dropAcks(1);
+      h.views.select("a");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(acks()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect([acks(), rejected]).toEqual([2, []]);
+    });
+  });
+
+  it("reports an ack dropped twice in a row under its sentence", async () => {
+    await catchingRejections(async (rejected) => {
+      dropAcks(2);
+      h.views.select("a");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(acks()).toBe(2);
+      expect(rejected.map(String)).toEqual(["Error: Could not mark the session read: TypeError: Load failed"]);
+    });
   });
 
   it("acks on iOS coming back visible, which sends no focus event", async () => {
@@ -998,49 +1049,38 @@ describe("the continuous conversation", () => {
     }
   });
 
-  /** A failed refresh still rejects, for report.ts; here it is caught to be asserted.
-   *  Node's process, typed here: the web tsconfig has no Node types. */
-  async function catchingRejections(body: (rejected: unknown[]) => Promise<void>): Promise<void> {
-    type Listener = (reason: unknown) => void;
-    const node = (globalThis as unknown as { process: {
-      listeners(event: string): Listener[]; removeAllListeners(event: string): void; on(event: string, fn: Listener): void;
-    } }).process;
-    const listeners = node.listeners("unhandledRejection");
-    const rejected: unknown[] = [];
-    node.removeAllListeners("unhandledRejection");
-    node.on("unhandledRejection", (reason) => rejected.push(reason));
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      await body(rejected);
-    } finally {
-      node.removeAllListeners("unhandledRejection");
-      for (const l of listeners) node.on("unhandledRejection", l);
-      vi.useRealTimers();
-    }
-  }
-  /** The next chain read fails as a dropped request does; the ones after it answer. */
-  function failChainReadOnce(): void {
+  /** The next `times` chain reads fail as a dropped request does; the ones after them answer. */
+  function failChainReads(times: number): void {
     const read = chainRead;
-    let failing = true;
-    chainRead = () => {
-      if (!failing) return read();
-      failing = false;
-      return Promise.reject(new TypeError("Load failed"));
-    };
+    chainRead = () => times-- > 0 ? Promise.reject(new TypeError("Load failed")) : read();
   }
 
-  it("retries a failed chain read, and follows the head it then finds", async () => {
+  it("retries a chain read the network dropped unreported, and follows the head it then finds", async () => {
     await boot([member("h1"), member("h0", "first")]);
     await catchingRejections(async (rejected) => {
-      failChainReadOnce();
+      failChainReads(1);
       chain = [member("h2"), member("h1"), member("h0", "first")];
       h.composer.headMoved?.();
       await vi.advanceTimersByTimeAsync(0);
-      expect(rejected).toEqual([new TypeError("Load failed")]);
       expect(h.header.currentId()).toBe("h1");
       await vi.advanceTimersByTimeAsync(1000);
+      expect(rejected).toEqual([]);
       expect(h.header.currentId()).toBe("h2");
       expect(h.content).toEqual(["said in h0", "said in h1", "head"]);
+    });
+  });
+
+  it("reports a chain read dropped twice in a row under its sentence, and follows on the retry", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    await catchingRejections(async (rejected) => {
+      failChainReads(2);
+      chain = [member("h2"), member("h1"), member("h0", "first")];
+      h.composer.headMoved?.();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(rejected.map(String)).toEqual(["Error: Could not load the continuous conversation: TypeError: Load failed"]);
+      expect(h.header.currentId()).toBe("h1");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(h.header.currentId()).toBe("h2");
     });
   });
 
@@ -1071,8 +1111,7 @@ describe("the continuous conversation", () => {
         await vi.advanceTimersByTimeAsync(10_000);
         expect(rejected).toEqual([]);
         await vi.advanceTimersByTimeAsync(1000 + 10_000);
-        expect(rejected).toHaveLength(1);
-        expect((rejected[0] as DOMException).name).toBe("TimeoutError");
+        expect(rejected.map(String)).toEqual(["Error: Could not load the continuous conversation: TimeoutError: signal timed out"]);
       } finally {
         timeout.mockRestore();
       }
@@ -1085,14 +1124,14 @@ describe("the continuous conversation", () => {
     await catchingRejections(async (rejected) => {
       // The server rotated before answering h1's reload, and the re-list that would name h2 is dropped.
       chain = [member("h2"), member("h1"), member("h0", "first")];
-      failChainReadOnce();
+      failChainReads(2);
       latest().reset();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(rejected).toHaveLength(1);
       expect(h.header.currentId()).toBe("h1");
       expect(chat.chatLoading).toHaveBeenLastCalledWith(false);
       expect(h.content).toEqual(["This session is no longer the conversation's head, and the new head could not be read yet."]);
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2000);
       expect(h.header.currentId()).toBe("h2");
       expect(latest().url).toContain("/h2/");
       expect(h.content).toEqual(["said in h0", "said in h1", "head"]);

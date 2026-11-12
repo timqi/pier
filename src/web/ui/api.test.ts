@@ -2,7 +2,7 @@
 // failures: fifteen views answer with what these functions decided.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { aborted, coalesce, getJson, mustGetJson, refused } from "./api.js";
+import { coalesce, cutShort, getJson, mustGetJson, refused } from "./api.js";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -78,7 +78,15 @@ describe("mustGetJson", () => {
     const err: unknown = await mustGetJson("/api/sessions", "Could not load sessions").catch((e: unknown) => e);
     expect(String(err)).toBe("Error: Could not load sessions: TimeoutError: signal timed out");
     expect((err as Error).cause).toBe(timedOut);
-    expect(aborted(err)).toBe(true);
+    expect(cutShort(err)).toBe(true);
+  });
+
+  it("throws a request the network dropped under its sentence, caused by what the request threw", async () => {
+    const dropped = new TypeError("Load failed");
+    globalThis.fetch = vi.fn(() => Promise.reject(dropped)) as unknown as typeof fetch;
+    const err: unknown = await mustGetJson("/api/sessions", "Could not load sessions").catch((e: unknown) => e);
+    expect(String(err)).toBe("Error: Could not load sessions: TypeError: Load failed");
+    expect(cutShort(err)).toBe(true);
   });
 
   it("throws the sentence, not the response", async () => {
@@ -108,14 +116,14 @@ describe("coalesce", () => {
       const load = coalesce(async () => {
         loads++;
         await Promise.resolve();
-        if (outcomes.shift() === "fail") throw new TypeError("Load failed");
+        if (outcomes.shift() === "fail") throw new Error("HTTP 503");
       });
       // The first load fails while a second is asked for: that one runs, and succeeds.
       await Promise.all([load(), load()]);
       expect(loads).toBe(2);
       // Nothing else will ask: a failure retries itself, later after each failure in a row,
       // and rejects once for it — its repeat is the same failure, still being retried.
-      await expect(load()).rejects.toThrow("Load failed");
+      await expect(load()).rejects.toThrow("HTTP 503");
       await expect(load()).resolves.toBeUndefined();
       expect(loads).toBe(4);
       await vi.advanceTimersByTimeAsync(1999);
@@ -172,6 +180,29 @@ describe("coalesce", () => {
     }
   });
 
+  it("settles a request the network dropped once with its retry, and rejects for a second in a row", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcomes = ["drop", "ok", "drop", "drop"];
+      let loads = 0;
+      const load = coalesce(async () => {
+        loads++;
+        if (outcomes.shift() === "drop") throw new Error("Could not load sessions: TypeError: Load failed", { cause: new TypeError("Load failed") });
+      });
+      const first = load();
+      await vi.advanceTimersByTimeAsync(1000);
+      await first;
+      expect(loads).toBe(2);
+      const second = load();
+      const caught = expect(second).rejects.toThrow("Could not load sessions: TypeError: Load failed");
+      await vi.advanceTimersByTimeAsync(1000);
+      await caught;
+      expect(loads).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects again for a different failure, and for the same one after a success", async () => {
     vi.useFakeTimers();
     try {
@@ -188,6 +219,23 @@ describe("coalesce", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("cutShort", () => {
+  it("knows each engine's dropped request and a signal's abort, directly or as a cause", () => {
+    for (const message of ["Load failed", "Failed to fetch", "NetworkError when attempting to fetch resource."]) {
+      expect(cutShort(new TypeError(message))).toBe(true);
+      expect(cutShort(new Error("Could not load", { cause: new TypeError(message) }))).toBe(true);
+    }
+    expect(cutShort(new DOMException("Fetch is aborted", "AbortError"))).toBe(true);
+  });
+
+  it("leaves a bug's TypeError, a refusal and a non-error alone", () => {
+    expect(cutShort(new TypeError("x is not a function"))).toBe(false);
+    expect(cutShort(new Error("Load failed"))).toBe(false);
+    expect(cutShort(new Error("Could not load sessions (503)"))).toBe(false);
+    expect(cutShort("Load failed")).toBe(false);
   });
 });
 
