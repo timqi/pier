@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+### Fixed
+
+- Web: remove the open-item row's arrow so selecting an item no longer shifts the list.
+- Web: retry a read interrupted by its deadline once before reporting a failure, avoiding a spurious AbortError on wake.
+
 ## 1.3.0
 
 ### Added
