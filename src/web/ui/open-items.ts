@@ -79,9 +79,6 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const dot = h("span", "open-item-dot h-2 w-2 flex-none rounded-full");
   const title = h("span", "open-item-title block min-w-0 text-sm text-neutral-900");
   const tag = chainChip();
-  // Where the click goes, said in the label: a sighted reader sees ↗ before leaving the conversation.
-  const away = h("span", "open-item-away flex-none text-sm leading-[1.35] text-neutral-500", "\u2197");
-  away.setAttribute("aria-hidden", "true");
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
   const age = h("span", "open-item-age flex-none text-neutral-500");
@@ -90,7 +87,7 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
   const main = h("button", "session-open flex w-full min-w-0 items-start gap-2 text-left", dot,
-    h("span", "open-item-text min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, away, tag), stage, metadata));
+    h("span", "open-item-text min-w-0 flex-1", h("span", "flex items-start gap-1.5", title, tag), stage, metadata));
   main.setAttribute("type", "button");
   const column = h("div", "min-w-0 flex-1", main);
   const li = h("li", "open-item", column);
@@ -107,7 +104,6 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     phrase.textContent = stagePhrase(item);
     const to = openItemDestination(item);
     const leaves = !to.topic && !!to.session && to.session !== a.currentId;
-    away.classList.toggle("hidden", !leaves);
     // Title and phrase are short; the head's full wording stays one hover away.
     const full = [item.title !== item.problem ? item.problem : item.runName ?? "", phrase.textContent !== item.stage ? stageLine(item) : "",
       leaves ? OPENS_SESSION : ""];

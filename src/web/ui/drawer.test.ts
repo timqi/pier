@@ -266,7 +266,7 @@ it("marks a row current where its click lands: the newest run's session, never a
   expect(item("item:ask").querySelector(".session-open")!.getAttribute("aria-current")).toBeNull();
 });
 
-// A row whose click leaves the conversation for a session says so: ↗ beside the title, the label and tooltip in words.
+// A row whose click leaves the conversation for a session says so in its label and tooltip; no glyph, so the row's width never changes.
 it("marks a row whose click opens a session, never one answered in the chat, run-less or already shown", () => {
   current = "s-here";
   open = { items: [
@@ -277,9 +277,8 @@ it("marks a row whose click opens a session, never one answered in the chat, run
   ], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
-  const away = (key: string) => !item(key).querySelector(".open-item-away")!.classList.contains("hidden");
+  const away = (key: string) => item(key).querySelector(".session-open")!.getAttribute("aria-label")!.endsWith("opens its session");
   expect(["item:work", "item:ask", "item:bare", "item:here", "session:solo"].map(away)).toEqual([true, false, false, false, true]);
-  expect(item("item:work").querySelector(".open-item-away")!.getAttribute("aria-hidden")).toBe("true");
   const main = item("item:work").querySelector(".session-open")!;
   expect(main.getAttribute("aria-label")).toBe("work · in progress · opens its session");
   expect(main.title).toBe("w\nOpens its session");
