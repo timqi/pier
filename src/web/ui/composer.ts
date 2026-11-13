@@ -61,7 +61,6 @@ const imageStrip = $("#image-strip");
 const quoteStrip = $("#quote-strip");
 const commandMenu = $("#command-menu");
 const attachInput = $<HTMLInputElement>("#attach-input");
-const inputRow = input.parentElement!;
 
 let queueHasRows = false;
 let queueVersion = 0;
@@ -99,15 +98,16 @@ function trackKeyboard(): void {
   vv.addEventListener("scroll", sync);
 }
 
-/** The height is read at the row's width, so a new width (a rotation, a
- *  resized window) reads it again; the row's own height changes are not one. */
+/** The height is read at the draft's width, so a new width (a rotation, voice
+ *  mode's wrap, a return from voice mode's `display: none`, where it read 0)
+ *  reads it again; its own height changes are not one. */
 function trackWidth(): void {
-  let width = inputRow.clientWidth;
+  let width = input.clientWidth;
   new ResizeObserver(() => {
-    if (inputRow.clientWidth === width) return;
-    width = inputRow.clientWidth;
+    if (input.clientWidth === width) return;
+    width = input.clientWidth;
     autosize();
-  }).observe(inputRow);
+  }).observe(input);
 }
 
 /** The dock floats over the transcript, so the pane pads its tail by the dock's

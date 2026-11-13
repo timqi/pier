@@ -133,7 +133,7 @@ async function recallPending(stage: "fetch" | "body") {
 // pays back — measured that way, --dock-h stayed 34px short and the last
 // transcript row sat under the input pill.
 it("measures the dock's parts as border-box", () => {
-  const dock = state.observed.filter((o) => o.target !== node("#input").parentNode).map((o) => o.options);
+  const dock = state.observed.filter((o) => o.target !== node("#input")).map((o) => o.options);
   expect(dock.length).toBe(2);
   expect(dock).toEqual(dock.map(() => ({ box: "border-box" })));
 });
@@ -145,19 +145,33 @@ it("hands the pane half its scrollbar's width per edge", () => {
   expect(fake(document.querySelector("main")).style.getPropertyValue("--gutter")).toBe("10px");
 });
 
-// The height is read at the row's width: a window resized under a draft reads it again.
-it("re-reads the draft's height when the row's width changes, not its height", () => {
-  const row = node("#input").parentNode!;
+// The height is read at the draft's width: a window resized under a draft reads it again.
+it("re-reads the draft's height when its width changes, not its height", () => {
   const input = node("#input");
   type("a draft that fits one line here");
-  const watch = state.observed.find((o) => o.target === row)!;
+  const watch = state.observed.find((o) => o.target === input)!;
   const before = input.style.height;
-  Object.defineProperty(input, "scrollHeight", { value: 60 });
+  Object.defineProperty(input, "scrollHeight", { value: 60, configurable: true });
   watch.fire();
   expect(input.style.height).toBe(before);
-  Object.defineProperty(row, "clientWidth", { value: 240 });
+  Object.defineProperty(input, "clientWidth", { value: 240, configurable: true });
   watch.fire();
   expect(input.style.height).toBe("60px");
+});
+
+// Voice mode hides an empty draft, where it measures 0 tall: shown again, it is
+// read again, or the keyboard's draft is a clipped sliver.
+it("re-reads the draft's height when it is shown again after display: none", () => {
+  const input = node("#input");
+  const watch = state.observed.find((o) => o.target === input)!;
+  Object.defineProperty(input, "scrollHeight", { value: 0, configurable: true });
+  Object.defineProperty(input, "clientWidth", { value: 0, configurable: true });
+  watch.fire();
+  expect(input.style.height).toBe("0px");
+  Object.defineProperty(input, "scrollHeight", { value: 44, configurable: true });
+  Object.defineProperty(input, "clientWidth", { value: 240, configurable: true });
+  watch.fire();
+  expect(input.style.height).toBe("44px");
 });
 
 // localStorage is readable by any script on this origin; a tab-scoped store is not.
