@@ -119,7 +119,7 @@ the area is.
 | --- | --- | --- |
 | `core/` | 2.35k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
 | `channels/` | 5k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
-| `web/` | 15.35k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette, voice input with its hold-to-talk mode, caption card and ASR relay to two recognizers |
+| `web/` | 15.35k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette, voice input with its hold-to-talk mode, the composer's voice panel and ASR relay to two recognizers |
 | `agent/` | 3.2k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
 | `tasks/` | 4.2k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, and the `--worktree` seam |
 | root `src/*.ts` | 3.8k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |

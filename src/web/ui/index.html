@@ -130,6 +130,15 @@
     </div>
     <form id="composer" class="flex-none pb-3 pt-2">
       <div class="rounded-[10px] border border-neutral-200 bg-white px-3 py-2.5 transition-shadow">
+        <!-- The voice panel's head, shown while a take runs (voice-input.ts, style.css). -->
+        <div id="voice-head" class="-mr-2 -mt-2 items-center gap-2 pl-1 text-[13px]">
+          <span id="voice-dot" class="running-dot h-2 w-2 flex-none rounded-full"></span>
+          <span id="voice-status" role="status" class="font-medium">Starting…</span>
+          <span id="voice-clock" class="tabular-nums text-neutral-500">0:00</span>
+          <button type="button" id="voice-cancel" aria-label="Cancel voice input" class="icon-btn ml-auto h-11 w-11">
+            <span data-icon="X" class="h-4 w-4"></span>
+          </button>
+        </div>
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- The row the next send answers (composer.ts setQuote). -->
         <div id="quote-strip" class="hidden px-1 pb-1.5 pt-1"></div>
@@ -146,6 +155,8 @@
           <textarea id="input" rows="1"
             class="block max-h-48 min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 focus:outline-none"
             placeholder="Message…"></textarea>
+          <!-- Only while a take is held: between the voice panel's draft and its row. -->
+          <div id="voice-hint" hidden class="-order-1 basis-full px-1 text-center text-[12px] text-neutral-500"></div>
           <!-- Voice mode's input (voice-input.ts): hold to talk, tap for hands-free. -->
           <button type="button" id="voice-hold" title="Hold to talk · tap for hands-free"
             class="min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-(--line) bg-neutral-50 px-3 text-[15px] font-medium text-neutral-700">
@@ -179,22 +190,6 @@
       <button type="button" id="to-bottom" class="fab" title="Scroll to the end" aria-label="Scroll to the end">
         <span data-icon="ArrowDown" class="h-4 w-4"></span>
       </button>
-    </div>
-    <!-- A voice take's caption card over the transcript, the backdrop under it
-         (voice-input.ts); the composer stays above both. -->
-    <div id="voice-layer" hidden>
-      <div id="voice-card" role="dialog" aria-label="Voice input">
-        <div class="flex items-center gap-2 pl-4 text-[13px]">
-          <span id="voice-dot" class="running-dot h-2 w-2 flex-none rounded-full"></span>
-          <span id="voice-status" role="status" class="font-medium">Starting…</span>
-          <span id="voice-clock" class="tabular-nums text-neutral-500">0:00</span>
-          <button type="button" id="voice-cancel" aria-label="Cancel voice input" class="icon-btn ml-auto h-11 w-11">
-            <span data-icon="X" class="h-4 w-4"></span>
-          </button>
-        </div>
-        <div id="voice-text" aria-live="off"></div>
-        <div id="voice-hint" class="px-4 pb-3 text-center text-[12px] text-neutral-500"></div>
-      </div>
     </div>
   </main>
 

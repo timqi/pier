@@ -127,7 +127,7 @@ function trackDock(): void {
   for (const el of parts) ro.observe(el, { box: "border-box" });
 }
 
-/** Not in voice mode: a focus there is the user's tap, which leaves it. */
+/** Not in voice mode: there the phone's keyboard comes up only for the user's tap. */
 export function focusInput(): void {
   if (!voiceMode()) input.focus();
 }
@@ -489,7 +489,8 @@ function autosize(): void {
   input.style.height = "auto";
   // A classic scrollbar on the one-row box narrows the lines measured: one too many.
   input.style.overflowY = "hidden";
-  const next = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
+  // The cap is the CSS's: the voice panel's eight lines, else max-h-48.
+  const next = `${Math.min(input.scrollHeight, parseFloat(getComputedStyle(input).maxHeight) || Infinity)}px`;
   input.style.overflowY = "";
   input.style.height = next;
   if (next !== was) scrollBottom();
@@ -654,7 +655,7 @@ export function initComposer(d: ComposerDeps): void {
   initVoice({ sessionId: deps.sessionId, chatVisible: deps.chatVisible, changed: (id) => {
     autosize();
     saveDraft(id);
-  } });
+  }, resize: autosize });
   const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });

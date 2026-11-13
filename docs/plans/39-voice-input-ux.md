@@ -1,7 +1,10 @@
 # 39 — 语音输入：按住说话与展开的 composer
 
-状态：修订中（branch `voice-composer-panel`）——独立字幕卡取消，composer 自己展开为面板；模式、手势、按下即录已在
-`voice-input-ux` 落地并在 iPhone 上验证，不变。只改 `src/web/ui/`（浏览器）；服务端路由、wire、provider
+状态：已实现（branch `voice-composer-panel`）——独立字幕卡取消，composer 自己展开为面板；模式、手势、按下即录已在
+`voice-input-ux` 落地并在 iPhone 上验证，不变。修订在 headless Chrome（390×844 触摸模拟与 1280 宽）里走过：按住、轻点免提、
+上滑取消与滑回、Esc、两次 take 累积、take 之间点草稿改字仍在语音模式、长文本跟到底 / 上滑停跟 / 滑回恢复、take 期间发送、
+发送后收起、切回键盘模式、暗色；识别器是浏览器里打桩的 `/api/voice`（服务端的 mock 已随 `PIER_VOICE` 删除），麦克风是
+Chrome 的假设备。未测：真机 iPhone、`+` 加图、切会话（单测覆盖）。只改 `src/web/ui/`（浏览器）；服务端路由、wire、provider
 不变（[38](38-voice-input.md) 的传输与 provider 两节仍然有效）；不碰 `native/`。
 取代 38 的「按钮与状态」、06 §Mic，改写 03 的 Voice input / Voice text in the draft 两条。
 

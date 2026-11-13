@@ -59,6 +59,7 @@ beforeEach(async () => {
   vi.stubGlobal("window", { addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") state.pagehide = fn; } });
   doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  vi.stubGlobal("getComputedStyle", () => ({ maxHeight: "192px" }));
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("ResizeObserver", class {
     constructor(private readonly cb: () => void) {}
@@ -861,21 +862,37 @@ describe("voice mode", () => {
   };
   const say = (type: string, text: string) => take.on!.onEvent({ type, text });
   const label = () => node("#voice-hold-label").textContent;
-  const card = () => ({ open: !node("#voice-layer").hidden, status: node("#voice-status").textContent, hint: node("#voice-hint").hidden ? null : node("#voice-hint").textContent, text: node("#voice-text").textContent });
+  /** The panel as the composer card shows it: its head while a take runs (style.css), the hint while held. */
+  const panel = () => {
+    const c = node("#composer");
+    return { take: c.dataset.take ?? null, cancel: c.hasAttribute("data-cancel"), status: node("#voice-status").textContent, hint: node("#voice-hint").hidden ? null : node("#voice-hint").textContent, placeholder: input.getAttribute("placeholder") };
+  };
 
-  it("switches modes from the toggle, remembers voice mode, and leaves it when the draft is tapped", () => {
+  it("switches modes from the toggle and remembers voice mode", () => {
     const toggle = node("#voice");
     expect(toggle.hidden).toBe(false);
     expect([toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice")]).toEqual(["true", "Keyboard", true]);
     expect(stored.get("pier.voice")).toBe("on");
-    input.focus();
-    input.dispatchEvent(new Event("focus")); // the user's tap: the caret stays where it landed
-    expect([toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice")]).toEqual(["false", "Voice input", false]);
+    toggle.onclick!();
+    expect([toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice"), document.activeElement]).toEqual(["false", "Voice input", false, input]);
     expect(stored.has("pier.voice")).toBe(false);
     toggle.onclick!();
     expect(document.activeElement).not.toBe(input); // the phone's keyboard goes down
-    toggle.onclick!();
-    expect(document.activeElement).toBe(input);
+  });
+
+  it("edits the draft on a tap between takes without leaving voice mode, and the next take follows the edit", () => {
+    holdAt("", 0);
+    say("final", "First.");
+    pointer("pointerup", 20, 400);
+    take.on!.onState("idle");
+    input.focus();
+    input.dispatchEvent(new Event("focus")); // the user's tap: the caret stays where it landed
+    expect([document.activeElement, node("#composer").hasAttribute("data-voice"), input.readOnly]).toEqual([input, true, false]);
+    typeAt("First, edited.", 14);
+    pointer("pointerdown");
+    expect(document.activeElement).not.toBe(input); // the press takes the keyboard down
+    say("final", "Then more.");
+    expect(input.value).toBe("First, edited. Then more.");
   });
 
   it("hides the switch when the Console turns voice off, cancelling a take, and brings back the remembered mode with it", async () => {
@@ -901,22 +918,21 @@ describe("voice mode", () => {
     expect([node("#composer").hasAttribute("data-voice"), document.activeElement]).toEqual([false, input]);
   });
 
-  it("holds: the card shows the take's own text, the release keeps it in the draft and closes the card", () => {
+  it("holds: the panel's head and hint while the take runs, the release keeps the text in the draft and closes the head", () => {
     holdAt("ask: please", 5);
-    expect(card()).toEqual({ open: true, status: "Starting…", hint: "Release to finish · slide up to cancel", text: "Speak now" });
+    expect(panel()).toEqual({ take: "starting", cancel: false, status: "Starting…", hint: "Release to finish · slide up to cancel", placeholder: "Speak now" });
     expect([node("#voice").disabled, input.readOnly, bar.hasAttribute("data-live")]).toEqual([true, true, true]);
     take.on!.onState("recording");
-    expect(card().status).toBe("Listening");
+    expect(panel()).toMatchObject({ take: "recording", status: "Listening" });
     say("partial", "hel");
     say("final", "Hello. ");
     say("partial", "wor");
     expect(input.value).toBe("ask: Hello. worplease");
-    expect(card().text).toBe("Hello. wor");
     expect(drafts.get("pier.draft.a")).toBe("ask: Hello. worplease");
     pointer("pointerup", 20, 300);
     expect(take.stop).toHaveBeenCalledOnce();
     take.on!.onState("finishing");
-    expect(card().open).toBe(false);
+    expect(panel()).toMatchObject({ take: null, hint: null, placeholder: "Message…" });
     expect([label(), bar.getAttribute("aria-disabled")]).toEqual(["Finishing…", "true"]);
     say("final", "world.");
     take.on!.onEvent({ type: "done" });
@@ -941,21 +957,22 @@ describe("voice mode", () => {
     take.on!.onState("recording");
     say("final", "Spoken.");
     pointer("pointermove", -65, 100);
-    expect(node("#voice-card").hasAttribute("data-cancel")).toBe(true);
-    expect(card()).toMatchObject({ status: "Release to cancel", hint: "Slide back to keep talking" });
+    expect(panel()).toMatchObject({ cancel: true, status: "Release to cancel", hint: "Slide back to keep talking" });
     pointer("pointermove", -10, 200);
-    expect(card()).toMatchObject({ status: "Listening", hint: "Release to finish · slide up to cancel" });
+    expect(panel()).toMatchObject({ cancel: false, status: "Listening", hint: "Release to finish · slide up to cancel" });
     pointer("pointermove", -80, 300);
     pointer("pointerup", -80, 400);
     expect(take.cancel).toHaveBeenCalledOnce();
     expect(input.value).toBe("mine ");
+    take.on!.onState("idle");
+    expect(panel()).toMatchObject({ take: null, cancel: false });
   });
 
   it("turns a tap hands-free, and finishes on the next tap", () => {
     holdAt("", 0);
     pointer("pointerup", 22, 120);
     expect(take.stop).not.toHaveBeenCalled();
-    expect([card().open, card().hint, label(), node("#voice-hold-stop").hidden, document.activeElement]).toEqual([true, null, "Tap to finish", false, bar]);
+    expect([panel().take, panel().hint, label(), node("#voice-hold-stop").hidden, document.activeElement]).toEqual(["starting", null, "Tap to finish", false, bar]);
     pointer("pointerdown", 20, 2000);
     expect(take.stop).toHaveBeenCalledOnce();
   });
@@ -969,21 +986,12 @@ describe("voice mode", () => {
 
   it("starts hands-free from Enter or Space and finishes on the next", () => {
     key("Enter");
-    expect([card().open, label()]).toEqual([true, "Tap to finish"]);
+    expect([panel().take, label()]).toEqual(["starting", "Tap to finish"]);
     key(" ");
     expect(take.stop).toHaveBeenCalledOnce();
   });
 
-  it("finishes hands-free on a click on the backdrop, not on the card", () => {
-    key("Enter");
-    const layer = node("#voice-layer");
-    node("#voice-card").dispatchEvent(Object.assign(new Event("click", { bubbles: true })));
-    expect(take.stop).not.toHaveBeenCalled();
-    layer.dispatchEvent(new Event("click"));
-    expect(take.stop).toHaveBeenCalledOnce();
-  });
-
-  it("cancels from the card's ×, removing only what the take wrote", () => {
+  it("cancels from the head's ×, removing only what the take wrote", () => {
     holdAt("draft ", 6);
     say("final", "mine now");
     say("partial", " and this");
@@ -995,7 +1003,7 @@ describe("voice mode", () => {
     expect(take.stop).not.toHaveBeenCalled();
   });
 
-  it("cancels on Esc while the card is open, and leaves Esc alone while finishing", async () => {
+  it("cancels on Esc while the head is up, and leaves Esc alone while finishing", async () => {
     const { escapeKey } = vi.mocked(await import("./shortcut.js"));
     const [, , run, when] = escapeKey.mock.calls.find((c) => c[1] === "Cancel voice input")!;
     expect(when()).toBe(false);
@@ -1011,22 +1019,21 @@ describe("voice mode", () => {
     expect(when()).toBe(false);
   });
 
-  it("follows the caption's end unless the reader scrolled up", () => {
-    const caption = node("#voice-text");
-    // 20px a character, the card's eight lines 240px.
-    Object.defineProperties(caption, { scrollHeight: { get: () => Math.max(240, caption.textContent.length * 20) }, clientHeight: { value: 240 } });
+  it("follows the take's end in the draft unless the reader scrolled it a line away, and again once back", () => {
+    // 20px a character, the panel's eight lines 240px; the take writes at the draft's end.
+    Object.defineProperties(input, { scrollHeight: { get: () => Math.max(240, input.value.length * 20) }, clientHeight: { value: 240 } });
     holdAt("", 0);
     say("partial", "x".repeat(30));
-    expect(caption.scrollTop).toBe(600);
-    caption.scrollTop = 200; // scrolled up past a line
+    expect(input.scrollTop).toBe(360);
+    input.scrollTop = 0; // scrolled up past a line
     say("partial", "x".repeat(40));
-    expect(caption.scrollTop).toBe(200);
-    caption.scrollTop = 560; // back at the end
+    expect(input.scrollTop).toBe(0);
+    input.scrollTop = 560; // back at the end
     say("partial", "x".repeat(50));
-    expect(caption.scrollTop).toBe(1000);
+    expect(input.scrollTop).toBe(760);
   });
 
-  it("keeps the draft unfocused during a take, so the tap after it is the one that leaves voice mode", () => {
+  it("keeps the draft unfocused and in voice mode on a tap during a take", () => {
     holdAt("draft", 5);
     input.focus();
     input.dispatchEvent(new Event("focus"));
@@ -1034,7 +1041,7 @@ describe("voice mode", () => {
     expect(node("#composer").hasAttribute("data-voice")).toBe(true);
   });
 
-  it("drops the partial on an error, says why, and closes the card", () => {
+  it("drops the partial on an error, says why, and closes the head", () => {
     holdAt("", 0);
     node("#voice-cancel").focus(); // tabbed to the ×: the focus must not fall to the page
     say("final", "Kept.");
@@ -1043,7 +1050,7 @@ describe("voice mode", () => {
     take.on!.onState("idle");
     expect(input.value).toBe("Kept.");
     expect(state.appendTurn).toHaveBeenCalledWith("error", "voice input: upstream closed");
-    expect([card().open, document.activeElement]).toEqual([false, bar]);
+    expect([panel().take, document.activeElement]).toEqual([null, bar]);
   });
 
   it("cancels on a session switch, leaving the old draft without the take's text", () => {
@@ -1063,7 +1070,7 @@ describe("voice mode", () => {
     voice.endVoice();
     expect(take.cancel).toHaveBeenCalledOnce();
     take.on!.onState("idle"); // the take's own answer to its cancel
-    expect(card().open).toBe(false);
+    expect(panel().take).toBe(null);
     say("final", "And more."); // a take that ended sends none; were one late, it has no span
     expect(input.value).toBe("draft Spoken. and mo");
     select("b"); // the rotation's own restoreDraft finds no take to cancel
@@ -1094,6 +1101,7 @@ describe("voice mode", () => {
     expect(state.fetch).toHaveBeenCalledOnce();
     expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("Half a sentence.");
     expect(input.value).toBe("");
+    expect(panel()).toMatchObject({ take: null, placeholder: "Message…" }); // empty, so the panel is the one-row bar again
   });
 
   it("keeps the draft unsent when the take it waited for fails", async () => {

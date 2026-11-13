@@ -1,5 +1,5 @@
 // Voice mode: the composer's hold-to-talk bar, what a press on it does, and
-// the caption card a take shows over the transcript (03-web-workbench.md
+// the panel the composer card becomes while a take runs (03-web-workbench.md
 // §Voice input). One take at a time (voice.ts); its text is a span of the
 // draft, which is read-only while the take runs.
 
@@ -13,23 +13,23 @@ interface VoiceDeps {
   chatVisible: () => boolean;
   /** The draft of session `id` changed under the take: resize and save it. */
   changed: (id: string | null) => void;
+  /** The draft's box changed its type or minimum: measure its height again. */
+  resize: () => void;
 }
 
 const MODE_KEY = "pier.voice";
 const LIMIT_S = 300; // the server's cap on a take
 const WARN_S = 30;
-const LINE_PX = 30; // the card's 20px text at 1.5
+const LINE_PX = 30; // the panel's 20px text at 1.5
 
 const composer = $("#composer");
 const input = $<HTMLTextAreaElement>("#input");
 const toggle = $<HTMLButtonElement>("#voice");
 const bar = $<HTMLButtonElement>("#voice-hold");
 const barLabel = $("#voice-hold-label");
-const layer = $("#voice-layer");
-const card = $("#voice-card");
+const head = $("#voice-head");
 const status = $("#voice-status");
 const clock = $("#voice-clock");
-const caption = $("#voice-text");
 const hint = $("#voice-hint");
 const cancelBtn = $("#voice-cancel");
 
@@ -47,7 +47,7 @@ let ticker: ReturnType<typeof setInterval> | undefined;
 let clean = false; // the take ended with `done`: its text is whole
 let settling: ((whole: boolean) => void)[] = [];
 
-/** Voice mode is on: the draft is not focused for the user, only on their tap. */
+/** Voice mode is on: the draft is focused only by the user's tap. */
 export const voiceMode = (): boolean => voiceOn;
 
 /** `remember` false: not the user's switch, so the stored mode stays for later. */
@@ -61,6 +61,7 @@ function setMode(on: boolean, focus = true, remember = true): void {
   $("#voice-keyboard").hidden = !on;
   if (remember && on) localStorage.setItem(MODE_KEY, "on");
   else if (remember) localStorage.removeItem(MODE_KEY);
+  deps.resize();
   // The phone's keyboard follows the focus: down for talking, up for typing.
   if (on) input.blur();
   else if (focus) input.focus();
@@ -77,9 +78,10 @@ const live = (): boolean => state === "starting" || state === "recording";
 
 function paint(): void {
   const open = live();
-  layer.hidden = !open;
-  card.toggleAttribute("data-cancel", cancelling);
-  card.dataset.state = state;
+  if (open) composer.dataset.take = state;
+  else delete composer.dataset.take;
+  composer.toggleAttribute("data-cancel", cancelling);
+  input.placeholder = open ? "Speak now" : "Message…";
   status.textContent = cancelling ? "Release to cancel" : state === "starting" ? "Starting…" : "Listening";
   hint.hidden = !press;
   hint.textContent = cancelling ? "Slide back to keep talking" : "Release to finish · slide up to cancel";
@@ -103,31 +105,29 @@ function paintClock(): void {
   clock.classList.toggle("text-neutral-500", !warn);
 }
 
-/** The take's own text, from the draft: settled, then the partial. Follows the
- *  end only when the reader was there already, so scrolling up stops it. */
-function paintCaption(): void {
-  const atEnd = caption.scrollHeight - caption.scrollTop - caption.clientHeight <= LINE_PX;
-  const settled = span ? input.value.slice(span.start, span.mid) : "";
-  const partial = span ? input.value.slice(span.mid, span.end) : "";
-  caption.replaceChildren(
-    ...(settled || partial
-      ? [settled.trimStart(), h("span", "text-neutral-500", settled ? partial : partial.trimStart())]
-      : [h("span", "text-neutral-400", "Speak now")]),
-  );
-  if (atEnd) caption.scrollTop = caption.scrollHeight;
-}
-
 function write(edit: (span: Span) => SpanEdit): void {
   if (!span) return;
+  const follow = atTakeEnd(span.end);
   const e = edit(span);
   const [from, to] = [caretAfter(e, input.selectionStart), caretAfter(e, input.selectionEnd)];
   input.setRangeText(e.text, e.from, e.to);
   input.setSelectionRange(from, to);
   span = e.span;
   deps.changed(takeSession);
-  // The draft is not focused, so nothing scrolls it to the take's end but this.
-  if (input.scrollHeight > input.clientHeight) input.scrollTop = Math.max(0, heightTo(e.from + e.text.length) - input.clientHeight);
-  paintCaption();
+  if (follow) reveal(e.from + e.text.length);
+}
+
+/** The take's end is within a line of the draft's view: a reader who scrolled
+ *  it away stops the following, and scrolling back resumes it. */
+function atTakeEnd(end: number): boolean {
+  if (input.scrollHeight <= input.clientHeight) return true;
+  const y = heightTo(end);
+  return y >= input.scrollTop - LINE_PX && y <= input.scrollTop + input.clientHeight + LINE_PX;
+}
+
+/** The draft is not focused, so nothing scrolls it to the take's end but this. */
+function reveal(end: number): void {
+  if (input.scrollHeight > input.clientHeight) input.scrollTop = Math.max(0, heightTo(end) - input.clientHeight);
 }
 
 /** How tall the draft is down to `end`, laid out in a copy of its own box. */
@@ -168,9 +168,10 @@ function onState(next: TakeState): void {
     clean = false;
   }
   input.readOnly = next !== "idle";
-  // A focus left inside the hidden card would fall to the page.
-  if (!live() && card.contains(document.activeElement)) bar.focus();
+  // A focus left inside the hidden head would fall to the page.
+  if (!live() && head.contains(document.activeElement)) bar.focus();
   paint();
+  deps.resize();
 }
 
 function begin(): void {
@@ -179,17 +180,17 @@ function begin(): void {
   started = Date.now();
   paintClock();
   ticker = setInterval(paintClock, 1000);
-  caption.scrollTop = 0;
-  paintCaption();
+  input.blur();
   try {
     take = startTake({ onEvent, onState });
+    if (span) reveal(span.end);
   } catch (err) {
     onState("idle");
     appendTurn("error", `voice input: ${String(err)}`);
   }
 }
 
-/** The text stays, the card closes; the bar is `Finishing…` until `done`. */
+/** The text stays, the head closes; the bar is `Finishing…` until `done`. */
 function finish(): void {
   take?.stop();
 }
@@ -256,11 +257,6 @@ function wireBar(): void {
     if (state === "idle") begin();
     else if (live() && !press) finish();
   });
-  layer.addEventListener("click", (ev) => {
-    if (ev.target !== layer || press) return;
-    finish();
-    bar.focus();
-  });
   cancelBtn.onclick = () => {
     cancelVoice();
     bar.focus();
@@ -286,13 +282,10 @@ export async function offerVoice(): Promise<void> {
   toggle.onclick = () => setMode(!voiceOn);
   wireBar();
   window.addEventListener("pagehide", cancelVoice);
-  // A tap on the draft is to edit it: the keyboard, the caret where it landed.
-  // During a take the draft is read-only and stays unfocused, so a later tap is
-  // still the one that leaves voice mode.
+  // A tap on the draft between takes edits it in voice mode; during a take it
+  // is read-only and keeps the phone's keyboard down.
   input.addEventListener("focus", () => {
-    if (!voiceOn) return;
-    if (state === "idle") setMode(false, false);
-    else input.blur();
+    if (state !== "idle") input.blur();
   });
 }
 
