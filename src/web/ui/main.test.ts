@@ -43,11 +43,12 @@ vi.mock("./chat.js", () => ({
   resetChat: () => { h.content = []; h.resetChat(); }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
-  cancelVoice: vi.fn(), clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), endVoice: vi.fn(), focusInput: vi.fn(),
+  clearOptimistic: vi.fn(), dropParked: vi.fn(), dropStaged: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setQuote: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
 }));
+vi.mock("./voice-input.js", () => ({ cancelVoice: vi.fn(), endVoice: vi.fn() }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn(), isIOS: h.isIOS }));
 vi.mock("./session-header.js", () => ({
   initHeader: (deps: typeof h.header) => { h.header = deps; }, noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
@@ -979,7 +980,8 @@ describe("the continuous conversation", () => {
     h.history.mockImplementation((url) => url.includes("/h2/") ? head.promise : Promise.resolve(earlier(url.split("/")[3]!)));
     const paints = h.resetChat.mock.calls.length;
     const loadings = vi.mocked((await import("./chat.js")).chatLoading).mock.calls.length;
-    const { endVoice, restoreDraft } = vi.mocked(await import("./composer.js"));
+    const { restoreDraft } = vi.mocked(await import("./composer.js"));
+    const { endVoice } = vi.mocked(await import("./voice-input.js"));
     expect(endVoice).not.toHaveBeenCalled(); // opening the conversation was the user's
     chain = [member("h2", "new", 7), member("h1"), member("h0", "first")];
     h.composer.headMoved?.();
@@ -1140,7 +1142,7 @@ describe("the continuous conversation", () => {
 
   it("ends a voice take with its text kept when a read-only answer, not the re-list's follow, moves the pane to the head", async () => {
     await boot([member("h1"), member("h0", "first")]);
-    const { endVoice } = vi.mocked(await import("./composer.js"));
+    const { endVoice } = vi.mocked(await import("./voice-input.js"));
     const visible = vi.mocked((await import("./views.js")).isChatVisible);
     try {
       // Nothing follows a rotation read behind Settings; back in the chat, h1's reload answers read-only.
@@ -1253,7 +1255,7 @@ describe("the continuous conversation", () => {
     expect(h.composer.continuous()).toBe(true);
     expect(h.content).toContain("The continuous conversation — your first message starts it.");
     // No draft is restored on this path, so the voice take is ended by name.
-    expect((await import("./composer.js")).cancelVoice).toHaveBeenCalled();
+    expect((await import("./voice-input.js")).cancelVoice).toHaveBeenCalled();
     // Before the first message is when a charter is written.
     const hint = fake(h.appendTurn.mock.results.at(-1)!.value);
     const charter = hint.nextElementSibling!;

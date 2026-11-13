@@ -360,6 +360,10 @@ export class FakeElement extends EventTarget {
     if ([...ancestors(this)].some((n) => n.inert)) return;
     focused.set(this.#document()!, this);
   }
+  blur(): void {
+    const doc = this.#document();
+    if (doc && focused.get(doc) === this) focused.delete(doc);
+  }
   /** Like the browser, nothing on a disabled control; `onclick` is a listener like any other. */
   click(): void {
     if (FORM_CONTROLS.has(this.localName) && this.disabled) return;

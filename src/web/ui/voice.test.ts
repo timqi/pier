@@ -1,6 +1,6 @@
-// The take's lifecycle over fake audio, fetch and EventSource; the draft span's rules as pure edits.
+// The take's lifecycle over fake audio, fetch and EventSource; the draft span's rules as pure edits; the hold bar's gesture.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { caretAfter, type Span, type SpanEdit, spanAt, voiceAvailable, spanCancel, spanEdited, spanError, spanText, startTake, type TakeState, type VoiceEvent } from "./voice.js";
+import { caretAfter, pressAt, type Span, type SpanEdit, spanAt, voiceAvailable, spanCancel, spanError, spanText, startTake, type TakeState, type VoiceEvent } from "./voice.js";
 
 vi.mock("./voice-worklet.ts?worker&url", () => ({ default: "/app/assets/voice-worklet.js" }));
 
@@ -49,37 +49,26 @@ describe("draft span", () => {
     expect(spanError(owned.span!).span).toBeNull();
     expect(apply(owned.text, spanCancel(owned.span!))).toBe("x");
   });
+});
 
-  const span = { start: 4, mid: 7, end: 9 }; // "pre one tw post": "one" settled, "tw" partial
-  const draft = "pre onetw post";
+describe("hold bar press", () => {
+  const press = { x: 100, y: 500, at: 1000, top: 480 };
 
-  it("moves with an edit wholly before it, even one ending at its start", () => {
-    expect(spanEdited(span, draft, "Xpre onetw post", 1)).toEqual({ start: 5, mid: 8, end: 10 });
-    expect(spanEdited(span, draft, "preonetw post", 3)).toEqual({ start: 3, mid: 6, end: 8 });
-    expect(spanEdited(span, draft, "pre !onetw post", 5)).toEqual({ start: 5, mid: 8, end: 10 });
+  it("is a cancel only past 64px above the bar, while held and at the release", () => {
+    expect(pressAt(press, "move", 100, 417, 1500)).toBe("held");
+    expect(pressAt(press, "move", 100, 415, 1500)).toBe("cancelling");
+    expect(pressAt(press, "move", 100, 450, 1600)).toBe("held"); // slid back
+    expect(pressAt(press, "up", 100, 415, 1700)).toBe("cancel");
   });
 
-  it("reads the caret, not the first difference, when the typed letter repeats the span's", () => {
-    // "o" typed just before "one": a plain prefix diff would place it inside the span.
-    expect(spanEdited(span, draft, "pre oonetw post", 5)).toEqual({ start: 5, mid: 8, end: 10 });
+  it("finishes a hold of 300ms or a moving release, and turns a short still press hands-free", () => {
+    expect(pressAt(press, "up", 100, 500, 1300)).toBe("finish");
+    expect(pressAt(press, "up", 103, 505, 1299)).toBe("hands-free");
+    expect(pressAt(press, "up", 110, 500, 1100)).toBe("finish");
   });
 
-  it("stays put for an edit after it", () => {
-    expect(spanEdited(span, draft, "pre onetw post!", 15)).toBe(span);
-    expect(spanEdited(span, draft, "pre onetw!post", 10)).toBe(span);
-  });
-
-  it("is given up to the user by an edit touching it, and restarts empty at the caret", () => {
-    const next = spanEdited(span, draft, "pre onXetw post", 7);
-    expect(next).toEqual({ start: 7, mid: 7, end: 7 });
-    // A cancel now removes nothing the user took over.
-    expect(apply("pre onXetw post", spanCancel(next))).toBe("pre onXetw post");
-  });
-
-  it("falls back to the text when the caret does not close the edit", () => {
-    // A select-all replace with the caret left at 0.
-    expect(spanEdited(span, draft, "new", 0)).toEqual(spanAt(0));
-    expect(spanEdited(span, draft, "Zpre onetw post", 0)).toEqual({ start: 5, mid: 8, end: 10 });
+  it("keeps listening hands-free when the system takes the press away", () => {
+    expect(pressAt(press, "cancel", 100, 300, 5000)).toBe("hands-free");
   });
 });
 
@@ -100,7 +89,7 @@ let opened: ReturnType<typeof deferred> | null;
 let available: boolean;
 let sources: { url: string; onmessage: ((ev: { data: string }) => void) | null; onerror: (() => void) | null; close: ReturnType<typeof vi.fn> }[];
 let nodes: { port: { postMessage: ReturnType<typeof vi.fn>; onmessage: ((ev: { data: unknown }) => void) | null }; disconnect: ReturnType<typeof vi.fn> }[];
-let contexts: { close: ReturnType<typeof vi.fn> }[];
+let contexts: { close: ReturnType<typeof vi.fn>; resume: ReturnType<typeof vi.fn> }[];
 let track: { stop: ReturnType<typeof vi.fn> };
 let mic: Promise<unknown>;
 let states: TakeState[];
@@ -127,6 +116,7 @@ beforeEach(() => {
     audioWorklet = { addModule: vi.fn(() => Promise.resolve()) };
     destination = {};
     close = vi.fn(() => Promise.resolve());
+    resume = vi.fn(() => Promise.resolve());
     constructor() { contexts.push(this); }
     createMediaStreamSource() { return { connect: (n: unknown) => n }; }
   });
@@ -340,6 +330,25 @@ describe("a take", () => {
     await settled();
     expect(calls.at(-1)).toMatchObject({ url: "/api/voice/t2", method: "DELETE" });
     expect(sources).toEqual([]);
+  });
+
+  it("records once the microphone feeds the worklet, before the take is open, and resumes the context then and on request", async () => {
+    opened = deferred();
+    const take = start();
+    expect(states).toEqual(["starting"]);
+    await settled();
+    expect(states).toEqual(["starting", "recording"]);
+    expect(contexts[0]!.resume).toHaveBeenCalledOnce();
+    frame(1); // captured while the take opens
+    expect(uploads()).toEqual([]);
+    opened.resolve(res(200, { id: "t1" }));
+    await settled();
+    expect(uploads()).toHaveLength(1);
+    take.resume();
+    expect(contexts[0]!.resume).toHaveBeenCalledTimes(2);
+    take.cancel();
+    take.resume(); // a closed context is not resumed
+    expect(contexts[0]!.resume).toHaveBeenCalledTimes(2);
   });
 
   it("finishes once set up when stopped while starting", async () => {

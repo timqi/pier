@@ -12,7 +12,7 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, splitItem, splitSpeaker, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { caretAfter, type Span, type SpanEdit, spanAt, spanCancel, spanEdited, spanError, spanText, startTake, type Take, type TakeState, type VoiceEvent, voiceAvailable } from "./voice.js";
+import { cancelVoice, endVoice, initVoice, keyboardMode, voiceMode } from "./voice-input.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
@@ -127,8 +127,9 @@ function trackDock(): void {
   for (const el of parts) ro.observe(el, { box: "border-box" });
 }
 
+/** Not in voice mode: a focus there is the user's tap, which leaves it. */
 export function focusInput(): void {
-  input.focus();
+  if (!voiceMode()) input.focus();
 }
 
 /** True when `text` was our own optimistic render — the caller skips drawing it. */
@@ -511,8 +512,7 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
     if (sending) return;
     sending = true;
     // The take ends, but its later text must not land in the next draft.
-    span = null;
-    take?.stop();
+    endVoice();
     // Cleared before any await: whatever is typed while an upload runs is a
     // new draft, not collateral of this send.
     input.value = "";
@@ -622,7 +622,7 @@ async function recallQueue(): Promise<void> {
         if (selected) {
           input.value = text;
           autosize();
-          if (draftAtStart === draftVersion && deps.chatVisible() && document.activeElement === focusAtStart) input.focus();
+          if (draftAtStart === draftVersion && deps.chatVisible() && document.activeElement === focusAtStart) focusInput();
         }
         saveDraft(id, text);
       } catch (error) {
@@ -636,113 +636,6 @@ async function recallQueue(): Promise<void> {
   }
 }
 
-// --- voice input ----------------------------------------------------------------------
-// One take at a time (voice.ts); its text is a span of the draft, last
-// reconciled with the user's edits at `spanDraft`.
-
-const voiceBtn = $<HTMLButtonElement>("#voice");
-const voiceCancel = $("#voice-cancel");
-let take: Take | null = null;
-let takeSession: string | null = null;
-let span: Span | null = null;
-let spanDraft = "";
-// A write under an IME's candidate ends the composition: it waits for the commit.
-let composing = false;
-const heldWrites: ((span: Span) => SpanEdit)[] = [];
-
-function spanSync(): void {
-  if (span && input.value !== spanDraft) span = spanEdited(span, spanDraft, input.value, input.selectionEnd);
-  spanDraft = input.value;
-}
-
-function voiceWrite(edit: (span: Span) => SpanEdit): void {
-  if (composing) return void heldWrites.push(edit);
-  spanSync();
-  if (!span) return;
-  const e = edit(span);
-  const [from, to] = [caretAfter(e, input.selectionStart), caretAfter(e, input.selectionEnd)];
-  input.setRangeText(e.text, e.from, e.to);
-  input.setSelectionRange(from, to);
-  span = e.span;
-  spanDraft = input.value;
-  autosize();
-  saveDraft(takeSession);
-}
-
-function voiceEvent(e: VoiceEvent): void {
-  if (e.type === "partial" || e.type === "final") voiceWrite((s) => spanText(s, e.type, e.text, input.value[s.mid - 1]));
-  if (e.type !== "error") return;
-  voiceWrite(spanError);
-  appendTurn("error", `voice input: ${e.message}`);
-}
-
-const VOICE_TITLE: Record<TakeState, string> = { idle: "Voice input", starting: "Starting the microphone — click to stop", recording: "Stop voice input", finishing: "Finishing voice input…" };
-
-/** The look of each state is style.css's, keyed on `aria-pressed` and `disabled`. */
-function voiceState(state: TakeState): void {
-  if (state === "idle") {
-    take = null;
-    // Writes held by a composition still need the span; its end releases it.
-    if (!composing) span = null;
-  }
-  const live = state !== "idle";
-  const stopping = state === "recording" || state === "finishing";
-  voiceBtn.disabled = state === "finishing";
-  voiceBtn.title = VOICE_TITLE[state];
-  voiceBtn.setAttribute("aria-pressed", String(live));
-  $("#voice-mic").hidden = stopping;
-  $("#voice-stop").hidden = !stopping;
-  voiceCancel.hidden = !live;
-}
-
-function toggleVoice(): void {
-  if (take) return take.stop();
-  heldWrites.length = 0;
-  takeSession = deps.sessionId();
-  spanDraft = input.value;
-  span = spanAt(input.selectionEnd);
-  try {
-    take = startTake({ onEvent: voiceEvent, onState: voiceState });
-  } catch (err) {
-    voiceState("idle");
-    appendTurn("error", `voice input: ${String(err)}`);
-  }
-}
-
-export function cancelVoice(): void {
-  // A span that outlived its take is one a composition held: its writes must not land in the next draft.
-  if (!take) return void (span = null);
-  composing = false; // leaving waits for no composition
-  voiceWrite(spanCancel);
-  take.cancel();
-}
-
-/** The draft went out of sight, or to another session unasked: the take ends
- *  with its text kept, a composition's held writes landed, and writes no more. */
-export function endVoice(): void {
-  composing = false; // leaving waits for no composition
-  for (const edit of heldWrites.splice(0)) voiceWrite(edit);
-  span = null;
-  take?.cancel();
-}
-
-/** Shown only where the server can transcribe and the browser can capture. */
-async function offerVoice(): Promise<void> {
-  if (!(await voiceAvailable())) return;
-  voiceBtn.hidden = false;
-  voiceBtn.onclick = toggleVoice;
-  voiceCancel.onclick = cancelVoice;
-  window.addEventListener("pagehide", cancelVoice);
-  input.addEventListener("compositionstart", () => {
-    composing = true;
-  });
-  input.addEventListener("compositionend", () => {
-    composing = false;
-    for (const edit of heldWrites.splice(0)) voiceWrite(edit);
-    if (!take) span = null;
-  });
-}
-
 // --- wiring ----------------------------------------------------------------------------
 
 export function initComposer(d: ComposerDeps): void {
@@ -751,13 +644,15 @@ export function initComposer(d: ComposerDeps): void {
   trackKeyboard();
   trackDock();
   trackWidth();
+  initVoice({ sessionId: deps.sessionId, chatVisible: deps.chatVisible, changed: (id) => {
+    autosize();
+    saveDraft(id);
+  } });
   const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });
   };
   stopBtn.onclick = abort;
-  // Before the turn's Esc: a take running is the nearer thing to cancel.
-  escapeKey(voiceCancel, "Cancel voice input", cancelVoice, () => take !== null && deps.chatVisible());
   // Only while the button is on screen: Esc with nothing running belongs to
   // the browser, and in a Console view there is no turn in front of you.
   escapeKey(stopBtn, "Stop the running turn", abort, () =>
@@ -770,11 +665,10 @@ export function initComposer(d: ComposerDeps): void {
     void send("auto");
   };
   // "/" is where Slack, GitHub and Discord put this.
-  letterKey(input, ["/"], "Write a message", focusInput, deps.chatVisible);
+  letterKey(input, ["/"], "Write a message", keyboardMode, deps.chatVisible);
   // Focusing the composer means the user is watching the tail.
   input.onfocus = followTail;
   input.oninput = () => {
-    spanSync();
     autosize();
     saveDraft();
     commandDismissed = false;
@@ -824,5 +718,4 @@ export function initComposer(d: ComposerDeps): void {
     attachInput.value = "";
   };
   updateComposer();
-  void offerVoice();
 }

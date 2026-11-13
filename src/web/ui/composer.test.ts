@@ -17,7 +17,7 @@ vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
 // The take is voice.test.ts's; here only what the composer does with its events.
 const take = vi.hoisted(() => ({
   on: null as { onEvent: (e: unknown) => void; onState: (s: string) => void } | null,
-  stop: vi.fn(), cancel: vi.fn(),
+  stop: vi.fn(), cancel: vi.fn(), resume: vi.fn(),
 }));
 vi.mock("./voice.js", async (real) => ({
   ...await real<typeof import("./voice.js")>(),
@@ -25,7 +25,7 @@ vi.mock("./voice.js", async (real) => ({
   startTake: (on: NonNullable<typeof take.on>) => {
     take.on = on;
     on.onState("starting");
-    return { stop: take.stop, cancel: take.cancel };
+    return { stop: take.stop, cancel: take.cancel, resume: take.resume };
   },
 }));
 
@@ -801,9 +801,10 @@ describe("the chat-command completion", () => {
   });
 });
 
-describe("voice input", () => {
-  type Draft = FakeElement & { selectionStart: number; selectionEnd: number; setRangeText: (text: string, from: number, to: number) => void };
+describe("voice mode", () => {
+  type Draft = FakeElement & { selectionStart: number; selectionEnd: number; readOnly?: boolean; setRangeText: (text: string, from: number, to: number) => void };
   let input: Draft;
+  let bar: FakeElement;
   /** The textarea's selection and `setRangeText`'s default "preserve", as HTML specifies it: the DOM double lacks both. */
   beforeEach(async () => {
     input = node("#input") as Draft;
@@ -820,171 +821,230 @@ describe("voice input", () => {
       input.selectionStart = from;
       input.selectionEnd = to;
     } });
+    bar = node("#voice-hold");
+    Object.assign(bar, { setPointerCapture: vi.fn() });
     take.on = null;
     await settled(); // the availability check
+    node("#voice").onclick!(); // into voice mode
   });
+  /** A pointer event on the bar, whose top edge is at 0. */
+  const pointer = (type: string, y = 20, at = 0, x = 10) => {
+    const ev = new Event(type);
+    Object.defineProperties(ev, { button: { value: 0 }, pointerId: { value: 1 }, clientX: { value: x }, clientY: { value: y }, timeStamp: { value: at } });
+    bar.dispatchEvent(ev);
+  };
+  const key = (k: string) => bar.dispatchEvent(Object.assign(new Event("keydown", { cancelable: true }), { key: k, repeat: false }));
   const typeAt = (text: string, caret: number) => {
     input.value = text;
     input.selectionStart = input.selectionEnd = caret;
     input.oninput!();
   };
-  const startAt = (text: string, caret: number) => {
+  /** Pressed and held: the take runs until `pointer("pointerup", …, ≥ 300)`. */
+  const holdAt = (text: string, caret: number) => {
     typeAt(text, caret);
-    node("#voice").onclick!();
+    pointer("pointerdown");
   };
   const say = (type: string, text: string) => take.on!.onEvent({ type, text });
+  const label = () => node("#voice-hold-label").textContent;
+  const card = () => ({ open: !node("#voice-layer").hidden, status: node("#voice-status").textContent, hint: node("#voice-hint").hidden ? null : node("#voice-hint").textContent, text: node("#voice-text").textContent });
 
-  it("shows the mic, and its stop and cancel while a take runs", () => {
-    const mic = node("#voice");
-    expect(mic.hidden).toBe(false);
-    expect(node("#voice-cancel").hidden).toBe(true);
-    startAt("", 0);
-    expect(mic.getAttribute("aria-pressed")).toBe("true");
-    expect(node("#voice-cancel").hidden).toBe(false);
-    take.on!.onState("recording");
-    expect([node("#voice-mic").hidden, node("#voice-stop").hidden]).toEqual([true, false]);
-    mic.onclick!();
-    expect(take.stop).toHaveBeenCalledOnce();
-    take.on!.onState("finishing");
-    expect(mic.disabled).toBe(true);
-    take.on!.onState("idle");
-    expect([mic.getAttribute("aria-pressed"), mic.disabled, node("#voice-cancel").hidden]).toEqual(["false", false, true]);
+  it("switches modes from the toggle, remembers voice mode, and leaves it when the draft is tapped", () => {
+    const toggle = node("#voice");
+    expect(toggle.hidden).toBe(false);
+    expect([toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice")]).toEqual(["true", "Keyboard", true]);
+    expect(stored.get("pier.voice")).toBe("on");
+    input.focus();
+    input.dispatchEvent(new Event("focus")); // the user's tap: the caret stays where it landed
+    expect([toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice")]).toEqual(["false", "Voice input", false]);
+    expect(stored.has("pier.voice")).toBe(false);
+    toggle.onclick!();
+    expect(document.activeElement).not.toBe(input); // the phone's keyboard goes down
+    toggle.onclick!();
+    expect(document.activeElement).toBe(input);
   });
 
-  it("writes at the caret, follows the user's edits around it, and keeps the text when done", () => {
-    startAt("ask: please", 5);
+  it("keeps the draft unfocused for focus nobody asked for, and gives it the keyboard for /", async () => {
+    composer.focusInput();
+    expect(document.activeElement).not.toBe(input);
+    const { letterKey } = vi.mocked(await import("./shortcut.js"));
+    const slash = letterKey.mock.calls.find((c) => c[1][0] === "/")![3];
+    slash();
+    expect([node("#composer").hasAttribute("data-voice"), document.activeElement]).toEqual([false, input]);
+  });
+
+  it("holds: the card shows the take's own text, the release keeps it in the draft and closes the card", () => {
+    holdAt("ask: please", 5);
+    expect(card()).toEqual({ open: true, status: "Starting…", hint: "Release to finish · slide up to cancel", text: "Speak now" });
+    expect([node("#voice").disabled, input.readOnly, bar.hasAttribute("data-live")]).toEqual([true, true, true]);
+    take.on!.onState("recording");
+    expect(card().status).toBe("Listening");
     say("partial", "hel");
     say("final", "Hello. ");
-    expect(input.value).toBe("ask: Hello. please");
-    expect(input.selectionEnd).toBe(12); // the user's caret moved with the text before it
-    typeAt("Then ask: Hello. please", 5);
-    say("partial", "more");
-    expect(input.value).toBe("Then ask: Hello. moreplease");
-    expect(drafts.get("pier.draft.a")).toBe("Then ask: Hello. moreplease");
+    say("partial", "wor");
+    expect(input.value).toBe("ask: Hello. worplease");
+    expect(card().text).toBe("Hello. wor");
+    expect(drafts.get("pier.draft.a")).toBe("ask: Hello. worplease");
+    pointer("pointerup", 20, 300);
+    expect(take.stop).toHaveBeenCalledOnce();
+    take.on!.onState("finishing");
+    expect(card().open).toBe(false);
+    expect([label(), bar.getAttribute("aria-disabled")]).toEqual(["Finishing…", "true"]);
+    say("final", "world.");
     take.on!.onEvent({ type: "done" });
     take.on!.onState("idle");
-    expect(input.value).toBe("Then ask: Hello. moreplease");
+    expect(input.value).toBe("ask: Hello. world.please");
+    expect([label(), bar.getAttribute("aria-disabled"), node("#voice").disabled, input.readOnly]).toEqual(["Hold to talk", "false", false, false]);
   });
 
-  it("keeps a caret at the take's end at its end, and spaces bare Latin sentences apart", () => {
-    startAt("Typed", 5);
-    say("partial", "fir");
+  it("puts each take after the last, the caret moving with the take's end", () => {
+    holdAt("Typed", 5);
     say("final", "First.");
+    pointer("pointerup", 20, 400);
+    take.on!.onState("idle");
+    pointer("pointerdown");
     say("final", "Second one.");
     expect(input.value).toBe("Typed First. Second one.");
     expect([input.selectionStart, input.selectionEnd]).toEqual([24, 24]);
   });
 
-  it("holds its writes while an IME composes, and lands them at the commit even after the take ended", () => {
-    startAt("", 0);
-    say("final", "One.");
-    input.dispatchEvent(new Event("compositionstart"));
-    say("partial", "tw");
-    say("final", "Two.");
-    take.on!.onEvent({ type: "done" });
-    take.on!.onState("idle");
-    expect(input.value).toBe("One.");
-    typeAt("你好One.", 2); // the commit, before the take's text
-    input.dispatchEvent(new Event("compositionend"));
-    expect(input.value).toBe("你好One. Two.");
-    expect(drafts.get("pier.draft.a")).toBe("你好One. Two.");
+  it("marks a slide past 64px above the bar as a pending cancel, undone by sliding back, done by releasing there", () => {
+    holdAt("mine ", 5);
+    take.on!.onState("recording");
+    say("final", "Spoken.");
+    pointer("pointermove", -65, 100);
+    expect(node("#voice-card").hasAttribute("data-cancel")).toBe(true);
+    expect(card()).toMatchObject({ status: "Release to cancel", hint: "Slide back to keep talking" });
+    pointer("pointermove", -10, 200);
+    expect(card()).toMatchObject({ status: "Listening", hint: "Release to finish · slide up to cancel" });
+    pointer("pointermove", -80, 300);
+    pointer("pointerup", -80, 400);
+    expect(take.cancel).toHaveBeenCalledOnce();
+    expect(input.value).toBe("mine ");
   });
 
-  it("drops a held write on a session switch instead of landing it in the next draft", () => {
-    drafts.set("pier.draft.b", "other");
-    startAt("mine", 4);
-    input.dispatchEvent(new Event("compositionstart"));
-    say("final", "late");
-    select("b");
-    input.dispatchEvent(new Event("compositionend"));
-    expect(input.value).toBe("other");
-    expect(drafts.get("pier.draft.a")).toBe("mine");
+  it("turns a tap hands-free, and finishes on the next tap", () => {
+    holdAt("", 0);
+    pointer("pointerup", 22, 120);
+    expect(take.stop).not.toHaveBeenCalled();
+    expect([card().open, card().hint, label(), node("#voice-hold-stop").hidden, document.activeElement]).toEqual([true, null, "Tap to finish", false, bar]);
+    pointer("pointerdown", 20, 2000);
+    expect(take.stop).toHaveBeenCalledOnce();
   });
 
-  it("drops the writes a composition still holds when the session changes after the take ended", () => {
-    drafts.set("pier.draft.b", "other");
-    startAt("mine", 4);
-    input.dispatchEvent(new Event("compositionstart"));
-    say("final", "late");
-    take.on!.onEvent({ type: "done" });
-    take.on!.onState("idle");
-    select("b");
-    input.dispatchEvent(new Event("compositionend"));
-    expect(input.value).toBe("other");
-    expect(drafts.get("pier.draft.a")).toBe("mine");
+  it("turns a press the system took away hands-free, keeping what was said", () => {
+    holdAt("", 0);
+    say("final", "Kept.");
+    pointer("pointercancel", 20, 50);
+    expect([take.stop.mock.calls.length, take.cancel.mock.calls.length, label(), input.value]).toEqual([0, 0, "Tap to finish", "Kept."]);
   });
 
-  it("cancels by removing only what the take still owns", () => {
-    startAt("", 0);
+  it("starts hands-free from Enter or Space and finishes on the next", () => {
+    key("Enter");
+    expect([card().open, label()]).toEqual([true, "Tap to finish"]);
+    key(" ");
+    expect(take.stop).toHaveBeenCalledOnce();
+  });
+
+  it("finishes hands-free on a click on the backdrop, not on the card", () => {
+    key("Enter");
+    const layer = node("#voice-layer");
+    node("#voice-card").dispatchEvent(Object.assign(new Event("click", { bubbles: true })));
+    expect(take.stop).not.toHaveBeenCalled();
+    layer.dispatchEvent(new Event("click"));
+    expect(take.stop).toHaveBeenCalledOnce();
+  });
+
+  it("cancels from the card's ×, removing only what the take wrote", () => {
+    holdAt("draft ", 6);
     say("final", "mine now");
-    typeAt("mine, now", 5); // inside the span: its text is the user's
     say("partial", " and this");
-    expect(input.value).toBe("mine, and this now");
     node("#voice-cancel").onclick!();
     expect(take.cancel).toHaveBeenCalledOnce();
-    expect(input.value).toBe("mine, now");
+    expect(input.value).toBe("draft ");
+    take.on!.onState("idle");
+    pointer("pointerup", 20, 900); // the finger still down: nothing more to end
+    expect(take.stop).not.toHaveBeenCalled();
   });
 
-  it("drops the partial on an error and says why", () => {
-    startAt("", 0);
+  it("cancels on Esc while the card is open, and leaves Esc alone while finishing", async () => {
+    const { escapeKey } = vi.mocked(await import("./shortcut.js"));
+    const [, , run, when] = escapeKey.mock.calls.find((c) => c[1] === "Cancel voice input")!;
+    expect(when()).toBe(false);
+    holdAt("", 0);
+    expect(when()).toBe(true);
+    run();
+    expect(take.cancel).toHaveBeenCalledOnce();
+    take.on!.onState("idle");
+    holdAt("", 0);
+    pointer("pointerup", 20, 500);
+    take.on!.onState("finishing");
+    expect(when()).toBe(false);
+  });
+
+  it("follows the caption's end unless the reader scrolled up", () => {
+    const caption = node("#voice-text");
+    // 20px a character, the card's eight lines 240px.
+    Object.defineProperties(caption, { scrollHeight: { get: () => Math.max(240, caption.textContent.length * 20) }, clientHeight: { value: 240 } });
+    holdAt("", 0);
+    say("partial", "x".repeat(30));
+    expect(caption.scrollTop).toBe(600);
+    caption.scrollTop = 200; // scrolled up past a line
+    say("partial", "x".repeat(40));
+    expect(caption.scrollTop).toBe(200);
+    caption.scrollTop = 560; // back at the end
+    say("partial", "x".repeat(50));
+    expect(caption.scrollTop).toBe(1000);
+  });
+
+  it("drops the partial on an error, says why, and closes the card", () => {
+    holdAt("", 0);
     say("final", "Kept.");
     say("partial", " lost");
     take.on!.onEvent({ type: "error", message: "upstream closed" });
     take.on!.onState("idle");
     expect(input.value).toBe("Kept.");
     expect(state.appendTurn).toHaveBeenCalledWith("error", "voice input: upstream closed");
+    expect(card().open).toBe(false);
   });
 
   it("cancels on a session switch, leaving the old draft without the take's text", () => {
-    startAt("draft ", 6);
+    holdAt("draft ", 6);
     say("partial", "spoken");
     select("b");
     expect(take.cancel).toHaveBeenCalledOnce();
     expect(drafts.get("pier.draft.a")).toBe("draft ");
   });
 
-  it("ends with its text kept where the draft leaves unasked, and writes nothing into the next one", () => {
+  it("ends with its text kept where the draft leaves unasked, and writes nothing into the next one", async () => {
+    const voice = await import("./voice-input.js");
     drafts.set("pier.draft.b", "other");
-    startAt("draft ", 6);
+    holdAt("draft ", 6);
     say("final", "Spoken.");
     say("partial", "and mo");
-    composer.endVoice();
+    voice.endVoice();
     expect(take.cancel).toHaveBeenCalledOnce();
     take.on!.onState("idle"); // the take's own answer to its cancel
-    expect(node("#voice").getAttribute("aria-pressed")).toBe("false");
+    expect(card().open).toBe(false);
     say("final", "And more."); // a take that ended sends none; were one late, it has no span
     expect(input.value).toBe("draft Spoken. and mo");
     select("b"); // the rotation's own restoreDraft finds no take to cancel
-    say("final", "And more.");
     expect(take.cancel).toHaveBeenCalledOnce();
     expect(input.value).toBe("other");
     expect(drafts.get("pier.draft.a")).toBe("draft Spoken. and mo");
   });
 
-  it("lands the writes a composition held when it ends that way", () => {
-    startAt("", 0);
-    say("final", "One.");
-    input.dispatchEvent(new Event("compositionstart"));
-    say("final", "Two.");
-    composer.endVoice();
-    expect(input.value).toBe("One. Two.");
-    expect(drafts.get("pier.draft.a")).toBe("One. Two.");
-    input.dispatchEvent(new Event("compositionend"));
-    expect(input.value).toBe("One. Two.");
-  });
-
   it("cancels when the page goes away", () => {
-    startAt("", 0);
+    holdAt("", 0);
     state.pagehide!();
     expect(take.cancel).toHaveBeenCalledOnce();
   });
 
   it("sends the draft as it stands on send, ends the take, and keeps its later text out", async () => {
-    startAt("", 0);
+    holdAt("", 0);
     say("partial", "half a sentence");
     state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
     await composer.send("auto");
-    expect(take.stop).toHaveBeenCalledOnce();
+    expect(take.cancel).toHaveBeenCalledOnce();
     expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("half a sentence");
     say("final", "Half a sentence.");
     expect(input.value).toBe("");

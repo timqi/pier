@@ -30,11 +30,9 @@ import {
   turnsPane,
 } from "./chat.js";
 import {
-  cancelVoice,
   clearOptimistic,
   dropParked,
   dropStaged,
-  endVoice,
   focusInput,
   initComposer,
   markOptimisticUser,
@@ -47,6 +45,7 @@ import {
   setSkills,
   updateComposer,
 } from "./composer.js";
+import { cancelVoice, endVoice } from "./voice-input.js";
 import { initPush, isIOS } from "./notifications.js";
 import { initReport, report } from "./report.js";
 import { initChains, renderChains, unarchive } from "./chains.js";

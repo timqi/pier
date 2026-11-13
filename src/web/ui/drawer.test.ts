@@ -451,7 +451,7 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   expect(item("item:a/auth").style.minHeight).toBe("52px");
   expect(undoOf(item("item:a/auth")).getAttribute("aria-label")).toBe("Undo closing auth");
   expect(doc.activeElement).toBe(undoOf(item("item:a/auth")));
-  expect(doc.querySelector("[role='status']")!.textContent).toBe("auth closed \u2014 Undo for 5 seconds.");
+  expect(doc.querySelector("p[role='status']")!.textContent).toBe("auth closed \u2014 Undo for 5 seconds.");
   expect(shown("#status-item-count")).toBe("2");
   vi.advanceTimersByTime(4999);
   expect(asked).toEqual([]);
@@ -471,7 +471,7 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   undoOf(item("item:a/sign in")).onclick?.();
   expect(labels()).toEqual(["sign in", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
-  expect(doc.querySelector("[role='status']")!.textContent).toBe("sign in kept open.");
+  expect(doc.querySelector("p[role='status']")!.textContent).toBe("sign in kept open.");
   lapse();
   expect(asked).toHaveLength(1);
 

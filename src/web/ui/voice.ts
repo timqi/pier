@@ -1,6 +1,7 @@
 // One voice take — microphone, capture worklet, the take's routes and event
 // stream (03-web-workbench.md §Voice input) — released on every way out, and
-// the pure rules for where its text sits in the draft. No DOM.
+// the pure rules for where its text sits in the draft and what a press on the
+// hold bar means. No DOM.
 
 import workletUrl from "./voice-worklet.ts?worker&url";
 import { failure, getJson, sendJson } from "./api.js";
@@ -15,6 +16,8 @@ export interface Take {
   stop(): void;
   /** Drop the take now: no further event, `DELETE` to the server. */
   cancel(): void;
+  /** Resume the audio context: the press's release is a user activation where its start was not. */
+  resume(): void;
 }
 
 // 32 frames of 250 ms PCM16 at 16 kHz: under the server's 256 KB body cap.
@@ -48,8 +51,9 @@ function micError(err: unknown): string {
   return `voice input failed: ${err instanceof Error ? err.message : String(err)}`;
 }
 
-/** Called from the click: Safari starts an AudioContext only inside the gesture.
- *  `onState("idle")` comes last on every exit; `onEvent` carries `ready`,
+/** Called from the press: Safari starts an AudioContext only inside a gesture.
+ *  `recording` once the microphone feeds the worklet, before upstream is
+ *  ready; `onState("idle")` comes last on every exit; `onEvent` carries `ready`,
  *  `partial`, `final`, then `done` or `error` — never after `cancel()`. */
 export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: TakeState) => void }): Take {
   const context = new AudioContext();
@@ -72,6 +76,9 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
   const set = (next: TakeState): void => {
     state = next;
     on.onState(next);
+  };
+  const resume = (): void => {
+    if (!released) context.resume().catch((err: unknown) => console.warn("voice: audio context did not resume", err));
   };
   const release = (): void => {
     clearTimeout(flushTimer);
@@ -157,7 +164,6 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
     }
     if (!isEvent(event)) return console.warn("voice: dropped a malformed event", data);
     if (event.type === "done" || event.type === "error") return end(event, true);
-    if (event.type === "ready" && state === "starting") set("recording");
     if (!over()) on.onEvent(event);
   };
 
@@ -168,6 +174,9 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
         stream = media;
         // Ended while the permission was being asked: the take never gets it.
         if (over()) release();
+        // A touch's pointerdown is no user activation, so the context was born
+        // suspended; WebKit lets it run once the document is capturing.
+        else resume();
       });
     try {
       await Promise.all([mic, context.audioWorklet.addModule(workletUrl)]);
@@ -175,6 +184,21 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
       return fail(micError(err));
     }
     if (over()) return;
+    // Capture before the take is open: frames queue until it has an id.
+    try {
+      node = new AudioWorkletNode(context, "pier-voice");
+      node.port.onmessage = (ev: MessageEvent<ArrayBuffer | "flushed">) => {
+        if (ev.data === "flushed") return flushed();
+        queue.push(new Uint8Array(ev.data));
+        void pump();
+      };
+      // Into the destination as silence: a node nothing pulls may never render.
+      context.createMediaStreamSource(stream!).connect(node).connect(context.destination);
+    } catch (err) {
+      return fail(micError(err));
+    }
+    if (state === "starting") set("recording");
+    if (stopping) flush();
     let res: Response;
     try {
       res = await sendJson("/api/voice", {});
@@ -189,19 +213,7 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
     events.onmessage = (ev: MessageEvent<string>) => receive(ev.data);
     // EventSource would reconnect, but a closed stream has already cancelled the take.
     events.onerror = () => fail("voice connection lost");
-    try {
-      node = new AudioWorkletNode(context, "pier-voice");
-      node.port.onmessage = (ev: MessageEvent<ArrayBuffer | "flushed">) => {
-        if (ev.data === "flushed") return flushed();
-        queue.push(new Uint8Array(ev.data));
-        void pump();
-      };
-      // Into the destination as silence: a node nothing pulls may never render.
-      context.createMediaStreamSource(stream!).connect(node).connect(context.destination);
-    } catch (err) {
-      return fail(micError(err));
-    }
-    if (stopping) flush();
+    void pump();
   })();
 
   return {
@@ -212,6 +224,7 @@ export function startTake(on: { onEvent: (e: VoiceEvent) => void; onState: (s: T
       if (node) flush();
     },
     cancel: () => end(),
+    resume,
   };
 }
 
@@ -251,21 +264,24 @@ export function caretAfter(e: SpanEdit, p: number): number {
   return p >= e.to ? p + end - e.to : Math.min(p, end);
 }
 
-/** The span after the user turned `before` into `after`, the caret at `caret`:
- *  moved by an edit wholly before it, kept by one after it, and given up — its
- *  text the user's — by one that touches it, a new one starting at the caret. */
-export function spanEdited(span: Span, before: string, after: string, caret: number): Span {
-  const delta = after.length - before.length;
-  // Typing, deleting and replacing a selection leave the caret at the edit's end.
-  let end = caret - delta;
-  if (end < 0 || end > before.length || before.slice(end) !== after.slice(caret)) {
-    let suffix = 0;
-    while (suffix < Math.min(before.length, after.length) && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
-    end = before.length - suffix;
-  }
-  let prefix = 0;
-  while (prefix < end && before[prefix] === after[prefix]) prefix++;
-  if (end <= span.start) return { start: span.start + delta, mid: span.mid + delta, end: span.end + delta };
-  if (prefix >= span.end) return span;
-  return spanAt(caret);
+// --- the hold bar's gesture --------------------------------------------------------
+
+/** A press on the hold bar, as its pointerdown found it; `top` is the bar's top edge. */
+export interface Press { x: number; y: number; at: number; top: number }
+/** `held` and `cancelling` while the press is down; the rest are how it ended. */
+export type PressState = "held" | "cancelling" | "finish" | "cancel" | "hands-free";
+
+const TAP_MS = 300;
+const TAP_PX = 10;
+const CANCEL_PX = 64;
+
+/** The press at a pointer event: a release past `CANCEL_PX` above the bar
+ *  cancels, a short still one is a tap and keeps listening hands-free, and so
+ *  does a press the system took away (`pointercancel`), so nothing said is lost. */
+export function pressAt(p: Press, type: "move" | "up" | "cancel", x: number, y: number, at: number): PressState {
+  if (type === "cancel") return "hands-free";
+  const cancelling = y < p.top - CANCEL_PX;
+  if (type === "move") return cancelling ? "cancelling" : "held";
+  if (cancelling) return "cancel";
+  return at - p.at < TAP_MS && Math.hypot(x - p.x, y - p.y) < TAP_PX ? "hands-free" : "finish";
 }

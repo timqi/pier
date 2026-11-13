@@ -98,6 +98,7 @@ html[data-theme="dark"] {
   --color-red-50: oklch(24.5% 0.028 17.38);
   --color-red-100: oklch(32% 0.065 17.717);
   --color-red-200: oklch(40% 0.09 18.334);
+  --color-red-300: oklch(50% 0.125 20.5);
   --color-red-400: oklch(62% 0.155 22.216);
   --color-red-600: oklch(73% 0.145 27.325);
   --color-red-700: oklch(80% 0.115 27.518);
@@ -566,6 +567,8 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
   body[data-kb] #composer {
     padding-bottom: 0.5rem;
   }
+  /* The backdrop dims the notch strip too, which main's padding keeps out of its rows. */
+  #voice-layer { margin-top: calc(-1 * env(safe-area-inset-top)); --head-h: calc(var(--bar-h) + env(safe-area-inset-top)); }
   /* black-translucent (index.html) hands us the notch strip instead of the
      system's grey band, so main pays the inset back — and the strip carries
      its background, which was the point. */
@@ -909,15 +912,50 @@ main {
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
 /* The box docked at the column's foot: a bordered surface, its focus a ring. */
 #composer > div:focus-within { box-shadow: 0 0 0 3px var(--color-indigo-100); }
-#composer :is(#attach, #voice, #voice-cancel, #send, #stop) {
+#composer :is(#attach, #voice, #send, #stop) {
   width: var(--composer-control-size);
   height: var(--composer-control-size);
   border-radius: 50%;
 }
-/* A take in progress (composer.ts voiceState): the accent tint; finishing is inert. */
-#voice[aria-pressed="true"] { background: var(--color-indigo-50); color: var(--color-indigo-700); }
-#voice[aria-pressed="true"]:hover { background: var(--color-indigo-100); }
-#voice:disabled { background: none; color: var(--color-neutral-400); cursor: default; }
+/* Voice mode (voice-input.ts): the hold bar takes the draft's place in the row,
+   and a draft, when there is one, the card's whole width above it. */
+#voice-hold { display: none; height: var(--composer-control-size); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#composer[data-voice] #voice-hold { display: flex; }
+#composer[data-voice] #input-row { flex-wrap: wrap; }
+#composer[data-voice] #input { order: -1; flex-basis: 100%; }
+#composer[data-voice] #input:placeholder-shown { display: none; }
+/* Voice mode on, and a take in progress on the bar: the accent tint; finishing is inert. */
+:is(#voice[aria-pressed="true"], #voice-hold[data-live]) { background: var(--color-indigo-50); color: var(--color-indigo-700); }
+#voice-hold[data-live] { border-color: var(--color-indigo-200); }
+#voice[aria-pressed="true"]:hover:not(:disabled) { background: var(--color-indigo-100); }
+#voice-hold[aria-disabled="true"], #voice:disabled { color: var(--color-neutral-400); cursor: default; }
+/* The caption card floats over the transcript, its top at 18% of the pane
+   under the bar so a growing text never moves it; the backdrop under it covers
+   bar and transcript, never the composer. */
+#voice-layer { grid-row: 1 / 3; position: relative; z-index: 2; background: rgb(0 0 0 / 0.15); animation: surface-fade 160ms ease-out; }
+#voice-layer[hidden] { display: none; }
+#voice-card {
+  position: absolute;
+  top: calc(var(--head-h) + 0.18 * (100% - var(--head-h)));
+  inset-inline: var(--col-pad);
+  max-height: calc(0.82 * (100% - var(--head-h)) - 0.75rem);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--color-white);
+  box-shadow: var(--shadow-pop);
+  animation: surface-in 160ms var(--ease-surface);
+}
+@media (width >= 48rem) { #voice-card { inset-inline: 0; width: min(30rem, calc(100% - 2 * var(--col-pad))); margin-inline: auto; } }
+/* 3 to 8 lines of 20px at 1.5 at every width, in px since the phone's root size is larger; streaming text never animates. */
+#voice-text { flex: 0 1 auto; min-height: calc(3 * 30px + 16px); max-height: calc(8 * 30px + 16px); overflow-y: auto; overscroll-behavior: contain; padding: 4px 16px 12px; font-size: 20px; line-height: 1.5; color: var(--color-neutral-900); white-space: pre-wrap; overflow-wrap: anywhere; }
+#voice-dot { background: var(--color-indigo-500); }
+#voice-card[data-state="starting"] #voice-dot { background: var(--color-neutral-400); }
+#voice-card[data-cancel] { border-color: var(--color-red-300); }
+#voice-card[data-cancel] #voice-status { color: var(--color-red-600); }
+#voice-card[data-cancel] #voice-dot { background: var(--color-red-600); }
+#voice-card[data-cancel] #voice-text, #voice-card[data-cancel] #voice-text * { color: var(--color-neutral-400); }
 /* Opacity/transform entrances avoid layout animation; history replay skips them. */
 @keyframes surface-in {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }
@@ -1035,7 +1073,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 @media (pointer: coarse) { #composer { --composer-control-size: 44px; } }
 @keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  #turns > [data-enter], dialog[open]:not(#image-dialog) {
+  #turns > [data-enter], dialog[open]:not(#image-dialog), #voice-card {
     animation: surface-fade 120ms ease-out;
   }
   .chip { transition: none; }

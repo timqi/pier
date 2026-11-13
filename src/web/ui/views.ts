@@ -2,7 +2,8 @@
 // elements hide while one is open, and the address bar's copy of "where am I".
 
 import { turnsPane } from "./chat.js";
-import { endVoice, syncQueuePanel } from "./composer.js";
+import { syncQueuePanel } from "./composer.js";
+import { endVoice } from "./voice-input.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import type { SessionInfo } from "./drawer.js";
 
