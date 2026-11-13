@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { AuthStore, requireAuth } from "./auth.js";
-import { type AsrEvent, type AsrProvider, firstAvailable, mockAsr, MOCK_SCRIPT, registerVoiceRoutes } from "./voice.js";
+import { type AsrEvent, type AsrProvider, registerVoiceRoutes, selected } from "./voice.js";
 
 const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock("../log.js", () => ({ logger: () => log }));
@@ -11,6 +11,53 @@ afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
 });
+
+/** Scripted recognition: each body advances the script by its byte count,
+ *  deterministic and timer-free. Sentences
+ *  come bare, as a recognizer sends them. */
+const MOCK_SCRIPT = ["Pier heard you.", "This is the mock recognizer."];
+const MOCK_BYTES_PER_CHAR = 3_200; // 100 ms of 16 kHz PCM16
+
+const mockAsr: AsrProvider = {
+  available: () => true,
+  open(_opts, emit) {
+    let bytes = 0;
+    let sentence = 0;
+    let closed = false;
+    queueMicrotask(() => {
+      if (!closed) emit({ type: "ready" });
+    });
+    const heard = (): string => {
+      let chars = Math.floor(bytes / MOCK_BYTES_PER_CHAR);
+      for (let i = 0; i < sentence; i++) chars -= MOCK_SCRIPT[i]?.length ?? 0;
+      return (MOCK_SCRIPT[sentence] ?? "").slice(0, chars);
+    };
+    return {
+      audio(pcm) {
+        if (closed) return;
+        bytes += pcm.byteLength;
+        for (let text = heard(); sentence < MOCK_SCRIPT.length; text = heard()) {
+          if (text !== MOCK_SCRIPT[sentence]) {
+            if (text) emit({ type: "partial", text });
+            return;
+          }
+          emit({ type: "final", text });
+          sentence++;
+        }
+      },
+      finish() {
+        if (closed) return;
+        closed = true;
+        const rest = heard();
+        if (rest) emit({ type: "final", text: rest });
+        emit({ type: "done" });
+      },
+      close() {
+        closed = true;
+      },
+    };
+  },
+};
 
 /** A provider the test drives: `emit` is the last open's, `calls` what the route asked of it. */
 function scripted(available = true) {
@@ -300,25 +347,26 @@ describe("/api/voice", () => {
   });
 });
 
-describe("firstAvailable", () => {
-  it("opens the first provider that is available at the time, and refuses when none is", () => {
-    let first = false;
-    let second = true;
+describe("selected", () => {
+  it("opens the provider picked at the time, and refuses when none is", () => {
     const opened: string[] = [];
-    const provider = (name: string, available: () => boolean): AsrProvider => ({
-      available,
+    const provider = (name: string, available = true): AsrProvider => ({
+      available: () => available,
       open: () => {
         opened.push(name);
         return { audio: () => {}, finish: () => {}, close: () => {} };
       },
     });
-    const either = firstAvailable(provider("doubao", () => first), provider("qwen", () => second));
-    either.open({}, () => {});
-    first = true;
-    either.open({}, () => {});
+    let pick: AsrProvider | undefined = provider("qwen");
+    const voice = selected(() => pick);
+    voice.open({}, () => {});
+    pick = provider("doubao");
+    voice.open({}, () => {});
     expect(opened).toEqual(["qwen", "doubao"]);
-    first = second = false;
-    expect(either.available()).toBe(false);
-    expect(() => either.open({}, () => {})).toThrow("no recognizer has its key in the vault");
+    pick = provider("doubao", false);
+    expect(voice.available()).toBe(false);
+    pick = undefined;
+    expect(voice.available()).toBe(false);
+    expect(() => voice.open({}, () => {})).toThrow("voice input is off");
   });
 });

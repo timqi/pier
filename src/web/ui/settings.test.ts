@@ -12,6 +12,7 @@ vi.mock("./providers.js", () => ({ openProviders: vi.fn() }));
 vi.mock("./tasks.js", () => ({ createTasksPane: pane }));
 vi.mock("./vault.js", () => ({ createVaultPane: pane }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn() }));
+vi.mock("./voice-input.js", () => ({ offerVoice: vi.fn() }));
 
 let scrolled: FakeElement[];
 beforeEach(() => {

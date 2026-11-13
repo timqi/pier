@@ -32,9 +32,8 @@ export const NodeWebSocket = WebSocket as unknown as SocketCtor;
 
 /** A recognizer's key from the vault. `readKey` is `vault.get`: it throws while
  *  the vault is locked, and an approve-level row is a `vt://` record, not a
- *  key. Either is "unavailable", warned once per change of state; a key that is
- *  simply absent goes unwarned when the recognizer is `optional`. */
-function vaultKey(name: string, recognizer: string, readKey: () => string | undefined, optional: boolean): () => string | undefined {
+ *  key. Either is "unavailable", warned once per change of state. */
+function vaultKey(name: string, recognizer: string, readKey: () => string | undefined): () => string | undefined {
   let warned = "";
   return () => {
     let problem: string;
@@ -43,10 +42,6 @@ function vaultKey(name: string, recognizer: string, readKey: () => string | unde
       if (value && !value.startsWith("vt://")) {
         warned = "";
         return value;
-      }
-      if (!value && optional) {
-        warned = "";
-        return undefined;
       }
       problem = value ? "is an approve-level vt:// record; voice input needs an auto row" : "is not in the vault";
     } catch (err) {
@@ -103,9 +98,9 @@ async function refusal(url: string, headers: Record<string, string>): Promise<st
  *  (handshake and finish timeouts, failures as `error`) around its wire. */
 export function socketAsr(
   recognizer: string, keyName: string, readKey: () => string | undefined, Socket: SocketCtor,
-  wireOf: (key: string, opts: { language?: string }) => Wire, optional = false,
+  wireOf: (key: string, opts: { language?: string }) => Wire,
 ): AsrProvider {
-  const key = vaultKey(keyName, recognizer, readKey, optional);
+  const key = vaultKey(keyName, recognizer, readKey);
   return {
     available: () => key() !== undefined,
     open(opts, emit) {
@@ -202,15 +197,14 @@ export function socketAsr(
   };
 }
 
-/** The first provider that is available takes every new take; a key added or
- *  removed in the vault switches recognizers without a restart. */
-export function firstAvailable(...providers: AsrProvider[]): AsrProvider {
-  const pick = (): AsrProvider | undefined => providers.find((p) => p.available());
+/** The recognizer the instance's setting names takes every new take; a switch
+ *  in the Console applies to the next take without a restart. */
+export function selected(pick: () => AsrProvider | undefined): AsrProvider {
   return {
-    available: () => pick() !== undefined,
+    available: () => pick()?.available() ?? false,
     open(opts, emit) {
       const provider = pick();
-      if (!provider) throw new Error("no recognizer has its key in the vault");
+      if (!provider) throw new Error("voice input is off");
       return provider.open(opts, emit);
     },
   };
@@ -243,53 +237,6 @@ interface Take {
   idle?: NodeJS.Timeout;
   cap?: NodeJS.Timeout;
 }
-
-/** Scripted recognition: each body advances the script by its byte count,
- *  deterministic and timer-free, for tests and keyless manual runs. Sentences
- *  come bare, as a recognizer sends them. */
-export const MOCK_SCRIPT = ["Pier heard you.", "This is the mock recognizer."];
-const MOCK_BYTES_PER_CHAR = 3_200; // 100 ms of 16 kHz PCM16
-
-export const mockAsr: AsrProvider = {
-  available: () => true,
-  open(_opts, emit) {
-    let bytes = 0;
-    let sentence = 0;
-    let closed = false;
-    queueMicrotask(() => {
-      if (!closed) emit({ type: "ready" });
-    });
-    const heard = (): string => {
-      let chars = Math.floor(bytes / MOCK_BYTES_PER_CHAR);
-      for (let i = 0; i < sentence; i++) chars -= MOCK_SCRIPT[i]?.length ?? 0;
-      return (MOCK_SCRIPT[sentence] ?? "").slice(0, chars);
-    };
-    return {
-      audio(pcm) {
-        if (closed) return;
-        bytes += pcm.byteLength;
-        for (let text = heard(); sentence < MOCK_SCRIPT.length; text = heard()) {
-          if (text !== MOCK_SCRIPT[sentence]) {
-            if (text) emit({ type: "partial", text });
-            return;
-          }
-          emit({ type: "final", text });
-          sentence++;
-        }
-      },
-      finish() {
-        if (closed) return;
-        closed = true;
-        const rest = heard();
-        if (rest) emit({ type: "final", text: rest });
-        emit({ type: "done" });
-      },
-      close() {
-        closed = true;
-      },
-    };
-  },
-};
 
 export function registerVoiceRoutes(app: Hono, provider: AsrProvider | undefined): void {
   const takes = new Map<string, Take>();

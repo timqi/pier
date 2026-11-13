@@ -84,7 +84,7 @@ class FakeSocket {
 function start(readKey: () => string | undefined = () => "ak-test") {
   FakeSocket.all = [];
   const events: AsrEvent[] = [];
-  const provider = doubaoAsr(readKey, { Socket: FakeSocket satisfies SocketCtor });
+  const provider = doubaoAsr(readKey, FakeSocket satisfies SocketCtor);
   const stream = provider.open({}, (e) => events.push(e));
   const ws = FakeSocket.all[0]!;
   return { provider, stream, events, ws };
@@ -98,21 +98,15 @@ function ready() {
 
 describe("doubaoAsr", () => {
   it("is unavailable without a key, warning under its own name", () => {
-    const provider = doubaoAsr(() => undefined, { Socket: FakeSocket });
+    const provider = doubaoAsr(() => undefined, FakeSocket);
     expect(provider.available()).toBe(false);
     expect(provider.available()).toBe(false);
     expect(log.warn.mock.calls.map(([line]) => String(line))).toEqual(["DOUBAO_ASR_API_KEY is not in the vault — Doubao recognition is off"]);
-    expect(doubaoAsr(() => "vt://abc", { Socket: FakeSocket }).available()).toBe(false);
-    log.warn.mockClear();
-    let key: () => string | undefined = () => undefined;
-    const optional = doubaoAsr(() => key(), { Socket: FakeSocket, optional: true });
-    expect(optional.available()).toBe(false);
-    key = () => "vt://abc";
-    expect(optional.available()).toBe(false);
-    expect(log.warn.mock.calls.map(([line]) => String(line))).toEqual([
+    expect(doubaoAsr(() => "vt://abc", FakeSocket).available()).toBe(false);
+    expect(log.warn.mock.calls.map(([line]) => String(line)).at(-1)).toBe(
       "DOUBAO_ASR_API_KEY is an approve-level vt:// record; voice input needs an auto row — Doubao recognition is off",
-    ]);
-    expect(doubaoAsr(() => "ak-test", { Socket: FakeSocket }).available()).toBe(true);
+    );
+    expect(doubaoAsr(() => "ak-test", FakeSocket).available()).toBe(true);
   });
 
   it("errors instead of connecting when the key went away", async () => {

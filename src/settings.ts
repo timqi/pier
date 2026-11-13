@@ -41,7 +41,13 @@ interface Settings {
   customTools: CustomTool[];
   /** The workbench's accent, one of `ACCENTS`; `""` is the default ramp. */
   accent: string;
+  /** Which recognizer voice input relays to; `off` hides the composer's switch. */
+  voice: VoiceBackend;
 }
+
+export const VOICE_BACKENDS = ["doubao", "qwen", "off"] as const;
+export type VoiceBackend = (typeof VOICE_BACKENDS)[number];
+export const isVoiceBackend = (v: unknown): v is VoiceBackend => VOICE_BACKENDS.includes(v as VoiceBackend);
 
 /** The presets, each with the hex of its 600 step — what the manifest and the
  *  icon paint with, since neither can read a CSS variable. The ramps
@@ -148,6 +154,8 @@ export class SettingsStore {
     const titleModel = this.#json("titleModel", normalizeModelRef, "a {provider, id}");
     const accent = normalizeAccent(this.#value("accent") ?? "");
     if (accent === null) log.warn("settings.accent is not a preset — ignoring it");
+    const voice = this.#value("voice") ?? "doubao";
+    if (!isVoiceBackend(voice)) log.warn(`settings.voice is not one of ${VOICE_BACKENDS.join(", ")} — voice input is off`);
     return {
       publicUrl: this.#value("publicUrl") ?? "",
       modelMenu: this.#json("modelMenu", (raw) => {
@@ -165,6 +173,7 @@ export class SettingsStore {
         "a list of {name, toml}",
       ) ?? [],
       accent: accent ?? "",
+      voice: isVoiceBackend(voice) ? voice : "off",
     };
   }
 
@@ -192,6 +201,11 @@ export class SettingsStore {
 
   setAccent(accent: string): Settings {
     this.#set("accent", accent);
+    return this.get();
+  }
+
+  setVoice(voice: VoiceBackend): Settings {
+    this.#set("voice", voice);
     return this.get();
   }
 

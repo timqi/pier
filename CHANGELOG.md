@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Console: Settings › Instance › Voice input picks the recognizer — Doubao, Qwen or Off; Off hides the composer's voice switch. It replaces the `PIER_VOICE` environment variable.
+
 ### Fixed
 
 - Web: a recognizer that refuses its key now says why — `voice input: Doubao connection failed: HTTP 401 {"error":"Invalid X-Api-Key"}` instead of a bare "connection failed".

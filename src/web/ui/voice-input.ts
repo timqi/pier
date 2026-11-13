@@ -50,7 +50,8 @@ let settling: ((whole: boolean) => void)[] = [];
 /** Voice mode is on: the draft is not focused for the user, only on their tap. */
 export const voiceMode = (): boolean => voiceOn;
 
-function setMode(on: boolean, focus = true): void {
+/** `remember` false: not the user's switch, so the stored mode stays for later. */
+function setMode(on: boolean, focus = true, remember = true): void {
   voiceOn = on;
   composer.toggleAttribute("data-voice", on);
   toggle.setAttribute("aria-pressed", String(on));
@@ -58,8 +59,8 @@ function setMode(on: boolean, focus = true): void {
   toggle.setAttribute("aria-label", toggle.title);
   $("#voice-mic").hidden = on;
   $("#voice-keyboard").hidden = !on;
-  if (on) localStorage.setItem(MODE_KEY, "on");
-  else localStorage.removeItem(MODE_KEY);
+  if (remember && on) localStorage.setItem(MODE_KEY, "on");
+  else if (remember) localStorage.removeItem(MODE_KEY);
   // The phone's keyboard follows the focus: down for talking, up for typing.
   if (on) input.blur();
   else if (focus) input.focus();
@@ -266,12 +267,23 @@ function wireBar(): void {
   };
 }
 
-/** Shown only where the server can transcribe and the browser can capture. */
-async function offerVoice(): Promise<void> {
-  if (!(await voiceAvailable())) return;
-  toggle.hidden = false;
-  toggle.onclick = () => setMode(!voiceOn);
+let wired = false;
+
+/** Shown only where the server can transcribe and the browser can capture;
+ *  asked again when the Console switches the recognizer. */
+export async function offerVoice(): Promise<void> {
+  const available = await voiceAvailable();
+  toggle.hidden = !available;
+  if (!available) {
+    cancelVoice();
+    // Not the user's switch: the remembered mode returns with the recognizer.
+    setMode(false, false, false);
+    return;
+  }
   setMode(localStorage.getItem(MODE_KEY) === "on", false);
+  if (wired) return;
+  wired = true;
+  toggle.onclick = () => setMode(!voiceOn);
   wireBar();
   window.addEventListener("pagehide", cancelVoice);
   // A tap on the draft is to edit it: the keyboard, the caret where it landed.

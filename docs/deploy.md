@@ -233,10 +233,12 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
 - Channel tokens are vault rows too (`SLACK_TOKEN`, `SLACK_APP_TOKEN`,
   `LARK_APP_ID`, `LARK_APP_SECRET`): removing one there empties that channel's credential.
-- Voice input in the web composer reads `DOUBAO_ASR_API_KEY` (Volcengine
-  console › API Key, streaming ASR 2.0 hourly) or `DASHSCOPE_API_KEY` as an
-  `auto` row, Doubao first; with neither the mic is not shown.
-  `PIER_VOICE=doubao|qwen|mock` in the service's environment pins one.
+- Voice input in the web composer uses the recognizer Console › Settings ›
+  Instance › Voice input names (Doubao by default, Qwen, or Off), which reads
+  `DOUBAO_ASR_API_KEY` (Volcengine console › API Key, streaming ASR 2.0
+  hourly) or `DASHSCOPE_API_KEY` as an `auto` row; without its key, or Off,
+  the mic is not shown. A refused key ends the take with the server's answer,
+  e.g. `Doubao connection failed: HTTP 401 {"error":"Invalid X-Api-Key"}`.
 
 ## Remote access
 

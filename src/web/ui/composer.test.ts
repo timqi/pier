@@ -18,10 +18,11 @@ vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
 const take = vi.hoisted(() => ({
   on: null as { onEvent: (e: unknown) => void; onState: (s: string) => void } | null,
   stop: vi.fn(), cancel: vi.fn(), resume: vi.fn(),
+  available: true,
 }));
 vi.mock("./voice.js", async (real) => ({
   ...await real<typeof import("./voice.js")>(),
-  voiceAvailable: () => Promise.resolve(true),
+  voiceAvailable: () => Promise.resolve(take.available),
   startTake: (on: NonNullable<typeof take.on>) => {
     take.on = on;
     on.onState("starting");
@@ -861,6 +862,20 @@ describe("voice mode", () => {
     expect(document.activeElement).not.toBe(input); // the phone's keyboard goes down
     toggle.onclick!();
     expect(document.activeElement).toBe(input);
+  });
+
+  it("hides the switch when the Console turns voice off, cancelling a take, and brings back the remembered mode with it", async () => {
+    const { offerVoice } = await import("./voice-input.js");
+    holdAt("", 0);
+    take.available = false;
+    await offerVoice();
+    expect(take.cancel).toHaveBeenCalledOnce();
+    const toggle = node("#voice");
+    expect([toggle.hidden, toggle.getAttribute("aria-pressed"), toggle.title, node("#composer").hasAttribute("data-voice"), stored.get("pier.voice")])
+      .toEqual([true, "false", "Voice input", false, "on"]);
+    take.available = true;
+    await offerVoice();
+    expect([node("#voice").hidden, node("#composer").hasAttribute("data-voice")]).toEqual([false, true]);
   });
 
   it("keeps the draft unfocused for focus nobody asked for, and gives it the keyboard for /", async () => {

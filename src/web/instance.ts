@@ -7,11 +7,13 @@ import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
   ACCENTS,
+  isVoiceBackend,
   normalizeAccent,
   parseModelMenu,
   normalizeModelRef,
   normalizePublicUrl,
   type SettingsStore,
+  VOICE_BACKENDS,
 } from "../settings.js";
 // Type-only: erased at build, so web/ runs nothing from tools.ts.
 import type { CustomTool } from "../tools.js";
@@ -207,14 +209,15 @@ export function registerInstanceRoutes(
         customTools?: unknown;
         tool?: unknown;
         accent?: unknown;
+        voice?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent, body.voice]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool or accent required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool, accent or voice required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -236,6 +239,11 @@ export function registerInstanceRoutes(
       const accent = normalizeAccent(body.accent);
       if (accent === null) return refuse(`accent must be one of ${Object.keys(ACCENTS).join(", ")}, or empty`);
       writes.push(() => settings.setAccent(accent));
+    }
+    if (body?.voice !== undefined) {
+      const { voice } = body;
+      if (!isVoiceBackend(voice)) return refuse(`voice must be one of ${VOICE_BACKENDS.join(", ")}`);
+      writes.push(() => settings.setVoice(voice));
     }
     if (body?.modelMenu !== undefined) {
       if (subscribed()) return managedRefusal(c);

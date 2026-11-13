@@ -7,7 +7,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { $, agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches } from "./form.js";
+import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, segmented, setStatus, swatches } from "./form.js";
 import { icon } from "./icons.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
@@ -16,6 +16,7 @@ import { openProviders } from "./providers.js";
 import { escapeKey } from "./shortcut.js";
 import { createTasksPane } from "./tasks.js";
 import { createVaultPane } from "./vault.js";
+import { offerVoice } from "./voice-input.js";
 
 type Topic = "instance" | "models" | "channels" | "vault" | "tasks" | "files" | "security";
 // Setup order: what you need first sits first — what to run on, then what the
@@ -178,6 +179,39 @@ export function createSettingsView(
     accentStatus,
   );
 
+  // --- Instance: voice input -------------------------------------------------------
+
+  type Voice = "doubao" | "qwen" | "off";
+  const voiceBox = h("div", "");
+  const voiceStatus = h("span", "text-[12px]", "");
+  let storedVoice: Voice = "off";
+  function renderVoice(value: Voice): void {
+    voiceBox.replaceChildren(segmented([["Doubao", "doubao"], ["Qwen", "qwen"], ["Off", "off"]], value, (picked) => {
+      renderVoice(picked);
+      setStatus(voiceStatus, "saving", "saving…");
+      void (async () => {
+        const res = await sendJson("/api/settings", { voice: picked }, "PUT");
+        if (!res.ok) {
+          renderVoice(storedVoice);
+          return setStatus(voiceStatus, "failed", await failure(res, "Could not save"));
+        }
+        storedVoice = ((await res.json()) as { voice: Voice }).voice;
+        renderVoice(storedVoice);
+        setStatus(voiceStatus, "saved", storedVoice === "off" ? "Saved — the composer's voice switch is gone." : "Saved — the next take uses it.");
+        void offerVoice();
+      })();
+    }));
+  }
+
+  const voiceCard = card(
+    "Voice input",
+    "Which recognizer the composer's hold-to-talk relays to. Off hides the voice switch.",
+    field("Recognizer", voiceBox, {
+      hint: "Doubao reads DOUBAO_ASR_API_KEY and Qwen DASHSCOPE_API_KEY from the vault; without its key the switch stays hidden.",
+    }),
+    voiceStatus,
+  );
+
   // --- Security: password ----------------------------------------------------------
 
   const current = input("", "password");
@@ -322,6 +356,7 @@ export function createSettingsView(
     "mx-auto flex max-w-2xl flex-col gap-6",
     urlCard,
     accentCard,
+    voiceCard,
     // Per browser, not per instance — but this is the page a person opens to
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
@@ -351,7 +386,7 @@ export function createSettingsView(
   function loadInstance(): void {
     notifications.load();
     void (async () => {
-      const got = await getJson<{ publicUrl: string; accent: string; accents: Record<string, string> }>(
+      const got = await getJson<{ publicUrl: string; accent: string; accents: Record<string, string>; voice: Voice }>(
         "/api/settings",
         "Could not load settings",
       );
@@ -361,6 +396,9 @@ export function createSettingsView(
       storedAccent = got.value.accent;
       renderAccent(got.value.accents);
       accentStatus.textContent = "";
+      storedVoice = got.value.voice;
+      renderVoice(storedVoice);
+      voiceStatus.textContent = "";
     })();
   }
 

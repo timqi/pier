@@ -35,7 +35,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`; non-blank text required — attachments were already uploaded and ride the text as marker lines) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/inbox` | body `{name?, mimeType, data}` (base64, ≤32MB) → saved via `core/inbox.ts` under `$PIER_HOME/inbox/web/`, returns `{path}`; the client appends `[name](file:///path)` to the message it then sends |
 | `POST /api/sessions/:id/abort` | abort the current run |
-| `GET /api/voice` | *(voice input, `web/voice.ts`)* `{available}`: a recognition provider is configured and its key readable |
+| `GET /api/voice` | *(voice input, `web/voice.ts`)* `{available}`: the `voice` setting names a recognizer and its key is readable |
 | `POST /api/voice` | body `{language?}` → open a take, connect upstream, `{id}` (random); 503 `{error}` without a provider. One take per browser session: a new one closes the old |
 | `GET /api/voice/:id/events` | SSE, `data:` JSON: `{type:"ready"}` upstream ready (audio before it is buffered, 128 frames at most, then `error`); `{type:"partial", text}` the current sentence, replacing the last partial; `{type:"final", text}` a settled sentence, appended, with no separator of its own; `{type:"error", message}` or `{type:"done"}` (after `finish`), then the stream ends and the take is 404. Disconnecting cancels the take; 409 for a second stream. An `error` before the stream attached waits 15 s for it |
 | `POST /api/voice/:id/audio` | body raw PCM16LE, 16 kHz, mono, ≤ 256 KB (413 over); 202; 409 once the take has ended or is finishing. Sent serially, so no sequence numbers |
@@ -615,7 +615,9 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   shows the server's error, which names the row and field. Instance: Public URL, Accent (a
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
-  refusal), the browser's notification switch, Reload.
+  refusal), Voice input (a Doubao / Qwen / Off segmented control, `PUT
+  {voice}`; a saved pick asks `GET /api/voice` again, so Off hides the
+  composer's switch without a reload), the browser's notification switch, Reload.
 - **Files** (`explorer.ts`, `#files-dialog`; ⋯ Browse files and its chord,
   Agent → Browse files, and a chat file reference all open it, on the current
   session): a directory tree beside a viewer; in a git checkout the

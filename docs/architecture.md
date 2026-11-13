@@ -70,7 +70,7 @@ src/
                set), push.ts + webpush.ts (RFC 8291/8292), ui/public/sw.js,
                plain-text.ts (markdown without its marks, the server's and the UI's),
                voice.ts (voice input's relay: takes, routes, the AsrProvider
-               seam, mockAsr for `PIER_VOICE=mock`), voice-qwen.ts (the DashScope realtime ASR adapter),
+               seam, the recognizer the `voice` setting names), voice-qwen.ts (the DashScope realtime ASR adapter),
                voice-doubao.ts (the Volcengine Doubao streaming ASR adapter),
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,

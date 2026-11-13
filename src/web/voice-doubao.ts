@@ -69,10 +69,7 @@ function utterancesOf(body: unknown): Utterance[] {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
-/** `optional`: another recognizer stands behind this one, so an absent key is no warning. */
-export function doubaoAsr(
-  readKey: () => string | undefined, { Socket = NodeWebSocket, optional = false }: { Socket?: SocketCtor; optional?: boolean } = {},
-): AsrProvider {
+export function doubaoAsr(readKey: () => string | undefined, Socket: SocketCtor = NodeWebSocket): AsrProvider {
   // bigmodel_async takes no language: the model detects it, so the client's is not passed on.
   return socketAsr("Doubao", "DOUBAO_ASR_API_KEY", readKey, Socket, (key): Wire => {
     /** Utterances already emitted as final, and the partial last shown after them. */
@@ -129,5 +126,5 @@ export function doubaoAsr(
         if (f.last) take.done();
       },
     };
-  }, optional);
+  });
 }

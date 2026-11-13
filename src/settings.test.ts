@@ -22,6 +22,7 @@ const EMPTY = {
   tools: [],
   customTools: [],
   accent: "",
+  voice: "doubao",
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
@@ -85,6 +86,16 @@ describe("SettingsStore", () => {
       publicUrl: "https://pier.example.com",
     });
     reopened.close();
+  });
+
+  it("stores the voice recognizer, and turns voice off over a value it does not know", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    expect(store.setVoice("qwen").voice).toBe("qwen");
+    db.prepare("UPDATE settings SET value = 'mock' WHERE key = 'voice'").run();
+    expect(store.get().voice).toBe("off");
+    expect(log.warn).toHaveBeenCalledWith("settings.voice is not one of doubao, qwen, off — voice input is off");
+    db.close();
   });
 
   it("overwrites rather than accumulating rows", () => {

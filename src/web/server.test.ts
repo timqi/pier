@@ -94,6 +94,7 @@ const SETTINGS_JSON = {
   tools: [],
   customTools: [],
   accent: "",
+  voice: "doubao",
   accents: ACCENTS,
   catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
@@ -2393,6 +2394,19 @@ describe("the app shell", () => {
     // The default's own name clears the override.
     const back = await app.request("/api/settings", json({ accent: "indigo" }));
     expect((await back.json()).accent).toBe("");
+  });
+
+  it("stores the voice recognizer and refuses one it does not know", async () => {
+    const { app, settings } = setup();
+    const put = (voice: unknown) =>
+      app.request("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice }) });
+    const ok = await put("off");
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).voice).toBe("off");
+    const bad = await put("mock");
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toBe("voice must be one of doubao, qwen, off");
+    expect(settings.get().voice).toBe("off");
   });
 
   it("names the instance in the tab title", () => {
