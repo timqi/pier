@@ -1,6 +1,7 @@
 # Web 工作台实时语音输入
 
 状态：已实现（branch `voice-input`）；真实 DashScope、Safari/iOS、Tauri 壳未实测。不碰 `native/`、`core/`、`agent/`。
+「按钮与状态」与 06 §Mic 已由 [39](39-voice-input-ux.md) 取代。
 
 落地时要更新的 owner 文档：03（行为与 wire）、06（麦克风按钮与录音态）、
 `architecture.md`（`web/` 新文件的一句话）、CHANGELOG、`AGENTS.md` 的 `web/` 预算行。

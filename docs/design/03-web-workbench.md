@@ -452,34 +452,45 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - **Composer**: **Send** submits while idle; while a turn runs, sending queues
   with `mode:"auto"` (amber clock). **Stop** or Esc aborts the running turn.
   Enter sends, never during IME composition (`isComposing`/229).
-- **Voice input** (`voice.ts`, `voice-worklet.ts`): the mic left of Send
-  exists only when `GET /api/voice` is `available` and the browser has
-  `AudioWorkletNode` and `getUserMedia`. A click starts a take: microphone,
-  the capture worklet (`/app/assets/voice-worklet-<hash>.js`, the channels
-  averaged to mono, 16 kHz PCM16, a 250 ms frame), `POST /api/voice`, the
-  take's event stream; audio goes up one POST at a time, frames that queue
-  meanwhile as one body (≤ 32 frames). The next click stops it: the last
-  frame, then `finish`; `done` ends it. A 404 or 409 for `audio` or `finish`
-  is the take over on the server: uploads stop and the stream's `error` is
-  the reason, the refusal itself only when none arrives within 2 s. The
-  microphone and audio context are released on every exit; text is never
-  sent by itself. The copied resampler's MIT notice is
-  `/app/voice.LICENSE-avibe`.
+- **Voice input** (`voice.ts`, `voice-worklet.ts`, `voice-input.ts`): a
+  mode switch left of Send exists only when `GET /api/voice` is `available`
+  and the browser has `AudioWorkletNode` and `getUserMedia`; voice mode is
+  remembered per browser (`localStorage` `pier.voice`) and ignored without
+  it. Voice mode puts a `Hold to talk` bar where the draft was, the draft above
+  the row at the card's full width while it holds text; a tap on the draft is
+  keyboard mode, the caret where it landed. On the bar (pointer events, any
+  pointer): a press starts a take; a release at 300 ms or later finishes it;
+  a slide 64px above the bar's top is a pending cancel, sliding back undoes
+  it and a release there cancels; a release within 300 ms and 10px is a tap,
+  hands-free, finished by the next press, Enter or Space on the bar or a click
+  on the backdrop; `pointercancel` turns the press hands-free; Enter or Space
+  starts one hands-free. A take is the microphone, the capture worklet
+  (`/app/assets/voice-worklet-<hash>.js`, the channels averaged to mono,
+  16 kHz PCM16, a 250 ms frame), `POST /api/voice`, the take's event stream;
+  it is recording once the microphone feeds the worklet, upstream's `ready`
+  not awaited (the server buffers before it). The press creates the audio
+  context, resumed once the stream arrives and again on release. Audio goes
+  up one POST at a time, frames that queue meanwhile as one body (≤ 32
+  frames). Finishing sends the last frame, then `finish`; `done` ends it. A
+  404 or 409 for `audio` or `finish` is the take over on the server: uploads
+  stop and the stream's `error` is the reason, the refusal itself only when
+  none arrives within 2 s. The microphone and audio context are released on
+  every exit; text is never sent by itself. The copied resampler's MIT notice
+  is `/app/voice.LICENSE-avibe`.
 - **Voice text in the draft**: the take holds a span from the caret where it
   started — its final sentences, then the partial. `partial` replaces the
-  partial, `final` settles it. An edit wholly before the span moves it, one
-  after leaves it, one touching it gives its text to the user and a new empty
-  span starts at the caret. Text of a spaced script (not CJK) set after a
-  word or its punctuation gets the space a bare sentence lacks. Each write saves the draft and keeps
-  the user's caret, one at the take's end moving with it; writes wait while
-  an IME composes and land at its commit. `done` releases the span. Cancel
-  (×, Esc), leaving the session and `pagehide` remove what the span holds and
-  `DELETE` the take; Send ends the take and sends the draft as it stands,
-  later text dropped. A Console view over the chat and a head rotation the
-  user did not make `DELETE` the take and keep its text, the partial
-  included, in the draft it was spoken into. `error` and a refused or missing microphone keep the
-  final sentences, drop the partial and post an error row
-  `voice input: <reason>`.
+  partial, `final` settles it; takes follow one another from the last one's
+  end. Text of a spaced script (not CJK) set after a word or its punctuation
+  gets the space a bare sentence lacks. The draft is read-only while a take
+  runs; each write saves it and scrolls it to the take's end. `done` releases
+  the span. Cancel (the card's ×, Esc, a release in pending cancel), leaving
+  the session and `pagehide` remove what the span holds and `DELETE` the
+  take; Send ends the take and sends the draft as it stands, later text
+  dropped. A Console view over the chat and a head rotation the user did not
+  make `DELETE` the take and keep its text, the partial included, in the
+  draft it was spoken into. `error` and a refused or missing microphone keep
+  the final sentences, drop the partial and post an error row
+  `voice input: <reason>`. Every end closes the caption card.
 - **Completion**: a draft
   that is `/` followed by a prefix with no whitespace lists, above the input,
   one flat list — the chain commands (each line from `CHAT_COMMANDS`; the

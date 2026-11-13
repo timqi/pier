@@ -1,6 +1,6 @@
 # 39 — 语音输入：按住说话与字幕卡
 
-状态：设计已定稿（2026-11-13）；未实现。只改 `src/web/ui/`（浏览器）；服务端路由、wire、provider
+状态：已实现（branch `voice-input-ux`）；Chromium 手机模拟与桌面已走通，真机 iPhone Safari 与主屏幕 PWA 未实测。只改 `src/web/ui/`（浏览器）；服务端路由、wire、provider
 不变（[38](38-voice-input.md) 的传输与 provider 两节仍然有效）；不碰 `native/`。
 取代 38 的「按钮与状态」、06 §Mic，改写 03 的 Voice input / Voice text in the draft 两条。
 

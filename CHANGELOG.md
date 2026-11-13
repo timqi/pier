@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Web: voice input is a mode. The switch beside Send turns the draft's row into a `Hold to talk` bar: hold and speak, release to keep the text in the draft, slide up to cancel; a tap listens hands-free until the next tap. While you speak, a caption card over the conversation shows what you said in large type and follows it to the end; nothing is sent until you send it. The mode is remembered per browser.
+
 ## 1.3.2
 
 ### Fixed
