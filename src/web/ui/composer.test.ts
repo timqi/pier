@@ -804,7 +804,7 @@ describe("the chat-command completion", () => {
 describe("voice mode", () => {
   type Draft = FakeElement & { selectionStart: number; selectionEnd: number; readOnly?: boolean; setRangeText: (text: string, from: number, to: number) => void };
   let input: Draft;
-  let bar: FakeElement;
+  let bar: FakeElement & { releasePointerCapture: (id: number) => void };
   /** The textarea's selection and `setRangeText`'s default "preserve", as HTML specifies it: the DOM double lacks both. */
   beforeEach(async () => {
     input = node("#input") as Draft;
@@ -821,8 +821,8 @@ describe("voice mode", () => {
       input.selectionStart = from;
       input.selectionEnd = to;
     } });
-    bar = node("#voice-hold");
-    Object.assign(bar, { setPointerCapture: vi.fn() });
+    bar = node("#voice-hold") as typeof bar;
+    Object.assign(bar, { setPointerCapture: vi.fn(), hasPointerCapture: vi.fn(() => true), releasePointerCapture: vi.fn() });
     take.on = null;
     await settled(); // the availability check
     node("#voice").onclick!(); // into voice mode
@@ -975,6 +975,7 @@ describe("voice mode", () => {
     run();
     expect(take.cancel).toHaveBeenCalledOnce();
     take.on!.onState("idle");
+    expect(bar.releasePointerCapture).toHaveBeenCalledWith(1); // the finger still down holds nothing
     holdAt("", 0);
     pointer("pointerup", 20, 500);
     take.on!.onState("finishing");
@@ -996,15 +997,24 @@ describe("voice mode", () => {
     expect(caption.scrollTop).toBe(1000);
   });
 
+  it("keeps the draft unfocused during a take, so the tap after it is the one that leaves voice mode", () => {
+    holdAt("draft", 5);
+    input.focus();
+    input.dispatchEvent(new Event("focus"));
+    expect(document.activeElement).not.toBe(input);
+    expect(node("#composer").hasAttribute("data-voice")).toBe(true);
+  });
+
   it("drops the partial on an error, says why, and closes the card", () => {
     holdAt("", 0);
+    node("#voice-cancel").focus(); // tabbed to the ×: the focus must not fall to the page
     say("final", "Kept.");
     say("partial", " lost");
     take.on!.onEvent({ type: "error", message: "upstream closed" });
     take.on!.onState("idle");
     expect(input.value).toBe("Kept.");
     expect(state.appendTurn).toHaveBeenCalledWith("error", "voice input: upstream closed");
-    expect(card().open).toBe(false);
+    expect([card().open, document.activeElement]).toEqual([false, bar]);
   });
 
   it("cancels on a session switch, leaving the old draft without the take's text", () => {

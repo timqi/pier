@@ -140,11 +140,15 @@ function onState(next: TakeState): void {
   if (next === "idle") {
     take = null;
     span = null;
+    // Ended under the finger (Esc, Send, an error): its later moves are no take's.
+    if (press && bar.hasPointerCapture(press.id)) bar.releasePointerCapture(press.id);
     press = null;
     cancelling = false;
     clearInterval(ticker);
   }
   input.readOnly = next !== "idle";
+  // A focus left inside the hidden card would fall to the page.
+  if (!live() && card.contains(document.activeElement)) bar.focus();
   paint();
 }
 
@@ -241,8 +245,12 @@ async function offerVoice(): Promise<void> {
   wireBar();
   window.addEventListener("pagehide", cancelVoice);
   // A tap on the draft is to edit it: the keyboard, the caret where it landed.
+  // During a take the draft is read-only and stays unfocused, so a later tap is
+  // still the one that leaves voice mode.
   input.addEventListener("focus", () => {
-    if (voiceOn && state === "idle") setMode(false, false);
+    if (!voiceOn) return;
+    if (state === "idle") setMode(false, false);
+    else input.blur();
   });
 }
 
