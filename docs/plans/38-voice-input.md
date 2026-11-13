@@ -9,8 +9,9 @@
 
 - 识别：阿里云千问 `qwen3-asr-flash-realtime`，DashScope WebSocket 北京区，由 Pier
   服务端中转；浏览器不直连，key 不出服务端。
-- 识别层是可替换的 provider 接口；首版两个实现：`qwen`、`mock`。豆包以后加一个文件。
-- key：vault 名 `DASHSCOPE_API_KEY`（`vault.get`，与 `channels/config.ts` 同一读法）。
+- 识别层是可替换的 provider 接口；实现：`doubao`（豆包流式识别 2.0）、`qwen`、`mock`。
+- key：vault 名 `DOUBAO_ASR_API_KEY` / `DASHSCOPE_API_KEY`（`vault.get`，与 `channels/config.ts` 同一读法），
+  每个 take 开始时有豆包 key 用豆包，否则千问；`PIER_VOICE=doubao|qwen|mock` 钉死一个。
   没有 key（或 vault 锁着）→ `available:false`，麦克风按钮不渲染。
 - 交互：点麦克风开始，再点结束；实时文字进草稿，可编辑后再发；可取消。不自动发送。
 - 参考 Avibe（`~/code/ref/avibe`，MIT，Copyright (c) 2026 The Vibe Remote Authors）。
@@ -63,11 +64,11 @@ export interface AsrProvider {
 }
 ```
 
-- `src/web/voice.ts`：路由、take 表、上面的约束、接口、`mockAsr`。
-- `src/web/voice-qwen.ts`：千问适配器，唯一知道 DashScope 协议的文件。
-- `createServer` 的 `WebDeps` 加 `voice?: AsrProvider`；`main.ts` 接线：
-  `PIER_VOICE=mock` → `mockAsr`，否则 `qwenAsr(() => vault.get("DASHSCOPE_API_KEY"))`
-  （vault 锁着时 `get` 会抛，按不可用处理并记一行 warn）。
+- `src/web/voice.ts`：路由、take 表、上面的约束、接口、`mockAsr`；`socketAsr`（vault 取 key、
+  上游 WebSocket 的 take 生命周期与超时）、`firstAvailable`。
+- `src/web/voice-qwen.ts` / `voice-doubao.ts`：各自唯一知道 DashScope / 火山 sauc 协议的文件，只有 `Wire` 映射。
+- `createServer` 的 `WebDeps` 加 `voice?: AsrProvider`；`main.ts` 按 `PIER_VOICE` 接线，未设 →
+  `firstAvailable(doubaoAsr(…), qwenAsr(…))`（vault 锁着时 `get` 会抛，按不可用处理并记一行 warn）。
 - `mockAsr`：每收到一段音频就按字节数推进一段固定脚本文字，发 `partial`，凑满一句发
   `final`；`finish` 后发剩余 `final` 与 `done`。确定性，无定时器，测试与无 key 手测都用它。
 

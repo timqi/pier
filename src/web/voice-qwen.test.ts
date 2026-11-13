@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AsrEvent } from "./voice.js";
-import { qwenAsr, type SocketCtor } from "./voice-qwen.js";
+import type { AsrEvent, SocketCtor } from "./voice.js";
+import { qwenAsr } from "./voice-qwen.js";
 
 const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock("../log.js", () => ({ logger: () => log }));
@@ -17,6 +17,7 @@ class FakeSocket {
   static all: FakeSocket[] = [];
   sent: Record<string, unknown>[] = [];
   closed = 0;
+  binaryType: BinaryType = "blob";
   onopen: Handler<"onopen"> = null;
   onmessage: Handler<"onmessage"> = null;
   onerror: Handler<"onerror"> = null;
@@ -79,9 +80,9 @@ describe("qwenAsr", () => {
     key = () => "vt://abc";
     expect(provider.available()).toBe(false);
     expect(log.warn.mock.calls.map(([line]) => String(line))).toEqual([
-      "DASHSCOPE_API_KEY is not in the vault — voice input is off",
-      "DASHSCOPE_API_KEY cannot be read: secrets locked: unlock() has not run — voice input is off",
-      "DASHSCOPE_API_KEY is an approve-level vt:// record; voice input needs an auto row — voice input is off",
+      "DASHSCOPE_API_KEY is not in the vault — DashScope recognition is off",
+      "DASHSCOPE_API_KEY cannot be read: secrets locked: unlock() has not run — DashScope recognition is off",
+      "DASHSCOPE_API_KEY is an approve-level vt:// record; voice input needs an auto row — DashScope recognition is off",
     ]);
     key = () => "sk-test";
     expect(provider.available()).toBe(true);

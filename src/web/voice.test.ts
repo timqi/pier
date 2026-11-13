@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { AuthStore, requireAuth } from "./auth.js";
-import { type AsrEvent, type AsrProvider, mockAsr, MOCK_SCRIPT, registerVoiceRoutes } from "./voice.js";
+import { type AsrEvent, type AsrProvider, firstAvailable, mockAsr, MOCK_SCRIPT, registerVoiceRoutes } from "./voice.js";
 
 const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock("../log.js", () => ({ logger: () => log }));
@@ -297,5 +297,28 @@ describe("/api/voice", () => {
     expect(s.calls.at(-1)).toBe("close");
     const events = await sse(await r.send("GET", `/api/voice/${long}/events`)).rest();
     expect(events.at(-1)).toEqual({ type: "error", message: "a voice take is limited to 5 minutes" });
+  });
+});
+
+describe("firstAvailable", () => {
+  it("opens the first provider that is available at the time, and refuses when none is", () => {
+    let first = false;
+    let second = true;
+    const opened: string[] = [];
+    const provider = (name: string, available: () => boolean): AsrProvider => ({
+      available,
+      open: () => {
+        opened.push(name);
+        return { audio: () => {}, finish: () => {}, close: () => {} };
+      },
+    });
+    const either = firstAvailable(provider("doubao", () => first), provider("qwen", () => second));
+    either.open({}, () => {});
+    first = true;
+    either.open({}, () => {});
+    expect(opened).toEqual(["qwen", "doubao"]);
+    first = second = false;
+    expect(either.available()).toBe(false);
+    expect(() => either.open({}, () => {})).toThrow("no recognizer has its key in the vault");
   });
 });

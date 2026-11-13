@@ -71,6 +71,7 @@ src/
                plain-text.ts (markdown without its marks, the server's and the UI's),
                voice.ts (voice input's relay: takes, routes, the AsrProvider
                seam, mockAsr for `PIER_VOICE=mock`), voice-qwen.ts (the DashScope realtime ASR adapter),
+               voice-doubao.ts (the Volcengine Doubao streaming ASR adapter),
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,

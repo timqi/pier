@@ -54,7 +54,8 @@ import { SessionStateStore } from "./web/session-state.js";
 import { untilUnlockSettled } from "./web/instance.js";
 import { createServer } from "./web/server.js";
 import { registerVaultRoutes } from "./web/vault.js";
-import { mockAsr } from "./web/voice.js";
+import { type AsrProvider, firstAvailable, mockAsr } from "./web/voice.js";
+import { doubaoAsr } from "./web/voice-doubao.js";
 import { qwenAsr } from "./web/voice-qwen.js";
 
 const log = logger("pier");
@@ -382,6 +383,24 @@ registerPushRoutes(app, {
   host: machine,
   publicUrl: () => settings.get().publicUrl,
 });
+// PIER_VOICE pins one recognizer; unset, Doubao takes a take when its key is in the vault, else DashScope.
+const doubao = (optional = false): AsrProvider => doubaoAsr(() => vault.get("DOUBAO_ASR_API_KEY"), { optional });
+const qwen = (): AsrProvider => qwenAsr(() => vault.get("DASHSCOPE_API_KEY"));
+let voice: AsrProvider;
+switch (process.env.PIER_VOICE) {
+  case "mock":
+    voice = mockAsr;
+    break;
+  case "doubao":
+    voice = doubao();
+    break;
+  case "qwen":
+    voice = qwen();
+    break;
+  default:
+    if (process.env.PIER_VOICE) log.warn(`PIER_VOICE=${process.env.PIER_VOICE} is not mock, doubao or qwen — ignored`);
+    voice = firstAvailable(doubao(true), qwen());
+}
 app.route("/", createServer({
   factory,
   router,
@@ -431,7 +450,7 @@ app.route("/", createServer({
     return live && live.channelId !== "task" ? live.channelId : chatKeyOf(id)?.channelId;
   },
   continuous: chain,
-  voice: process.env.PIER_VOICE === "mock" ? mockAsr : qwenAsr(() => vault.get("DASHSCOPE_API_KEY")),
+  voice,
 }));
 
 const port = Number(process.env.PORT ?? 3141);

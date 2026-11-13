@@ -23,6 +23,173 @@ export interface AsrProvider {
   open(opts: { language?: string }, emit: (e: AsrEvent) => void): AsrStream;
 }
 
+/** The upstream socket an adapter needs: the global `WebSocket` in production, a fake in tests. */
+type AsrSocket = Pick<WebSocket, "send" | "close" | "binaryType" | "onopen" | "onmessage" | "onerror" | "onclose">;
+export type SocketCtor = new (url: string, init: { headers: Record<string, string> }) => AsrSocket;
+// Node's WebSocket (undici) takes `{ headers }`; the DOM lib this program
+// compiles against types only `protocols` there.
+export const NodeWebSocket = WebSocket as unknown as SocketCtor;
+
+/** A recognizer's key from the vault. `readKey` is `vault.get`: it throws while
+ *  the vault is locked, and an approve-level row is a `vt://` record, not a
+ *  key. Either is "unavailable", warned once per change of state; a key that is
+ *  simply absent goes unwarned when the recognizer is `optional`. */
+function vaultKey(name: string, recognizer: string, readKey: () => string | undefined, optional: boolean): () => string | undefined {
+  let warned = "";
+  return () => {
+    let problem: string;
+    try {
+      const value = readKey();
+      if (value && !value.startsWith("vt://")) {
+        warned = "";
+        return value;
+      }
+      if (!value && optional) {
+        warned = "";
+        return undefined;
+      }
+      problem = value ? "is an approve-level vt:// record; voice input needs an auto row" : "is not in the vault";
+    } catch (err) {
+      problem = `cannot be read: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (problem !== warned) log.warn(`${name} ${problem} — ${recognizer} recognition is off`);
+    warned = problem;
+    return undefined;
+  };
+}
+
+type Frame = string | Uint8Array<ArrayBuffer>;
+/** What a take lets its upstream's message handler do. */
+export interface WireTake {
+  emit(e: Extract<AsrEvent, { type: "partial" | "final" }>): void;
+  /** Audio may flow; only the first call counts. */
+  ready(): void;
+  done(): void;
+  fail(message: string): void;
+}
+/** One take's wire: everything an adapter knows about its upstream's protocol. */
+export interface Wire {
+  url: string;
+  headers: Record<string, string>;
+  binaryType?: BinaryType;
+  /** Sent on open; `readyOnOpen` when audio may follow it unacknowledged. */
+  start: Frame;
+  readyOnOpen?: boolean;
+  audio(pcm: Uint8Array): Frame;
+  finish(): Frame;
+  message(data: unknown, take: WireTake): void;
+}
+
+const HANDSHAKE_MS = 8_000;
+const FINISH_MS = 20_000;
+
+/** A WebSocket recognizer: its key from the vault, and the take's lifecycle
+ *  (handshake and finish timeouts, failures as `error`) around its wire. */
+export function socketAsr(
+  recognizer: string, keyName: string, readKey: () => string | undefined, Socket: SocketCtor,
+  wireOf: (key: string, opts: { language?: string }) => Wire, optional = false,
+): AsrProvider {
+  const key = vaultKey(keyName, recognizer, readKey, optional);
+  return {
+    available: () => key() !== undefined,
+    open(opts, emit) {
+      let state: "connecting" | "ready" | "finishing" | "closed" = "connecting";
+      let ws: AsrSocket | undefined;
+      let timer: NodeJS.Timeout | undefined;
+
+      const stop = (event: AsrEvent): void => {
+        if (state === "closed") return;
+        state = "closed";
+        clearTimeout(timer);
+        ws?.close();
+        emit(event);
+      };
+      const fail = (message: string): void => stop({ type: "error", message });
+      const send = (frame: Frame): void => {
+        try {
+          ws?.send(frame);
+        } catch (err) {
+          fail(`${recognizer} send failed: ${String(err)}`);
+        }
+      };
+      const take: WireTake = {
+        emit(e) {
+          if (state !== "closed") emit(e);
+        },
+        ready() {
+          if (state !== "connecting") return;
+          clearTimeout(timer);
+          state = "ready";
+          emit({ type: "ready" });
+        },
+        done: () => stop({ type: "done" }),
+        fail,
+      };
+
+      const apiKey = key();
+      let wire: Wire | undefined;
+      if (!apiKey) {
+        queueMicrotask(() => fail(`${keyName} is not available`));
+      } else {
+        try {
+          wire = wireOf(apiKey, opts);
+          ws = new Socket(wire.url, { headers: wire.headers });
+        } catch (err) {
+          queueMicrotask(() => fail(`${recognizer} connection failed: ${String(err)}`));
+        }
+      }
+      if (ws && wire) {
+        const w = wire;
+        if (w.binaryType) ws.binaryType = w.binaryType;
+        timer = setTimeout(() => fail(`${recognizer} was not ready within ${HANDSHAKE_MS / 1000} s`), HANDSHAKE_MS);
+        ws.onopen = () => {
+          if (state !== "connecting") return;
+          send(w.start);
+          if (w.readyOnOpen) take.ready();
+        };
+        ws.onmessage = (m) => {
+          if (state !== "closed") w.message(m.data, take);
+        };
+        // A rejected key fails the handshake itself (HTTP 401/403): error, then close.
+        ws.onerror = () => fail(`${recognizer} connection failed`);
+        ws.onclose = (c) => fail(`${recognizer} closed the connection (${c.code}${c.reason ? ` ${c.reason}` : ""})`);
+      }
+
+      return {
+        audio(pcm) {
+          if (state === "ready" && wire) send(wire.audio(pcm));
+        },
+        finish() {
+          if (state !== "ready" || !wire) return;
+          state = "finishing";
+          timer = setTimeout(() => fail(`${recognizer} did not finish within ${FINISH_MS / 1000} s`), FINISH_MS);
+          send(wire.finish());
+        },
+        close() {
+          if (state === "closed") return;
+          state = "closed";
+          clearTimeout(timer);
+          ws?.close();
+        },
+      };
+    },
+  };
+}
+
+/** The first provider that is available takes every new take; a key added or
+ *  removed in the vault switches recognizers without a restart. */
+export function firstAvailable(...providers: AsrProvider[]): AsrProvider {
+  const pick = (): AsrProvider | undefined => providers.find((p) => p.available());
+  return {
+    available: () => pick() !== undefined,
+    open(opts, emit) {
+      const provider = pick();
+      if (!provider) throw new Error("no recognizer has its key in the vault");
+      return provider.open(opts, emit);
+    },
+  };
+}
+
 const MAX_AUDIO_BYTES = 256 * 1024;
 const MAX_TAKE_MS = 5 * 60_000;
 const IDLE_MS = 15_000;
