@@ -485,8 +485,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   runs; each write saves it and scrolls it to the take's end. `done` releases
   the span. Cancel (the card's ×, Esc, a release in pending cancel), leaving
   the session and `pagehide` remove what the span holds and `DELETE` the
-  take; Send ends the take and sends the draft as it stands, later text
-  dropped. A Console view over the chat and a head rotation the user did not
+  take; Send finishes the take as a release does and sends the draft once
+  `done` has settled its last sentence — a take cancelled or failed meanwhile
+  sends nothing and leaves the draft. A Console view over the chat and a head rotation the user did not
   make `DELETE` the take and keep its text, the partial included, in the
   draft it was spoken into. `error` and a refused or missing microphone keep
   the final sentences, drop the partial and post an error row

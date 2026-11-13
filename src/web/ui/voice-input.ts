@@ -44,6 +44,8 @@ let press: (Press & { id: number }) | null = null;
 let cancelling = false;
 let started = 0;
 let ticker: ReturnType<typeof setInterval> | undefined;
+let clean = false; // the take ended with `done`: its text is whole
+let settling: ((whole: boolean) => void)[] = [];
 
 /** Voice mode is on: the draft is not focused for the user, only on their tap. */
 export const voiceMode = (): boolean => voiceOn;
@@ -123,12 +125,28 @@ function write(edit: (span: Span) => SpanEdit): void {
   span = e.span;
   deps.changed(takeSession);
   // The draft is not focused, so nothing scrolls it to the take's end but this.
-  const end = e.from + e.text.length;
-  if (input.value) input.scrollTop = Math.max(0, (input.scrollHeight * end) / input.value.length - input.clientHeight);
+  if (input.scrollHeight > input.clientHeight) input.scrollTop = Math.max(0, heightTo(e.from + e.text.length) - input.clientHeight);
   paintCaption();
 }
 
+/** How tall the draft is down to `end`, laid out in a copy of its own box. */
+function heightTo(end: number): number {
+  if (end === input.value.length) return input.scrollHeight;
+  const style = getComputedStyle(input);
+  const mirror = h("div", "");
+  mirror.style.cssText = "position:absolute;visibility:hidden;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:break-word";
+  mirror.style.width = `${input.clientWidth}px`;
+  for (const prop of ["font", "lineHeight", "letterSpacing", "padding"] as const) mirror.style[prop] = style[prop];
+  // A last line that is empty has no height without a character on it.
+  mirror.textContent = `${input.value.slice(0, end)}\u200b`;
+  document.body.append(mirror);
+  const height = mirror.offsetHeight;
+  mirror.remove();
+  return height;
+}
+
 function onEvent(e: VoiceEvent): void {
+  if (e.type === "done") clean = true;
   if (e.type === "partial" || e.type === "final") write((s) => spanText(s, e.type, e.text, input.value[s.mid - 1]));
   if (e.type !== "error") return;
   write(spanError);
@@ -145,6 +163,8 @@ function onState(next: TakeState): void {
     press = null;
     cancelling = false;
     clearInterval(ticker);
+    for (const settle of settling.splice(0)) settle(clean);
+    clean = false;
   }
   input.readOnly = next !== "idle";
   // A focus left inside the hidden card would fall to the page.
@@ -179,8 +199,18 @@ export function cancelVoice(): void {
   take.cancel();
 }
 
-/** The draft went out of sight, to another session unasked, or was sent: the
- *  take ends with its text kept, and writes no more. */
+/** A take is running or finishing: the draft is not whole yet. */
+export const voiceBusy = (): boolean => take !== null;
+
+/** Ends the take as a release does; true once `done` left its text whole in
+ *  the draft, false when it was cancelled or failed instead. */
+export function settleVoice(): Promise<boolean> {
+  finish();
+  return new Promise((resolve) => settling.push(resolve));
+}
+
+/** The draft went out of sight, or to another session unasked: the take ends
+ *  with its text kept, and writes no more. */
 export function endVoice(): void {
   span = null;
   take?.cancel();

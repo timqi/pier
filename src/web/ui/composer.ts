@@ -12,7 +12,7 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { QUOTE_CHARS, splitItem, splitSpeaker, withItem, withQuote } from "../../core/identity.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { cancelVoice, endVoice, initVoice, keyboardMode, voiceMode } from "./voice-input.js";
+import { cancelVoice, initVoice, keyboardMode, settleVoice, voiceBusy, voiceMode } from "./voice-input.js";
 import { CHAT_COMMANDS, type ChatCommand, chatCommand, isCommandText, type SessionState } from "../../core/types.js";
 import type { ParkedMessage } from "../../tasks/types.js";
 
@@ -503,6 +503,15 @@ let sending = false; // uploads await; a second Enter meanwhile must not double-
  *  click is a side action and must not consume the user's unsent draft, nor
  *  its staged quote; `quote` is the reply that offered the label. */
 export async function send(mode: "auto" | "steer", label?: string, quote?: QuoteSource): Promise<void> {
+  if (label === undefined && voiceBusy()) {
+    if (sending) return;
+    sending = true;
+    // The take's last sentence is part of the message; one cancelled or failed
+    // meanwhile leaves the draft with the user.
+    const whole = await settleVoice();
+    sending = false;
+    if (!whole) return;
+  }
   const typed = (label ?? input.value).trim();
   const files = label === undefined ? pendingFiles : [];
   const id = deps.sessionId();
@@ -511,8 +520,6 @@ export async function send(mode: "auto" | "steer", label?: string, quote?: Quote
   if (label === undefined) {
     if (sending) return;
     sending = true;
-    // The take ends, but its later text must not land in the next draft.
-    endVoice();
     // Cleared before any await: whatever is typed while an upload runs is a
     // new draft, not collateral of this send.
     input.value = "";

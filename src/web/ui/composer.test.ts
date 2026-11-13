@@ -1049,14 +1049,33 @@ describe("voice mode", () => {
     expect(take.cancel).toHaveBeenCalledOnce();
   });
 
-  it("sends the draft as it stands on send, ends the take, and keeps its later text out", async () => {
+  it("finishes the take on send and sends once its last sentence has settled", async () => {
     holdAt("", 0);
     say("partial", "half a sentence");
     state.fetch.mockResolvedValueOnce(Response.json({}, { status: 202 }));
-    await composer.send("auto");
-    expect(take.cancel).toHaveBeenCalledOnce();
-    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("half a sentence");
+    const sent = composer.send("auto");
+    void composer.send("auto"); // a second Enter while the take settles
+    expect(take.stop).toHaveBeenCalledOnce();
+    expect(take.cancel).not.toHaveBeenCalled();
+    expect(state.fetch).not.toHaveBeenCalled();
     say("final", "Half a sentence.");
+    take.on!.onEvent({ type: "done" });
+    take.on!.onState("idle");
+    await sent;
+    expect(state.fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(state.fetch.mock.calls[0]?.[1]?.body as string).text).toBe("Half a sentence.");
     expect(input.value).toBe("");
   });
+
+  it("keeps the draft unsent when the take it waited for fails", async () => {
+    holdAt("", 0);
+    say("final", "One.");
+    const sent = composer.send("auto");
+    take.on!.onEvent({ type: "error", message: "upstream closed" });
+    take.on!.onState("idle");
+    await sent;
+    expect(state.fetch).not.toHaveBeenCalled();
+    expect(input.value).toBe("One.");
+  });
+
 });
