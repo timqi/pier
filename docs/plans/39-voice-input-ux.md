@@ -169,6 +169,8 @@ Console 盖住聊天、非用户发起的 head 轮换就地结束并保留文字
 
 - iOS 上由 `pointerdown` 启动采集未实测；若 `resume()` 仍不放行，退路是切换键的那次点击
   （真正的用户激活）里预先创建并保留 `AudioContext`，离开语音模式时关闭。
+  探针：`https://corkboard-private.pages.dev/voice-hold-probe/`（board `voice-hold-probe`；测试 A＝按下即录，
+  B＝退路）。实现在真机结果回来之后才开始：A 通过走正文，A 不通过而 B 通过走退路。结果：待测。
 - 首次按住会弹麦克风权限，手势必然被打断；设计上转成免提，实际以真机为准。
 - 轻点＝免提与微信不同（微信提示「说话时间太短」）；条的 `title` 与字幕卡底部提示负责教会用户。
 
