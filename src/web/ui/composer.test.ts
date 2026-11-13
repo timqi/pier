@@ -1037,7 +1037,7 @@ describe("voice mode", () => {
     holdAt("draft", 5);
     input.focus();
     input.dispatchEvent(new Event("focus"));
-    expect(document.activeElement).not.toBe(input);
+    expect(document.activeElement).toBe(bar); // the phone's keyboard stays down, hands-free still finishes from it
     expect(node("#composer").hasAttribute("data-voice")).toBe(true);
   });
 

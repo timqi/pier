@@ -283,9 +283,9 @@ export async function offerVoice(): Promise<void> {
   wireBar();
   window.addEventListener("pagehide", cancelVoice);
   // A tap on the draft between takes edits it in voice mode; during a take it
-  // is read-only and keeps the phone's keyboard down.
+  // is read-only, and the focus stays on the bar that finishes hands-free.
   input.addEventListener("focus", () => {
-    if (state !== "idle") input.blur();
+    if (state !== "idle") bar.focus();
   });
 }
 
