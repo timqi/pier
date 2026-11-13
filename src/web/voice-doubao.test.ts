@@ -8,6 +8,7 @@ vi.mock("../log.js", () => ({ logger: () => log }));
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -211,11 +212,14 @@ describe("doubaoAsr", () => {
     ]);
   });
 
-  it("errors on a refused handshake and on an unexpected close", () => {
+  it("errors on a refused handshake with the server's reason, and on an unexpected close", async () => {
+    const fetch = vi.fn(async () => new Response('{"error":"Invalid X-Api-Key"}', { status: 401 }));
+    vi.stubGlobal("fetch", fetch);
     const refused = start();
     refused.ws.fail();
     refused.ws.drop(1006);
-    expect(refused.events).toEqual([{ type: "error", message: "Doubao connection failed" }]);
+    await vi.waitFor(() => expect(refused.events).toEqual([{ type: "error", message: 'Doubao connection failed: HTTP 401 {"error":"Invalid X-Api-Key"}' }]));
+    expect(fetch).toHaveBeenCalledWith("https://openspeech.bytedance.com/api/v3/sauc/bigmodel_async", expect.objectContaining({ headers: refused.ws.init.headers }));
     const t = ready();
     t.ws.drop(1011, "internal");
     expect(t.events).toEqual([{ type: "ready" }, { type: "error", message: "Doubao closed the connection (1011 internal)" }]);

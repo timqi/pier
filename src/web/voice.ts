@@ -82,6 +82,22 @@ export interface Wire {
 
 const HANDSHAKE_MS = 8_000;
 const FINISH_MS = 20_000;
+const REFUSAL_MS = 5_000;
+
+/** Why a handshake was refused: the WebSocket API hides the HTTP response, so the
+ *  same request is replayed as a plain GET, which these servers answer with the
+ *  same 401/403 and its JSON reason. */
+async function refusal(url: string, headers: Record<string, string>): Promise<string> {
+  try {
+    const res = await fetch(url.replace(/^ws/, "http"), { headers, signal: AbortSignal.timeout(REFUSAL_MS) });
+    const body = (await res.text()).trim().slice(0, 200);
+    return `HTTP ${res.status}${body ? ` ${body}` : ""}`;
+  } catch (err) {
+    // undici's "fetch failed" carries the reason (ENOTFOUND, ECONNREFUSED…) only in its cause.
+    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+    return `${String(err)}${cause}`;
+  }
+}
 
 /** A WebSocket recognizer: its key from the vault, and the take's lifecycle
  *  (handshake and finish timeouts, failures as `error`) around its wire. */
@@ -141,8 +157,11 @@ export function socketAsr(
       if (ws && wire) {
         const w = wire;
         if (w.binaryType) ws.binaryType = w.binaryType;
+        let opened = false;
+        let refused = false;
         timer = setTimeout(() => fail(`${recognizer} was not ready within ${HANDSHAKE_MS / 1000} s`), HANDSHAKE_MS);
         ws.onopen = () => {
+          opened = true;
           if (state !== "connecting") return;
           send(w.start);
           if (w.readyOnOpen) take.ready();
@@ -151,8 +170,15 @@ export function socketAsr(
           if (state !== "closed") w.message(m.data, take);
         };
         // A rejected key fails the handshake itself (HTTP 401/403): error, then close.
-        ws.onerror = () => fail(`${recognizer} connection failed`);
-        ws.onclose = (c) => fail(`${recognizer} closed the connection (${c.code}${c.reason ? ` ${c.reason}` : ""})`);
+        ws.onerror = () => {
+          if (opened || state !== "connecting") return fail(`${recognizer} connection failed`);
+          refused = true;
+          clearTimeout(timer);
+          void refusal(w.url, w.headers).then((why) => fail(`${recognizer} connection failed: ${why}`));
+        };
+        ws.onclose = (c) => {
+          if (!refused) fail(`${recognizer} closed the connection (${c.code}${c.reason ? ` ${c.reason}` : ""})`);
+        };
       }
 
       return {

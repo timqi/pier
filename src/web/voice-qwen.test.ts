@@ -7,6 +7,7 @@ vi.mock("../log.js", () => ({ logger: () => log }));
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -168,11 +169,13 @@ describe("qwenAsr", () => {
     expect(log.warn).toHaveBeenCalledWith("DashScope sent a frame that is not JSON — dropped");
   });
 
-  it("errors on a refused handshake and on an unexpected close", () => {
+  it("errors on a refused handshake, naming why the replay failed too, and on an unexpected close", async () => {
+    const cause = new Error("getaddrinfo ENOTFOUND dashscope.aliyuncs.com");
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed", { cause }))));
     const refused = start();
     refused.ws.fail();
     refused.ws.drop(1006);
-    expect(refused.events).toEqual([{ type: "error", message: "DashScope connection failed" }]);
+    await vi.waitFor(() => expect(refused.events).toEqual([{ type: "error", message: "DashScope connection failed: TypeError: fetch failed (getaddrinfo ENOTFOUND dashscope.aliyuncs.com)" }]));
     const t = ready();
     t.ws.drop(1011, "internal");
     expect(t.events).toEqual([{ type: "ready" }, { type: "error", message: "DashScope closed the connection (1011 internal)" }]);
