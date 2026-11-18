@@ -81,6 +81,8 @@ src/
                cli (`pier task`: argv → the params object over the socket),
                routes (Settings → Tasks: list, pause/resume, runs)
   main.ts      wiring only
+  system-ca.ts the OS certificate store trusted, called first by cli.ts and
+               main.ts; NODE_OPTIONS carries --use-system-ca to child Node
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME
   db.ts        the one connection, and the migration list that owns the schema

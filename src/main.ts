@@ -57,7 +57,9 @@ import { registerVaultRoutes } from "./web/vault.js";
 import { selected } from "./web/voice.js";
 import { doubaoAsr } from "./web/voice-doubao.js";
 import { qwenAsr } from "./web/voice-qwen.js";
+import { trustSystemCa } from "./system-ca.js";
 
+trustSystemCa();
 const log = logger("pier");
 
 // Before any SDK call resolves a path, so everything Pi derives from its agent

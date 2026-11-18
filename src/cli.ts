@@ -11,6 +11,9 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { Resolved } from "./vault.js";
 import { currentVersion, UpdateCheck } from "./update.js";
+import { trustSystemCa } from "./system-ca.js";
+
+trustSystemCa();
 
 const version = currentVersion();
 
