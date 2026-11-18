@@ -1,6 +1,6 @@
 use super::*;
 
-/// The tests' login shell: /bin/sh reads no profile, so nothing of the user's runs.
+/// The tests' login shell: a POSIX sh, which reads `~/.profile` but never `~/.zshrc` or `~/.bashrc`.
 fn plain_shell() {
     env::set_var("SHELL", "/bin/sh");
 }
@@ -37,8 +37,9 @@ fn a_command_that_exits_before_listening_names_its_log() {
     let log = env::temp_dir().join(format!("pier-client-test-{}", std::process::id())).join("serve.log");
     let error = start("echo starting; exit 3", 1, &log).unwrap_err();
     assert!(error.contains(&log.display().to_string()), "{error}");
-    // An interactive login bash, as /bin/sh is, adds its `logout`.
-    assert!(fs::read_to_string(&log).unwrap().starts_with("starting\n"));
+    // The shell adds its own lines around it: bash its `logout`, dash with no tty its job-control warning.
+    let logged = fs::read_to_string(&log).unwrap();
+    assert!(logged.lines().any(|line| line == "starting"), "{logged}");
     fs::remove_dir_all(log.parent().unwrap()).unwrap();
 }
 
