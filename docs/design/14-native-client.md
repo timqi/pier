@@ -84,12 +84,21 @@ not a server, so no launchd or systemd unit: quitting the app stops it.
 
 - **Command**: `+` → Add Local Instance… opens the add field holding the
   command that starts Pier, prefilled with `<pier's absolute path> serve`
-  from an interactive login shell (`$SHELL -lic 'command -v pier'`; a GUI
-  app's PATH lacks fnm's and Homebrew's, and zsh reads `~/.zshrc` only when
-  interactive), empty when it finds none; a shell that does not answer in
-  20s is killed and its error shown, the field opening empty. The user may edit
-  it — a dev build, `PORT=3200 pier serve`. It runs in that login shell too,
-  so a bare `pier` works.
+  (single-quoted when it holds a space), the first executable `pier` on the
+  search PATH; none found shows an error naming the directories searched, the
+  field opening empty. The user may edit it — a dev build, `PORT=3200 pier
+  serve`. It runs in an interactive login shell (`$SHELL -lic`, zsh when
+  `$SHELL` is not zsh, bash, sh, ksh or dash) whose PATH starts as the search
+  PATH, so a bare `pier` and `pier`'s `node` are found.
+- **Search PATH**: a GUI app's PATH lacks fnm's and Homebrew's, and zsh reads
+  `~/.zshrc` only when interactive, so the first need runs `$SHELL -ilc` in
+  the home directory printing `$PATH` between markers: 3s and 64 KiB at most,
+  then its process group is killed; escapes stripped, one marker pair, no
+  control character, relative entries dropped. A PATH read is kept for the
+  app's life; a failed read is logged and asked again next time, the app's own
+  PATH standing in. `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`,
+  `~/.local/bin`, `~/.volta/bin` and fnm's default alias follow it. Only spawned
+  commands get it; the app's own environment is left as launchd gave it.
 - **Instance** = `{name, url, closed, command}`; its url is
   `http://127.0.0.1:<port>`, the port the command's own `PORT=` word
   assigns, else 3141; a `PORT` the profile exports is not seen.
