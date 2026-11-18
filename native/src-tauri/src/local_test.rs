@@ -1,8 +1,18 @@
 use super::*;
 
-/// The tests' login shell: a POSIX sh, which reads `~/.profile` but never `~/.zshrc` or `~/.bashrc`.
-fn plain_shell() {
-    env::set_var("SHELL", "/bin/sh");
+/// The tests' login shell: a POSIX sh, which reads `~/.profile` but never `~/.zshrc` or `~/.bashrc`,
+/// on this process's PATH, built here rather than read so no test depends on another's environment.
+fn plain_shell() -> LoginShell {
+    let path = env::var("PATH").unwrap();
+    LoginShell { shell: "/bin/sh".into(), path, failure: None, reported: AtomicBool::new(false) }
+}
+
+/// A home of its own holding `profile` as `.profile`, so no test reads the user's.
+fn home_with(name: &str, profile: &str) -> PathBuf {
+    let home = env::temp_dir().join(format!("pier-client-home-{name}-{}", std::process::id()));
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join(".profile"), profile).unwrap();
+    home
 }
 
 #[test]
@@ -23,19 +33,19 @@ fn a_local_instance_is_on_the_loopback_port_its_command_names() {
 
 #[test]
 fn sign_in_runs_the_command_with_login_for_serve_and_keeps_the_links_path() {
-    plain_shell();
-    let link = login("echo profile noise; echo http://pier.example:3141/login/tok3n; true serve").unwrap();
+    let shell = plain_shell();
+    let link = login(&shell, "echo profile noise; echo http://pier.example:3141/login/tok3n; true serve").unwrap();
     assert_eq!(link, Ok("/login/tok3n".to_owned()));
-    let refused = login("echo 'pier: no socket' >&2; false serve").unwrap().unwrap_err();
+    let refused = login(&shell, "echo 'pier: no socket' >&2; false serve").unwrap().unwrap_err();
     assert!(refused.contains("pier: no socket"), "{refused}");
-    assert!(login("node dist/main.js").is_none());
+    assert!(login(&shell, "node dist/main.js").is_none());
 }
 
 #[test]
 fn a_command_that_exits_before_listening_names_its_log() {
-    plain_shell();
+    let shell = plain_shell();
     let log = env::temp_dir().join(format!("pier-client-test-{}", std::process::id())).join("serve.log");
-    let error = start("echo starting; exit 3", 1, &log).unwrap_err();
+    let error = start(&shell, "echo starting; exit 3", 1, &log).unwrap_err();
     assert!(error.contains(&log.display().to_string()), "{error}");
     // The shell adds its own lines around it: bash its `logout`, dash with no tty its job-control warning.
     let logged = fs::read_to_string(&log).unwrap();
@@ -98,11 +108,12 @@ fn a_shell_s_output_is_read_within_its_budget_and_cap() {
 }
 
 #[test]
-fn a_shell_path_is_read_from_a_login_shell() {
-    // A login sh reads `~/.profile`, whatever it holds: only the framing is checked.
-    let path = shell_path(Path::new("/bin/sh"), Duration::from_secs(3));
-    assert!(path.is_ok_and(|p| p.split(':').all(|d| d.starts_with('/'))));
-    assert!(shell_path(Path::new("/nonexistent/zsh"), Duration::from_secs(3)).is_err());
+fn a_shell_path_is_read_from_a_login_shell_in_its_home() {
+    let home = home_with("read", "PATH=\"/from/profile:$(pwd):$HOME\"\n");
+    let path = shell_path(Path::new("/bin/sh"), Some(&home), Duration::from_secs(3)).unwrap();
+    assert_eq!(path, format!("/from/profile:{0}:{0}", home.display()));
+    assert!(shell_path(Path::new("/nonexistent/zsh"), Some(&home), Duration::from_secs(3)).is_err());
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -128,10 +139,26 @@ fn pier_is_the_first_executable_on_the_path_and_quoted_when_the_shell_would_spli
 }
 
 #[test]
-fn the_search_path_ends_in_the_install_directories_it_lacks() {
-    plain_shell();
-    let (path, _) = search_path();
-    assert!(path.contains(":/opt/homebrew/bin") || path.starts_with("/opt/homebrew/bin"));
-    assert_eq!(path.split(':').filter(|d| *d == "/usr/local/bin").count(), 1);
-    assert!(path.split(':').all(|d| d.starts_with('/')));
+fn the_search_path_is_the_shell_s_then_the_install_directories_it_lacks() {
+    let home = home_with("search", "PATH=\"/from/profile:/usr/local/bin\"\n");
+    let shell = LoginShell::read(Some("/bin/sh".into()), Some(&home), "/inherited");
+    assert!(shell.unreported_failure().is_none());
+    let npm = format!("{}/.npm-global/bin", home.display());
+    let dirs: Vec<&str> = shell.path.split(':').collect();
+    assert_eq!(dirs[..3], ["/from/profile", "/usr/local/bin", "/opt/homebrew/bin"]);
+    assert_eq!(dirs[3], npm);
+    assert_eq!(search_path("relative:/a:/opt/homebrew/bin", None), "/a:/opt/homebrew/bin:/usr/local/bin");
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn a_failed_read_is_kept_reported_once_and_the_app_s_path_stands_in() {
+    let home = home_with("failed", "exit 1\n");
+    let shell = LoginShell::read(Some("/bin/sh".into()), Some(&home), "/inherited");
+    assert!(shell.path.starts_with("/inherited:/opt/homebrew/bin:"), "{}", shell.path);
+    assert!(shell.unreported_failure().is_some_and(|e| e.contains("no PATH between markers")));
+    assert!(shell.unreported_failure().is_none());
+    let missing = suggested(&shell).unwrap_err();
+    assert!(missing.starts_with("no executable `pier` in /inherited, /opt/homebrew/bin, "), "{missing}");
+    fs::remove_dir_all(home).unwrap();
 }

@@ -94,8 +94,8 @@ not a server, so no launchd or systemd unit: quitting the app stops it.
   `~/.zshrc` only when interactive, so the first need runs `$SHELL -ilc` in
   the home directory printing `$PATH` between markers: 3s and 64 KiB at most,
   then its process group is killed; escapes stripped, one marker pair, no
-  control character, relative entries dropped. A PATH read is kept for the
-  app's life; a failed read is logged and asked again next time, the app's own
+  control character, relative entries dropped. The read is kept for the app's
+  life, a failed one too: its error shows on the tab bar once, the app's own
   PATH standing in. `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`,
   `~/.local/bin`, `~/.volta/bin` and fnm's default alias follow it. Only spawned
   commands get it; the app's own environment is left as launchd gave it.

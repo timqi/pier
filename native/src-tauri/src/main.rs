@@ -105,6 +105,16 @@ fn report(app: &AppHandle, message: impl Display) {
     }
 }
 
+/// The local Pier's login shell, read on first need, so to be called off the main thread; a shell
+/// that gave no PATH shows on the tab bar once.
+fn login_shell(app: &AppHandle) -> &'static local::LoginShell {
+    let shell = local::LoginShell::get();
+    if let Some(e) = shell.unreported_failure() {
+        report(app, format!("the login shell gave no PATH, so the app's own is searched: {e}"));
+    }
+    shell
+}
+
 /// An instance's command failing shows on the tab bar too, not only in its page's console.
 fn surfaced(app: &AppHandle, result: Res) -> Res {
     if let Err(e) = &result {
@@ -324,7 +334,12 @@ fn sign_in(app: &AppHandle, instance: &Instance, tried: &Mutex<Option<Instant>>)
     let Some(command) = instance.command.clone().filter(|_| again) else { return };
     let (handle, id, origin) = (app.clone(), instance.id.clone(), instance.url.clone());
     detach(app, async move {
-        let link = tauri::async_runtime::spawn_blocking(move || local::login(&command)).await.map_err(text)?;
+        let link = tauri::async_runtime::spawn_blocking({
+            let handle = handle.clone();
+            move || local::login(login_shell(&handle), &command)
+        })
+        .await
+        .map_err(text)?;
         let Some(link) = link.transpose()? else { return Ok(()) };
         let url = Url::parse(&origin).and_then(|u| u.join(&link)).map_err(text)?;
         let webview = handle.get_webview(&id).ok_or_else(|| format!("{id} has no webview"))?;
@@ -343,7 +358,9 @@ async fn serve(app: &AppHandle, instance: &Instance) -> Res<impl Sized> {
     let Some(command) = instance.command.clone().filter(|_| !running) else { return Ok(starting) };
     let port = local::port(&command)?;
     let log = app.path().home_dir().map_err(text)?.join(".pier/logs").join(format!("serve-{port}.log"));
-    let start = move || (!local::listening(port)).then(|| local::start(&command, port, &log)).transpose();
+    let handle = app.clone();
+    let start =
+        move || (!local::listening(port)).then(|| local::start(login_shell(&handle), &command, port, &log)).transpose();
     let child = tauri::async_runtime::spawn_blocking(start).await.map_err(text)??;
     shell.lock().children.extend(child.map(|child| (instance.id.clone(), child)));
     Ok(starting)
@@ -983,7 +1000,12 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         "add-local" => {
             let handle = app.clone();
             detach(app, async move {
-                let suggested = tauri::async_runtime::spawn_blocking(local::suggested).await.map_err(text)?;
+                let suggested = tauri::async_runtime::spawn_blocking({
+                    let handle = handle.clone();
+                    move || local::suggested(login_shell(&handle))
+                })
+                .await
+                .map_err(text)?;
                 let command = suggested.inspect_err(|e| report(&handle, e)).unwrap_or_default();
                 handle.get_webview(TABS).ok_or("the tab bar is gone")?.set_focus().map_err(text)?;
                 handle.emit_to(TABS, "add-local", command).map_err(text)

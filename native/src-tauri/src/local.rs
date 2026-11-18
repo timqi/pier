@@ -3,14 +3,17 @@
 
 use std::{
     env,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::{self, OpenOptions},
     io::Read,
     net::{SocketAddr, TcpStream},
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
-    sync::{mpsc, Mutex, PoisonError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, OnceLock,
+    },
     thread::{self, sleep},
     time::{Duration, Instant},
 };
@@ -32,67 +35,81 @@ const INSTALL_DIRS: [&str; 7] = [
 ];
 
 /// `$SHELL` when it takes `-ilc` and prints `$PATH` joined by `:` as a POSIX shell does, else zsh.
-fn shell() -> PathBuf {
+fn pick_shell(shell: Option<OsString>) -> PathBuf {
     let posix =
         |s: &PathBuf| matches!(s.file_name().and_then(OsStr::to_str), Some("zsh" | "bash" | "sh" | "ksh" | "dash"));
-    let shell = env::var_os("SHELL").map(PathBuf::from);
+    let shell = shell.map(PathBuf::from);
     shell.filter(|s| s.is_absolute() && posix(s) && executable(s)).unwrap_or_else(|| "/bin/zsh".into())
 }
 
-/// A GUI app's PATH lacks what the user's profile adds (fnm, Homebrew); an interactive login
-/// shell has it, as `~/.zshrc` is read only by an interactive zsh. It starts from `child_path`'s,
-/// so a profile that adds nothing still finds an install directory's `pier` and `node`.
-fn login_shell(script: &str) -> Command {
-    let mut command = Command::new(shell());
-    command.arg("-lic").arg(script).env("PATH", child_path());
-    // Its own process group, so a stop or a timeout reaches what the script started.
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
-    command
+/// What a local Pier's commands run in: the user's login shell and the PATH they start from.
+pub struct LoginShell {
+    shell: PathBuf,
+    path: String,
+    /// Why the shell gave no PATH, the app's own standing in.
+    failure: Option<String>,
+    reported: AtomicBool,
 }
 
-/// The login shell's PATH, kept once read: it runs the user's whole profile.
-static SHELL_PATH: Mutex<Option<String>> = Mutex::new(None);
+static LOGIN_SHELL: OnceLock<LoginShell> = OnceLock::new();
 
-/// The login shell's PATH, else this process's, then the install directories neither has; the app's
-/// own environment is left as launchd gave it. A shell that gave none is asked again next time.
-fn search_path() -> (String, Result<(), String>) {
-    let mut cached = SHELL_PATH.lock().unwrap_or_else(PoisonError::into_inner);
-    let read = match cached.as_ref() {
-        Some(path) => Ok(path.clone()),
-        None => shell_path(&shell(), Duration::from_secs(3)).inspect(|path| *cached = Some(path.clone())),
-    };
-    let base = read.clone().unwrap_or_else(|_| env::var("PATH").unwrap_or_default());
-    let home = env::var_os("HOME").map(PathBuf::from);
+impl LoginShell {
+    /// This app's, read on first need and kept for its life, a failed read too: reading runs the
+    /// user's whole profile, up to 3s. The app's own environment is left as launchd gave it.
+    pub fn get() -> &'static LoginShell {
+        LOGIN_SHELL.get_or_init(|| {
+            let inherited = env::var("PATH").unwrap_or_default();
+            LoginShell::read(env::var_os("SHELL"), env::var_os("HOME").map(PathBuf::from).as_deref(), &inherited)
+        })
+    }
+
+    fn read(shell: Option<OsString>, home: Option<&Path>, inherited: &str) -> LoginShell {
+        let shell = pick_shell(shell);
+        let read = shell_path(&shell, home, Duration::from_secs(3));
+        let path = search_path(read.as_deref().unwrap_or(inherited), home);
+        LoginShell { shell, path, failure: read.err(), reported: AtomicBool::new(false) }
+    }
+
+    /// Why the shell gave no PATH, once: the caller reports it.
+    pub fn unreported_failure(&self) -> Option<String> {
+        self.failure.clone().filter(|_| !self.reported.swap(true, Ordering::Relaxed))
+    }
+
+    /// A GUI app's PATH lacks what the user's profile adds (fnm, Homebrew); an interactive login
+    /// shell has it, as `~/.zshrc` is read only by an interactive zsh. It starts from `search_path`'s,
+    /// so a profile that adds nothing still finds an install directory's `pier` and `node`.
+    fn command(&self, script: &str) -> Command {
+        let mut command = Command::new(&self.shell);
+        command.arg("-lic").arg(script).env("PATH", &self.path);
+        // Its own process group, so a stop or a timeout reaches what the script started.
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+        command
+    }
+}
+
+/// `base`'s absolute directories, then the install directories it lacks.
+fn search_path(base: &str, home: Option<&Path>) -> String {
     let extra = INSTALL_DIRS.iter().filter_map(|dir| match dir.strip_prefix("~/") {
-        Some(rest) => home.as_ref().map(|home| home.join(rest).to_string_lossy().into_owned()),
+        Some(rest) => home.map(|home| home.join(rest).to_string_lossy().into_owned()),
         None => Some((*dir).to_owned()),
     });
-    let mut dirs: Vec<String> = base.split(':').filter(|d| !d.is_empty()).map(str::to_owned).collect();
+    let mut dirs: Vec<String> = base.split(':').filter(|d| d.starts_with('/')).map(str::to_owned).collect();
     for dir in extra {
         if !dirs.contains(&dir) {
             dirs.push(dir);
         }
     }
-    (dirs.join(":"), read.map(drop))
+    dirs.join(":")
 }
 
-/// The PATH a spawned command starts from; a shell that gave none is logged, the rest still searched.
-fn child_path() -> String {
-    let (path, read) = search_path();
-    if let Err(e) = read {
-        eprintln!("pier-client: the login shell's PATH: {e}");
-    }
-    path
-}
-
-/// `shell -ilc` printing its PATH between markers, within `budget`.
-fn shell_path(shell: &Path, budget: Duration) -> Result<String, String> {
+/// `shell -ilc` printing its PATH between markers, within `budget`, run in and with `home`.
+fn shell_path(shell: &Path, home: Option<&Path>, budget: Duration) -> Result<String, String> {
     let mut command = Command::new(shell);
     command.arg("-ilc").arg(format!("printf '\\n{BEGIN}%s{END}\\n' \"$PATH\""));
     // Oh My Zsh's update prompt would wait on input; a profile's relative paths assume the home.
     command.env("DISABLE_AUTO_UPDATE", "true");
-    if let Some(home) = env::var_os("HOME") {
-        command.current_dir(home);
+    if let Some(home) = home {
+        command.current_dir(home).env("HOME", home);
     }
     let out = bounded(command, budget, 64 * 1024).map_err(|e| format!("{}: {e}", shell.display()))?;
     parse_path(&out).map_err(|e| format!("{}: {e}", shell.display()))
@@ -191,8 +208,8 @@ fn find(name: &str, path: &str) -> Option<PathBuf> {
 
 /// The login shell's output for `script`, its process group killed after 20s: a profile can wait
 /// on input or the network.
-fn output(script: &str) -> Result<Output, String> {
-    let child = login_shell(script).spawn().map_err(|e| format!("`{script}`: {e}"))?;
+fn output(shell: &LoginShell, script: &str) -> Result<Output, String> {
+    let child = shell.command(script).spawn().map_err(|e| format!("`{script}`: {e}"))?;
     let (group, (tx, rx)) = (format!("-{}", child.id()), mpsc::channel());
     thread::spawn(move || drop(tx.send(child.wait_with_output())));
     let Ok(out) = rx.recv_timeout(Duration::from_secs(20)) else {
@@ -202,16 +219,11 @@ fn output(script: &str) -> Result<Output, String> {
     out.map_err(|e| format!("`{script}`: {e}"))
 }
 
-/// `<pier's absolute path> serve`, `pier` found on `search_path`'s PATH.
-pub fn suggested() -> Result<String, String> {
-    let (path, read) = search_path();
-    let Some(pier) = find("pier", &path) else {
-        let shell = read.err().map(|e| format!("; the login shell gave no PATH: {e}")).unwrap_or_default();
-        return Err(format!("no executable `pier` on the login shell's PATH or in {}{shell}", INSTALL_DIRS.join(", ")));
+/// `<pier's absolute path> serve`, `pier` found on the shell's PATH.
+pub fn suggested(shell: &LoginShell) -> Result<String, String> {
+    let Some(pier) = find("pier", &shell.path) else {
+        return Err(format!("no executable `pier` in {}", shell.path.replace(':', ", ")));
     };
-    if let Err(e) = read {
-        eprintln!("pier-client: the login shell's PATH: {e}");
-    }
     suggestion(&pier.to_string_lossy())
 }
 
@@ -240,14 +252,14 @@ pub fn listening(port: u16) -> bool {
 
 /// Spawned in a process group of its own, so a stop reaches what the command started; returns
 /// once the port answers.
-pub fn start(command: &str, port: u16, log: &Path) -> Result<Child, String> {
+pub fn start(shell: &LoginShell, command: &str, port: u16, log: &Path) -> Result<Child, String> {
     let shown = log.display();
     let opened = log.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| {
         let out = OpenOptions::new().create(true).append(true).open(log)?;
         Ok((out.try_clone()?, out))
     });
     let (err, out) = opened.map_err(|e| format!("{shown}: {e}"))?;
-    let spawned = login_shell(command).stdout(out).stderr(err).spawn();
+    let spawned = shell.command(command).stdout(out).stderr(err).spawn();
     let mut child = spawned.map_err(|e| format!("starting `{command}`: {e}"))?;
     let deadline = Instant::now() + Duration::from_secs(60);
     while !listening(port) {
@@ -265,9 +277,9 @@ pub fn start(command: &str, port: u16, log: &Path) -> Result<Child, String> {
 
 /// The path of a one-time sign-in link, the output line that is one: the command with `serve`
 /// swapped for `login`, so it reaches the same `PIER_HOME`. None for a command that does not end in `serve`.
-pub fn login(command: &str) -> Option<Result<String, String>> {
+pub fn login(shell: &LoginShell, command: &str) -> Option<Result<String, String>> {
     let script = format!("{} login", command.trim().strip_suffix("serve")?);
-    Some(output(&script).and_then(|out| {
+    Some(output(shell, &script).and_then(|out| {
         let text = String::from_utf8_lossy(&out.stdout);
         let mut links = text.lines().filter_map(|line| Url::parse(line.trim()).ok());
         let link = links.find(|u| out.status.success() && u.path().starts_with("/login/")).map(|u| u.path().to_owned());
