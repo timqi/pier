@@ -692,6 +692,9 @@ describe("workbench server", () => {
     const ok = await app.request(url(join(root, "report.md")));
     expect(ok.status).toBe(200);
     expect(ok.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    // Fresh for a minute, so a redraw of the chat asks nothing; validated after.
+    expect(ok.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(ok.headers.get("etag")).toMatch(/^"[0-9a-f]+-[0-9a-f]+"$/);
     expect(await ok.text()).toBe("# hi");
     expect((await app.request(`${url(join(root, "report.md"))}&download=1`)).headers.get("content-disposition"))
       .toBe("attachment; filename*=UTF-8''report.md");

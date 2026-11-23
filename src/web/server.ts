@@ -2,7 +2,7 @@
 // See docs/design/03-web-workbench.md for the route contract.
 
 import { randomUUID } from "node:crypto";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -447,9 +447,9 @@ export function createServer(
     if (!raw) return c.json({ error: "path required" }, 400);
     // Absolute only: neither the agent nor Pier writes a relative link.
     const file = isAbsolute(raw) ? await realpath(raw).catch(() => null) : null;
-    const info = file ? await stat(file).catch(() => null) : null;
-    if (!file || !info?.isFile()) return c.json({ error: "no such file" }, 404);
-    return serveFile(c, file, c.req.query("download") === "1");
+    if (!file) return c.json({ error: "no such file" }, 404);
+    // A minute fresh: the chat re-renders its images on every redraw.
+    return serveFile(c, file, c.req.query("download") === "1", "private, max-age=60");
   });
 
   // Upload first, so the text the client sends and optimistically renders is final.

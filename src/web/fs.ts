@@ -86,21 +86,26 @@ export function fileHeaders(file: string, bytes: Buffer, download = false): Reco
 }
 
 /** One file, conditional and by Range. The ceiling holds only for what a page
- *  holds whole: media is read by Range, a `download` goes to disk. */
-export async function serveFile(c: Context, file: string, download = false): Promise<Response> {
+ *  holds whole: media is read by Range, a `download` goes to disk. The default
+ *  `no-cache` keeps the answer conditional, so an edited file is never shown
+ *  from a browser cache. */
+export async function serveFile(
+  c: Context,
+  file: string,
+  download = false,
+  cacheControl = "private, no-cache",
+): Promise<Response> {
   const handle = await open(file);
   let streaming = false;
   try {
     const info = await handle.stat();
-    if (!info.isFile()) throw new Error("not a file");
+    if (!info.isFile()) return c.json({ error: "no such file" }, 404);
     if (info.size > MAX_FILE_BYTES && !download && !streamed(file)) return c.json({ error: "file too large" }, 413);
-    // `no-cache` keeps the answer conditional, so an edited file is never
-    // shown from a browser cache.
     const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
     const validators = {
       etag: tag,
       "last-modified": info.mtime.toUTCString(),
-      "cache-control": "private, no-cache",
+      "cache-control": cacheControl,
       "accept-ranges": "bytes",
     };
     if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
