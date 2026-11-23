@@ -728,6 +728,32 @@ describe("workbench server", () => {
     expect((await app.request(url(big))).status).toBe(413);
   });
 
+  it("downloads an attachment past the size ceiling as its own bytes, not an error body", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-files-")));
+    const video = join(root, "muldiv.mp4");
+    writeFileSync(video, "");
+    truncateSync(video, MAX_FILE_BYTES + 1);
+    const log = join(root, "big.log");
+    writeFileSync(log, "");
+    truncateSync(log, MAX_FILE_BYTES + 1);
+    const { app } = setup(root);
+    const url = (p: string) => `/api/sessions/s1/files?path=${encodeURIComponent(p)}`;
+
+    const dl = await app.request(`${url(video)}&download=1`);
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toBe("video/mp4");
+    expect(dl.headers.get("content-disposition")).toBe("attachment; filename*=UTF-8''muldiv.mp4");
+    expect(dl.headers.get("content-length")).toBe(String(MAX_FILE_BYTES + 1));
+    expect((await dl.arrayBuffer()).byteLength).toBe(MAX_FILE_BYTES + 1);
+    // Played inline, by Range, like the Files viewer.
+    const part = await app.request(url(video), { headers: { range: "bytes=0-0" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe(`bytes 0-0/${MAX_FILE_BYTES + 1}`);
+    // Any big file downloads; only showing it whole stays capped.
+    expect((await app.request(`${url(log)}&download=1`)).status).toBe(200);
+    expect((await app.request(url(log))).status).toBe(413);
+  });
+
   it("snapshots history, live state and pending queue on demand", async () => {
     const { app, hub, session } = setup();
     hub.emit("s1", { type: "turn-start" });

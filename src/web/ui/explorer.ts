@@ -364,7 +364,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     if (download) {
       const dl = document.createElement("a");
       dl.className = "btn flex-none text-[12px]";
-      dl.href = fsApi("file", { path });
+      dl.href = fsApi("file", { path, download: "1" });
       dl.download = basename(path);
       dl.textContent = "Download";
       tail.append(dl);

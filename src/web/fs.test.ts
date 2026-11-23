@@ -152,6 +152,10 @@ describe("fs routes", () => {
     expect(head.status).toBe(206);
     expect(head.headers.get("content-range")).toBe(`bytes 0-0/${MAX_FILE_BYTES + 1}`);
     expect((await file({ root, path: "long.log" })).status).toBe(413);
+    // Download goes to disk, so the ceiling does not hold it back.
+    const dl = await file({ root, path: "long.log", download: "1" });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-disposition")).toBe("attachment; filename*=UTF-8''long.log");
   });
 
   it("creates a folder by name, and refuses a path", async () => {

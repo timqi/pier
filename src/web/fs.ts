@@ -8,7 +8,7 @@ import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { logger } from "../log.js";
 import { guarded } from "./route.js";
 
@@ -85,6 +85,54 @@ export function fileHeaders(file: string, bytes: Buffer, download = false): Reco
   };
 }
 
+/** One file, conditional and by Range. The ceiling holds only for what a page
+ *  holds whole: media is read by Range, a `download` goes to disk. */
+export async function serveFile(c: Context, file: string, download = false): Promise<Response> {
+  const handle = await open(file);
+  let streaming = false;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error("not a file");
+    if (info.size > MAX_FILE_BYTES && !download && !streamed(file)) return c.json({ error: "file too large" }, 413);
+    // `no-cache` keeps the answer conditional, so an edited file is never
+    // shown from a browser cache.
+    const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
+    const validators = {
+      etag: tag,
+      "last-modified": info.mtime.toUTCString(),
+      "cache-control": "private, no-cache",
+      "accept-ranges": "bytes",
+    };
+    if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
+    // A range of a file edited since the player's first read would splice two
+    // versions; a stale If-Range gets the whole new file instead.
+    const ifRange = c.req.header("if-range");
+    const range = ifRange && ifRange !== tag ? null : byteRange(c.req.header("range"), info.size);
+    if (range === "unsatisfiable") {
+      return c.body(null, 416, { ...validators, "content-range": `bytes */${info.size}` });
+    }
+    // The same open file, so a replacement cannot make the headers describe
+    // different bytes.
+    const head = Buffer.alloc(Math.min(8192, info.size));
+    await handle.read(head, 0, head.length, 0);
+    const bytes = handle.createReadStream(range ?? { start: 0 });
+    streaming = true;
+    // Past the headers a failure can only truncate the body (§5).
+    bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
+    const headers = { ...fileHeaders(file, head, download), ...validators };
+    if (!range) {
+      return c.body(Readable.toWeb(bytes) as ReadableStream, 200, { ...headers, "content-length": String(info.size) });
+    }
+    return c.body(Readable.toWeb(bytes) as ReadableStream, 206, {
+      ...headers,
+      "content-range": `bytes ${range.start}-${range.end}/${info.size}`,
+      "content-length": String(range.end - range.start + 1),
+    });
+  } finally {
+    if (!streaming) await handle.close();
+  }
+}
+
 export function registerFsRoutes(app: Hono): void {
   // The Files dialog walks a project (`root` confines it); the cwd pickers walk
   // from anywhere. Never contents, and never `.git`.
@@ -107,47 +155,7 @@ export function registerFsRoutes(app: Hono): void {
     // On every answer, a 304 included: its headers replace the cached ones.
     c.header("x-frame-options", "SAMEORIGIN");
     const file = await scoped(c.req.query("root"), c.req.query("path"));
-    const handle = await open(file);
-    let streaming = false;
-    try {
-      const info = await handle.stat();
-      if (!info.isFile()) throw new Error("not a file");
-      if (info.size > MAX_FILE_BYTES && !streamed(file)) return c.json({ error: "file too large" }, 413);
-      // `no-cache` keeps the answer conditional, so an edited file is never
-      // shown from a browser cache.
-      const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
-      const validators = {
-        etag: tag,
-        "last-modified": info.mtime.toUTCString(),
-        "cache-control": "private, no-cache",
-        "accept-ranges": "bytes",
-      };
-      if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
-      // A range of a file edited since the player's first read would splice two
-      // versions; a stale If-Range gets the whole new file instead.
-      const ifRange = c.req.header("if-range");
-      const range = ifRange && ifRange !== tag ? null : byteRange(c.req.header("range"), info.size);
-      if (range === "unsatisfiable") {
-        return c.body(null, 416, { ...validators, "content-range": `bytes */${info.size}` });
-      }
-      // The same open file, so a replacement cannot make the headers describe
-      // different bytes.
-      const head = Buffer.alloc(Math.min(8192, info.size));
-      await handle.read(head, 0, head.length, 0);
-      const bytes = handle.createReadStream(range ?? { start: 0 });
-      streaming = true;
-      // Past the headers a failure can only truncate the body (§5).
-      bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
-      const headers = { ...fileHeaders(file, head), ...validators };
-      if (!range) return c.body(Readable.toWeb(bytes) as ReadableStream, 200, headers);
-      return c.body(Readable.toWeb(bytes) as ReadableStream, 206, {
-        ...headers,
-        "content-range": `bytes ${range.start}-${range.end}/${info.size}`,
-        "content-length": String(range.end - range.start + 1),
-      });
-    } finally {
-      if (!streaming) await handle.close();
-    }
+    return serveFile(c, file, c.req.query("download") === "1");
   });
 
   // Which of these absolute paths exist, file or folder: a reply's file

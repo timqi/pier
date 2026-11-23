@@ -18,7 +18,7 @@ import { QueueOperationError, Router, SkillAmbiguous } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { registerPackageRoutes } from "./packages.js";
-import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
+import { registerFsRoutes, serveFile } from "./fs.js";
 import { guarded } from "./route.js";
 import { sessionIdOf } from "./auth.js";
 import type {
@@ -449,12 +449,7 @@ export function createServer(
     const file = isAbsolute(raw) ? await realpath(raw).catch(() => null) : null;
     const info = file ? await stat(file).catch(() => null) : null;
     if (!file || !info?.isFile()) return c.json({ error: "no such file" }, 404);
-    if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
-    const bytes = await readFile(file);
-    return c.body(bytes, 200, {
-      ...fileHeaders(file, bytes, c.req.query("download") === "1"),
-      "cache-control": "private, max-age=60",
-    });
+    return serveFile(c, file, c.req.query("download") === "1");
   });
 
   // Upload first, so the text the client sends and optimistically renders is final.
