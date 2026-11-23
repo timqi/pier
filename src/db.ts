@@ -484,6 +484,13 @@ const MIGRATIONS: readonly string[] = [
   `
   DELETE FROM settings WHERE key = 'chainMode';
   `,
+  // 44 — the chat list 35 stored as a JSON string on SQLite 3.54, which drops the subquery's
+  // JSON subtype, becomes the array again.
+  `
+  UPDATE channels SET json = json_set(json, '$.chats', json(json ->> '$.chats'))
+  WHERE json_type(json, '$.chats') = 'text'
+    AND iif(json_valid(json ->> '$.chats'), json_type(json ->> '$.chats'), NULL) = 'array';
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

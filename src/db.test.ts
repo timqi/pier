@@ -104,9 +104,13 @@ const UNDO_33 =
   " ALTER TABLE push_identity ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;";
 
 describe("openDb", () => {
+  const rows = (db: DatabaseSync): unknown =>
+    Object.fromEntries((db.prepare("SELECT platform, json FROM channels").all() as { platform: string; json: string }[])
+      .map((r) => [r.platform, JSON.parse(r.json) as unknown]));
+
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(tables(db)).toEqual([
       "auth",
       "chains",
@@ -161,7 +165,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(43);
+    expect(version(second)).toBe(44);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -174,7 +178,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 43/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 44/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -360,7 +364,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -386,7 +390,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT * FROM session_state").get()).toEqual({ session_id: "s1", unread: 1 });
     db.close();
   });
@@ -405,7 +409,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT * FROM session_state").all()).toEqual([{ session_id: "s1", unread: 1 }]);
     expect(db.prepare("SELECT * FROM conversations").all())
       .toEqual([{ channel_id: "slack", conversation_id: "C1/1.2", session_id: "s1", launch: null }]);
@@ -422,7 +426,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     // A session's role: the fresh run that made it.
     const plan = JSON.stringify(db.prepare("EXPLAIN QUERY PLAN SELECT json FROM task_runs" +
       " WHERE json_extract(json, '$.targetSessionId') = 's' AND json_extract(json, '$.sessionMode') = 'fresh' ORDER BY queued_at LIMIT 1").all());
@@ -444,7 +448,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -478,7 +482,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -518,7 +522,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT session_id, unread FROM session_state ORDER BY session_id").all())
       .toEqual([{ session_id: "s1", unread: 0 }, { session_id: "s2", unread: 0 }]);
     db.close();
@@ -537,7 +541,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     // The row itself stays: clearing a mark deletes nothing.
     expect(db.prepare("SELECT session_id, unread FROM session_state ORDER BY session_id").all())
       .toEqual([{ session_id: "im", unread: 0 }, { session_id: "own", unread: 0 }]);
@@ -555,7 +559,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT name, value FROM vault ORDER BY name").all()).toEqual([
       { name: "LARK_APP_ID", value: "v1:aa:id" },
       { name: "SLACK_APP_TOKEN", value: "v1:aa:app" },
@@ -591,11 +595,9 @@ describe("openDb", () => {
     before.exec(UNDO_42 + UNDO_41 + UNDO_40 + UNDO_38 + UNDO_37 + UNDO_36 + " PRAGMA user_version = 34");
     before.close();
 
-    const rows = (db: DatabaseSync): unknown =>
-      Object.fromEntries((db.prepare("SELECT platform, json FROM channels").all() as { platform: string; json: string }[])
-        .map((r) => [r.platform, JSON.parse(r.json) as unknown]));
+    // On SQLite 3.54 35 leaves each chat list a JSON string and 44 turns it back: the result is 44's.
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     const expected = {
       lark: { enabled: false },
       slack: {
@@ -617,6 +619,26 @@ describe("openDb", () => {
     again.close();
   });
 
+  it("turns a chat list stored as a JSON string back into the array, and nothing else", () => {
+    const path = dbPath();
+    const chats = [{ id: "c1", name: "c1", kind: "group", enabled: true, cwd: "" }];
+    const docs = {
+      slack: { enabled: true, chats: JSON.stringify(chats) },
+      lark: { enabled: true, chats },
+      telegram: { enabled: true, chats: "not json" },
+    };
+    const before = openDb(path);
+    const insert = before.prepare("INSERT INTO channels(platform, json) VALUES (?, ?)");
+    for (const [platform, doc] of Object.entries(docs)) insert.run(platform, JSON.stringify(doc));
+    before.exec("PRAGMA user_version = 43");
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(44);
+    expect(rows(db)).toEqual({ ...docs, slack: { enabled: true, chats } });
+    db.close();
+  });
+
   it("adds the launch column to the conversations a database already routes", () => {
     const path = dbPath();
     const before = openDb(path);
@@ -626,7 +648,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT session_id, launch FROM conversations").all()).toEqual([{ session_id: "s1", launch: null }]);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'conversations_session'").get()).toBeTruthy();
     db.close();
@@ -641,7 +663,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT key FROM settings").all()).toEqual([{ key: "publicUrl" }]);
     db.close();
   });
@@ -653,7 +675,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT * FROM open_items").all())
       .toEqual([{ chain_id: "main", problem: "fix login", stage: "testing", run_ids: '["r1"]', updated_at: 5, closed_at: null, aliases: "[]", sessions: "[]", opened_at: null }]);
     db.close();
@@ -670,7 +692,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT id, name, archived_at FROM chains").all()).toEqual([{ id: "main", name: "Main", archived_at: null }]);
     expect(db.prepare("SELECT session_id, chain_id, started_at, reason FROM main_chain ORDER BY rowid").all()).toEqual([
       { session_id: "s1", chain_id: "main", started_at: 1, reason: "first" },
@@ -698,7 +720,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT problem, opened_at FROM open_items ORDER BY rowid").all())
       .toEqual([{ problem: "a", opened_at: 20 }, { problem: "b", opened_at: null }, { problem: "c", opened_at: null }]);
     db.close();
@@ -729,7 +751,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(43);
+    expect(version(db)).toBe(44);
     expect(db.prepare("SELECT id FROM task_messages ORDER BY id").all()).toEqual([{ id: "f" }, { id: "s" }]);
     db.close();
   });

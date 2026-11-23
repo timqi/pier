@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Database: on SQLite 3.54 (Node 24.22.3 and later) migration 35 stored each platform's chat list as a JSON string; schema 44 turns it back into the array.
 - Web: a recognizer that refuses its key now says why — `voice input: Doubao connection failed: HTTP 401 {"error":"Invalid X-Api-Key"}` instead of a bare "connection failed".
 
 ### Changed
