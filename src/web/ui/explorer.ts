@@ -27,7 +27,9 @@ interface GitInfo {
 /** A relative path's folder, "" at the root. */
 const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 
-const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i;
+const AUDIO_EXT = /\.(mp3|wav|ogg|opus|m4a|aac|flac)$/i;
+const VIDEO_EXT = /\.(mp4|m4v|webm|mov)$/i;
 const MD_EXT = /\.(md|markdown)$/i;
 
 /** name-status letters, toned like every diff tool tones them. */
@@ -508,6 +510,28 @@ function createFilesDialog(root: HTMLDialogElement): Show {
       img.src = url;
       img.onerror = () => body.replaceChildren(note("Could not load image.", "text-red-600"));
       return void body.append(img);
+    }
+    if (AUDIO_EXT.test(path) || VIDEO_EXT.test(path)) {
+      const video = VIDEO_EXT.test(path);
+      const media = (video ? h("video", "max-h-[70vh] max-w-full") : h("audio", "w-full")) as HTMLMediaElement;
+      // Without it an iPhone takes the video full-screen on play.
+      if (video) media.setAttribute("playsinline", "");
+      media.controls = true;
+      media.preload = "metadata";
+      media.src = url;
+      // Only SRC_NOT_SUPPORTED means no decoder; a 404 or a dropped connection
+      // is a load failure, which Download would not get past either.
+      media.onerror = () => {
+        const kind = video ? "video" : "audio";
+        const unplayable = media.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+        body.replaceChildren(note(
+          unplayable ? `This browser cannot play this ${kind} — use Download.` : `Could not load ${kind}.`,
+          "text-red-600",
+        ));
+      };
+      const box = h("div", "p-4");
+      box.append(media);
+      return void body.append(box);
     }
     if (path.toLowerCase().endsWith(".pdf")) {
       const frame = document.createElement("iframe");

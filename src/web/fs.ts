@@ -28,8 +28,38 @@ const RENDERABLE: Record<string, string> = {
   ".avif": "image/avif",
   ".bmp": "image/bmp",
   ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
   ".pdf": "application/pdf",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".opus": "audio/ogg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
+
+/** A player reads these by Range, so their size costs the reader nothing. */
+const streamed = (file: string): boolean => /^(audio|video)\//.test(RENDERABLE[extname(file).toLowerCase()] ?? "");
+
+/** One `bytes=` range of a `size`-byte file, inclusive; null serves it whole
+ *  (no header, a multi-range, a malformed one), "unsatisfiable" is a 416. */
+export function byteRange(header: string | undefined, size: number): { start: number; end: number } | null | "unsatisfiable" {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? "");
+  if (!m || (!m[1] && !m[2])) return null;
+  if (!m[1]) {
+    const n = Number(m[2]); // a suffix: the last n bytes
+    return n === 0 || size === 0 ? "unsatisfiable" : { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(m[1]);
+  const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (m[2] && Number(m[2]) < start) return null;
+  return start >= size ? "unsatisfiable" : { start, end };
+}
 
 /** The containment check, and the only way a path becomes one this reads. */
 export async function scoped(root: string | undefined, path = ""): Promise<string> {
@@ -82,7 +112,7 @@ export function registerFsRoutes(app: Hono): void {
     try {
       const info = await handle.stat();
       if (!info.isFile()) throw new Error("not a file");
-      if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
+      if (info.size > MAX_FILE_BYTES && !streamed(file)) return c.json({ error: "file too large" }, 413);
       // `no-cache` keeps the answer conditional, so an edited file is never
       // shown from a browser cache.
       const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
@@ -90,19 +120,30 @@ export function registerFsRoutes(app: Hono): void {
         etag: tag,
         "last-modified": info.mtime.toUTCString(),
         "cache-control": "private, no-cache",
+        "accept-ranges": "bytes",
       };
       if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
+      // A range of a file edited since the player's first read would splice two
+      // versions; a stale If-Range gets the whole new file instead.
+      const ifRange = c.req.header("if-range");
+      const range = ifRange && ifRange !== tag ? null : byteRange(c.req.header("range"), info.size);
+      if (range === "unsatisfiable") {
+        return c.body(null, 416, { ...validators, "content-range": `bytes */${info.size}` });
+      }
       // The same open file, so a replacement cannot make the headers describe
       // different bytes.
       const head = Buffer.alloc(Math.min(8192, info.size));
       await handle.read(head, 0, head.length, 0);
-      const bytes = handle.createReadStream({ start: 0 });
+      const bytes = handle.createReadStream(range ?? { start: 0 });
       streaming = true;
       // Past the headers a failure can only truncate the body (§5).
       bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
-      return c.body(Readable.toWeb(bytes) as ReadableStream, 200, {
-        ...fileHeaders(file, head),
-        ...validators,
+      const headers = { ...fileHeaders(file, head), ...validators };
+      if (!range) return c.body(Readable.toWeb(bytes) as ReadableStream, 200, headers);
+      return c.body(Readable.toWeb(bytes) as ReadableStream, 206, {
+        ...headers,
+        "content-range": `bytes ${range.start}-${range.end}/${info.size}`,
+        "content-length": String(range.end - range.start + 1),
       });
     } finally {
       if (!streaming) await handle.close();

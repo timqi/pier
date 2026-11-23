@@ -51,6 +51,8 @@ describe("a Markdown file in Files", () => {
   const files: Record<string, string> = {
     "docs/guide.md": "# Guide\n\n## Set up\n\n![shot](img/a.png) [next](next.md) [site](https://x.dev) [up](#set-up)\n\n```ts\nconst a = 1;\n```\n",
     "docs/next.md": "# Next\n",
+    "media/clip.mp4": "",
+    "media/song.flac": "",
   };
   let doc: FakeDocument;
   let explorer: typeof import("./explorer.js");
@@ -141,6 +143,33 @@ describe("a Markdown file in Files", () => {
     await settled();
     expect(viewer()).toBeNull();
     expect(dialog.querySelectorAll(".bg-red-50").map((el) => el.textContent)).toEqual([expect.stringContaining("# Old")]);
+  });
+
+  it("plays audio and video in place, from the file route the player seeks by Range", async () => {
+    const dialog = doc.querySelector("#files-dialog")!;
+    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "media/clip.mp4");
+    await settled();
+    const video = dialog.querySelector("video") as unknown as HTMLVideoElement;
+    expect(video.src).toBe(`/api/fs/file?${new URLSearchParams({ root: "/w", path: "media/clip.mp4" })}`);
+    expect(video.controls).toBe(true);
+    expect(video.getAttribute("playsinline")).toBe("");
+    vi.stubGlobal("MediaError", { MEDIA_ERR_NETWORK: 2, MEDIA_ERR_SRC_NOT_SUPPORTED: 4 });
+    // A failed load is not a missing decoder: Download would fail the same way.
+    Object.assign(video, { error: { code: 2 } });
+    video.onerror!(null as never);
+    expect(dialog.querySelector("video")).toBeNull();
+    expect(dialog.textContent).toContain("Could not load video.");
+    expect(dialog.textContent).not.toContain("cannot play");
+
+    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "media/song.flac");
+    await settled();
+    const audio = dialog.querySelector("audio") as unknown as HTMLAudioElement;
+    expect(audio.controls).toBe(true);
+    expect(urls.some((u) => u.startsWith("/api/fs/file"))).toBe(false); // the element fetches, not the viewer
+    Object.assign(audio, { error: { code: 4 } });
+    audio.onerror!(null as never);
+    expect(dialog.querySelector("audio")).toBeNull();
+    expect(dialog.textContent).toContain("This browser cannot play this audio");
   });
 });
 

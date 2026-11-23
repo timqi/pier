@@ -43,7 +43,7 @@ surface owns its routes and is mounted beside it.
 | `DELETE /api/voice/:id` | cancel: close upstream, discard; 204. A take lasts 5 minutes at most, closes with `error` after 15 s with neither audio nor `finish`, and is 404 to any other browser session |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
+| `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's images, attachment thumbnails and downloads; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts`; typed by `fs.ts` too, so an image, PDF, audio or video file (SVG excepted) is `inline` unless `download=1`, read whole, no `Range` |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
 | `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null}]}], checkedAt: iso \| null, busy: source \| null}`. `state` is the one line a row shows instead of a plain switch reading (`not loaded — <why>`); `<agentDir>/extensions/rtk.ts` is left out, being the rtk tool's (`PUT` on it is 404); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
@@ -644,7 +644,12 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   folder (a leading `/` is the project root), relative links open in Files,
   `#anchors` scroll to the heading, URLs open a new tab. A PDF shows inline in the viewer's frame:
   `GET /api/fs/file` answers `X-Frame-Options: SAMEORIGIN`, every other
-  response `DENY`. On a phone the dialog is full-screen, inside the
+  response `DENY`. Audio (mp3, wav, ogg, opus, m4a, aac, flac) and video (mp4,
+  m4v, webm, mov) play in the viewer with the browser's own controls, video
+  inline on a phone too; a codec the browser lacks says so and points at
+  Download, any other failure reads "Could not load". `GET /api/fs/file` answers a single `Range` with 206 (416 past the
+  end, the whole file for a multi-range or a stale `If-Range`), and serves
+  audio and video past the size cap. On a phone the dialog is full-screen, inside the
   safe-area insets, tree above viewer.
 
   The Agent nav, drawn from one `GET /api/packages` answer. The management

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
-import { registerFsRoutes } from "./fs.js";
+import { MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 
 // The one place a path from the browser becomes a path on disk: what it lets
 // through, and what it refuses, is the whole point of the module.
@@ -110,6 +110,48 @@ describe("fs routes", () => {
     // The validator is the file's own state: a rewrite invalidates it.
     writeFileSync(join(root, "a.ts"), "const x = 2;\nconst y = 3;\n");
     expect((await file({ root, path: "a.ts" })).headers.get("etag")).not.toBe(tag);
+  });
+
+  it("answers a Range with 206 and that slice, so a player can seek", async () => {
+    writeFileSync(join(root, "clip.mp4"), "0123456789");
+    const get = (headers: Record<string, string>) =>
+      app.request(`/api/fs/file?${new URLSearchParams({ root, path: "clip.mp4" })}`, { headers });
+
+    const whole = await get({});
+    expect(whole.status).toBe(200);
+    expect(whole.headers.get("accept-ranges")).toBe("bytes");
+    expect(whole.headers.get("content-type")).toBe("video/mp4");
+    expect(whole.headers.get("content-disposition")).toContain("inline");
+    const tag = whole.headers.get("etag")!;
+
+    const mid = await get({ range: "bytes=2-5" });
+    expect(mid.status).toBe(206);
+    expect(mid.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect(mid.headers.get("content-length")).toBe("4");
+    expect(await mid.text()).toBe("2345");
+    expect(await (await get({ range: "bytes=7-" })).text()).toBe("789");
+    expect(await (await get({ range: "bytes=-3" })).text()).toBe("789");
+    expect(await (await get({ range: "bytes=8-99" })).text()).toBe("89");
+    expect(await (await get({ range: "bytes=2-3", "if-range": tag })).text()).toBe("23");
+
+    const past = await get({ range: "bytes=10-" });
+    expect(past.status).toBe(416);
+    expect(past.headers.get("content-range")).toBe("bytes */10");
+    // Whole on what it cannot slice for sure: a stale If-Range, a multi-range.
+    expect((await get({ range: "bytes=2-3", "if-range": '"old"' })).status).toBe(200);
+    expect((await get({ range: "bytes=0-1,4-5" })).status).toBe(200);
+  });
+
+  it("serves media past the size ceiling, which still holds for everything else", async () => {
+    const big = Buffer.alloc(MAX_FILE_BYTES + 1);
+    writeFileSync(join(root, "long.webm"), big);
+    writeFileSync(join(root, "long.log"), big);
+    const head = await app.request(`/api/fs/file?${new URLSearchParams({ root, path: "long.webm" })}`, {
+      headers: { range: "bytes=0-0" },
+    });
+    expect(head.status).toBe(206);
+    expect(head.headers.get("content-range")).toBe(`bytes 0-0/${MAX_FILE_BYTES + 1}`);
+    expect((await file({ root, path: "long.log" })).status).toBe(413);
   });
 
   it("creates a folder by name, and refuses a path", async () => {
