@@ -564,8 +564,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   have been. A press that moves is a selection, and on a touch screen the hold
   is ours (no native callout or selection handles over inline code).
 - **Download**: a plain click on a download link (an attachment card's, Files' Download)
-  shows `Download started: <name>` for 2.5 s in a solid hairline note under
-  the bar, inside the open dialog when it was clicked in one; it never says
+  shows a note under the bar for 5 s — a filled accent download glyph,
+  **Download started** and the file's name below it, on the popover material
+  with an accent hairline — inside the open dialog when it was clicked in one; it never says
   the download finished — the page cannot know — and disables nothing.
 - **Lightbox**: click magnifies about the point, second click fits; drag pans
   (mouse and finger); scrim, ✕, Esc close; ‹ › and ← / → page the gallery the

@@ -93,16 +93,23 @@ describe("noteDownloads", () => {
     const click = (target: FakeElement, ev: Partial<MouseEvent> = {}): void =>
       onClick({ target: target as unknown as EventTarget, button: 0, defaultPrevented: false, ...ev });
     const notes = (): FakeElement[] => doc.querySelectorAll("[role=status]");
+    // The note's text column: the title line, then the file name with its full-name tooltip.
+    const shown = (): { title: string; name: string; tip: string }[] =>
+      notes().map((n) => {
+        const [title, name] = n.children[1]!.children;
+        return { title: title!.textContent, name: name!.textContent, tip: name!.title };
+      });
+    const b = { title: "Download started", name: "b.txt", tip: "b.txt" };
 
     click(link("a.pdf"));
     click(link("b.txt"));
-    expect(notes().map((n) => n.textContent)).toEqual(["Download started: b.txt"]);
+    expect(shown()).toEqual([b]);
     for (const ev of [{ defaultPrevented: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) {
       click(link("no.bin"), ev);
     }
-    expect(notes().map((n) => n.textContent)).toEqual(["Download started: b.txt"]);
+    expect(shown()).toEqual([b]);
     click(doc.body); // not a download
-    vi.advanceTimersByTime(2500 + 200);
+    vi.advanceTimersByTime(5000 + 200);
     expect(notes()).toEqual([]);
     vi.useRealTimers();
     vi.unstubAllGlobals();

@@ -1,6 +1,6 @@
 // The DOM helpers every UI module shares. Nothing else belongs here.
 
-import { ChevronRight } from "lucide";
+import { ChevronRight, Download } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { Marked, marked, Renderer } from "marked";
@@ -142,8 +142,10 @@ export function copyBtn(cls: string, text: () => string): HTMLElement {
   return btn;
 }
 
-const NOTE_MS = 2500;
-let note: HTMLElement | undefined;
+// Long enough to be read after the eye leaves the button; the page never
+// learns how a download ends, so the note is the only sign one began.
+const NOTE_MS = 5000;
+let note: { box: HTMLElement; name: HTMLElement } | undefined;
 let noteTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Every `a[download]` says it started, so a download with no visible sign is
@@ -154,12 +156,10 @@ export function noteDownloads(): void {
     if (ev.defaultPrevented || ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
     const link = ev.target instanceof Element ? ev.target.closest<HTMLAnchorElement>("a[download]") : null;
     if (!link) return;
-    const shown = (note ??= h(
-      "div",
-      "download-note pointer-events-none fixed left-1/2 top-[calc(4rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1.5rem)] -translate-x-1/2 truncate rounded-[10px] border border-(--line) px-3 py-1.5 font-sans text-[13px] text-neutral-700",
-    ));
-    shown.setAttribute("role", "status");
-    shown.textContent = `Download started: ${link.download}`;
+    note ??= downloadNote();
+    const shown = note.box;
+    note.name.textContent = link.download;
+    note.name.title = link.download;
     delete shown.dataset.closing;
     // A modal <dialog> is the top layer: a note on body would paint under Files.
     (link.closest("dialog[open]") ?? document.body).append(shown);
@@ -169,6 +169,18 @@ export function noteDownloads(): void {
       noteTimer = setTimeout(() => shown.remove(), 200);
     }, NOTE_MS);
   });
+}
+
+function downloadNote(): { box: HTMLElement; name: HTMLElement } {
+  const name = h("div", "truncate text-[13px] text-neutral-600");
+  const box = h(
+    "div",
+    "download-note pointer-events-none fixed left-1/2 top-[calc(4rem+env(safe-area-inset-top))] z-50 flex w-max min-w-[16rem] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-indigo-200 px-4 py-3 font-sans",
+    h("span", "grid h-9 w-9 flex-none place-items-center rounded-full bg-indigo-600 text-white dark:text-neutral-50", icon(Download, "h-5 w-5")),
+    h("div", "min-w-0", h("div", "text-[14px] font-semibold text-neutral-900", "Download started"), name),
+  );
+  box.setAttribute("role", "status");
+  return { box, name };
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without
