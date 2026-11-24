@@ -15,6 +15,12 @@
 
 - Web: voice input is a mode. The switch beside Send turns the draft's row into a `Hold to talk` bar: hold and speak, release to keep the text in the draft, slide up to cancel; a tap listens hands-free until the next tap. While you speak, the composer expands into a panel that shows the draft in large type and follows your words to the end; takes add up in the same draft, a tap edits it between takes, and once sent it is one row again. Nothing is sent until you send it. The mode is remembered per browser.
 
+## 1.4.4
+
+### Fixed
+
+- Web: retry reads quietly when Safari wakes before the network is ready, and reconnect the workspace and reload the selected session when the page becomes visible or comes back online.
+
 ## 1.3.2
 
 ### Fixed
