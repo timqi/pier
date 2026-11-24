@@ -9,7 +9,7 @@ import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
 import { openItemDestination } from "../../core/open-items.js";
-import { coalesce, cutShort, getJson, mustGetJson, RETRY_MS } from "./api.js";
+import { coalesce, getJson, mustGetJson, patience, persist, wakeRetries } from "./api.js";
 import { bundleVersion, guardFetch, matchVersion, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -490,14 +490,16 @@ function maybeAckRead(): void {
   void ackRead(s.id);
 }
 
-/** A page acks as it wakes, before the network is back: a dropped ack is sent once more before it is news. */
-async function ackRead(id: string, again = true): Promise<void> {
-  try {
-    await fetch(`/api/sessions/${id}/read`, { method: "POST" });
-  } catch (err) {
-    if (!again || !cutShort(err)) throw new Error(`Could not mark the session read: ${String(err)}`, { cause: err });
-    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
-    return ackRead(id, false);
+/** A page acks as it wakes, before the network is back: a dropped ack is sent again before it is news. */
+async function ackRead(id: string): Promise<void> {
+  const retry = patience();
+  for (;;) {
+    try {
+      await fetch(`/api/sessions/${id}/read`, { method: "POST" });
+      return;
+    } catch (err) {
+      if (!(await retry.quietly(err))) throw new Error(`Could not mark the session read: ${String(err)}`, { cause: err });
+    }
   }
 }
 
@@ -634,8 +636,12 @@ function handleEvent(e: SessionEvent): void {
   if (e.type !== "text-delta") itemFilter?.();
 }
 
+let workspace: EventSource | null = null;
+
 function connectWorkspace(): void {
-  const src = new EventSource("/api/events");
+  // A wake reopens a dead stream the probe would revive too: one stream, whichever comes first.
+  if (workspace && workspace.readyState !== EventSource.CLOSED) return;
+  const src = (workspace = new EventSource("/api/events"));
   // Any (re)connect may follow a gap: re-list instead of replaying.
   src.onopen = () => {
     void refreshSessions();
@@ -778,11 +784,16 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
     chatLoading(true);
   }
   const problem = (paneItem = item);
+  const live = (): boolean => currentId === id && generation === loadSeq;
+  const at = chainId;
   // Read first: its `lastSeq` is the cursor, and the head's snapshot read after it is no older.
-  const view = problem && chainId ? await getJson<ItemTurns>(itemTurnsUrl(problem, chainId), `Could not load the item "${problem}"`) : null;
-  if (currentId !== id || generation !== loadSeq) return;
-  const got = paged ?? await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
-  if (currentId !== id || generation !== loadSeq) return;
+  const view = problem && at ? await persist(() => getJson<ItemTurns>(itemTurnsUrl(problem, at), `Could not load the item "${problem}"`,
+    { signal: AbortSignal.timeout(READ_MS) }), live) : null;
+  if (!live()) return;
+  // A read that never answers would hold `loading`, and with it every wake's resync, for good.
+  const got = paged ?? await persist(() => getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session",
+    { signal: AbortSignal.timeout(READ_MS) }), live);
+  if (!live()) return;
   // A near-empty head opens with the sessions before it, read before the one paint; `loading` holds off a scroll's page meanwhile.
   const oldest = continuousOpen() ? returning?.oldest : undefined;
   const left = Math.max(0, chain.findIndex((m) => m.sessionId === oldest));
@@ -973,6 +984,15 @@ void initPush();
 document.addEventListener("gesturestart", (ev) => ev.preventDefault());
 noteDownloads();
 
+/** Back from the background or onto the network: a dead stream is reopened, a pane whose read failed read again. */
+function resync(): void {
+  // A hidden tab may have missed `open-items-changed` and the rest of the stream; a reopened one re-lists on open.
+  if (workspace?.readyState === EventSource.CLOSED) connectWorkspace();
+  else void refreshSessions();
+  // The probe's revive of a closed session stream then finds itself superseded.
+  if (currentId && !loading && !paging && (!source || source.readyState === EventSource.CLOSED)) void loadSession(currentId);
+}
+
 // Coming back to a hidden tab — or to an unfocused window — is the other way
 // turns get seen.
 document.addEventListener("visibilitychange", () => {
@@ -980,8 +1000,11 @@ document.addEventListener("visibilitychange", () => {
   // page back with no `focus` event, and with no other app beside it.
   windowFocused = document.visibilityState === "visible" && (windowFocused || isIOS());
   maybeAckRead();
-  // A hidden tab may have missed `open-items-changed` and the rest of the stream.
-  if (document.visibilityState === "visible") void refreshSessions();
+  if (document.visibilityState === "visible") resync();
+});
+window.addEventListener("online", () => {
+  wakeRetries();
+  resync();
 });
 window.addEventListener("focus", () => { windowFocused = true; maybeAckRead(); });
 window.addEventListener("blur", () => { windowFocused = false; });

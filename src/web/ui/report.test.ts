@@ -43,3 +43,18 @@ it("still reports a real throw, and one that only mentions ResizeObserver", () =
   expect(state.fetch).toHaveBeenCalledTimes(2);
   expect(state.appendTurn).toHaveBeenCalledTimes(2);
 });
+
+it("removes the line of a rejection a later success takes back", async () => {
+  const { passing } = await import("./api.js");
+  const line = { remove: vi.fn() };
+  state.appendTurn.mockReturnValueOnce(line);
+  let recover!: () => void;
+  const dropped = new TypeError("Load failed");
+  passing.set(dropped, new Promise<void>((resolve) => { recover = resolve; }));
+  (handlers.get("unhandledrejection") as unknown as (e: { reason: unknown }) => void)({ reason: dropped });
+  (handlers.get("unhandledrejection") as unknown as (e: { reason: unknown }) => void)({ reason: new Error("HTTP 503") });
+  expect(state.appendTurn).toHaveBeenCalledTimes(2);
+  recover();
+  await Promise.resolve();
+  expect(line.remove).toHaveBeenCalledOnce();
+});

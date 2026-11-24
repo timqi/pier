@@ -2,7 +2,7 @@
 // failures: fifteen views answer with what these functions decided.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coalesce, cutShort, getJson, mustGetJson, refused } from "./api.js";
+import { coalesce, cutShort, getJson, mustGetJson, passing, persist, refused, wakeRetries } from "./api.js";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -154,10 +154,10 @@ describe("coalesce", () => {
     }
   });
 
-  it("settles a read cut short once with its retry, and rejects for a second in a row", async () => {
+  it("settles reads cut short with their retries, and rejects once they waited fifteen seconds", async () => {
     vi.useFakeTimers();
     try {
-      const outcomes = ["abort", "ok", "abort", "abort"];
+      const outcomes = ["abort", "abort", "ok", "abort", "abort", "abort", "abort", "abort"];
       let loads = 0;
       const load = coalesce(async () => {
         loads++;
@@ -165,38 +165,86 @@ describe("coalesce", () => {
       });
       let settled = false;
       const first = load().then(() => { settled = true; });
-      await vi.advanceTimersByTimeAsync(999);
-      expect([loads, settled]).toEqual([1, false]); // not a success: the caller waits for the data
+      await vi.advanceTimersByTimeAsync(2999);
+      expect([loads, settled]).toEqual([2, false]); // not a success: the caller waits for the data
       await vi.advanceTimersByTimeAsync(1);
       await first;
-      expect(loads).toBe(2);
+      expect(loads).toBe(3);
+      // A success starts the wait over: 1 + 2 + 4 + 8 seconds between five reads.
       const second = load();
       const caught = expect(second).rejects.toThrow("signal timed out");
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(loads).toBe(7);
+      await vi.advanceTimersByTimeAsync(1);
       await caught;
-      expect(loads).toBe(4);
+      expect(loads).toBe(8);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("settles a request the network dropped once with its retry, and rejects for a second in a row", async () => {
+  it("settles a request the network dropped with its retry, and rejects for one still dropped after the retries", async () => {
     vi.useFakeTimers();
     try {
-      const outcomes = ["drop", "ok", "drop", "drop"];
+      const dropped = () => new Error("Could not load sessions: TypeError: Load failed", { cause: new TypeError("Load failed") });
+      let drops = 1;
       let loads = 0;
       const load = coalesce(async () => {
         loads++;
-        if (outcomes.shift() === "drop") throw new Error("Could not load sessions: TypeError: Load failed", { cause: new TypeError("Load failed") });
+        if (drops-- > 0) throw dropped();
       });
       const first = load();
       await vi.advanceTimersByTimeAsync(1000);
       await first;
       expect(loads).toBe(2);
+      drops = Infinity;
       const second = load();
       const caught = expect(second).rejects.toThrow("Could not load sessions: TypeError: Load failed");
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(15_000);
       await caught;
+      expect(loads).toBe(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("takes back a dropped request it rejected with once one succeeds, and never a refusal", async () => {
+    vi.useFakeTimers();
+    try {
+      let next: () => void = () => { throw new TypeError("Load failed"); };
+      const load = coalesce(async () => next());
+      const dropped: unknown = await Promise.all([load().catch((e: unknown) => e), vi.advanceTimersByTimeAsync(15_000)]).then(([e]) => e);
+      expect(String(dropped)).toBe("TypeError: Load failed");
+      let back = false;
+      void passing.get(dropped as object)!.then(() => { back = true; });
+      next = () => { throw new Error("HTTP 503"); };
+      const refusal: unknown = await load().catch((e: unknown) => e);
+      expect(passing.has(refusal as object)).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(back).toBe(false);
+      next = () => {};
+      await load();
+      expect(back).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends a cut-short read's wait when it is asked for again", async () => {
+    vi.useFakeTimers();
+    try {
+      let drops = 3;
+      let loads = 0;
+      const load = coalesce(async () => {
+        loads++;
+        if (drops-- > 0) throw new TypeError("Load failed");
+      });
+      const first = load();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(loads).toBe(3); // now waiting 4s
+      const again = load();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.all([first, again]);
       expect(loads).toBe(4);
     } finally {
       vi.useRealTimers();
@@ -219,6 +267,57 @@ describe("coalesce", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("persist", () => {
+  const timedOut = { ok: false as const, error: "Could not load", cause: new DOMException("signal timed out", "TimeoutError") };
+
+  it("counts its fifteen seconds from the first failure, not in waits: a read that hangs is news after three", async () => {
+    vi.useFakeTimers();
+    try {
+      let reads = 0;
+      const hang = () => new Promise<typeof timedOut>((resolve) => {
+        reads++;
+        setTimeout(() => resolve(timedOut), 10_000);
+      });
+      let got: unknown;
+      void persist(hang, () => true).then((g) => { got = g; });
+      await vi.advanceTimersByTimeAsync(32_999);
+      expect([reads, got]).toEqual([3, undefined]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(got).toBe(timedOut);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads again at once when the network is back, and stops once nobody wants the answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const answers: { ok: boolean; cause?: unknown }[] = [timedOut, timedOut, { ok: true }];
+      let reads = 0;
+      let live = true;
+      const read = () => Promise.resolve(answers[reads++]!);
+      const got = persist(read, () => live);
+      await vi.advanceTimersByTimeAsync(0);
+      wakeRetries();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reads).toBe(2);
+      live = false;
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(got).resolves.toBe(timedOut);
+      expect(reads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers a refusal at once", async () => {
+    const refusal = { ok: false, error: "no session" };
+    let reads = 0;
+    await expect(persist(() => { reads++; return Promise.resolve(refusal); }, () => true)).resolves.toBe(refusal);
+    expect(reads).toBe(1);
   });
 });
 

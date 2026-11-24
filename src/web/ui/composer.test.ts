@@ -205,6 +205,31 @@ it("moves drafts left in localStorage into this tab and deletes them", async () 
   expect(drafts.get("pier.draft.b")).toBe("typed in this tab");
 });
 
+// A request the network dropped rejects with a stackless `TypeError: Load failed`: said in the pane, never left unhandled.
+describe("a stop or a recall the network dropped", () => {
+  it("says a stop that never reached the server, or that it refused, in the pane", async () => {
+    state.fetch.mockRejectedValueOnce(new TypeError("Load failed"));
+    node("#stop").onclick!();
+    await settled();
+    expect(state.appendTurn).toHaveBeenLastCalledWith("error", "Could not stop the turn: TypeError: Load failed");
+    state.fetch.mockResolvedValueOnce(Response.json({ error: "nothing is running" }, { status: 409 }));
+    node("#stop").onclick!();
+    await settled();
+    expect(state.appendTurn).toHaveBeenLastCalledWith("error", "nothing is running");
+    expect(state.fetch).toHaveBeenLastCalledWith("/api/sessions/a/abort", { method: "POST" });
+  });
+
+  it("says a recall that never reached the server in the pane, and recalls again after it", async () => {
+    state.fetch.mockRejectedValueOnce(new TypeError("Load failed"));
+    click();
+    await settled();
+    expect(state.appendTurn).toHaveBeenCalledWith("error", "Could not recall queued messages: TypeError: Load failed");
+    const finish = await recallPending("fetch");
+    await finish(["recalled"]);
+    expect(node("#input").value).toBe("recalled");
+  });
+});
+
 describe("queue recall drafts", () => {
   it.each(["fetch", "body"] as const)("returns delayed %s messages to A without touching B", async (stage) => {
     type(" A draft \n");

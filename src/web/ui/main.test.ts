@@ -78,12 +78,14 @@ vi.mock("./views.js", () => ({
 
 class Stream extends EventTarget {
   static all: Stream[] = [];
+  static readonly CLOSED = 2;
+  readyState = 1;
   onmessage: ((event: { data: string }) => void) | null = null;
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
   constructor(readonly url: string) { super(); Stream.all.push(this); }
-  close(): void { this.closed = true; }
+  close(): void { this.closed = true; this.readyState = Stream.CLOSED; }
   reset(): void { this.dispatchEvent(new Event("reset")); }
   message(seq: number, text: string, id = "a"): void {
     this.onmessage?.({ data: JSON.stringify({ sessionId: id, seq, ts: 1, type: "user-message", text }) });
@@ -156,7 +158,7 @@ it("orders the sessions by birth, newest first, once for every surface", () => {
 // A boot read cut short — a page suspended as it loaded — routes on the retry's data, not before it.
 it("routes at boot only once a read cut short has been retried", async () => {
   vi.resetModules();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   try {
     const base = vi.mocked(fetch).getMockImplementation()!;
     let cut = 1;
@@ -319,6 +321,113 @@ describe("session loads", () => {
     expect(latest().closed).toBe(false);
   });
 
+  // A page woken before its network: the snapshot read is dropped, and the pane waits for the retry instead of saying so.
+  it("reads a snapshot the network dropped again with backoff, unreported, and says so only after fifteen seconds of it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      let drops = 2;
+      h.history.mockImplementation(() => drops-- > 0 ? Promise.reject(new TypeError("Load failed")) : Promise.resolve(snapshot("woken")));
+      h.views.select("a");
+      await vi.advanceTimersByTimeAsync(2999);
+      expect([h.history.mock.calls.length, h.content]).toEqual([2, []]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.content).toEqual(["woken"]);
+      expect(latest().url).toContain("/api/sessions/a/events");
+
+      h.history.mockImplementation(() => Promise.reject(new TypeError("Load failed")));
+      h.views.select("b");
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(h.content).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.history.mock.calls.length).toBe(3 + 5);
+      expect(h.content).toEqual(["failed to load session: TypeError: Load failed"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops retrying a dropped snapshot read once the pane moved on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      h.history.mockImplementationOnce(() => Promise.reject(new TypeError("Load failed")));
+      h.views.select("a");
+      await vi.advanceTimersByTimeAsync(0);
+      h.views.select("b");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.history.mock.calls.map(([url]) => url)).toEqual(["/api/sessions/a/history", "/api/sessions/b/history"]);
+      expect(h.content).toEqual(["loaded"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** What `main.ts` registered on the window for `name`. */
+  const onWindow = (name: string) => vi.mocked(window.addEventListener).mock.calls.find(([n]) => n === name)![1] as () => void;
+  const comeBack = (): void => {
+    Object.assign(document, { visibilityState: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  it.each([["back online", () => onWindow("online")()], ["shown again", comeBack]])("reads a pane whose load failed again when %s", async (_, wake) => {
+    h.history.mockResolvedValueOnce(Response.json({ error: "busy snapshot" }, { status: 503 }));
+    h.views.select("a");
+    await settled();
+    expect(h.content).toEqual(["busy snapshot"]);
+    wake();
+    await settled();
+    expect(h.content).toEqual(["loaded"]);
+    expect(latest().url).toContain("/api/sessions/a/events");
+  });
+
+  it("reads a dropped snapshot again as soon as the network is back, not at its next retry", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      h.history.mockImplementationOnce(() => Promise.reject(new TypeError("Load failed")));
+      h.views.select("a");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.content).toEqual([]);
+      onWindow("online")();
+      await vi.advanceTimersByTimeAsync(0);
+      expect([h.history.mock.calls.length, h.content]).toEqual([2, ["loaded"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a live pane and a load in flight alone on a wake, and reloads a stream the browser closed", async () => {
+    h.views.select("a");
+    await settled();
+    onWindow("online")();
+    await settled();
+    expect(h.history).toHaveBeenCalledTimes(1);
+
+    const pending = deferred();
+    h.history.mockReturnValueOnce(pending.promise);
+    latest().reset();
+    onWindow("online")();
+    await settled();
+    expect(h.history).toHaveBeenCalledTimes(2);
+    pending.resolve(snapshot("reset"));
+    await settled();
+
+    latest().close();
+    onWindow("online")();
+    await settled();
+    expect(h.history).toHaveBeenCalledTimes(3);
+    expect(latest().closed).toBe(false);
+  });
+
+  it("reopens a workspace stream the browser closed on a wake, once whatever revives it after", async () => {
+    const streams = () => Stream.all.filter((s) => s.url === "/api/events");
+    const [workspace] = streams() as [Stream];
+    workspace.close();
+    workspace.onerror?.();
+    const revive = h.streamDied.mock.calls[0]![2] as () => void;
+    onWindow("online")();
+    revive();
+    expect(streams()).toHaveLength(2);
+  });
+
   // A switch re-reads one session, not every chain's list: only a turn's end changes that.
   it("re-lists the sessions when a turn ends, not when a load reads idle", async () => {
     const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -396,7 +505,7 @@ async function catchingRejections(body: (rejected: unknown[]) => Promise<void>):
   const rejected: unknown[] = [];
   node.removeAllListeners("unhandledRejection");
   node.on("unhandledRejection", (reason) => rejected.push(reason));
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   try {
     await body(rejected);
   } finally {
@@ -527,12 +636,14 @@ describe("acking an unread session", () => {
     });
   });
 
-  it("reports an ack dropped twice in a row under its sentence", async () => {
+  it("reports an ack still dropped fifteen seconds after the first under its sentence", async () => {
     await catchingRejections(async (rejected) => {
-      dropAcks(2);
+      dropAcks(5);
       h.views.select("a");
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(acks()).toBe(2);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect([acks(), rejected]).toEqual([4, []]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(acks()).toBe(5);
       expect(rejected.map(String)).toEqual(["Error: Could not mark the session read: TypeError: Load failed"]);
     });
   });
@@ -564,6 +675,8 @@ it("reopens dead streams through the revive it hands streamDied", async () => {
   await settled();
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const session = latest();
+  // streamDied acts on a stream the browser gave up on, which is CLOSED.
+  workspace.close();
   workspace.onerror?.();
   session.onerror?.();
   const [reconnectWorkspace, reviveSession] = h.streamDied.mock.calls.map((call) => call[2] as () => void) as [() => void, () => void];
@@ -1072,21 +1185,23 @@ describe("the continuous conversation", () => {
     });
   });
 
-  it("reports a chain read dropped twice in a row under its sentence, and follows on the retry", async () => {
+  it("reports a chain read still dropped after fifteen seconds of retries under its sentence, and follows on the retry", async () => {
     await boot([member("h1"), member("h0", "first")]);
     await catchingRejections(async (rejected) => {
-      failChainReads(2);
+      failChainReads(5);
       chain = [member("h2"), member("h1"), member("h0", "first")];
       h.composer.headMoved?.();
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(rejected).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
       expect(rejected.map(String)).toEqual(["Error: Could not load the continuous conversation: TypeError: Load failed"]);
       expect(h.header.currentId()).toBe("h1");
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(16_000);
       expect(h.header.currentId()).toBe("h2");
     });
   });
 
-  it("gives up on a re-list read that never answers, retries it unreported, and reports a second in a row", async () => {
+  it("gives up on a re-list read that never answers, retries it unreported, and reports one still hanging after the retries", async () => {
     await boot([member("h1"), member("h0", "first")]);
     await catchingRejections(async (rejected) => {
       // AbortSignal.timeout runs on Node's own clock; this one is on the faked one.
@@ -1108,11 +1223,12 @@ describe("the continuous conversation", () => {
         await vi.advanceTimersByTimeAsync(1000);
         expect(rejected).toEqual([]);
         expect(h.header.currentId()).toBe("h2");
-        hangs = 2;
+        // Fifteen seconds counted from the first deadline, not in waits: three reads of ten seconds, 1 + 2 between them.
+        hangs = 3;
         h.composer.headMoved?.();
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(32_999);
         expect(rejected).toEqual([]);
-        await vi.advanceTimersByTimeAsync(1000 + 10_000);
+        await vi.advanceTimersByTimeAsync(1);
         expect(rejected.map(String)).toEqual(["Error: Could not load the continuous conversation: TimeoutError: signal timed out"]);
       } finally {
         timeout.mockRestore();
@@ -1126,14 +1242,14 @@ describe("the continuous conversation", () => {
     await catchingRejections(async (rejected) => {
       // The server rotated before answering h1's reload, and the re-list that would name h2 is dropped.
       chain = [member("h2"), member("h1"), member("h0", "first")];
-      failChainReads(2);
+      failChainReads(5);
       latest().reset();
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(15_000);
       expect(rejected).toHaveLength(1);
       expect(h.header.currentId()).toBe("h1");
       expect(chat.chatLoading).toHaveBeenLastCalledWith(false);
       expect(h.content).toEqual(["This session is no longer the conversation's head, and the new head could not be read yet."]);
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(16_000);
       expect(h.header.currentId()).toBe("h2");
       expect(latest().url).toContain("/h2/");
       expect(h.content).toEqual(["said in h0", "said in h1", "head"]);

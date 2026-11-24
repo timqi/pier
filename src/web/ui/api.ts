@@ -3,28 +3,89 @@
 // modules had grown their own copy of the method/headers/body triple.
 
 /** The wait before a failed request's first retry. */
-export const RETRY_MS = 1000;
+const RETRY_MS = 1000;
 const RETRY_MAX_MS = 30_000;
+/** How long after the first of them reads cut short are retried before they are news: a woken page's network can take this long. */
+const QUIET_MS = 15_000;
+
+/** A failure a later success takes back, to the promise that success resolves: report.ts removes its line then. */
+export const passing = new WeakMap<object, Promise<void>>();
+
+/** Every wait before a cut-short read's retry, each ending its own. */
+const napping = new Set<() => void>();
+
+/** The network is back (main.ts's `online`): every read waiting to be retried runs now. */
+export function wakeRetries(): void {
+  for (const wake of napping) wake();
+}
+
+/** One read's retries: a failure is waited out at 1s doubling to 30s, and one cut short — a deadline fired, or the
+ *  network not back yet, on a woken page — is retried in silence until QUIET_MS after the first since the last success. */
+export function patience() {
+  let backoff = RETRY_MS;
+  let since: number | undefined;
+  let nap: (() => void) | undefined;
+  /** The next wait, the one after it doubled. */
+  const delay = (): number => {
+    const ms = backoff;
+    backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+    return ms;
+  };
+  return {
+    delay,
+    /** True once `err`'s wait is over, false at once when it is news: not cut short, or past QUIET_MS. */
+    async quietly(err: unknown): Promise<boolean> {
+      if (!cutShort(err)) return false;
+      since ??= Date.now();
+      if (Date.now() - since >= QUIET_MS) return false;
+      await new Promise<void>((resolve) => {
+        const wake = (): void => {
+          clearTimeout(timer);
+          napping.delete(wake);
+          nap = undefined;
+          resolve();
+        };
+        const timer = setTimeout(wake, delay());
+        napping.add(wake);
+        nap = wake;
+      });
+      return true;
+    },
+    /** Ends this read's wait: it is asked for again. */
+    wake: (): void => nap?.(),
+    /** A success: the next failure starts over. */
+    reset(): void {
+      backoff = RETRY_MS;
+      since = undefined;
+    },
+  };
+}
+
+/** `read` until it answers or its failure is news (`patience`); the last answer once `live` says nobody wants it. */
+export async function persist<T extends { ok: boolean; cause?: unknown }>(read: () => Promise<T>, live: () => boolean): Promise<T> {
+  const retry = patience();
+  let got = await read();
+  while (!got.ok && (await retry.quietly(got.cause)) && live()) got = await read();
+  return got;
+}
 
 /** A burst of workspace events costs two fetches, not twenty. A failed load
  *  is retried with backoff until one succeeds: the event that asked for it
  *  will not come again, so the view would otherwise stay stale. It rejects
  *  once per failure until then, for report.ts, not once per retry. */
-export function coalesce(load: () => Promise<void>, retryMs = RETRY_MS): () => Promise<void> {
+export function coalesce(load: () => Promise<void>): () => Promise<void> {
   let inflight: Promise<void> | undefined;
   let dirty = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
-  let backoff = retryMs;
+  const wait = patience();
   /** The failure already rejected with since the last success. */
   let told: string | undefined;
-  /** A read was cut short since the last success. */
-  let cut = false;
-  /** Ends the wait before a cut-short read's retry: a request asked for meanwhile runs now. */
-  let wake: (() => void) | undefined;
+  /** Resolves each cut-short failure rejected with since the last success. */
+  const takeBack: (() => void)[] = [];
   const run = (): Promise<void> => {
     dirty = true;
     clearTimeout(retry);
-    wake?.();
+    wait.wake();
     return inflight ??= (async () => {
       let failed: { err: unknown } | undefined;
       for (;;) {
@@ -38,30 +99,24 @@ export function coalesce(load: () => Promise<void>, retryMs = RETRY_MS): () => P
             failed = { err };
           }
         }
-        // A read's deadline fires, or the network is not back yet, on wake when the page was suspended
-        // mid-read, so the first cut-short read is retried before it is news — inside this promise, whose
-        // caller is owed the data, not a success; a second in a row is a server that does not answer.
-        if (!failed || cut || !cutShort(failed.err)) break;
-        cut = true;
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-          retry = setTimeout(resolve, backoff);
-        });
-        wake = undefined;
-        backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+        // Retried inside this promise, whose caller is owed the data, not a success; a request asked for meanwhile ends the wait.
+        if (!failed || !(await wait.quietly(failed.err))) break;
         dirty = true;
       }
       if (!failed) {
-        backoff = retryMs;
+        wait.reset();
         told = undefined;
-        cut = false;
+        for (const back of takeBack.splice(0)) back();
         return;
       }
-      retry = setTimeout(() => void run(), backoff);
-      backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+      retry = setTimeout(() => void run(), wait.delay());
       // Already reported and still being retried: a repeat would only be noise.
       if (String(failed.err) === told) return;
       told = String(failed.err);
+      // A network that comes back is not news: the line saying it was gone goes with it.
+      if (cutShort(failed.err) && typeof failed.err === "object" && failed.err !== null) {
+        passing.set(failed.err, new Promise<void>((resolve) => takeBack.push(resolve)));
+      }
       throw failed.err;
     })().finally(() => {
       inflight = undefined;

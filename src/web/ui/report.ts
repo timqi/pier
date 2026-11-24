@@ -1,6 +1,7 @@
 // Client-side failures, which the server's log cannot see: shown in the chat
 // pane (§5) and POSTed back so `journalctl -t pier | grep client:` has them.
 
+import { passing } from "./api.js";
 import { appendTurn } from "./chat.js";
 
 /** Captured before auth.ts wraps `window.fetch`: a beacon must not navigate
@@ -60,6 +61,8 @@ export function initReport(): void {
   // Every `void fetch(...)` and un-awaited async call in the workbench lands
   // here when it rejects, which is why those call sites need no try/catch.
   window.addEventListener("unhandledrejection", (e) => {
-    report("unhandled rejection", e.reason);
+    const line = report("unhandled rejection", e.reason);
+    const back = typeof e.reason === "object" && e.reason !== null ? passing.get(e.reason) : undefined;
+    if (line && back) void back.then(() => line.remove());
   });
 }

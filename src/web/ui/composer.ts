@@ -4,7 +4,7 @@
 
 import { X } from "lucide";
 import { icon } from "./icons.js";
-import { failure, sendJson } from "./api.js";
+import { failure, refused, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { appendTurn, excerptText, followTail, type QuoteSource, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
@@ -614,7 +614,13 @@ async function recallQueue(): Promise<void> {
   try {
     // Checkpointed: the selection may move before the answer lands.
     saveDraft();
-    const res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
+    let res: Response;
+    try {
+      res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
+    } catch (err) {
+      if (deps.sessionId() === id) appendTurn("error", `Could not recall queued messages: ${String(err)}`);
+      return;
+    }
     if (!res.ok) {
       const why = await failure(res, "Could not recall queued messages");
       if (deps.sessionId() === id) appendTurn("error", why);
@@ -658,7 +664,10 @@ export function initComposer(d: ComposerDeps): void {
   }, resize: autosize });
   const abort = (): void => {
     const id = deps.sessionId();
-    if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });
+    if (!id) return;
+    void refused(`/api/sessions/${id}/abort`, "POST", "Could not stop the turn").then((why) => {
+      if (why && deps.sessionId() === id) appendTurn("error", why);
+    });
   };
   stopBtn.onclick = abort;
   // Only while the button is on screen: Esc with nothing running belongs to
