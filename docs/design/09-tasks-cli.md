@@ -204,7 +204,7 @@ pier task runs [--state <state>[,<state>…]] [--since <n>m|h|d] [--limit <n>]
 Any session, a delegated run's included (§Two levels, no tree). Receipt: a
 JSON array of `LedgerRun` (`core/types.ts`), an agent run's with its `context` (§Continuing a run) and its `tier` where the launch named one, the runs the caller launched —
 every chain member's, for a member of the head; every run, for a delegated
-run's — in
+run's — plus the runs in flight launched by sessions those runs created (a lead's workers), in
 flight plus finished within `--since` (default 24h), only the `--state`s given,
 in flight first then newest first, at most `--limit` (default 20, max 200); a
 full page adds a `task:` line on stderr that there may be more.

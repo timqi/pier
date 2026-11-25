@@ -83,7 +83,7 @@ function runsOf(host: TaskService, launchers: string[] | null, input: Record<str
   }
   if (typeof sinceMs !== "number" || !Number.isInteger(sinceMs) || sinceMs < 1) throw new Error("since_ms must be a positive whole number");
   if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > RUNS_MAX) throw new Error(`limit must be a whole number from 1 to ${String(RUNS_MAX)}`);
-  return host.ledger(launchers, Date.now() - sinceMs, states).slice(0, limit);
+  return host.ledger(launchers, Date.now() - sinceMs, { states, workers: true }).slice(0, limit);
 }
 
 /** `runs` over `launchers`, every run's when null; `stats` is instance-wide for every caller. */

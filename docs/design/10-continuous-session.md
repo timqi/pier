@@ -443,7 +443,9 @@ and orders the chain list (`commandStartsTurn`, `core/types.ts`).
 ## Run ledger
 
 - `TaskService.ledger` over `TaskStore.ledgerRuns`: runs launched by the given
-  sessions, in flight or finished since a time, at most 200; the seed reads it
+  sessions, in flight or finished since a time, at most 200; the seed, `/stop`'s
+  count and `pier task runs` add the runs in flight launched by a session one of
+  those runs created (a lead's workers), one layer, never a turn's footer; the seed reads it
   since the previous head's start and drops the succeeded and skipped runs, `pier task runs` over the last 24h
   ([09 §`runs`](09-tasks-cli.md#runs)).
 - Callbacks and ownership follow the chain: a result owed to

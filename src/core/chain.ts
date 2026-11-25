@@ -46,8 +46,9 @@ interface ChainDeps {
   router: Router;
   home: string;
   chains: Chains;
-  /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`. */
-  ledger: (sessionIds: string[], since: number) => LedgerRun[];
+  /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`;
+   *  with `workers`, also the runs in flight launched by a session one of those runs created — a lead's workers. */
+  ledger: (sessionIds: string[], since: number, scope: { workers: boolean }) => LedgerRun[];
   /** The session that launched run `runId`; null for a cron or watch run, which has no launcher, or an unknown id. */
   launcher: (runId: string) => string | null;
   /** One chain's items: a single read supplies the complete seed, compact answer and fixed command snapshot. */
@@ -300,7 +301,7 @@ export class MainChain {
 
   /** The runs `sessionId` launched at or after `since`: what a head's turn started. */
   launched(sessionId: string, since: number): LedgerRun[] {
-    return this.deps.ledger([sessionId], since).filter((r) => r.queuedAt >= since);
+    return this.deps.ledger([sessionId], since, { workers: false }).filter((r) => r.queuedAt >= since);
   }
 
   /** `/chain <name>`, `/chain new <name>` and `/chain archive` answer with the chain
@@ -352,7 +353,7 @@ export class MainChain {
       const running = session.state === "streaming";
       if (running) await session.abort();
       // The chain's runs go on: a stop that looks total would be read as one.
-      const runs = this.deps.ledger(this.members(chainId).map((m) => m.sessionId), this.now()).filter((r) => r.finishedAt === null).length;
+      const runs = this.deps.ledger(this.members(chainId).map((m) => m.sessionId), this.now(), { workers: true }).filter((r) => r.finishedAt === null).length;
       const still = runs ? ` · ${String(runs)} run${runs === 1 ? "" : "s"} still running` : "";
       await session.systemInput(running ? `stopped${still}` : `nothing running${still}`, origin, "append");
       return undefined;
@@ -497,7 +498,7 @@ export class MainChain {
   private async seed(chainId: string, reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
     const name = this.deps.chains.get(chainId)?.name ?? chainId;
     const own = join("chains", chainId);
-    const runs = this.deps.ledger(this.members(chainId).map((m) => m.sessionId), previous?.startedAt ?? this.now())
+    const runs = this.deps.ledger(this.members(chainId).map((m) => m.sessionId), previous?.startedAt ?? this.now(), { workers: true })
       .filter((r) => !SEED_RUNS_HIDDEN.has(r.state));
     const section = (title: string, text: string): string => (text ? `## ${title}\n\n${text}` : "");
     const spoken = open ? await open.history() : [];

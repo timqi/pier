@@ -7,10 +7,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
+import { MainChain } from "../core/chain.js";
+import { Chains } from "../core/chains.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
-import type { AgentFactory } from "../core/types.js";
+import { CHAIN_IDLE_MS, type AgentFactory } from "../core/types.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
@@ -139,6 +141,58 @@ describe("tasks under the continuous conversation", () => {
     // Any session: its own runs, none refused.
     expect((await service.handle({ operation: "runs" }, "stranger") as { runId: string }[]).map((r) => r.runId)).toEqual(["theirs"]);
     await expect(service.handle({ operation: "runs" }, "child")).resolves.toEqual([]);
+  });
+
+  it("lists a lead's workers while they are in flight, in `runs` and the seed's ledger alike", async () => {
+    const { service, store, bash } = rig();
+    const task = await bash();
+    store.saveRun(stored("lead", task, { invokedBySessionId: "h0", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "lead-s" }));
+    store.saveRun(stored("w-live", task, { invokedBySessionId: "lead-s", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "w1" }));
+    store.saveRun(stored("w-queued", task, { invokedBySessionId: "lead-s", state: "queued", startedAt: null, finishedAt: null }));
+    store.saveRun(stored("w-done", task, { invokedBySessionId: "lead-s" }));
+    // One layer only: a worker's session launches nothing the head is owed; a stranger's lead is not the chain's.
+    store.saveRun(stored("deeper", task, { invokedBySessionId: "w1", state: "running", finishedAt: null }));
+    store.saveRun(stored("x-lead", task, { invokedBySessionId: "stranger", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "x-s" }));
+    store.saveRun(stored("x-worker", task, { invokedBySessionId: "x-s", state: "running", finishedAt: null }));
+    // A run the head sent into a session it did not create: that session's own launches stay its own.
+    store.saveRun(stored("nudge", task, { invokedBySessionId: "h0", sessionMode: "reuse", targetSessionId: "stranger" }));
+    const runs = await service.handle({ operation: "runs" }, "h1") as { runId: string }[];
+    expect(runs.map((r) => r.runId).sort()).toEqual(["lead", "nudge", "w-live", "w-queued"]);
+    // `launched`, a turn's footer, asks without workers.
+    expect(service.ledger(["h1", "h0"], 0).map((r) => r.runId).sort()).toEqual(["lead", "nudge"]);
+    service.stop();
+  });
+
+  it("renders a lead's worker in flight in the next head's seed, the ledger wired as main.ts wires it", async () => {
+    const { service, store, bash } = rig();
+    const task = await bash();
+    const now = Date.now();
+    store.saveRun(stored("lead", task, { invokedBySessionId: "h0", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "lead-s" }));
+    store.saveRun(stored("worker", { ...task, name: "build" }, { invokedBySessionId: "lead-s", state: "running", finishedAt: null, sessionMode: "fresh", targetSessionId: "w1", context: { definition: { ...task, name: "build" }, cwd: "/wt" } }));
+    const db = openDb(":memory:");
+    db.prepare("INSERT INTO main_chain(session_id, chain_id, started_at, reason) VALUES ('h0', 'main', ?, 'first')").run(now - 3 * CHAIN_IDLE_MS);
+    const h0 = fakeSession("h0", { history: [{ role: "user", text: "yesterday", at: now - 2 * CHAIN_IDLE_MS }, { role: "assistant", text: "ok" }] });
+    const m1 = fakeSession("m1");
+    const factory: AgentFactory = {
+      availableModels: async () => [], create: async () => m1, resume: async (id) => (id === "h0" ? h0 : m1),
+      list: async () => [], find: async (id) => ({ id, cwd: "/", createdAt: 0 }), search: async () => [],
+      readHistory: async () => undefined, readSystemPrompt: async () => undefined,
+    };
+    const chain = new MainChain(db, {
+      factory, router: new Router(new EventHub(), (key) => factory.resume(key.conversationId)),
+      home: mkdtempSync(join(tmpdir(), "pier-chain-seed-")), chains: new Chains(db, () => 0),
+      ledger: (ids, since, scope) => service.ledger(ids, since, scope),
+      launcher: () => null,
+      status: () => ({ text: "Nothing open.", seed: "Nothing open.", sessions: {}, snapshot: { version: 1, items: [] } }),
+      close: (_chainId, query) => query, changed: () => {},
+      defaults: async () => ({ defaultModel: null, defaultThinkingLevel: null }),
+    });
+    await chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: "new day", mode: "auto" }, "main");
+    const seed = m1.systemInputs[0]!.text;
+    expect(seed).toContain("`pier task runs`)\n\n");
+    expect(seed).toContain("worker · build · running · session w1 · /wt");
+    expect(seed).toContain("lead · command · running · session lead-s");
+    service.stop();
   });
 
   it("lets a delegated run read runs and stats over the whole instance, and nothing else", async () => {

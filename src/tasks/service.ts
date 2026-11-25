@@ -4,7 +4,7 @@
 
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { MODEL_TIERS, type AgentFactory, type BackgroundRun, type LedgerRun, type ModelTier, type TaskRunState } from "../core/types.js";
+import { MODEL_TIERS, type AgentFactory, type BackgroundRun, type LedgerRun, type ModelTier } from "../core/types.js";
 import { ChatCommandRefused, ItemNotFound, type MainChain } from "../core/chain.js";
 import type { Chains } from "../core/chains.js";
 import type { EventHub } from "../core/hub.js";
@@ -21,7 +21,7 @@ import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
 import { doneOld, openItems, openItemsStatus, recordOpenItems, revivedItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
-import { INTERRUPTED, namesKey, type StatsRow, type TaskStore } from "./store.js";
+import { INTERRUPTED, namesKey, type LedgerScope, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
 import type { CallbackMode, Goal, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
@@ -432,9 +432,10 @@ export class TaskService {
     }));
   }
 
-  /** The run ledger: runs any of `sessionIds` launched (every run, when null), in flight or finished since `since`, at most 200. */
-  ledger(sessionIds: string[] | null, since: number, states?: readonly TaskRunState[]): LedgerRun[] {
-    return this.store.ledgerRuns(sessionIds, since, states).map(ledgerRun);
+  /** The run ledger: runs any of `sessionIds` launched (every run, when null), in flight or finished since `since`, at most 200;
+   *  with `workers`, also the runs in flight launched by a session one of those runs created. */
+  ledger(sessionIds: string[] | null, since: number, scope: LedgerScope = {}): LedgerRun[] {
+    return this.store.ledgerRuns(sessionIds, since, scope).map(ledgerRun);
   }
 
   /** Dispatched runs of the last `days` by launch tier, role and the model the
@@ -604,7 +605,7 @@ export class TaskService {
       const inFlight = !isTerminal(parent.state);
       const sessions = [parent.targetSessionId, parent.handoff?.fromSessionId ?? null];
       const walked = sessions.filter((session): session is string => inFlight && session !== null && this.store.creatorOf(session) !== undefined);
-      const launched = walked.length > 0 ? this.store.ledgerRuns(walked, 0, ["queued", "running"]) : [];
+      const launched = walked.length > 0 ? this.store.ledgerRuns(walked, 0, { states: ["queued", "running"] }) : [];
       for (const child of [...this.store.listChildRuns(parent.id), ...launched]) {
         if (child.id === run.id || collected.has(child.id)) continue;
         collected.set(child.id, child);

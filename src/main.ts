@@ -144,7 +144,7 @@ const router = new Router(hub, (key) => {
 const chains = new Chains(db, (id) => taskStore.openItems(id).length);
 const chain = new MainChain(db, {
   factory, router, home: pierPath("home"), chains,
-  ledger: (ids, since) => tasks.ledger(ids, since),
+  ledger: (ids, since, scope) => tasks.ledger(ids, since, scope),
   launcher: (runId) => taskStore.getRun(runId)?.invokedBySessionId ?? null,
   status: (now, chainId) => openItemsStatus(tasks.openItems(chainId), now, tasks.unmatchedDone(chainId)),
   close: (chainId, query) => tasks.closeItem(chainId, query, Date.now()),

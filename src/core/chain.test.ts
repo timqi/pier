@@ -58,7 +58,7 @@ function rig({
     readHistory: async (id: string) => sessions.get(id)?.history(),
     readSystemPrompt: async () => undefined,
   } satisfies AgentFactory;
-  const ledger: { ids: string[]; since: number }[] = [];
+  const ledger: { ids: string[]; since: number; workers: boolean }[] = [];
   const launcherAsked: string[] = [];
   const hub = new EventHub();
   // The home chat answers for the head only, as main.ts wires it.
@@ -72,8 +72,8 @@ function rig({
   const deps: ConstructorParameters<typeof MainChain>[1] = {
     factory, router, home, chains,
     changed: vi.fn(),
-    ledger: (ids, since) => {
-      ledger.push({ ids, since });
+    ledger: (ids, since, { workers }) => {
+      ledger.push({ ids, since, workers });
       return typeof runs === "function" ? runs(ids, since) : runs;
     },
     launcher: (runId) => {
@@ -248,7 +248,8 @@ describe("the continuous conversation's chain", () => {
 
     expect(await r.say("new day")).toEqual({ sessionId: "m1", chainId: "main", rotated: "idle" });
     expect(r.created).toEqual([{ cwd: r.home, contextFiles: [r.charter], model: { provider: "p", id: "strong" }, thinking: "high" }]);
-    expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
+    // A lead's workers in flight ride the seed with the runs the chain launched.
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt, workers: true }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
     // In flight and failed runs only: a succeeded or skipped one is `pier task runs`' to show.
@@ -689,7 +690,7 @@ describe("the chat commands", () => {
     await r.say("go");
     await r.say("/stop");
     expect(h1.systemInputs.at(-1)?.text).toBe("stopped \u00b7 2 runs still running");
-    expect(r.ledger.at(-1)).toEqual({ ids: ["h1"], since: r.clock.now });
+    expect(r.ledger.at(-1)).toEqual({ ids: ["h1"], since: r.clock.now, workers: true });
     await r.say("/stop");
     expect(h1.systemInputs.at(-1)?.text).toBe("nothing running \u00b7 2 runs still running");
 
@@ -707,7 +708,8 @@ describe("the chat commands", () => {
     ];
     const r = rig({ runs });
     expect(r.chain.launched("h1", 40)).toEqual([runs[0]]);
-    expect(r.ledger).toEqual([{ ids: ["h1"], since: 40 }]);
+    // A lead's worker queued during the turn is not the head's launch.
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: 40, workers: false }]);
   });
 
   it("closes an item on `/done <item>`, answers its key, and refuses a bare or ambiguous one without a note", async () => {
