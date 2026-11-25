@@ -347,10 +347,12 @@ export function renderDrawer(): void {
 }
 
 /** Focus stays in the list for the keys' walk: on the row now at `at`, where one left. The rail's
- *  last row leaves its list for `Nothing open`, so the current chain's row above takes it. */
+ *  last row leaves its list for `Nothing open`, so the current chain's row above takes it. A heading there, the
+ *  panel's `Sessions` past the last item, has no control: the row above takes it, else the one below. */
 function focusRow(surface: Surface, at: number): void {
   const root = listOf(surface);
-  const to = root?.isConnected ? (root.children[at] ?? root.lastElementChild)?.querySelector("button")
+  const row = root?.children[at] ?? root?.lastElementChild;
+  const to = root?.isConnected ? [row, row?.previousElementSibling, row?.nextElementSibling].map((r) => r?.querySelector("button")).find(Boolean)
     : surface === "rail" ? $("#rail-chains").querySelector<HTMLElement>("[aria-current]") ?? $("#rail-chains").querySelector("button") : null;
   to?.focus({ preventScroll: true });
 }

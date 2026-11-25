@@ -19,6 +19,8 @@ export interface ItemTurns {
   sessions: { sessionId: string; startedAt: number; turns: ItemTurn[] }[];
   /** Every run behind the item, newest first: its sessions' own and the ones they launched (`itemRunTree`). */
   runs: TreeRun[];
+  /** The whole tree counted: `runs` stops at the newest 200. */
+  runCount: { total: number; running: number };
   epoch: string;
   lastSeq: number;
 }
@@ -35,7 +37,7 @@ export function renderItem(view: ItemTurns, head: { id: string; state: SessionSt
   const held = runs.filter((r) => keys.has(runTopic(r.runId) ?? ""));
   // Drawn before any session's rows, so the loading rows go first; an item with no session never clears them otherwise.
   chatLoading(false);
-  if (view.runs.length) turnsPane.append(runList(view.runs));
+  if (view.runs.length) turnsPane.append(runList(view.runs, view.runCount));
   for (const s of view.sessions) {
     const own = s.sessionId === head.id && view.closedAt === undefined;
     const streaming = own && head.state === "streaming" && s.turns.at(-1)?.index === head.turns - 1;
@@ -46,18 +48,18 @@ export function renderItem(view: ItemTurns, head: { id: string; state: SessionSt
   return () => filterRows(keys);
 }
 
-/** The item's run tree, one line a run with its state, opening on the ones still running. */
-function runList(runs: TreeRun[]): HTMLElement {
-  const running = runs.filter((r) => r.state === "running").length;
+/** The item's run tree, one line a run with its state, opening on the ones still running; a cut list says so. */
+function runList(runs: TreeRun[], { total, running }: ItemTurns["runCount"]): HTMLElement {
   const list = h("details", "item-runs my-3 rounded-lg border border-neutral-200 bg-white text-[13px]") as HTMLDetailsElement;
   list.open = running > 0;
   list.dataset.kind = "runs";
   list.append(h("summary", "cursor-pointer px-3 py-2 text-neutral-600",
-    `${runs.length} run${runs.length === 1 ? "" : "s"}${running ? `, ${running} running` : ""}`));
+    `${total} run${total === 1 ? "" : "s"}${running ? `, ${running} running` : ""}${total > runs.length ? `, showing the newest ${runs.length}` : ""}`));
   const rows = h("ul", "flex flex-col border-t border-neutral-200");
   for (const r of runs) {
-    const name = r.targetSessionId ? h("a", "min-w-0 flex-1 truncate text-indigo-600 hover:underline", r.name) : h("span", "min-w-0 flex-1 truncate", r.name);
-    if (r.targetSessionId) (name as HTMLAnchorElement).href = `#/session/${encodeURIComponent(r.targetSessionId)}`;
+    const name = r.targetSessionId
+      ? Object.assign(h("a", "min-w-0 flex-1 truncate text-indigo-600 hover:underline", r.name), { href: `#/session/${encodeURIComponent(r.targetSessionId)}` })
+      : h("span", "min-w-0 flex-1 truncate", r.name);
     const row = h("li", "flex items-center gap-2 px-3 py-1.5 max-md:min-h-11",
       (TASK_RUN_STATES as readonly string[]).includes(r.state) ? stateBadge(r.state as TaskRunState) : badge(r.state, "bg-neutral-100 text-neutral-600 ring-neutral-200"),
       ...(r.launched ? [h("span", "flex-none text-neutral-400", "worker")] : []), name,

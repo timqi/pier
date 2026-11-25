@@ -51,6 +51,9 @@ export const namesKey = (done: string, key: string): boolean => key === done || 
 /** The error of a run that cannot continue after a restart: not a result, not a cancel. */
 export const INTERRUPTED = "Pier restarted while the run was active";
 
+/** The most runs `TaskStore.runTree` lists; its counts go past it. */
+export const RUN_TREE_CAP = 200;
+
 /** A run tree's rows (`TaskStore.runTree`): bound twice to the tree's sessions. */
 const TREE = `(json_extract(json, '$.targetSessionId') IN (SELECT value FROM json_each(?))
   OR json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?)))
@@ -206,10 +209,12 @@ export class TaskStore {
 
   /** The runs behind `sessionIds`' items, newest first: every run targeting one of them or a session it
    *  continued (handoff.ts), and every run those launched — a lead's workers, the whole tree since workers
-   *  never delegate; a probe that found nothing is none. */
-  runTree(sessionIds: string[]): TaskRun[] {
+   *  never delegate; a probe that found nothing is none. At most `RUN_TREE_CAP` listed, `total` and `running` counting all. */
+  runTree(sessionIds: string[]): { runs: TaskRun[]; total: number; running: number } {
     const all = JSON.stringify([...new Set(sessionIds.flatMap((id) => this.lineage(id)))]);
-    return this.#many(`SELECT json FROM task_runs WHERE ${TREE} ORDER BY queued_at DESC, rowid DESC LIMIT 200`, all, all);
+    const runs = this.#many<TaskRun>(`SELECT json FROM task_runs WHERE ${TREE} ORDER BY queued_at DESC, rowid DESC LIMIT ${RUN_TREE_CAP}`, all, all);
+    const { total, running } = this.sql(`SELECT COUNT(*) AS total, coalesce(sum(state = 'running'), 0) AS running FROM task_runs WHERE ${TREE}`).get(all, all) as { total: number; running: number };
+    return { runs, total, running };
   }
 
   /** `sessionId` and every session it continued (handoff.ts), newest first. */
@@ -233,6 +238,12 @@ export class TaskStore {
       moved = true;
     }
     return (moved && session && this.latestRunForTarget(session)?.id) || runId;
+  }
+
+  /** The session a run token stands for, its item's (`itemRun`): that run's, else the token itself. */
+  itemSession(runId: string): string {
+    const own = this.itemRun(runId);
+    return this.getRun(own)?.targetSessionId ?? own;
   }
 
   /** `pier task stats`'s rows, one statement over opened agent runs a session
@@ -606,7 +617,7 @@ export class TaskStore {
   /** Main's markers, in reply order, as one write into `chainId`'s items (docs/design/10-continuous-session.md
    *  §Open items); answers the rows each marker changed — `null` for a `<done>` that named nothing, `0` for one
    *  already settled — and the keys its `<done>`s closed. Every item a marker touches, `answered.topic` names or
-   *  holding one of `answered.runIds` records `sessionId`, the writing head's, once. Arrows go last. */
+   *  holding a run of an `answered.runIds` session (`itemSession`) records `sessionId`, the writing head's, once. Arrows go last. */
   markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: (number | null)[]; closed: string[] } {
     const closed: string[] = [];
     const touched = new Set<string>();
@@ -637,8 +648,12 @@ export class TaskStore {
       }
       const topic = answered.topic === undefined ? undefined : this.itemHistory(chainId, answered.topic)?.problem;
       if (topic !== undefined) touched.add(topic);
-      for (const id of answered.runIds ?? []) {
-        for (const row of this.sql("SELECT problem FROM open_items WHERE chain_id = ? AND EXISTS (SELECT 1 FROM json_each(run_ids) WHERE value = ?)").all(chainId, id) as { problem: string }[]) touched.add(row.problem);
+      // By session, not run id: an item holding an older run of the answered session, or of one it continued, is its item.
+      const answeredSessions = new Set((answered.runIds ?? []).map((id) => this.itemSession(id)));
+      if (answeredSessions.size) {
+        for (const row of this.sql("SELECT problem, run_ids FROM open_items WHERE chain_id = ?").all(chainId) as { problem: string; run_ids: string }[]) {
+          if ((JSON.parse(row.run_ids) as string[]).some((id) => answeredSessions.has(this.itemSession(id)))) touched.add(row.problem);
+        }
       }
       for (const key of touched) {
         this.sql("UPDATE open_items SET sessions = json_insert(sessions, '$[#]', ?) WHERE chain_id = ? AND problem = ? AND NOT EXISTS (SELECT 1 FROM json_each(sessions) WHERE value = ?)")

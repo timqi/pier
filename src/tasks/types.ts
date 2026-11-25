@@ -348,6 +348,14 @@ export interface TreeRun extends LedgerRun {
   launched?: true;
 }
 
+/** An item's run tree as its view lists it (`itemRunTree`): the newest runs, `total` and `running` counting every run
+ *  past the list's cap. */
+export interface RunTree {
+  runs: TreeRun[];
+  total: number;
+  running: number;
+}
+
 /** An open item's chain as a row names it; an archived chain's items still show. */
 export interface ItemChain {
   id: string;

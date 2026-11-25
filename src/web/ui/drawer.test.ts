@@ -512,6 +512,29 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   vi.useRealTimers();
 });
 
+// The last item row's place goes to the `Sessions` heading, which has no control: the row above keeps the focus, else the one below.
+it("keeps the focus on a row when the last item row closes above the Sessions heading", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const c = { id: "a", name: "Main", archived: false };
+  chainId = "a";
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "deploy", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  sessions = [row("solo", { state: "streaming" })];
+  drawer.renderDrawer(); drawer.openDrawer();
+  const close = (key: string) => item(key).querySelector(".item-close")!;
+  close("item:a/deploy").focus();
+  close("item:a/deploy").onclick?.();
+  lapse();
+  expect(labels()).toEqual(["auth", "solo"]);
+  expect(doc.activeElement).toBe(item("item:a/auth").querySelector(".session-open"));
+  close("item:a/auth").focus();
+  close("item:a/auth").onclick?.();
+  lapse();
+  expect(labels()).toEqual(["solo"]);
+  expect(doc.activeElement).toBe(item("session:solo").querySelector(".session-open"));
+  vi.useRealTimers();
+});
+
 // Each Close keeps its own Undo window; a page that hides or leaves sends every waiting one at once.
 it("times each deferred Close on its own and sends the waiting ones when the page hides or leaves", () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

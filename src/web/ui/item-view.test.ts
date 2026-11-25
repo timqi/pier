@@ -34,7 +34,7 @@ const shown = () => pane().children.filter((r) => !r.hasAttribute("data-item-hid
 const text = (r: FakeElement) => r.textContent;
 
 const turns: ItemTurns = {
-  chain: "main", problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9, runs: [],
+  chain: "main", problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9, runs: [], runCount: { total: 0, running: 0 },
   sessions: [
     { sessionId: "h0", startedAt: 1, turns: [
       { index: 0, turn: { role: "user", text: "fix login", at: 1 } },
@@ -92,7 +92,7 @@ it("draws each session's rows, then shows only the live rows tagged with a key, 
 it("lists every run behind the item first, each with its state, its workers marked and its session linked", () => {
   const run = (runId: string, state: string, extra: Partial<TreeRun> = {}): TreeRun =>
     ({ runId, name: `${runId} name`, state, targetSessionId: `s-${runId}`, cwd: null, queuedAt: 1, finishedAt: null, ...extra });
-  const filter = view.renderItem({ ...turns, runs: [run("w2", "running", { launched: true }), run("L2", "succeeded", { finishedAt: 2 }), run("w1", "failed", { launched: true, targetSessionId: null })] },
+  const filter = view.renderItem({ ...turns, runs: [run("w2", "running", { launched: true }), run("L2", "succeeded", { finishedAt: 2 }), run("w1", "failed", { launched: true, targetSessionId: null })], runCount: { total: 3, running: 1 } },
     { id: "h1", state: "idle", turns: 5 }, []);
   const list = pane().children[0]!;
   expect(list.dataset.kind).toBe("runs");
@@ -106,6 +106,10 @@ it("lists every run behind the item first, each with its state, its workers mark
   // The list stays shown when the filter runs: it is the item's own.
   filter();
   expect(list.hasAttribute("data-item-hidden")).toBe(false);
+  // A list cut at its cap counts the whole tree and says how much it shows.
+  chat.resetChat();
+  view.renderItem({ ...turns, runs: [run("w9", "running")], runCount: { total: 250, running: 4 } }, { id: "h1", state: "idle", turns: 5 }, []);
+  expect(text(pane().children[0]!.querySelector("summary")!)).toBe("250 runs, 4 running, showing the newest 1");
 });
 
 it("says when the item has no rows on disk, and names an unknown one with the way back", () => {

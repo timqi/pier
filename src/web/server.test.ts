@@ -37,7 +37,7 @@ import type {
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun, TreeRun } from "../tasks/types.js";
+import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, RunTree, TaskRun, TreeRun } from "../tasks/types.js";
 import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -2470,7 +2470,7 @@ describe("the continuous conversation's routes", () => {
     { openCount, ...record }: {
       items?: (q: string, chainId?: string) => ItemSummary[];
       itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
-      runTree?: (runIds: string[]) => TreeRun[];
+      runTree?: (runIds: string[]) => RunTree;
       closeItem?: (chainId: string, problem: string) => string;
       itemSent?: (item: string, sessionId: string) => void;
       invokedBy?: (sessionId: string) => string | undefined;
@@ -2574,7 +2574,7 @@ describe("the continuous conversation's routes", () => {
     const record: ItemRecord = { chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: ["w1"] };
     const itemHistory = vi.fn((p: string) => (p === "login" || p === "sign in" ? record : undefined));
     const tree: TreeRun[] = [{ runId: "w1", name: "worker", state: "running", targetSessionId: "ws1", cwd: null, queuedAt: 1, finishedAt: null, launched: true }];
-    const runTree = vi.fn(() => tree);
+    const runTree = vi.fn(() => ({ runs: tree, total: 1, running: 1 }));
     const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory, runTree });
     restarted();
     factory.readHistory.mockImplementation(async (id: string) => (id === "old"
@@ -2585,7 +2585,7 @@ describe("the continuous conversation's routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { epoch: string; lastSeq: number };
     expect(body).toEqual({
-      chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0, runs: tree,
+      chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0, runs: tree, runCount: { total: 1, running: 1 },
       sessions: [
         { sessionId: "gone", startedAt: 0, turns: [
           { index: 0, turn: { role: "system", text: "Session gone is no longer in the conversation's chain; its rows cannot be shown." } },

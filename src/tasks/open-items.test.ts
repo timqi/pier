@@ -230,10 +230,39 @@ describe("the open items", () => {
     );
     r.item("feature", "", ["w1", "bash"], 1);
     expect(r.list().items[0]!.tree).toEqual({ runs: 6, running: 3 });
-    expect(itemRunTree(r.store, ["w1", "bash"]).map((x) => [x.runId, x.state, x.launched ?? false])).toEqual([
+    const tree = itemRunTree(r.store, ["w1", "bash"]);
+    expect([tree.total, tree.running]).toEqual([6, 3]);
+    expect(tree.runs.map((x) => [x.runId, x.state, x.launched ?? false])).toEqual([
       ["bash", "running", false], ["w2", "running", true], ["L2", "running", false], ["L1b", "succeeded", false], ["w1", "succeeded", true], ["L1", "succeeded", false],
     ]);
-    expect(itemRunTree(r.store, ["gone"])).toEqual([]);
+    expect(itemRunTree(r.store, ["gone"])).toEqual({ runs: [], total: 0, running: 0 });
+  });
+
+  it("lists an item's newest 200 runs and counts them all", () => {
+    const r = rig();
+    r.save(...Array.from({ length: 250 }, (_, i) => saved(`s${i}`, { targetSessionId: "lead1", state: i < 3 ? "running" : "succeeded", queuedAt: i + 1 })));
+    r.item("long lead", "", ["s0"], 1);
+    const tree = itemRunTree(r.store, ["s0"]);
+    expect([tree.runs.length, tree.runs[0]!.runId, tree.total, tree.running]).toEqual([200, "s249", 250, 3]);
+    expect(r.list().items[0]!.tree).toEqual({ runs: 250, running: 3 });
+  });
+
+  // An answered result's item is found by its session: the item may hold an older run of it, or of a session its lead continued.
+  it("records the replying head on the item holding an older run of the answered session, across a handoff", () => {
+    const r = rig();
+    const handoff = { fromSessionId: "lead1", reason: "the supervisor passed --fresh", prompt: "go on" };
+    r.save(
+      saved("L1", { lead: true, targetSessionId: "lead1", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("p1", { targetSessionId: "plain", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("p2", { targetSessionId: "plain", state: "succeeded", queuedAt: 3, finishedAt: 4 }),
+    );
+    r.item("plain work", "", ["p1"], 1);
+    recordOpenItems(r.store, "Done.", 5, "h2", "main", ["p2"]);
+    expect(r.store.itemHistory("main", "plain work")?.sessions).toEqual(["h2"]);
+    r.item("feature", "", ["L1"], 1);
+    r.save(saved("L2", { lead: true, targetSessionId: "lead2", state: "succeeded", queuedAt: 6, finishedAt: 7, handoff }));
+    recordOpenItems(r.store, "Done.", 8, "h3", "main", ["L2"]);
+    expect([r.store.itemHistory("main", "feature")?.sessions, r.store.itemHistory("main", "plain work")?.sessions]).toEqual([["h3"], ["h2"]]);
   });
 
   it("follows a session of 250 runs to its newest, past any listing's cap", () => {
