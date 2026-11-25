@@ -7,7 +7,7 @@ import { NOT_IN_LEDGER, NOTHING_OPEN, RUNS_IN_NO_ITEM, TASK_RUN_STATES, type Ope
 import { logger } from "../log.js";
 import { ledgerRun } from "./callbacks.js";
 import type { TaskStore } from "./store.js";
-import type { OpenItem, OpenItems, OpenRun } from "./types.js";
+import type { OpenItem, OpenItems, OpenRun, TaskRun, TreeRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -55,7 +55,7 @@ export function openStatus(
 }
 
 /** The store reads the list is joined against. */
-export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "itemRun" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
+export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "itemRun" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "treeCounts" | "openItems">;
 
 /** Each of `chains`' items, in their order, beside the chain they were read for; `members`: that chain, newest first. */
 export function openItems<C extends { id: string; members: string[] }>(store: OpenItemReads, router: Pick<Router, "stateOf">, chains: readonly C[]): (OpenItems & { chain: C })[] {
@@ -88,6 +88,14 @@ export function openItems<C extends { id: string; members: string[] }>(store: Op
   const leadOf = (r: OpenRun) => (r.state !== NOT_IN_LEDGER && r.targetSessionId && leads.has(r.targetSessionId) ? r.targetSessionId : null);
   const shown = new Set(listed.flatMap((r) => leadOf(r) ?? []));
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
+  // Every item's tree in one read too; a run with no session (a bash run, a fresh one queued) is its own tree.
+  const held = [...new Set(each.flatMap(({ items }) => items.flatMap((i) => i.runs.flatMap((r) => (r.state !== NOT_IN_LEDGER && r.targetSessionId ? [r.targetSessionId] : [])))))];
+  const trees = held.length ? store.treeCounts(held) : new Map<string, { runs: number; running: number }>();
+  const treeOf = (runs: readonly OpenRun[]): { runs: number; running: number } => runs.reduce((sum, r) => {
+    if (r.state === NOT_IN_LEDGER) return sum;
+    const own = r.targetSessionId ? trees.get(r.targetSessionId) : { runs: 1, running: r.state === "running" ? 1 : 0 };
+    return own ? { runs: sum.runs + own.runs, running: sum.running + own.running } : sum;
+  }, { runs: 0, running: 0 });
   const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
     const found = r.state !== NOT_IN_LEDGER && r.targetSessionId ? store.goalOf(r.targetSessionId) : undefined;
@@ -107,10 +115,23 @@ export function openItems<C extends { id: string; members: string[] }>(store: Op
       const rated = { ...i, runs: i.runs.map(joined) };
       const title = i.runs.map((r) => titles.get(r.targetSessionId ?? "")).find(Boolean);
       const designSessionId = i.runs.find((r) => r.targetSessionId && awaiting.has(r.targetSessionId))?.targetSessionId;
-      return { ...rated, ...openStatus(rated, session), ...(title ? { title } : {}), ...(designSessionId ? { designSessionId } : {}) };
+      const tree = treeOf(i.runs);
+      return { ...rated, ...openStatus(rated, session), ...(title ? { title } : {}), ...(designSessionId ? { designSessionId } : {}), ...(tree.runs ? { tree } : {}) };
     }),
     unlisted: unlisted.map(joined),
   }));
+}
+
+/** Every run behind an item holding `runIds`, newest first (`TaskStore.runTree`): its sessions' own runs, the ones
+ *  they launched marked `launched`, and a run with no session as itself. */
+export function itemRunTree(store: Pick<TaskStore, "getRun" | "itemRun" | "lineage" | "runTree">, runIds: readonly string[]): TreeRun[] {
+  const named = [...new Set(runIds.map((id) => store.itemRun(id)))].flatMap((id) => store.getRun(id) ?? []);
+  const sessions = [...new Set(named.flatMap((r) => r.targetSessionId ?? []))];
+  const own = new Set(sessions.flatMap((id) => store.lineage(id)));
+  const tree = sessions.length ? store.runTree(sessions) : [];
+  const alone = named.filter((r) => !r.targetSessionId && !tree.some((t) => t.id === r.id));
+  const launched = (r: TaskRun): boolean => !alone.includes(r) && !own.has(r.targetSessionId ?? "");
+  return [...alone, ...tree].map((r) => ({ ...ledgerRun(r), ...(launched(r) ? { launched: true as const } : {}) }));
 }
 
 /** The head's reply's markers, written by `sessionId`, which every item the reply is about records

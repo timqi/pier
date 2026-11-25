@@ -68,6 +68,12 @@ export function paintDot(dot: HTMLElement, item: OpenItemPresentation): void {
 
 const OPENS_SESSION = "Opens its session";
 
+/** An item's run tree on its row, short: `2/7 running`, `7 runs` with none running; the long form is its tooltip and label. */
+const treeLabel = ({ runs, running }: NonNullable<OpenItemPresentation["tree"]>): string =>
+  running ? `${running}/${runs} running` : `${runs} run${runs === 1 ? "" : "s"}`;
+const treeWords = ({ runs, running }: NonNullable<OpenItemPresentation["tree"]>): string =>
+  `${runs} run${runs === 1 ? "" : "s"} behind this item, ${running} running — its own and the ones they launched`;
+
 const updates = new WeakMap<HTMLElement, (p: OpenItemPresentation, actions: Actions) => void>();
 
 /** Reuse the row while facts change: a refresh between pointerdown and click must still activate it. */
@@ -82,7 +88,8 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
   const age = h("span", "open-item-age flex-none text-neutral-500");
-  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase, age);
+  const tree = h("span", "open-item-tree flex-none text-neutral-500");
+  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase, age, tree);
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
@@ -119,10 +126,13 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     reopen.onclick = a.reopen ?? null;
     age.textContent = item.age ?? "";
     age.classList.toggle("hidden", !item.age);
+    tree.textContent = item.tree ? treeLabel(item.tree) : "";
+    tree.title = item.tree ? treeWords(item.tree) : "";
+    tree.classList.toggle("hidden", !item.tree);
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
-    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}${leaves ? ` · ${OPENS_SESSION.toLowerCase()}` : ""}`);
+    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}${item.tree ? ` · ${treeLabel(item.tree)}` : ""}${leaves ? ` · ${OPENS_SESSION.toLowerCase()}` : ""}`);
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");
     else main.removeAttribute("aria-current");
     main.onclick = () => a.openItem(item);

@@ -145,7 +145,7 @@ it("lists the items, then the rows no item holds under their own head, short tit
     { problem: "原始完整问题", title: "稳定标题", stage: "waiting on you: 是否合并？授权只限本分支。", status: "waiting on you", runs: [run("lead", { state: "succeeded", finishedAt: 0 })] },
     { problem: "merged", stage: "restart pending", status: "wrapping up", runs: [] },
     { problem: "gone", stage: "", status: "stopped", runs: [run("missing", { state: NOT_IN_LEDGER, targetSessionId: null })] },
-    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0 },
+    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0, tree: { runs: 7, running: 2 } },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
   // The bar leads with what waits on you, a session's too; the panel and the rail keep the items apart from it.
@@ -174,6 +174,11 @@ it("lists the items, then the rows no item holds under their own head, short tit
   // The age rides the stage line, outside the metadata the sidebar hides; an item with no opening time has none.
   expect(item("item:auth").querySelector(".open-item-stage")!.querySelector(".open-item-age")!.textContent).toBe("open 10m");
   expect(item("item:gone").querySelector(".open-item-age")!.classList.contains("hidden")).toBe(true);
+  // Its run tree, the lead's runs and its workers', beside the age; none on a row that has no tree counted.
+  const tree = item("item:auth").querySelector(".open-item-stage")!.querySelector(".open-item-tree")!;
+  expect([tree.textContent, tree.title]).toEqual(["2/7 running", "7 runs behind this item, 2 running \u2014 its own and the ones they launched"]);
+  expect(item("item:auth").querySelector("button")!.getAttribute("aria-label")).toContain("2/7 running");
+  expect(item("item:gone").querySelector(".open-item-tree")!.classList.contains("hidden")).toBe(true);
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
   expect(panel().querySelectorAll(".row-status")).toHaveLength(0);
   const dot = (key: string) => item(key).querySelector(".open-item-dot")!;

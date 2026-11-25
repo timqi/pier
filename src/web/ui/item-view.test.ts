@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { withItem } from "../../core/identity.js";
 import { installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
+import type { TreeRun } from "../../tasks/types.js";
 import type { ItemTurns } from "./item-view.js";
 
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
@@ -33,7 +34,7 @@ const shown = () => pane().children.filter((r) => !r.hasAttribute("data-item-hid
 const text = (r: FakeElement) => r.textContent;
 
 const turns: ItemTurns = {
-  chain: "main", problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9,
+  chain: "main", problem: "auth", aliases: ["login"], epoch: "ep", lastSeq: 9, runs: [],
   sessions: [
     { sessionId: "h0", startedAt: 1, turns: [
       { index: 0, turn: { role: "user", text: "fix login", at: 1 } },
@@ -86,6 +87,25 @@ it("draws each session's rows, then shows only the live rows tagged with a key, 
   live[0]!.querySelector(".topic-tag")!.onclick!();
   expect(itemView).toHaveBeenCalledWith("auth");
   expect(pane().querySelectorAll("[data-kind='user']").flatMap((r) => r.querySelectorAll("button")).some((b) => b.title.startsWith("Edit"))).toBe(false);
+});
+
+it("lists every run behind the item first, each with its state, its workers marked and its session linked", () => {
+  const run = (runId: string, state: string, extra: Partial<TreeRun> = {}): TreeRun =>
+    ({ runId, name: `${runId} name`, state, targetSessionId: `s-${runId}`, cwd: null, queuedAt: 1, finishedAt: null, ...extra });
+  const filter = view.renderItem({ ...turns, runs: [run("w2", "running", { launched: true }), run("L2", "succeeded", { finishedAt: 2 }), run("w1", "failed", { launched: true, targetSessionId: null })] },
+    { id: "h1", state: "idle", turns: 5 }, []);
+  const list = pane().children[0]!;
+  expect(list.dataset.kind).toBe("runs");
+  expect((list as unknown as HTMLDetailsElement).open).toBe(true);
+  expect(text(list.querySelector("summary")!)).toBe("3 runs, 1 running");
+  const rows = list.querySelectorAll("li");
+  expect(rows.map((r) => r.dataset.runId)).toEqual(["w2", "L2", "w1"]);
+  expect(rows.map((r) => text(r).replace(/\d+\w* ago|just now/, ""))).toEqual(["runningworkerw2 name", "succeededL2 name", "failedworkerw1 name"]);
+  expect((rows[1]!.querySelector("a") as unknown as HTMLAnchorElement).href).toBe("#/session/s-L2");
+  expect(rows[2]!.querySelector("a")).toBeNull();
+  // The list stays shown when the filter runs: it is the item's own.
+  filter();
+  expect(list.hasAttribute("data-item-hidden")).toBe(false);
 });
 
 it("says when the item has no rows on disk, and names an unknown one with the way back", () => {

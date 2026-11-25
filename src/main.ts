@@ -33,7 +33,7 @@ import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
 import { abnormalNote, runResultText, runSource } from "./tasks/callbacks.js";
-import { openItemsStatus } from "./tasks/open-items.js";
+import { itemRunTree, openItemsStatus } from "./tasks/open-items.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
@@ -431,6 +431,7 @@ app.route("/", createServer({
   openItems: () => tasks.openItems(),
   items: (q, chainId) => taskStore.items(q, chainId),
   itemHistory: (problem, chainId) => taskStore.itemHistory(chainId, problem),
+  runTree: (runIds) => itemRunTree(taskStore, runIds),
   closeItem: (chainId, problem) => tasks.closeItem(chainId, problem, Date.now(), true),
   invokedBy: (id) => taskStore.creatorOf(id)?.invokedBySessionId ?? undefined,
   itemSent: (item, sessionId) => {

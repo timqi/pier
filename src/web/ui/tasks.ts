@@ -18,10 +18,12 @@ const RUN_TINT: Record<TaskRun["state"], string> = {
   skipped: "bg-neutral-100 text-neutral-600 ring-neutral-200",
 };
 
+/** A run's state as its tinted badge; the item view's run list wears the same. */
+export const stateBadge = (state: TaskRun["state"]): HTMLElement =>
+  badge(state, RUN_TINT[state], state === "running" ? "running-dot bg-sky-500" : undefined);
+
 const runBadge = (run: TaskRun): HTMLElement =>
-  run.state === "succeeded" && run.matched === false
-    ? badge("no match", RUN_TINT.skipped)
-    : badge(run.state, RUN_TINT[run.state], run.state === "running" ? "running-dot bg-sky-500" : undefined);
+  run.state === "succeeded" && run.matched === false ? badge("no match", RUN_TINT.skipped) : stateBadge(run.state);
 
 const triggerText = (task: TaskDefinition): string => {
   if (task.trigger.type === "manual") return "manual";

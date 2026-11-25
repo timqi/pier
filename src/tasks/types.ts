@@ -337,6 +337,15 @@ export interface OpenItem {
   openedAt?: number;
   /** The chain the item belongs to: on every row `TaskService.openItems` answers. */
   chain?: ItemChain;
+  /** Its whole run tree counted — every run of its sessions and every run they launched, a lead's
+   *  workers (`TaskStore.treeCounts`) — and how many of those are running. */
+  tree?: { runs: number; running: number };
+}
+
+/** One run of an item's tree (`TaskStore.runTree`), as the item view lists it; `launched`: a
+ *  run one of the item's sessions launched — a lead's worker — rather than one of those sessions' own. */
+export interface TreeRun extends LedgerRun {
+  launched?: true;
 }
 
 /** An open item's chain as a row names it; an archived chain's items still show. */

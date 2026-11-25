@@ -51,6 +51,11 @@ export const namesKey = (done: string, key: string): boolean => key === done || 
 /** The error of a run that cannot continue after a restart: not a result, not a cancel. */
 export const INTERRUPTED = "Pier restarted while the run was active";
 
+/** A run tree's rows (`TaskStore.runTree`): bound twice to the tree's sessions. */
+const TREE = `(json_extract(json, '$.targetSessionId') IN (SELECT value FROM json_each(?))
+  OR json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?)))
+  AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)`;
+
 export class TaskStore {
   /** Every query below is a fixed string, so each is compiled once. */
   private readonly sql: (sql: string) => StatementSync;
@@ -169,7 +174,7 @@ export class TaskStore {
    *  in a new session (handoff.ts) counts the launches of every session it replaced. */
   workerCounts(leadSessionIds: string[]): Map<string, Record<TaskRunState, number>> {
     const counts = new Map(leadSessionIds.map((id) => [id, Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>]));
-    const lines = leadSessionIds.map((id) => [id, this.replaced(id)] as const);
+    const lines = leadSessionIds.map((id) => [id, this.lineage(id)] as const);
     for (const r of this.sql(`
       SELECT json_extract(json, '$.invokedBySessionId') AS lead, state, COUNT(*) AS n FROM task_runs
       WHERE lead IN (SELECT value FROM json_each(?)) AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
@@ -180,8 +185,35 @@ export class TaskStore {
     return counts;
   }
 
+  /** Each of `sessionIds`' run tree, counted in one statement: as `runTree` lists one. */
+  treeCounts(sessionIds: string[]): Map<string, { runs: number; running: number }> {
+    const counts = new Map(sessionIds.map((id) => [id, { runs: 0, running: 0 }]));
+    const lines = sessionIds.map((id) => [id, this.lineage(id)] as const);
+    const all = JSON.stringify([...new Set(lines.flatMap(([, line]) => line))]);
+    for (const r of this.sql(`
+      SELECT json_extract(json, '$.targetSessionId') AS target, json_extract(json, '$.invokedBySessionId') AS by, state = 'running' AS live, COUNT(*) AS n
+      FROM task_runs WHERE ${TREE} GROUP BY target, by, live
+    `).all(all, all) as unknown as { target: string | null; by: string | null; live: number; n: number }[]) {
+      for (const [id, line] of lines) {
+        if (!line.includes(r.target ?? "") && !line.includes(r.by ?? "")) continue;
+        const count = counts.get(id)!;
+        count.runs += r.n;
+        if (r.live) count.running += r.n;
+      }
+    }
+    return counts;
+  }
+
+  /** The runs behind `sessionIds`' items, newest first: every run targeting one of them or a session it
+   *  continued (handoff.ts), and every run those launched — a lead's workers, the whole tree since workers
+   *  never delegate; a probe that found nothing is none. */
+  runTree(sessionIds: string[]): TaskRun[] {
+    const all = JSON.stringify([...new Set(sessionIds.flatMap((id) => this.lineage(id)))]);
+    return this.#many(`SELECT json FROM task_runs WHERE ${TREE} ORDER BY queued_at DESC, rowid DESC LIMIT 200`, all, all);
+  }
+
   /** `sessionId` and every session it continued (handoff.ts), newest first. */
-  private replaced(sessionId: string): string[] {
+  lineage(sessionId: string): string[] {
     const line = [sessionId];
     for (let from = this.creatorOf(sessionId)?.handoff?.fromSessionId; from && !line.includes(from); from = this.creatorOf(from)?.handoff?.fromSessionId) line.push(from);
     return line;

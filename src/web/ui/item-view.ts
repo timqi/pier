@@ -2,10 +2,12 @@
 // one item's rows, and the live rows its tagging puts in the item, the rest hidden.
 
 import type { ItemTurn } from "../../core/open-items.js";
-import type { BackgroundRun, SessionState } from "../../core/types.js";
-import { appendTurn, renderSnapshot, turnsPane } from "./chat.js";
-import { h } from "./dom.js";
-import { button } from "./form.js";
+import { TASK_RUN_STATES, type BackgroundRun, type SessionState, type TaskRunState } from "../../core/types.js";
+import type { TreeRun } from "../../tasks/types.js";
+import { appendTurn, chatLoading, renderSnapshot, turnsPane } from "./chat.js";
+import { agoLabel, h } from "./dom.js";
+import { badge, button } from "./form.js";
+import { stateBadge } from "./tasks.js";
 import { runTopic, setViewTopics } from "./topics.js";
 
 /** GET /api/continuous/items/:chain/:problem/turns — the item's sessions in chain order, the head's up to `lastSeq`. */
@@ -15,6 +17,8 @@ export interface ItemTurns {
   aliases: string[];
   closedAt?: number;
   sessions: { sessionId: string; startedAt: number; turns: ItemTurn[] }[];
+  /** Every run behind the item, newest first: its sessions' own and the ones they launched (`itemRunTree`). */
+  runs: TreeRun[];
   epoch: string;
   lastSeq: number;
 }
@@ -29,6 +33,9 @@ export function renderItem(view: ItemTurns, head: { id: string; state: SessionSt
   const keys = new Set([view.problem, ...view.aliases]);
   setViewTopics(keys);
   const held = runs.filter((r) => keys.has(runTopic(r.runId) ?? ""));
+  // Drawn before any session's rows, so the loading rows go first; an item with no session never clears them otherwise.
+  chatLoading(false);
+  if (view.runs.length) turnsPane.append(runList(view.runs));
   for (const s of view.sessions) {
     const own = s.sessionId === head.id && view.closedAt === undefined;
     const streaming = own && head.state === "streaming" && s.turns.at(-1)?.index === head.turns - 1;
@@ -37,6 +44,29 @@ export function renderItem(view: ItemTurns, head: { id: string; state: SessionSt
   if (!view.sessions.some((s) => s.turns.length)) appendTurn("system", `Nothing of "${view.problem}" in its sessions' transcripts.`);
   for (const row of [...turnsPane.children] as HTMLElement[]) row.dataset.itemRow = "";
   return () => filterRows(keys);
+}
+
+/** The item's run tree, one line a run with its state, opening on the ones still running. */
+function runList(runs: TreeRun[]): HTMLElement {
+  const running = runs.filter((r) => r.state === "running").length;
+  const list = h("details", "item-runs my-3 rounded-lg border border-neutral-200 bg-white text-[13px]") as HTMLDetailsElement;
+  list.open = running > 0;
+  list.dataset.kind = "runs";
+  list.append(h("summary", "cursor-pointer px-3 py-2 text-neutral-600",
+    `${runs.length} run${runs.length === 1 ? "" : "s"}${running ? `, ${running} running` : ""}`));
+  const rows = h("ul", "flex flex-col border-t border-neutral-200");
+  for (const r of runs) {
+    const name = r.targetSessionId ? h("a", "min-w-0 flex-1 truncate text-indigo-600 hover:underline", r.name) : h("span", "min-w-0 flex-1 truncate", r.name);
+    if (r.targetSessionId) (name as HTMLAnchorElement).href = `#/session/${encodeURIComponent(r.targetSessionId)}`;
+    const row = h("li", "flex items-center gap-2 px-3 py-1.5 max-md:min-h-11",
+      (TASK_RUN_STATES as readonly string[]).includes(r.state) ? stateBadge(r.state as TaskRunState) : badge(r.state, "bg-neutral-100 text-neutral-600 ring-neutral-200"),
+      ...(r.launched ? [h("span", "flex-none text-neutral-400", "worker")] : []), name,
+      h("span", "flex-none text-neutral-400", agoLabel(r.finishedAt ?? r.queuedAt)));
+    row.dataset.runId = r.runId;
+    rows.append(row);
+  }
+  list.append(rows);
+  return list;
 }
 
 /** A live row is the item's when tagged with a key; a rotation's divider shows; a reply in

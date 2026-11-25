@@ -112,7 +112,7 @@ holds it, else the first chain's.
   the stamp then carry; with no head yet the conversation opens, its hash
   replacing the item's; a closed item's view is read-only history plus the composer.
 - **Rows**: `GET /api/continuous/items/:chain/:problem/turns` →
-  `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns}]}`,
+  `{problem, aliases, closedAt?, sessions: [{sessionId, startedAt, turns}], runs}`,
   the item's `sessions` in chain order, each session's transcript read off
   disk as the history route does and reduced to the item's rows by one rule
   (`itemTurns`, `core/open-items.ts`, pure, keys = problem ∪ aliases):
@@ -130,6 +130,13 @@ holds it, else the first chain's.
   A transcript that cannot be read is one system row naming the session; the
   item's other sessions still show. A session the item names that the chain
   no longer holds (a lost head) is one such row too, first, `startedAt` 0.
+- **Runs**: `runs` is the item's run tree, newest first (`itemRunTree`,
+  `tasks/open-items.ts`): every run of the sessions its `run_ids` stand for
+  (`TaskStore.itemRun`, a lead's across its handoffs) and every run those
+  launched, `launched` — a lead's workers; a probe that matched nothing is none.
+  The view leads with it as one `<details>` reading `N runs, M running`, open
+  while one runs: a line a run with its state badge (Settings → Tasks'),
+  `worker` on a launched one, its name linking its session, its age.
 - **Live**: the view subscribes to the head's stream as the pane does; an
   incoming row is shown when the client's existing tagging
   ([03 §Topics](03-web-workbench.md#chat-pane-chatts-composerts)) tags it with

@@ -9,7 +9,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
 import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type TaskRunState } from "../core/types.js";
-import { openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, unmatchedNote, type OpenItemReads } from "./open-items.js";
+import { itemRunTree, openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, unmatchedNote, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { Goal, OpenItems, OpenRun, TaskDefinition, TaskRun } from "./types.js";
@@ -59,6 +59,7 @@ function rig() {
     getRun: (id) => store.getRun(id),
     goalOf: (id) => store.goalOf(id),
     itemRun: (id) => store.itemRun(id),
+    treeCounts: (ids) => store.treeCounts(ids),
     latestRunForTarget: (id) => store.latestRunForTarget(id),
     inFlightRuns: () => { sharedReads.push("inFlightRuns"); return store.inFlightRuns(); },
     leads: () => { sharedReads.push("leads"); return store.leads(); },
@@ -211,6 +212,28 @@ describe("the open items", () => {
     // An <open> naming the new run claims the item holding the old one, as one item.
     recordOpenItems(r.store, "<open>feature, again — building (run L2)</open>", 6, "h1", "main");
     expect(r.store.openItems("main").map((i) => [i.problem, i.runIds])).toEqual([["feature, again", ["L2"]]]);
+  });
+
+  // An item's row counts its whole tree, and its view lists it: the lead's callbacks in every session it ran in, and its workers.
+  it("counts and lists an item's run tree: a lead's runs across its handoff and every worker, with their states", () => {
+    const r = rig();
+    const handoff = { fromSessionId: "lead1", reason: "the supervisor passed --fresh", prompt: "go on" };
+    r.save(
+      saved("L1", { lead: true, targetSessionId: "lead1", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("w1", { invokedBySessionId: "lead1", targetSessionId: "ws1", state: "succeeded", queuedAt: 2, finishedAt: 3 }),
+      saved("L1b", { targetSessionId: "lead1", state: "succeeded", queuedAt: 3, finishedAt: 4 }),
+      saved("L2", { lead: true, targetSessionId: "lead2", queuedAt: 5, handoff }),
+      saved("w2", { invokedBySessionId: "lead2", targetSessionId: "ws2", queuedAt: 6 }),
+      saved("probe", { invokedBySessionId: "lead2", state: "succeeded", matched: false, queuedAt: 7, finishedAt: 7 }),
+      saved("bash", { queuedAt: 8 }),
+      saved("other", { invokedBySessionId: "elsewhere", targetSessionId: "o1", queuedAt: 9 }),
+    );
+    r.item("feature", "", ["w1", "bash"], 1);
+    expect(r.list().items[0]!.tree).toEqual({ runs: 6, running: 3 });
+    expect(itemRunTree(r.store, ["w1", "bash"]).map((x) => [x.runId, x.state, x.launched ?? false])).toEqual([
+      ["bash", "running", false], ["w2", "running", true], ["L2", "running", false], ["L1b", "succeeded", false], ["w1", "succeeded", true], ["L1", "succeeded", false],
+    ]);
+    expect(itemRunTree(r.store, ["gone"])).toEqual([]);
   });
 
   it("follows a session of 250 runs to its newest, past any listing's cap", () => {

@@ -24,6 +24,7 @@ interface Item {
   designSessionId?: string;
   waitsIn?: string;
   openedAt?: number;
+  tree?: { runs: number; running: number };
 }
 
 const LABELS: Record<Item["status"], string> = {
@@ -90,7 +91,7 @@ export function openItemPresentation(i: Item, now: number, key = `item:${i.probl
     }
   }
   return { key, problem: i.problem, title, ...(item && named !== i.problem ? { runName: named } : {}), status: i.status, statusLabel: LABELS[i.status], stage, metadata,
-    ...(i.openedAt === undefined ? {} : { age: `open ${since(i.openedAt, now)}` }),
+    ...(i.openedAt === undefined ? {} : { age: `open ${since(i.openedAt, now)}` }), ...(i.tree ? { tree: { ...i.tree } } : {}),
     runs: runs.map(({ runId, targetSessionId }) => ({ runId, targetSessionId })),
     ...(i.designSessionId ? { designSessionId: i.designSessionId } : {}), ...(i.waitsIn ? { waitsIn: i.waitsIn } : {}) };
 }
@@ -138,6 +139,7 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
     && optional(i, "designSessionId") && optional(i, "waitsIn") && optional(i, "age") && optional(i, "runName") && (i.direct === undefined || typeof i.direct === "boolean")
+    && (i.tree === undefined || (record(i.tree) && Number.isInteger(i.tree.runs) && Number.isInteger(i.tree.running)))
     && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
 }
 

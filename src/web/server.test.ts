@@ -37,7 +37,7 @@ import type {
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
+import type { ItemRecord, ItemSummary, OpenItems, TaskDefinition, TaskRun, TreeRun } from "../tasks/types.js";
 import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -2470,6 +2470,7 @@ describe("the continuous conversation's routes", () => {
     { openCount, ...record }: {
       items?: (q: string, chainId?: string) => ItemSummary[];
       itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
+      runTree?: (runIds: string[]) => TreeRun[];
       closeItem?: (chainId: string, problem: string) => string;
       itemSent?: (item: string, sessionId: string) => void;
       invokedBy?: (sessionId: string) => string | undefined;
@@ -2570,9 +2571,11 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("answers an item's rows across its sessions oldest first, the head's up to its cursor, and 404 for no item", async () => {
-    const record: ItemRecord = { chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: [] };
+    const record: ItemRecord = { chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, sessions: ["head", "gone", "old"], runIds: ["w1"] };
     const itemHistory = vi.fn((p: string) => (p === "login" || p === "sign in" ? record : undefined));
-    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory });
+    const tree: TreeRun[] = [{ runId: "w1", name: "worker", state: "running", targetSessionId: "ws1", cwd: null, queuedAt: 1, finishedAt: null, launched: true }];
+    const runTree = vi.fn(() => tree);
+    const { app, factory, sessions, restarted } = chainRig(undefined, undefined, { itemHistory, runTree });
     restarted();
     factory.readHistory.mockImplementation(async (id: string) => (id === "old"
       ? [{ role: "user", text: "fix sign in" }, { role: "assistant", text: "On it.\n<open>sign in</open>", steps: [{ id: "t1", name: "bash", args: { cmd: "ls" }, output: "x" }] }, { role: "user", text: "other" }, { role: "assistant", text: "Sure." }]
@@ -2582,7 +2585,7 @@ describe("the continuous conversation's routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { epoch: string; lastSeq: number };
     expect(body).toEqual({
-      chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0,
+      chain: "main", problem: "login", aliases: ["sign in"], closedAt: 9, epoch: expect.any(String), lastSeq: 0, runs: tree,
       sessions: [
         { sessionId: "gone", startedAt: 0, turns: [
           { index: 0, turn: { role: "system", text: "Session gone is no longer in the conversation's chain; its rows cannot be shown." } },
@@ -2597,6 +2600,7 @@ describe("the continuous conversation's routes", () => {
         ] },
       ],
     });
+    expect(runTree).toHaveBeenCalledWith(["w1"]);
     const missing = await app.request("/api/continuous/items/main/nope/turns");
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: "No item \"nope\"" });

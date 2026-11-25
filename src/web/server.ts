@@ -42,7 +42,7 @@ import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { chainCounts, itemTurns } from "../core/open-items.js";
 import { splitItem } from "../core/identity.js";
-import type { ItemRecord, ItemSummary, OpenItem, OpenItems, ParkedMessage } from "../tasks/types.js";
+import type { ItemRecord, ItemSummary, OpenItem, OpenItems, ParkedMessage, TreeRun } from "../tasks/types.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
@@ -170,6 +170,8 @@ interface WebDeps {
   /** `TaskStore.items` and `TaskStore.itemHistory`: what the item view's routes read. */
   items?: (q: string, chainId?: string) => ItemSummary[];
   itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
+  /** `itemRunTree`: every run behind an item holding `runIds`, the item view's list. */
+  runTree?: (runIds: string[]) => TreeRun[];
   /** `TaskService.closeItem` of exactly `problem`: the status panel's Close. */
   closeItem?: (chainId: string, problem: string) => string;
   /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
@@ -245,6 +247,7 @@ export function createServer(
     openItems,
     items,
     itemHistory,
+    runTree,
     closeItem,
     itemSent,
     invokedBy,
@@ -687,7 +690,7 @@ export function createServer(
           ? s.turns.map((t) => ({ index: t.index, turn: slim(t.turn) }))
           : [{ index: 0, turn: { role: "system" as const, text: missing } }] }));
       const { sessions: _ids, runIds: _runs, ...record } = item;
-      return c.json({ ...record, sessions, epoch, lastSeq });
+      return c.json({ ...record, sessions, runs: runTree?.(item.runIds) ?? [], epoch, lastSeq });
     }
     log.warn(`item view of "${problem}": the head changed during all 3 reads`);
     return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
