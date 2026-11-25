@@ -601,6 +601,14 @@ it("keeps a waiting Close's Undo through a re-read of the items, and sends it on
   vi.useRealTimers();
 });
 
+// A run tree with nothing running leaves the stage line alone; its total stays the tooltip's.
+it("hides the running count of a tree with none running and keeps its total in the tooltip", () => {
+  open = { items: [{ problem: "idle", stage: "", status: "wrapping up", runs: [], tree: { runs: 3, running: 0 } }], unlisted: [] };
+  drawer.renderDrawer(); drawer.openDrawer();
+  expect(item("item:idle").querySelector(".open-item-tree")!.classList.contains("hidden")).toBe(true);
+  expect(item("item:idle").querySelector(".session-open")!.title).toContain("3 runs behind this item, 0 running");
+});
+
 // The sidebar's Items section is the panel's list drawn again (§侧边栏): the same rows in the
 // same order, each surface its own nodes, one Close for both, a refusal said where it was asked.
 it("fills the rail's Items section with the panel's rows, closes on both surfaces from either, and refuses on the asking one", async () => {
