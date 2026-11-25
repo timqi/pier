@@ -350,6 +350,11 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   restart loses a reminder, never an item.
 - Items list in creation order (`TaskStore.openItems`); an `<open>` that
   replaces an item keeps its place.
+- A run token stands for its item's session (`TaskStore.itemRun`): a lead's
+  worker's for its lead's, a session continued in a new one (`--fresh`, worn
+  out; `handoff.fromSessionId`) for the newest; `markOpenItems` records such a
+  token as that session's newest run, deduplicated — the queued handoff run
+  until its session opens — and every read below resolves a stored one the same way.
 - A session is behind one item: an `<open>` takes its run tokens, and every
   run of their sessions, off every other item (`TaskStore.markOpenItems`); the first one left with no run is renamed to
   the new problem in its place, the rest are closed into it, and one that still has
@@ -359,10 +364,10 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   list — `TaskStore.openItems`, the seed, `/status`, `GET /api/continuous/open`,
   `namesKey` — is the open ones, and a reopened item takes the list's end.
 - `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session
-  (`TaskStore.getRun`) and shows that session's newest run (`latestRunForTarget`),
+  (`TaskStore.itemRun`) and shows that session's newest run (`latestRunForTarget`),
   however old, so a lead woken again stays the same item; a token naming no run
   reads `run <id> — not in the ledger` (`NOT_IN_LEDGER`); a lead run's carries all
-  its launches counted by state (`workerCounts`); `unlisted` is the chain's queued
+  its launches counted by state, the sessions it replaced included (`workerCounts`); `unlisted` is the chain's queued
   and running runs in no item's session; no listing window or cap applies.
 - Optional `title` comes from the session's creation run, independent of the newest run's name: reuse the existing lead read and batch other involved sessions through `TaskStore.creationTitles`; absent creation records fall back to a valid run name, then problem. Every surface titles an item by its problem, the name its topic tags carry; that name is the presentation's `runName`, a tooltip only, and an unlisted run's row its title.
 - A design lead is an item only through the head's `<open>` naming its run; `<done>` is its end.

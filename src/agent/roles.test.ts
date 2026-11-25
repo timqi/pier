@@ -181,7 +181,7 @@ describe("the surface prompt", () => {
 // crossing one asks what is in there, and is raised with a sentence.
 describe("prompt sizes", () => {
   it.each([
-    ["DISPATCHER", DISPATCHER, 2_000],
+    ["DISPATCHER", DISPATCHER, 2_010],
     ["WORKER", WORKER, 395],
     ['lead("build")', lead("build"), 600],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],

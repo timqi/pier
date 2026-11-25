@@ -516,10 +516,10 @@ main:has(#queue-panel:not(.hidden)) #fabs { margin-bottom: 10px; }
 .rail-head { display: flex; align-items: center; min-height: 1.75rem; margin-top: 0.25rem; padding: 0 0.5rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-neutral-500); }
 .rail-head .icon-btn { height: 1.75rem; width: 1.75rem; margin-left: auto; }
 .rail-empty { padding: 0.25rem 0 0.25rem 1.5rem; font-size: 0.8125rem; color: var(--color-neutral-400); }
-#rail-items { margin-top: 0.5rem; padding-top: 0.25rem; border-top: 1px solid var(--line); }
+#rail-items, #rail-sessions { margin-top: 0.5rem; padding-top: 0.25rem; border-top: 1px solid var(--line); }
 /* The rail's row is the title and its status line; the metadata stays in the
    panel and in the row's title tooltip, which keeps the whole text. */
-#rail-items .open-item-meta { display: none; }
+:is(#rail-items, #rail-sessions) .open-item-meta { display: none; }
 /* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the
    composer's top padding already leaves between it and the input.

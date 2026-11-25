@@ -64,6 +64,9 @@ const labels = () => panelRows().map((b) => b.querySelector(".open-item-title")!
 const item = (key: string) => panel().querySelector(`[data-row-key='${key}']`)!;
 const rail = () => doc.querySelector("#rail-items")!;
 const railRows = () => rail().querySelectorAll(".open-item-title").map((t) => t.textContent);
+/** The sidebar's Sessions section: the rows no item holds, apart from the items. */
+const railSessions = () => doc.querySelector("#rail-sessions")!;
+const railLoose = () => railSessions().querySelectorAll(".open-item-title").map((t) => t.textContent);
 
 it("keeps independent session marks and phase tags", () => {
   const dot = (over: Partial<Row>) => fake(drawer.stateDot(row("x", over))[0] ?? null as never);
@@ -134,7 +137,7 @@ it("leaves the chain off the list and counts the head's unread on the app badge"
   expect(drawer.inProgress(sessions, chain).map((s) => s.id)).toEqual(["c"]);
 });
 
-it("uses one flat list, short titles, visible questions and metadata, one control a row with the full wording as its tooltip", async () => {
+it("lists the items, then the rows no item holds under their own head, short titles, visible questions and metadata, one control a row with the full wording as its tooltip", async () => {
   const { topicColour } = await import("./topics.js");
   vi.spyOn(Date, "now").mockReturnValue(10 * 60_000);
   sessions = [row("s-lead", { state: "streaming" }), row("free", { unread: true }), row("queued", { phase: "build", runLive: true })];
@@ -145,8 +148,15 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
     { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0 },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(labels()).toEqual(["原始完整问题", "free", "merged", "gone", "auth", "Queued one", "queued"]);
+  // The bar leads with what waits on you, a session's too; the panel and the rail keep the items apart from it.
+  expect(labels()).toEqual(["原始完整问题", "merged", "gone", "auth", "free", "Queued one", "queued"]);
   expect([shown("#status-item-title"), next().textContent]).toEqual(["原始完整问题", "1/7"]);
+  const panelList = panel().querySelector("[data-list]")!;
+  expect(panelList.children.map((li) => li.dataset.rowKey ?? li.textContent)).toEqual(
+    ["item:原始完整问题", "item:merged", "item:gone", "item:auth", "Sessions", "session:free", "run:q", "session:queued"]);
+  expect([shown("#rail-items-head"), shown("#rail-sessions-head")]).toEqual(["Items \u00b7 4", "Sessions \u00b7 3"]);
+  expect(railRows()).toEqual(["原始完整问题", "merged", "gone", "auth"]);
+  expect(railLoose()).toEqual(["free", "Queued one", "queued"]);
   // An item is titled by its problem, its topic tags' name; the runs' name is the tooltip's.
   expect(lead().title).toBe("原始完整问题 (稳定标题) — waiting on you · 10m · 是否合并？授权只限本分支。");
   // The question's first clause beside the status; the wait and the rest are the tooltip's.
@@ -171,7 +181,7 @@ it("uses one flat list, short titles, visible questions and metadata, one contro
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
-  expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 1, 2, 2, 2, 1, 1]);
+  expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 2, 2, 2, 1, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nOpens its session");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
@@ -583,8 +593,8 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   ], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
-  expect(shown("#rail-items-head")).toBe("Items · 3");
-  expect(railRows()).toEqual(labels());
+  expect(shown("#rail-items-head")).toBe("Items · 2");
+  expect([...railRows(), ...railLoose()]).toEqual(labels());
   expect(labels()).toEqual(["asks", "auth", "solo"]);
   expect(rail().querySelector("[data-list]")).not.toBeNull();
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
@@ -601,20 +611,22 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   close.focus();
   close.onclick?.();
   expect([railItem("item:a/auth").textContent, item("item:a/auth").textContent]).toEqual(["Closed \u2014Undo", "Closed \u2014Undo"]);
-  expect(shown("#rail-items-head")).toBe("Items · 2");
+  expect(shown("#rail-items-head")).toBe("Items · 1");
   expect(doc.activeElement).toBe(undoOf(railItem("item:a/auth")));
   lapse();
-  expect(railRows()).toEqual(["asks", "solo"]);
+  expect(railRows()).toEqual(["asks"]);
   expect(labels()).toEqual(["asks", "solo"]);
-  expect(doc.activeElement).toBe(railItem("session:solo").querySelector(".session-open"));
+  // Focus stays in the Items list: the session sits in its own section.
+  expect(doc.activeElement).toBe(railItem("item:b/asks").querySelector(".session-open"));
+  expect(railLoose()).toEqual(["solo"]);
   await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
   // Refused from the rail: the row is back on both, the sentence atop the rail's list, the panel left as it was.
   menu.closeMenu();
   answer = { ok: false, status: 409, json: async () => ({ error: "auth is still running" }) };
   railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
   lapse();
-  expect(railRows()).toEqual(["solo"]);
-  await vi.waitFor(() => expect(railRows()).toEqual(["asks", "solo"]));
+  expect(railRows()).toEqual([]);
+  await vi.waitFor(() => expect(railRows()).toEqual(["asks"]));
   const list = rail().querySelector("[data-list]")!;
   expect(list.children[0]!.textContent).toBe("auth is still running");
   expect(list.children[0]!.className).toContain("text-red-600");
@@ -623,7 +635,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   const kept = open;
   open = { ...open, items: [open.items[0]!] };
   drawer.renderDrawer();
-  expect(railRows()).toEqual(["solo"]);
+  expect(railRows()).toEqual([]);
   expect(rail().textContent).not.toContain("still running");
   open = kept;
   drawer.renderDrawer();
@@ -636,8 +648,8 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   answer = { ok: true, status: 200, json: async () => ({ closed: "asks" }) };
   item("item:b/asks").querySelector(".item-close")!.onclick?.();
   lapse();
-  expect(railRows()).toEqual(["solo"]);
-  expect(rail().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
+  expect(railRows()).toEqual([]);
+  expect(rail().textContent).not.toContain("still running");
   vi.useRealTimers();
 });
 
@@ -653,7 +665,7 @@ it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's
   drawer.renderDrawer(); drawer.openDrawer();
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
   expect(item("item:a/auth").querySelector(".item-more")).toBeNull();
-  expect(railItem("session:solo").querySelector(".item-more")).toBeNull();
+  expect(railSessions().querySelector("[data-row-key='session:solo']")!.querySelector(".item-more")).toBeNull();
   const more = railItem("item:a/auth").querySelector(".item-more")!;
   expect(more.getAttribute("aria-label")).toBe("Actions for auth");
   more.onclick?.();
@@ -663,7 +675,8 @@ it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's
   expect(itemView).toHaveBeenCalledWith("auth", "a");
   entries[1]!.onSelect();
   lapse();
-  expect(railRows()).toEqual(["solo"]);
+  expect(railRows()).toEqual([]);
+  expect(railLoose()).toEqual(["solo"]);
   await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
   vi.useRealTimers();
 });

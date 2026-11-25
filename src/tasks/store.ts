@@ -165,15 +165,42 @@ export class TaskStore {
   }
 
   /** Each lead's launches by state over its whole life, in one statement: a
-   *  lead's session is one feature's, so no window or cap applies. */
+   *  lead's session is one feature's, so no window or cap applies; a lead continued
+   *  in a new session (handoff.ts) counts the launches of every session it replaced. */
   workerCounts(leadSessionIds: string[]): Map<string, Record<TaskRunState, number>> {
     const counts = new Map(leadSessionIds.map((id) => [id, Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>]));
+    const lines = leadSessionIds.map((id) => [id, this.replaced(id)] as const);
     for (const r of this.sql(`
       SELECT json_extract(json, '$.invokedBySessionId') AS lead, state, COUNT(*) AS n FROM task_runs
       WHERE lead IN (SELECT value FROM json_each(?)) AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
       GROUP BY lead, state
-    `).all(JSON.stringify(leadSessionIds)) as unknown as { lead: string; state: TaskRunState; n: number }[]) counts.get(r.lead)![r.state] = r.n;
+    `).all(JSON.stringify([...new Set(lines.flatMap(([, line]) => line))])) as unknown as { lead: string; state: TaskRunState; n: number }[]) {
+      for (const [id, line] of lines) if (line.includes(r.lead)) counts.get(id)![r.state] += r.n;
+    }
     return counts;
+  }
+
+  /** `sessionId` and every session it continued (handoff.ts), newest first. */
+  private replaced(sessionId: string): string[] {
+    const line = [sessionId];
+    for (let from = this.creatorOf(sessionId)?.handoff?.fromSessionId; from && !line.includes(from); from = this.creatorOf(from)?.handoff?.fromSessionId) line.push(from);
+    return line;
+  }
+
+  /** The run an item records for `runId`, one item standing for one session: a lead's worker stands for its lead,
+   *  a session continued in a new one (handoff.ts) for the newest, as that session's newest run — the handoff
+   *  itself while its session has not opened; any other run as named. */
+  itemRun(runId: string): string {
+    const run = this.getRun(runId);
+    const lead = run?.invokedBySessionId && this.roleOf(run.invokedBySessionId) === "lead" ? run.invokedBySessionId : undefined;
+    let session = lead ?? run?.targetSessionId;
+    let moved = lead !== undefined;
+    for (let next = session && this.replacing(session); next; next = session && this.replacing(session)) {
+      if (!next.targetSessionId) return next.id;
+      session = next.targetSessionId;
+      moved = true;
+    }
+    return (moved && session && this.latestRunForTarget(session)?.id) || runId;
   }
 
   /** `pier task stats`'s rows, one statement over opened agent runs a session
@@ -551,6 +578,9 @@ export class TaskStore {
   markOpenItems(markers: OpenItemMarker[], now: number, sessionId: string, chainId: string, answered: { topic?: string | undefined; runIds?: readonly string[] } = {}): { changed: (number | null)[]; closed: string[] } {
     const closed: string[] = [];
     const touched = new Set<string>();
+    const runs = (ids: readonly string[]) => [...new Set(ids.map((id) => this.itemRun(id)))];
+    markers = markers.map((m) => (m.op === "open" ? { ...m, runIds: runs(m.runIds) } : m));
+    answered = { ...answered, runIds: runs(answered.runIds ?? []) };
     const changed = this.transact(() => {
       const arrows: [number, { problem: string; to: string; whole?: string }][] = [];
       const changed = markers.map((m, i): number | null => {
@@ -677,7 +707,7 @@ export class TaskStore {
    *  alias; the rest close, answered as `absorbed` for the item to take once it is written. */
   private claimRuns(chainId: string, problem: string, runIds: string[], now: number): { changed: number; absorbed: string[] } {
     const sessions = new Set(runIds.flatMap((id) => this.getRun(id)?.targetSessionId ?? []));
-    const claimed = (id: string) => runIds.includes(id) || sessions.has(this.getRun(id)?.targetSessionId ?? "");
+    const claimed = (id: string) => runIds.includes(id) || sessions.has(this.getRun(this.itemRun(id))?.targetSessionId ?? "");
     let changed = 0;
     const absorbed: string[] = [];
     // Closed rows count: the key is taken, and the `<open>` reopens that row instead.

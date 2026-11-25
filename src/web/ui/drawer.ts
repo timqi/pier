@@ -1,7 +1,7 @@
 // The status panel: what needs you and what is running, led in the bar by its
-// most urgent row and listed in the panel that row opens — the open items and
-// the live sessions no item holds, one row each — and, from 64rem, the same
-// rows as the sidebar's Items section.
+// most urgent row and listed in the panel that row opens — the open items, then
+// the live sessions no item holds under their own head, one row each — and, from
+// 64rem, the same rows as the sidebar's Items and Sessions sections.
 
 import { getJson, refused } from "./api.js";
 import { $, agoLabel, h } from "./dom.js";
@@ -233,13 +233,14 @@ function listed(now: number): Listed & { sessions: SessionInfo[]; dropped: strin
   return { ordered: [...all.filter(waits), ...rest.filter((r) => !elsewhere(r)), ...rest.filter(elsewhere)], chainOf, sessions, dropped };
 }
 
-/** One surface's row nodes for `ordered`, reused by key; a node whose row left is dropped. */
-function rowsOn(surface: Surface, { ordered, chainOf }: Listed): HTMLElement[] {
+/** One surface's row nodes for `ordered`, reused by key; a node whose row left is dropped. Item rows first,
+ *  then `loose`, the rows no item holds — unlisted runs and independent sessions — under their own head. */
+function rowsOn(surface: Surface, { ordered, chainOf }: Listed): { items: HTMLElement[]; loose: HTMLElement[] } {
   const nodes = rowNodes[surface];
   const keys = new Set(ordered.map((p) => p.key));
   for (const [key, node] of nodes) if (!keys.has(key)) { node.remove(); nodes.delete(key); }
   for (const [key, node] of undoNodes[surface]) if (!pending.has(key)) { node.remove(); undoNodes[surface].delete(key); }
-  return ordered.map((p) => {
+  const drawn = (p: OpenItemPresentation): HTMLElement => {
     if (pending.has(p.key)) return undoRow(surface, p);
     const chain = chainOf.get(p.key);
     const node = openItemRow(p, {
@@ -253,7 +254,8 @@ function rowsOn(surface: Surface, { ordered, chainOf }: Listed): HTMLElement[] {
     }, nodes.get(p.key));
     nodes.set(p.key, node);
     return node;
-  });
+  };
+  return { items: ordered.filter((p) => !p.direct).map(drawn), loose: ordered.filter((p) => p.direct).map(drawn) };
 }
 
 function undoRow(surface: Surface, p: OpenItemPresentation): HTMLElement {
@@ -276,7 +278,10 @@ function undoRow(surface: Surface, p: OpenItemPresentation): HTMLElement {
 
 /** The panel's list while it is open; a render fills it in place. */
 let list: HTMLElement | null = null;
+/** The panel's rows, items then loose ones; `looseHead` stands between the two in its list. */
 let rows: HTMLElement[] = [];
+let looseAt = 0;
+const looseHead = h("li", "open-items-head px-1.5 pt-3 pb-1 text-xs font-medium text-neutral-500", "Sessions");
 let ordered: OpenItemPresentation[] = [];
 /** The sidebar's Items section (index.html): its head, its list and its own copy of the rows,
  *  filled by every render — hidden below 64rem, where the fill is harmless. */
@@ -287,6 +292,13 @@ const railList = h("ul", "");
 railList.dataset.list = ""; // the arrows' walk, by section (chains.ts)
 const railEmpty = h("p", "rail-empty", "Nothing open");
 let railRows: HTMLElement[] = [];
+/** The sidebar's Sessions section (index.html): the rows no item holds, apart from the items; absent with none. */
+const railSessions = $("#rail-sessions");
+const railSessionsHead = h("p", "rail-head", "Sessions");
+railSessionsHead.id = "rail-sessions-head";
+const railLoose = h("ul", "");
+railLoose.dataset.list = "";
+let railLooseRows: HTMLElement[] = [];
 /** The last rail Close's refusal, atop its list until the next Close. */
 let railError: HTMLElement | null = null;
 /** The row the bar leads with: the most urgent until the counter cycles it on,
@@ -311,8 +323,10 @@ export function renderDrawer(): void {
   // A row waiting on its Close is no longer what the bar leads with or counts.
   ordered = got.ordered.filter((p) => !pending.has(p.key));
   const sessions = got.sessions;
-  rows = rowsOn("panel", got);
-  railRows = rowsOn("rail", got);
+  const panel = rowsOn("panel", got);
+  rows = [...panel.items, ...panel.loose];
+  looseAt = panel.loose.length ? panel.items.length : -1;
+  ({ items: railRows, loose: railLooseRows } = rowsOn("rail", got));
   // A refusal stands while its row does: an item closed another way takes its sentence with it.
   closeError = standing(closeError);
   railError = standing(railError);
@@ -344,14 +358,20 @@ function focusRow(surface: Surface, at: number): void {
 const standing = (error: HTMLElement | null): HTMLElement | null =>
   error && ordered.some((p) => p.key === error.dataset.refused) ? error : null;
 
-/** `Items · N` over the rows, or `Nothing open`; N is the lead's count. */
+/** `Items · N` over the item rows, or `Nothing open`; `Sessions · M` over the loose rows, hidden with none. */
 function fillRail(): void {
-  railHead.textContent = ordered.length ? `Items \u00b7 ${ordered.length}` : "Items";
+  const items = ordered.filter((p) => !p.direct).length;
+  railHead.textContent = items ? `Items \u00b7 ${items}` : "Items";
   fill(railList, [...(railError ? [railError] : []), ...railRows]);
   railItems.replaceChildren(railHead, railRows.length || railError ? railList : railEmpty);
+  railSessionsHead.textContent = `Sessions \u00b7 ${railLooseRows.length}`;
+  fill(railLoose, railLooseRows);
+  railSessions.replaceChildren(...(railLooseRows.length ? [railSessionsHead, railLoose] : []));
+  railSessions.classList.toggle("hidden", !railLooseRows.length);
 }
 
-const fillPanel = (): void => { if (list) fill(list, [...(closeError ? [closeError] : []), ...(found ?? rows)]); };
+const panelRows = (): HTMLElement[] => (looseAt < 0 ? rows : [...rows.slice(0, looseAt), looseHead, ...rows.slice(looseAt)]);
+const fillPanel = (): void => { if (list) fill(list, [...(closeError ? [closeError] : []), ...(found ?? panelRows())]); };
 
 /** Dot, title, status mark and phrase of the shown row; below md and docked the status glyph and the row count only (index.html, style.css). */
 function paintLead(): void {

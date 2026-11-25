@@ -55,7 +55,7 @@ export function openStatus(
 }
 
 /** The store reads the list is joined against. */
-export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
+export type OpenItemReads = Pick<TaskStore, "creationTitles" | "getRun" | "goalOf" | "itemRun" | "latestRunForTarget" | "inFlightRuns" | "leads" | "workerCounts" | "openItems">;
 
 /** Each of `chains`' items, in their order, beside the chain they were read for; `members`: that chain, newest first. */
 export function openItems<C extends { id: string; members: string[] }>(store: OpenItemReads, router: Pick<Router, "stateOf">, chains: readonly C[]): (OpenItems & { chain: C })[] {
@@ -68,8 +68,9 @@ export function openItems<C extends { id: string; members: string[] }>(store: Op
     const tracked = new Set<string>();
     const items = store.openItems(chainId).map((row): Unrated => {
       const named = row.runIds.map((id): OpenRun => {
-        const own = store.getRun(id);
-        tracked.add(own?.targetSessionId ?? id);
+        // A worker's run stands for its lead, a replaced session's for the newest (TaskStore.itemRun).
+        const own = store.getRun(store.itemRun(id));
+        tracked.add(own?.targetSessionId ?? own?.id ?? id);
         return own ? ledgerRun(newest(own.targetSessionId) ?? own) : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
       }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
       return { problem: row.problem, stage: row.stage, runs: named, ...(row.openedAt === undefined ? {} : { openedAt: row.openedAt }) };
@@ -140,14 +141,17 @@ export const unmatchedNote = (unmatched: readonly string[], keys: readonly strin
   return `[Pier: ${unmatched.map(named).join(", ")} closed no open item. If it meant one of these, resend <done> with that key exactly; if its item is already closed, send nothing:\n${keys.map((k) => `- ${k}`).join("\n")}]`;
 };
 
-/** The session a run token stands for: its run's, else the token itself. */
-const sessionOf = (store: Pick<TaskStore, "getRun">, id: string): string => store.getRun(id)?.targetSessionId ?? id;
+/** The session a run token stands for, its item's (TaskStore.itemRun): its run's, else the token itself. */
+const sessionOf = (store: Pick<TaskStore, "getRun" | "itemRun">, id: string): string => {
+  const own = store.itemRun(id);
+  return store.getRun(own)?.targetSessionId ?? own;
+};
 
 /** The items a turn answering `runIds`' results left as they were: one holding a run of a
  *  result's session, no run of its sessions still live, its exact key in none of the turn's markers, `earlier`'s included. */
-export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[], chainId: string, earlier = ""): { runId: string; problem: string }[] {
+export function staleItems(store: Pick<TaskStore, "getRun" | "itemRun" | "latestRunForTarget" | "openItems">, text: string, runIds: readonly string[], chainId: string, earlier = ""): { runId: string; problem: string }[] {
   const named = new Set([earlier, text].flatMap((t) => openItemMarkers(t).markers).flatMap((m) => (m.op === "done" ? [m.problem, m.to, m.whole].filter((k) => k !== undefined) : [m.problem])));
-  const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(store, id)) ?? store.getRun(id))?.state ?? "") === "live";
+  const live = (id: string) => phaseOf((store.latestRunForTarget(sessionOf(store, id)) ?? store.getRun(store.itemRun(id)))?.state ?? "") === "live";
   return store.openItems(chainId).flatMap((item) => {
     const runId = named.has(item.problem) ? undefined : runIds.find((r) => item.runIds.some((id) => sessionOf(store, id) === sessionOf(store, r)));
     return runId && !item.runIds.some(live) ? [{ runId, problem: item.problem }] : [];
@@ -156,7 +160,7 @@ export function staleItems(store: Pick<TaskStore, "getRun" | "latestRunForTarget
 
 /** The open items a reply brought back of the ones the user closed while it was written (`closed`, each with its runs
  *  as they were): one under a closed key, or one not open `before` the reply that holds that key as an alias or a run of its sessions. */
-export function revivedItems(store: Pick<TaskStore, "getRun" | "itemHistory" | "openItems">, chainId: string, closed: readonly { key: string; runIds: string[] }[], before: ReadonlySet<string>): string[] {
+export function revivedItems(store: Pick<TaskStore, "getRun" | "itemHistory" | "itemRun" | "openItems">, chainId: string, closed: readonly { key: string; runIds: string[] }[], before: ReadonlySet<string>): string[] {
   const sharesRun = (a: string[], b: string[]) => a.some((id) => b.some((r) => sessionOf(store, r) === sessionOf(store, id)));
   const revived = (item: { problem: string; runIds: string[] }) => closed.some((c) => c.key === item.problem
     || (!before.has(item.problem) && (store.itemHistory(chainId, item.problem)!.aliases.includes(c.key) || sharesRun(item.runIds, c.runIds))));

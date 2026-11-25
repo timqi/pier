@@ -58,6 +58,7 @@ function rig() {
     creationTitles: (ids) => { titleReads.push(ids); return store.creationTitles(ids); },
     getRun: (id) => store.getRun(id),
     goalOf: (id) => store.goalOf(id),
+    itemRun: (id) => store.itemRun(id),
     latestRunForTarget: (id) => store.latestRunForTarget(id),
     inFlightRuns: () => { sharedReads.push("inFlightRuns"); return store.inFlightRuns(); },
     leads: () => { sharedReads.push("leads"); return store.leads(); },
@@ -154,6 +155,62 @@ describe("the open items", () => {
     expect(open.items[0]!.runs.map((x) => [x.runId, x.context])).toEqual([["k4k3jz55", "peak 45% of the compaction point, 1 compaction"]]);
     expect(open.unlisted).toEqual([]);
     expect(openItemsStatus(open, now).text).toBe("In progress · 1\n\nstatus 归并\nlead building\nelapsed 2m");
+  });
+
+  // A head naming only the worker a lead launched still has one item, its lead's: never the lead listed apart beside it.
+  it("records a lead's worker named by an <open> as its lead's newest run, with its workers counted", () => {
+    const r = rig();
+    r.save(
+      saved("L1", { lead: true, targetSessionId: "lead1", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("L1b", { targetSessionId: "lead1", queuedAt: 3 }),
+      saved("w1", { invokedBySessionId: "lead1", targetSessionId: "ws1", queuedAt: 2 }),
+      saved("w2", { invokedBySessionId: "lead1", targetSessionId: "ws2", state: "succeeded", queuedAt: 2, finishedAt: 3 }),
+      saved("plain", { targetSessionId: "p1", queuedAt: 4 }),
+    );
+    recordOpenItems(r.store, "<open>feature — building (run w1) (run w2) (run plain)</open>", 5, "h1", "main");
+    expect(r.store.openItems("main").map((i) => i.runIds)).toEqual([["L1b", "plain"]]);
+    const open = r.list();
+    expect(open.items[0]!.runs.map((x) => [x.runId, x.workers])).toEqual([
+      ["L1b", { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 }],
+      ["plain", undefined],
+    ]);
+    expect(open.unlisted).toEqual([]);
+    // A row written before the rule, holding the worker alone, reads as its lead's too.
+    r.db.prepare("DELETE FROM open_items").run();
+    r.item("legacy", "", ["w2"], 1);
+    const legacy = r.list();
+    expect(legacy.items[0]!.runs.map((x) => x.runId)).toEqual(["L1b"]);
+    expect(legacy.unlisted.map((u) => u.runId)).toEqual(["plain"]);
+    // The lead's callback is answered by the item holding its worker.
+    r.save({ ...r.store.getRun("L1b")!, state: "succeeded", finishedAt: 6 }, { ...r.store.getRun("w1")!, state: "succeeded", finishedAt: 6 });
+    expect(staleItems(r.store, "Done.", ["L1b"], "main")).toEqual([{ runId: "L1b", problem: "legacy" }]);
+  });
+
+  // `--fresh` (or a worn-out session) continues a lead in a new session; its old workers still launched from the old one.
+  it("follows a lead continued in a new session: its old workers and old runs record and read as the newest", () => {
+    const r = rig();
+    const handoff = { fromSessionId: "lead1", reason: "the supervisor passed --fresh", prompt: "go on" };
+    r.save(
+      saved("L1", { lead: true, targetSessionId: "lead1", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("w1", { invokedBySessionId: "lead1", targetSessionId: "ws1", state: "succeeded", queuedAt: 1, finishedAt: 2 }),
+      saved("L2", { lead: true, state: "queued", queuedAt: 3, handoff }),
+    );
+    // Before its session opens, the handoff run itself stands for the lead.
+    expect([r.store.itemRun("w1"), r.store.itemRun("L1")]).toEqual(["L2", "L2"]);
+    r.save(saved("L2", { lead: true, targetSessionId: "lead2", queuedAt: 3, handoff }), saved("w2", { invokedBySessionId: "lead2", targetSessionId: "ws2", queuedAt: 4 }));
+    recordOpenItems(r.store, "<open>feature — building (run w1)</open>", 5, "h1", "main");
+    expect(r.store.openItems("main")[0]!.runIds).toEqual(["L2"]);
+    r.db.prepare("DELETE FROM open_items").run();
+    r.item("feature", "", ["L1"], 1);
+    const open = r.list();
+    expect(open.items[0]!.runs.map((x) => [x.runId, x.workers])).toEqual([
+      ["L2", { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 }],
+    ]);
+    expect(open.items[0]!.status).toBe("running");
+    expect(open.unlisted).toEqual([]);
+    // An <open> naming the new run claims the item holding the old one, as one item.
+    recordOpenItems(r.store, "<open>feature, again — building (run L2)</open>", 6, "h1", "main");
+    expect(r.store.openItems("main").map((i) => [i.problem, i.runIds])).toEqual([["feature, again", ["L2"]]]);
   });
 
   it("follows a session of 250 runs to its newest, past any listing's cap", () => {
