@@ -68,9 +68,8 @@ export function paintDot(dot: HTMLElement, item: OpenItemPresentation): void {
 
 const OPENS_SESSION = "Opens its session";
 
-/** An item's run tree on its row, short: `2/7 running`, `7 runs` with none running; the long form is its tooltip and label. */
-const treeLabel = ({ runs, running }: NonNullable<OpenItemPresentation["tree"]>): string =>
-  running ? `${running}/${runs} running` : `${runs} run${runs === 1 ? "" : "s"}`;
+/** An item's run tree on its row, short: `2 running`, nothing with none running; the long form is its tooltip and label. */
+const treeLabel = ({ running }: NonNullable<OpenItemPresentation["tree"]>): string => running ? `${running} running` : "";
 const treeWords = ({ runs, running }: NonNullable<OpenItemPresentation["tree"]>): string =>
   `${runs} run${runs === 1 ? "" : "s"} behind this item, ${running} running — its own and the ones they launched`;
 
@@ -87,9 +86,8 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const tag = chainChip();
   const status = h("span", "");
   const phrase = h("span", "open-item-phrase min-w-0 text-neutral-600");
-  const age = h("span", "open-item-age flex-none text-neutral-500");
-  const tree = h("span", "open-item-tree flex-none text-neutral-500");
-  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase, age, tree);
+  const tree = h("span", "open-item-tree min-w-0 text-neutral-500");
+  const stage = h("span", "open-item-stage flex items-center gap-1.5 text-xs", status, phrase, tree);
   const metadata = h("span", "open-item-meta block text-xs text-neutral-500");
   const reopen = h("button", "open-item-reopen cursor-pointer text-xs text-indigo-700 hover:underline", "Open in its chain");
   reopen.setAttribute("type", "button");
@@ -111,9 +109,9 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     phrase.textContent = stagePhrase(item);
     const to = openItemDestination(item);
     const leaves = !to.topic && !!to.session && to.session !== a.currentId;
-    // Title and phrase are short; the head's full wording stays one hover away.
+    // Title and phrase are short; the head's full wording, the age and the whole run tree stay one hover away.
     const full = [item.title !== item.problem ? item.problem : item.runName ?? "", phrase.textContent !== item.stage ? stageLine(item) : "",
-      leaves ? OPENS_SESSION : ""];
+      [item.age, item.tree && treeWords(item.tree)].filter(Boolean).join(" · "), leaves ? OPENS_SESSION : ""];
     if (full.some(Boolean)) main.title = full.filter(Boolean).join("\n");
     else main.removeAttribute("title");
     // A grouped card's head already says `Waiting on you`.
@@ -124,15 +122,12 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     if (a.reopen) column.append(reopen);
     else reopen.remove();
     reopen.onclick = a.reopen ?? null;
-    age.textContent = item.age ?? "";
-    age.classList.toggle("hidden", !item.age);
     tree.textContent = item.tree ? treeLabel(item.tree) : "";
-    tree.title = item.tree ? treeWords(item.tree) : "";
-    tree.classList.toggle("hidden", !item.tree);
+    tree.classList.toggle("hidden", !tree.textContent);
     metadata.textContent = item.metadata.join(" · ");
     metadata.classList.toggle("hidden", !metadata.textContent);
     paintDot(dot, item);
-    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}${item.tree ? ` · ${treeLabel(item.tree)}` : ""}${leaves ? ` · ${OPENS_SESSION.toLowerCase()}` : ""}`);
+    main.setAttribute("aria-label", `${item.title} · ${STATUS[item.status].label}${tree.textContent ? ` · ${tree.textContent}` : ""}${leaves ? ` · ${OPENS_SESSION.toLowerCase()}` : ""}`);
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");
     else main.removeAttribute("aria-current");
     main.onclick = () => a.openItem(item);

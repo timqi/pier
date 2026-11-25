@@ -171,13 +171,12 @@ it("lists the items, then the rows no item holds under their own head, short tit
   expect(status("item:gone").className).toContain("text-red-600");
   expect(item("item:原始完整问题").querySelector(".open-item-meta")!.classList.contains("hidden")).toBe(true);
   expect(item("item:auth").querySelector(".open-item-meta")!.textContent).toBe("elapsed 5m");
-  // The age rides the stage line, outside the metadata the sidebar hides; an item with no opening time has none.
-  expect(item("item:auth").querySelector(".open-item-stage")!.querySelector(".open-item-age")!.textContent).toBe("open 10m");
-  expect(item("item:gone").querySelector(".open-item-age")!.classList.contains("hidden")).toBe(true);
-  // Its run tree, the lead's runs and its workers', beside the age; none on a row that has no tree counted.
+  // The stage line keeps only its running count, outside the metadata the sidebar hides; the age and the
+  // whole run tree are the tooltip's, and a row with no tree counted has neither.
   const tree = item("item:auth").querySelector(".open-item-stage")!.querySelector(".open-item-tree")!;
-  expect([tree.textContent, tree.title]).toEqual(["2/7 running", "7 runs behind this item, 2 running \u2014 its own and the ones they launched"]);
-  expect(item("item:auth").querySelector("button")!.getAttribute("aria-label")).toContain("2/7 running");
+  expect(tree.textContent).toBe("2 running");
+  expect(item("item:auth").querySelector(".open-item-age")).toBeNull();
+  expect(item("item:auth").querySelector("button")!.getAttribute("aria-label")).toContain("2 running");
   expect(item("item:gone").querySelector(".open-item-tree")!.classList.contains("hidden")).toBe(true);
   expect(item("item:gone").textContent).toContain(NOT_IN_LEDGER);
   expect(panel().querySelectorAll(".row-status")).toHaveLength(0);
@@ -188,7 +187,7 @@ it("lists the items, then the rows no item holds under their own head, short tit
   // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
   expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 2, 2, 2, 1, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
-  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nOpens its session");
+  expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nopen 10m \u00b7 7 runs behind this item, 2 running \u2014 its own and the ones they launched\nOpens its session");
   expect(item("item:merged").querySelector(".session-open")!.hasAttribute("title")).toBe(false);
   item("item:原始完整问题").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
@@ -628,7 +627,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
   expect(railItem("item:a/auth")).not.toBe(item("item:a/auth"));
   expect(railItem("item:b/asks").querySelector(".open-item-chain")!.textContent).toBe("Ops");
-  expect(railItem("item:a/auth").querySelector(".open-item-age")!.textContent).toBe("open 2h");
+  expect(railItem("item:a/auth").querySelector("button")!.title).toBe("open 2h");
   // A refresh keeps each surface's node.
   const before = [railItem("item:a/auth"), item("item:a/auth")];
   open = { ...open, items: [{ ...open.items[0]!, stage: "signing in" }, open.items[1]!] };
