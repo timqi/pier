@@ -71,6 +71,8 @@ export interface ChatDeps {
   reload: (id: string) => Promise<void>;
   /** Reply pressed on a row: the composer takes the source to quote. */
   quote: (source: QuoteSource) => void;
+  /** A task run's session other than a design lead's: no composer, so no row sends, edits or quotes. */
+  transcriptOnly: () => boolean;
 }
 
 /** The row a reply answers, as `withQuote` (core/identity.ts) needs it. */
@@ -466,10 +468,12 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
 }
 
 /** The row's toolbar in the gutter beside it: Reply on every chat row, Edit on
- *  a user row that is the head's (an earlier session is read-only). A touch
+ *  a user row that is the head's (an earlier session is read-only), neither in
+ *  a transcript-only session. A touch
  *  screen shows it only to a keyboard; a finger has the row's gestures. */
 function rowTools(kind: "user" | "assistant", row: HTMLElement, node: HTMLElement): HTMLElement {
   const tools = h("div", `message-tools absolute top-1 flex ${kind === "user" ? "right-full flex-row-reverse" : "left-full"}`);
+  if (deps.transcriptOnly()) return tools;
   const tool = (glyph: IconNode, action: string, label: string, title: string, onclick: () => void): HTMLElement => {
     const b = h("button", "flex h-8 w-8 items-center justify-center rounded-full", icon(glyph));
     b.setAttribute("type", "button");
@@ -848,7 +852,7 @@ function renderAssistant(
   node.parentElement?.toggleAttribute("data-silent", silent);
   if (silent) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
-  if (!readonlyRows) {
+  if (!readonlyRows && !deps.transcriptOnly()) {
     // A pick answers this reply: sent as a Reply to it, so the model reads which offer was taken.
     const row = node.parentElement ?? node;
     const pick = (label: string): void => deps.send("auto", label, { role: "assistant", at: Number(row.dataset.at), text: raw });

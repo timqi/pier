@@ -19,6 +19,7 @@ const quote = vi.fn();
 const send = vi.fn();
 const itemView = vi.fn();
 let viewing: string | null = null;
+let transcriptOnly = false;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -26,13 +27,14 @@ beforeEach(async () => {
   openItem.mockClear();
   itemView.mockClear();
   viewing = null;
+  transcriptOnly = false;
   doc = installPage();
   // Only the tail-follow uses them, and the fake DOM has no layout to follow.
   for (const name of ["ResizeObserver", "MutationObserver"]) vi.stubGlobal(name, class { observe(): void {} });
   chat = await import("./chat.js");
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle", continuous: () => true,
-    select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
+    select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing, transcriptOnly: () => transcriptOnly,
   });
   quote.mockClear();
   send.mockClear();
@@ -479,6 +481,18 @@ describe("an earlier turn's next steps", () => {
     expect(labels()).toEqual([]);
   });
 
+  it("offers no Edit, Reply or next step in a transcript-only session, replayed or live", () => {
+    transcriptOnly = true;
+    chat.renderSnapshot([
+      { role: "user", text: "go", at: 1 },
+      { role: "assistant", text: "Ready.\n\n---\n[Ship it]", meta: { completedAt: 2, durationMs: 1, tokens: 1 } },
+    ], "idle", []);
+    chat.appendTurn("user", "more", false, 3);
+    chat.completeTurn("Done.\n\n---\n[Wait]", { completedAt: 4, durationMs: 1, tokens: 1 });
+    expect(doc.querySelector("#turns")!.querySelectorAll("[data-action]")).toEqual([]);
+    expect(labels()).toEqual([]);
+  });
+
   it("keeps each open item's newest row across other topics; a newer row or a <done> folds it, an untagged one keeps only the last turn's", async () => {
     const topics = await import("./topics.js");
     const shown = () => doc.querySelector("#turns")!.querySelectorAll("button")
@@ -585,7 +599,7 @@ describe("tail follow across the final render", () => {
     chat = await import("./chat.js");
     chat.initChat({
       sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming", continuous: () => true,
-      select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing,
+      select, openItem: vi.fn(), send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing, transcriptOnly: () => false,
     });
   });
 
@@ -754,7 +768,7 @@ describe("file references", () => {
 
   it("falls back to the cwds earlier callbacks carried, most recent first, when the session's own has nothing", async () => {
     const asked = disk(["/w/main/src/a.ts", "/w/one/src/b.ts", "/w/two/src/b.ts", "/w/one/src/c.ts"]);
-    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, continuous: () => true, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing };
+    const deps = { sessionId: () => "h1", sessionCwd: () => "/w/main" as string | null, sessionChannel: () => "web", sessionState: () => "idle" as const, continuous: () => true, select, openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => viewing, transcriptOnly: () => false };
     chat.initChat(deps);
     const callback = (cwd: string) => chat.appendSystemInput("Task \"t\" finished with state: succeeded\n\nok", {
       kind: "task-callback", taskId: "t1", runId: "r1", sourceSessionId: "s", source: { taskName: "t" }, state: "succeeded", cwd,
@@ -1104,7 +1118,7 @@ describe("the turn's bubble", () => {
       continuous = false;
       chat.initChat({
         sessionId: () => "w1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "streaming", continuous: () => continuous,
-        select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => null,
+        select, openItem, send, ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote, itemView, item: () => null, transcriptOnly: () => false,
       });
     });
     const log = () => details().find((d) => d.classList.contains("activity-log"))!;

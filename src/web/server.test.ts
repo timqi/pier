@@ -463,6 +463,27 @@ describe("workbench server", () => {
     ]);
   });
 
+  // Stop and instructions to a task run's session go through the head (ui/composer.ts hides the box).
+  it("snapshots a worker's and a build lead's session transcript-only, a design lead's and the head's not", async () => {
+    const { app, db, tasks } = setup();
+    const run = async (runId: string, sessionId: string, launch?: { role: "lead"; design?: true }) => {
+      const task = await tasks.create({
+        name: runId,
+        trigger: { type: "manual" },
+        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "go", ...(launch ? { launch } : {}) },
+      });
+      new TaskStore(db).saveRun(storedRun(task, runId, {
+        sourceSessionId: "s1", targetSessionId: sessionId, sessionMode: "fresh", callbackSessionId: "s1",
+        context: { definition: task, sessionId }, state: "succeeded", startedAt: 1, finishedAt: 2,
+      }));
+    };
+    await run("design-run", "designer", { role: "lead", design: true });
+    await run("build-run", "builder", { role: "lead" });
+    await run("worker-run", "worker");
+    const only = async (id: string) => ((await (await app.request(`/api/sessions/${id}/history`)).json()) as { transcriptOnly?: true }).transcriptOnly;
+    expect(await Promise.all(["s1", "designer", "builder", "worker"].map(only))).toEqual([undefined, undefined, true, true]);
+  });
+
   // The badge counts "web" rows only (ui/drawer.ts): an IM turn is delivered
   // to its own chat, and no Console visit is owed for it.
   it("names the IM channel that owns a session", async () => {

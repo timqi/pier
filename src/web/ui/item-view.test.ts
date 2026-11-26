@@ -24,7 +24,7 @@ beforeEach(async () => {
   chat.initChat({
     sessionId: () => "h1", sessionCwd: () => null, sessionChannel: () => "web", sessionState: () => "idle", continuous: () => true,
     select: vi.fn(), openItem: vi.fn(), send: vi.fn(), ownTurn: vi.fn(), reload: vi.fn(async () => {}), quote: vi.fn(),
-    itemView, item: () => "auth",
+    itemView, item: () => "auth", transcriptOnly: () => false,
   });
 });
 afterEach(() => vi.unstubAllGlobals());

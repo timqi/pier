@@ -324,6 +324,9 @@ export function createServer(
   // An earlier member of the continuous conversation is read off disk and
   // never opened, so it can be neither edited nor resumed.
   const older = (id: string): boolean => continuous.headOf(id) !== id;
+  // Stop and instructions to a task run's session go through the head; only a design lead's is the user's to write in.
+  const transcriptOnly = (id: string): boolean =>
+    (taskSessions?.().has(id) ?? false) || leads?.().get(id)?.phase === "build";
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
     if (!older(id)) return (await ensure(id)).history();
     const turns = await factory.readHistory(id);
@@ -415,6 +418,7 @@ export function createServer(
         queue: { ...queue, parked: parkedMessages?.(id) ?? [] },
         backgroundRuns: backgroundRuns?.(id) ?? [],
         skills: session.skills(),
+        ...(transcriptOnly(id) ? { transcriptOnly: true } : {}),
       });
     }
     log.warn(`snapshot for ${id} changed during all 3 reads`);

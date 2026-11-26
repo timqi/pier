@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
 const state = vi.hoisted(() => ({
-  appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
+  appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true, transcriptOnly: false,
   pane: { offsetWidth: 0, clientWidth: 0 },
   observed: [] as { target: unknown; options?: ResizeObserverOptions; fire: () => void }[],
   pagehide: null as (() => void) | null,
@@ -53,7 +53,7 @@ let stored: Map<string, string>;
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
-  state.id = "a"; state.visible = true; state.observed = [];
+  state.id = "a"; state.visible = true; state.transcriptOnly = false; state.observed = [];
   drafts = new Map();
   stored = new Map();
   vi.stubGlobal("window", { addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") state.pagehide = fn; } });
@@ -86,7 +86,7 @@ beforeEach(async () => {
   composer = await import("./composer.js");
   composer.initComposer({
     sessionId: () => state.id, sessionState: () => "idle",
-    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false,
+    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false, transcriptOnly: () => state.transcriptOnly,
   });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -196,7 +196,7 @@ it("moves drafts left in localStorage into this tab and deletes them", async () 
   composer = await import("./composer.js");
   composer.initComposer({
     sessionId: () => state.id, sessionState: () => "idle",
-    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false,
+    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload, continuous: () => false, transcriptOnly: () => state.transcriptOnly,
   });
 
   expect([...stored.keys()]).toEqual(["pier.filesPrefs"]);
@@ -419,6 +419,18 @@ describe("parked task messages", () => {
   });
 });
 
+it("hides the box and the queue's actions in a transcript-only session, the queue itself still shown", () => {
+  state.transcriptOnly = true;
+  composer.updateComposer();
+  composer.renderQueue([], ["queued by the run"]);
+  expect(node("#composer").hasAttribute("data-transcript-only")).toBe(true);
+  expect(node("#queue-panel").classList.contains("hidden")).toBe(false);
+  expect(node("#queue-actions").classList.contains("hidden")).toBe(true);
+  state.transcriptOnly = false;
+  composer.updateComposer();
+  expect(node("#composer").hasAttribute("data-transcript-only")).toBe(false);
+});
+
 describe("queue control failures", () => {
   it("shows the recall conflict reason", async () => {
     state.fetch.mockResolvedValueOnce(Response.json({ error: "Queue operation in progress" }, { status: 409 }));
@@ -466,6 +478,22 @@ describe("pending attachments", () => {
     });
   };
   const staged = (): number => node("#image-strip").childElementCount;
+
+  it("stages a file dropped on the transcript, and none in a transcript-only session", () => {
+    state.fetch.mockResolvedValue(Response.json({ path: "/inbox/x.png" }));
+    const pane = state.pane as unknown as { ondragover: (ev: unknown) => void; ondrop: (ev: unknown) => void };
+    const drag = () => ({ preventDefault: vi.fn(), dataTransfer: { dropEffect: "copy", files: [new File(["png"], "drop.png", { type: "image/png" })] } });
+    pane.ondrop(drag());
+    expect(staged()).toBe(1);
+    state.transcriptOnly = true;
+    const over = drag();
+    pane.ondragover(over);
+    expect(over.dataTransfer.dropEffect).toBe("none");
+    const drop = drag();
+    pane.ondrop(drop);
+    expect(drop.preventDefault).toHaveBeenCalled();
+    expect(staged()).toBe(1);
+  });
 
   it("uploads a file as it is attached, so Enter does not wait on it", async () => {
     state.fetch.mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }));
@@ -629,7 +657,7 @@ it("starts no optimistic turn for a continuous command", async () => {
   const setState = vi.fn();
   composer.initComposer({
     sessionId: () => "m1", sessionState: () => "idle",
-    chatVisible: () => true, setState, reload: state.reload, continuous: () => true,
+    chatVisible: () => true, setState, reload: state.reload, continuous: () => true, transcriptOnly: () => false,
   });
   state.appendTurn.mockClear();
   state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", command: "status" }, { status: 202 }));
@@ -652,7 +680,7 @@ it("sends the conversation's chain and follows a /chain switch", async () => {
   const headMoved = vi.fn();
   composer.initComposer({
     sessionId: () => "m1", sessionState: () => "idle", chatVisible: () => true, setState: vi.fn(), reload: state.reload,
-    continuous: () => true, chain: () => "c2", switched, headMoved,
+    continuous: () => true, chain: () => "c2", switched, headMoved, transcriptOnly: () => false,
   });
   state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", chainId: "c2" }, { status: 202 }));
   type("hello");
@@ -677,7 +705,7 @@ it("sends the conversation's chain and follows a /chain switch", async () => {
 it("stamps a send from the item view with its item, before the quote, and sends a command unstamped", async () => {
   composer.initComposer({
     sessionId: () => "m1", sessionState: () => "idle",
-    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => true, item: () => "auth review",
+    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => true, item: () => "auth review", transcriptOnly: () => false,
   });
   state.appendTurn.mockClear();
   state.fetch.mockImplementation(async () => Response.json({ sessionId: "m1" }, { status: 202 }));
@@ -711,7 +739,7 @@ describe("the chat-command completion", () => {
   };
   const continuous = (on: boolean) => composer.initComposer({
     sessionId: () => "m1", sessionState: () => "idle",
-    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => on,
+    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => on, transcriptOnly: () => false,
   });
 
   it("lists every command with its line at a bare `/`, narrows on the prefix, hides on the exact word", () => {

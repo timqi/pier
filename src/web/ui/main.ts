@@ -107,6 +107,7 @@ interface SessionSnapshot {
   queue: { steering: string[]; followUp: string[]; parked: ParkedMessage[] };
   backgroundRuns: BackgroundRun[];
   skills: { name: string; description: string }[];
+  transcriptOnly?: true;
 }
 
 type SnapshotRead = Awaited<ReturnType<typeof getJson<SessionSnapshot>>>;
@@ -129,6 +130,8 @@ let turnOpen = false;
 /** Streaming set by this tab's own send, no state event since: the one guess
  *  an error may take back — after a server state event, only another one can. */
 let optimistic = false;
+/** The latest snapshot said the session has no composer; held until the next one says otherwise, so a switch never shows a box it would take back. */
+let transcriptOnly = false;
 
 // --- the continuous conversation (docs/design/10-continuous-session.md) -------------
 
@@ -329,6 +332,7 @@ function openContinuous(user = true): void {
   source = null;
   currentId = null;
   detached = null;
+  transcriptOnly = false;
   currentState = "idle";
   unstarted = true;
   earlier = [];
@@ -838,6 +842,8 @@ async function drawSession(id: string, paged?: SnapshotRead): Promise<void> {
   }
   snapshotReady = true;
   const snap = got.value;
+  // Before the rows: they read it for their tools.
+  transcriptOnly = snap.transcriptOnly === true;
   const cursor = view?.value ?? snap;
   // A hash naming an alias is the item under its key now: the bar and every stamped send say the key.
   if (view && view.value.problem !== item) {
@@ -908,6 +914,7 @@ initChat({
   },
   reload: reloadIfCurrent,
   quote: setQuote,
+  transcriptOnly: () => transcriptOnly,
 });
 initComposer({
   sessionId: () => currentId,
@@ -921,6 +928,7 @@ initComposer({
   headMoved: () => void refreshSessions(),
   chain: () => chainId,
   switched: (id) => void openChain(id),
+  transcriptOnly: () => transcriptOnly,
 });
 initDrawer({
   sessions: () => sessions,

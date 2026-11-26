@@ -43,6 +43,8 @@ interface ComposerDeps {
   chain?: () => string | null;
   /** A `/chain` command named another chain: the pane goes there. */
   switched?: (chainId: string) => void;
+  /** A task run's session other than a design lead's: its stop and instructions go through the head. */
+  transcriptOnly: () => boolean;
 }
 
 let deps: ComposerDeps;
@@ -151,6 +153,8 @@ export function clearOptimistic(): void {
 
 /** The composer buttons are the state display. */
 export function updateComposer(): void {
+  // The form's own padding stays: the transcript keeps its tail inset and the phone's home indicator.
+  composer.toggleAttribute("data-transcript-only", deps.transcriptOnly());
   const streaming = deps.sessionState() === "streaming";
   // No id, nothing to send to: send() would drop the prompt on the floor, so
   // the button says so before it is pressed rather than after.
@@ -192,7 +196,7 @@ export function renderQueue(steering: string[], followUp: string[], parkedNow = 
   queueLabel.textContent = rows.length > 1 ? `Queued · ${rows.length}` : "Queued";
   // The actions are Pi's whole-queue primitives; a parked row is its sender's
   // to `pier task cancel`, never recalled or sent from here.
-  const own = steering.length + followUp.length > 0;
+  const own = steering.length + followUp.length > 0 && !deps.transcriptOnly();
   queueActions.classList.toggle("hidden", !own);
   queueActions.classList.toggle("flex", own);
   syncQueuePanel();
@@ -673,7 +677,7 @@ export function initComposer(d: ComposerDeps): void {
   // Only while the button is on screen: Esc with nothing running belongs to
   // the browser, and in a Console view there is no turn in front of you.
   escapeKey(stopBtn, "Stop the running turn", abort, () =>
-    deps.sessionState() === "streaming" && deps.chatVisible());
+    deps.sessionState() === "streaming" && deps.chatVisible() && !deps.transcriptOnly());
   $("#queue-steer").onclick = () => void deliverQueue("steer");
   $("#queue-restart").onclick = () => void deliverQueue("restart");
   $("#queue-recall").onclick = () => void recallQueue();
@@ -724,9 +728,14 @@ export function initComposer(d: ComposerDeps): void {
     autosize();
     saveDraft();
   };
-  turnsPane.ondragover = (ev) => ev.preventDefault();
+  // Still cancelled with no composer: an unhandled drop would navigate the tab to the file.
+  turnsPane.ondragover = (ev) => {
+    ev.preventDefault();
+    if (deps.transcriptOnly() && ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
+  };
   turnsPane.ondrop = (ev) => {
     ev.preventDefault();
+    if (deps.transcriptOnly()) return;
     for (const file of ev.dataTransfer?.files ?? []) addFile(file);
   };
   $("#attach").onclick = () => attachInput.click();

@@ -912,6 +912,8 @@ main {
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
 /* The box docked at the column's foot: a bordered surface, its focus a ring. */
 #composer > div:focus-within { box-shadow: 0 0 0 3px var(--color-indigo-100); }
+/* A transcript-only session (composer.ts): the box goes, the dock's padding stays as the tail's inset. */
+#composer[data-transcript-only] > div { display: none; }
 #composer :is(#attach, #voice, #send, #stop) {
   width: var(--composer-control-size);
   height: var(--composer-control-size);

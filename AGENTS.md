@@ -119,13 +119,13 @@ the area is.
 | --- | --- | --- |
 | `core/` | 2.35k | platform- and Pi-blind routing, presentation vocabulary and the continuous conversation's chain with its chat commands |
 | `channels/` | 5k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
-| `web/` | 15.5k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette, voice input with its hold-to-talk mode, the composer's voice panel and ASR relay to two recognizers |
+| `web/` | 15.6k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette, voice input with its hold-to-talk mode, the composer's voice panel and ASR relay to two recognizers |
 | `agent/` | 3.2k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
 | `tasks/` | 4.3k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, the `--worktree` seam, and an item's run tree across a lead's workers and handoffs |
 | root `src/*.ts` | 3.8k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
 | `native/` | 1.5k | the Tauri shell, Rust and the tab bar page: the instance store, one hidden-or-shown webview per open instance, badge and notification relay, and the bounded login-shell PATH a local Pier is found and run with |
-| one module | 800 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `web/ui/chat.ts` at 841, the transcript pane |
+| one module | 800 | rule 2 before splitting; `agent/pi.ts` and `agent/packages.ts`, the two files that may touch the Pi SDK; `web/ui/chat.ts` at 843, the transcript pane |
 | channel adapter file | 500 | transport, render and panel counted separately, each serving the thread and the home chat's main flow |
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
 
