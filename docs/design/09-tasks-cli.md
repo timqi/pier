@@ -53,8 +53,8 @@ pier task run [--prompt <text|-> --model <tier|model|?> | --bash <script>] [--ru
   opens no goal; `--rounds` and `--review-model` beside it are refused. `--design` rides as `launch.design: true` and tags the
   lead `design` (the user finalizes it); the server refuses it without
   `--role lead`. A lead run's callback fires only for a milestone resume,
-  a result with a `Design final:` line, a build lead's run that leaves no result
-  coming to it, or a run that did not succeed; any
+  a result with a `Design final:` or a `Notify:` line, a build lead's run that leaves no result
+  coming to it, or a run that did not succeed; its receipt's `next` says so; any
   other settles as `--callback none`, `callbackError` "a lead's turn, not a
   milestone".
 - **`--rounds <n>`**: rides as `launch.rounds`, the reviews a goal allows

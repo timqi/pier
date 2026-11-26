@@ -12,7 +12,7 @@ import { clipResult } from "./callbacks.js";
 import { type TaskDefinitions, parseLaunch, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
-import { isTerminal, type CallbackFields, type CallbackMode, type Goal, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
+import { createdRole, isTerminal, type CallbackFields, type CallbackMode, type Goal, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -124,13 +124,15 @@ const summarize = (run: TaskRun): RunSummary => defined<RunSummary>({
 
 /** The receipt says the callback is the whole answer, or a model that just
  *  launched work reaches for a status call. */
-const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: string | null, mode: CallbackMode, callerSessionId: string): T => ({
+const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: string | null, mode: CallbackMode, callerSessionId: string, toLead = false): T => ({
   ...summary,
   next: callbackSessionId === null
     ? "callback none: the result is not delivered to anyone"
     : callbackSessionId !== callerSessionId
       ? `the result is delivered to session ${callbackSessionId}; this session will not receive a callback`
-      : mode === "steer"
+      : toLead
+        ? "a lead calls back only with a milestone, a Design final: or a Notify: line; any other reply stays in its session; nothing to query"
+        : mode === "steer"
         ? "the result interrupts your running turn as a steer message; nothing to query"
         : "the result arrives as a callback message once your turn ends; nothing to query",
 });
@@ -228,6 +230,8 @@ export async function handleTask(
   if (gate && (input.operation === "runs" || input.operation === "stats")) return readLedger(host, null, input);
   if (delegated) throw new Error(`a run cannot launch a run: ${HAND_UP}`);
   if (role === "worker") throw new Error(`a worker's session never launches a run, in a run or after it: ${HAND_UP}`);
+  // The session's creator fixes the role; a fresh run has no session yet, so its own launch does.
+  const toLead = (run: TaskRun): boolean => (run.targetSessionId === null ? createdRole(run) : store.roleOf(run.targetSessionId)) === "lead";
   // Read off a draft before it is filed; a saved definition has the same shape under `action`.
   const notLead = <T>(draft: T): T => {
     const role = record(record(draft)?.launch)?.role ?? record(record(record(draft)?.action)?.launch)?.role;
@@ -317,7 +321,7 @@ export async function handleTask(
       callbackMode,
       background: true,
     });
-    return receipt(summarize(run), callbackSessionId, callbackMode, callerSessionId);
+    return receipt(summarize(run), callbackSessionId, callbackMode, callerSessionId, toLead(run));
   }
   if (input.operation === "recover") {
     // History only, never status: readable once the callback has said its last
@@ -383,7 +387,7 @@ export async function handleTask(
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
       const handoff = await host.handoff(run.id, message, input.fresh === true);
       const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true }, again && { cap: again.rounds!, reviewModel: again.reviewModel }, handoff);
-      const summary = receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId);
+      const summary = receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId, toLead(resumed));
       return handoff ? { delivery: "handoff", reason: handoff.record.reason, run: summary } : { delivery: "resume", run: summary };
     }
     if (input.callback !== undefined || input.callback_session_id !== undefined) {

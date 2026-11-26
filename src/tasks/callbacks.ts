@@ -68,6 +68,9 @@ export const MILESTONE = "[Pier: the last result owed to you follows; nothing el
 /** The line a design lead ends on once the user confirms: its milestone, whether a run's or a turn outside any. */
 export const DESIGN_FINAL = /^Design final:/m;
 
+/** The line a lead marks a turn with when its supervisor should hear of it: an answer, a done, a decision. */
+export const NOTIFY = /^Notify:/m;
+
 /** On the record of a lead run that owed its supervisor nothing, so the run says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
@@ -87,8 +90,9 @@ export const goalLine = (goal: Goal, cwd: string | null): string => {
 };
 
 /** Decided once, as the run finishes. A live goal's step calls nobody back:
- *  the goal's end does (goals.ts). A lead reports milestones only: any
- *  other turn of its the user reads in its session, and settles as `--callback none`.
+ *  the goal's end does (goals.ts). A lead reports milestones and the turns it
+ *  marks `Notify:`: any other turn of its the user reads in its session, and
+ *  settles as `--callback none`.
  *  A build lead's turn that leaves nothing coming to it is its milestone: it
  *  declares its own completion, where only the user finalizes a design.
  *  A turn that did not succeed is not a turn the user read: it calls back. */
@@ -104,7 +108,7 @@ export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf
   const lead = run.targetSessionId;
   const phase = lead === null ? undefined : store.leadPhaseOf(lead);
   const milestone = (): boolean => run.context.resumePrompt?.startsWith(MILESTONE) === true ||
-    (run.result?.type === "agent" && DESIGN_FINAL.test(run.result.text)) ||
+    (run.result?.type === "agent" && (DESIGN_FINAL.test(run.result.text) || NOTIFY.test(run.result.text))) ||
     (phase === "build" && lead !== null && !store.awaitsResults(lead));
   if (phase !== undefined && run.state === "succeeded" && !milestone()) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";

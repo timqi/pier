@@ -183,7 +183,7 @@ describe("prompt sizes", () => {
   it.each([
     ["DISPATCHER", DISPATCHER, 2_010],
     ["WORKER", WORKER, 395],
-    ['lead("build")', lead("build"), 680],
+    ['lead("build")', lead("build"), 745],
     ["surfacePrompt()", surfacePrompt({ ...instance, publicUrl: "https://pier.example.com" }), 700],
   ])("%s stays under its ceiling", (_name, text, ceiling) => {
     expect(tokens(text)).toBeLessThanOrEqual(ceiling);

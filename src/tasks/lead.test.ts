@@ -356,17 +356,19 @@ describe("a feature lead", () => {
   });
 
   // The session's creator fixes the role: a follow-up from main carries no launch config of its own.
-  it("settles main's --session and --run follow-ups on a design lead as the lead's: a plain turn owes nothing, Design final: and a failure call back", async () => {
+  it("settles main's --session and --run follow-ups on a design lead as the lead's: a plain turn owes nothing, Notify:, Design final: and a failure call back", async () => {
     const paths = {
       session: { operation: "run", task: { action: { type: "agent", session: { mode: "reuse", sessionId: "lead" }, prompt: "what now?" } } },
       run: { operation: "message", run_id: "lead-run", message: "what now?" },
     };
     for (const [path, request] of Object.entries(paths)) {
-      for (const reply of [{ reply: "lead says done" }, { reply: "Design final: /repo/docs/design.md" }, { error: "provider down" }]) {
+      const replies = [{ reply: "lead says done" }, { reply: "Found it.\nNotify: the cause is the cache" }, { reply: "Design final: /repo/docs/design.md" }, { error: "provider down" }];
+      for (const reply of replies) {
         const { service, sessions, store, leadRan } = rig();
         await leadRan();
         sessions.set("lead", fakeSession("lead", reply));
-        const receipt = await service.handle(request, "main") as { runId?: string; run?: { runId: string } };
+        const receipt = await service.handle(request, "main") as { runId?: string; next?: string; run?: { runId: string; next?: string } };
+        expect(receipt.next ?? receipt.run!.next, path).toMatch(/Notify: line; any other reply stays in its session/);
         const run = await service.waitForRun(receipt.runId ?? receipt.run!.runId);
         expect(run, path).toMatchObject({ targetSessionId: "lead", callbackSessionId: "main" });
         if ("reply" in reply && reply.reply === "lead says done") {
@@ -375,7 +377,7 @@ describe("a feature lead", () => {
           expect(sessions.get("main")!.systemInputs, path).toEqual([]);
         } else {
           await vi.waitFor(() => expect(store.getRun(run.id)!.callbackState, path).toBe("delivered"));
-          expect(sessions.get("main")!.systemInputs.map((i) => i.text), path).toEqual([expect.stringContaining("reply" in reply ? "Design final:" : "provider down")]);
+          expect(sessions.get("main")!.systemInputs.map((i) => i.text), path).toEqual([expect.stringContaining(reply.reply ?? "provider down")]);
         }
         service.stop();
       }

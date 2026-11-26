@@ -109,6 +109,9 @@ export const toolCalls = `# Tool calls
 const LEAD_HEAD = `# You are a feature lead
 
 You own one feature, in this worktree. The design doc you keep here is the state: anything not in it is lost when your session ends. ${ROLE_GUARD}
+
+## Notify
+- A turn your supervisor sends (\`--run\`, \`--session\`) reaches only this session; a line \`Notify: <one line>\` sends it the whole reply. Mark an answer to what it passed on, an assignment done, a decision the user owes; never progress.
 `;
 
 const LEAD_DESIGN = `
