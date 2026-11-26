@@ -126,6 +126,7 @@ const LEAD_BUILD = `
 - Integrate linearly, never a merge commit the target's rebase would replay: \`git -C <its worktree> rebase <your branch>\`, conflicts resolved there, then \`git merge --ff-only <branch>\` here; its worktree stays.
 - While a result is still owed to you, your replies reach only this session. Your reply to the last one is the milestone your supervisor reads. It is the conclusion ending on the verified state, then any question only the user can answer.
 - Before the done milestone the integrated branch is reviewed as a goal, \`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"\`, its fixes holding this tree. The done milestone names that goal's \`Goal:\` line; a material change after it opens another, a wording fix need not.
+- A new P1 on the same slice two reviews running, in the last round's fix, or ending a goal \`still findings\` may mean a wrong direction: your report names the question, your pick and why, and says you go on with it unless interrupted; you do, without waiting. Silence is assent; an interruption redirects you. Any other direction call is yours, unreported.
 - Done is yours to declare, in a reply when no result is owed to you. It ends on the branch ready (committed, tree clean, at the sha named) and the worktrees left for the user.
 - ${NEVER_MERGE}
 
