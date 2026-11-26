@@ -8,7 +8,7 @@ import { quietLabel, restartInput, splitReply } from "../core/reply.js";
 import { userLanguage, withLanguage } from "../core/identity.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { runSource } from "./callbacks.js";
+import { FROM_SUPERVISOR, MILESTONE, runSource } from "./callbacks.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskStore } from "./store.js";
 import { createdPhase, createdRole, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
@@ -39,6 +39,11 @@ const preamble = (run: TaskRun, role: AgentRole | undefined): string => {
   return `${tag} Your final reply is recorded verbatim as the run result, ${audience}; ` +
     `next-step buttons and file:// attachments do not render there.${RUN_RESULT}\n\n`;
 };
+
+/** A turn a session sent on a lead's existing session: neither the run that
+ *  opened it, whose wave reports as a milestone, nor Pier's milestone resume. */
+const fromSupervisor = (run: TaskRun): boolean => run.invokedBySessionId !== null &&
+  !(run.sessionMode === "fresh" && run.resumedFromRunId === null) && run.context.resumePrompt?.startsWith(MILESTONE) !== true;
 
 export class AgentTaskRunner {
   private readonly active = new Set<string>();
@@ -94,9 +99,11 @@ export class AgentTaskRunner {
         // that was not has heard nothing, so it gets the prompt.
         const resumed = restart && run.context.sessionId ? restart : undefined;
         // A handoff is a new session's first message, so it hears the preamble too.
+        const role = this.store.roleOf(session.id);
+        const label = role === "lead" && fromSupervisor(run) ? `${FROM_SUPERVISOR}\n\n` : "";
         const prompt = resumed ? restartInput(resumed.at, resumed.downMs, resumed.queued)
-          : run.context.resumePrompt && !run.handoff ? run.context.resumePrompt
-            : `${preamble(run, this.store.roleOf(session.id))}${run.context.resumePrompt ?? action.prompt}${input}`;
+          : run.context.resumePrompt && !run.handoff ? `${label}${run.context.resumePrompt}`
+            : `${preamble(run, role)}${label}${run.context.resumePrompt ?? action.prompt}${input}`;
         run.context.sessionId = session.id;
         if (!resumed) run.context.renderedPrompt = prompt;
         this.store.saveRun(run);

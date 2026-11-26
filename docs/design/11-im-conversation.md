@@ -112,7 +112,7 @@ Both platforms, the same rule.
 
 - **When**: a run on a design lead's session settles as `LEAD_TURN` (a turn
   that is the user's, not the head's — `settleCallback`,
-  `tasks/callbacks.ts`) and the session has no chat yet (`conversations.keyOf`
+  `tasks/callbacks.ts`) or succeeds ending on a `Notify:` line, and the session has no chat yet (`conversations.keyOf`
   is empty). `TaskService` reports it (`designLead(run, "waiting")`, wired in
   `main.ts`) to `ChannelRuntime.designLead`.
 - **Where**: the home chat, while its adapter is live. No home, or its adapter
@@ -132,7 +132,7 @@ Both platforms, the same rule.
   before, in the main flow.
 - **Then**: the user's replies in the thread are the lead's messages; a button
   tap echoes into the thread; a reply carrying `Design final:` is recorded as
-  today (`designFinal`, `router.onTurnEnd`); the head's callback note is the
+  today (`leadReport`, `router.onTurnEnd`); the head's callback note is the
   status card's, not the main flow's (§Status). The thread stays bound after the design closes;
   it reaches the same session.
 - **The root is edited in place** (`Channel.editRoot(thread, note)`: Slack
@@ -405,7 +405,7 @@ through what the head launches (`pier task`), never by a group's message.
   each: a threaded home message with a row goes to `Router.dispatch` under
   `<chat>/<thread>`, without one to the head; `openThread` returns the thread
   id and posts the root in the main flow. `tasks/lead.test.ts`: `designLead`
-  fires `waiting` on `LEAD_TURN`, `final`, `failed`, for a design lead only.
+  fires `waiting` on `LEAD_TURN` or `Notify:`, `final`, `failed`, for a design lead only.
   `tasks/service.test.ts` (§abnormal-end notice): which ends owe a notice, the
   cancel's asker, the boot write-off, a throwing reporter.
 - §Status: `channels/receipts.test.ts` a quiet chat booked, settled and

@@ -40,12 +40,13 @@ delivery.
   owes the head a callback (§Milestones); the head launches a new build lead on
   the doc in the design lead's worktree (`--cwd`, no `--worktree`), so it builds on
   the design's branch toward its target, its prompt opening `Build per `.
-- A design lead's turn outside any run (the user confirmed in its session)
-  that carries the line is recorded as a finished run of the lead — reuse,
-  resumed from its latest run, that run's callback target, the reply its
-  result — so it reports and clears the same way (`TaskService.designFinal`,
-  on `Router.onTurnEnd`); a failed turn, a run's own turn and a build lead's
-  record nothing.
+- A lead's turn outside any run that reports — a design lead's carrying the
+  line (the user confirmed in its session), any lead's ending on a `Notify:`
+  line — is recorded as a finished run of the lead — reuse, resumed from its
+  latest run, that run's callback target, the reply its result — so it reports
+  and clears the same way (`TaskService.leadReport`, on `Router.onTurnEnd`); a
+  failed turn, a run's own turn and a build lead's `Design final:` record
+  nothing. A design lead's `Notify:` turn the user wrote opens no home-chat thread.
 - A run's `--name` is its session's title; a lead's session carries its
   phase (`TaskStore.leads`): `design` when its creating run carries
   `launch.design` (`--design`, set by the head only for a product or architecture
@@ -99,10 +100,12 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 - nobody waiting on that run, or a resume that cannot be filed (logged): plain.
 
 A lead's own run owes the head a callback only when it was a milestone resume,
-its result carries a `Design final:` line or a `Notify:` line (`NOTIFY`; the lead
+its result carries a `Design final:` line or ends on a `Notify:` line (`NOTIFY`; the lead
 marks an answer, a done or a needed decision, never progress), it is a build lead's and leaves no
 result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwise it settles as
 `--callback none` does, `LEAD_TURN` (`tasks/callbacks.ts`) the reason on its record.
+A turn a session sends on a lead's existing session (`--run`, `--session`, not a
+milestone resume) opens with `FROM_SUPERVISOR`, which names the rule.
 
 ## Home and memory
 

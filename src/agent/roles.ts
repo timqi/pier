@@ -111,7 +111,8 @@ const LEAD_HEAD = `# You are a feature lead
 You own one feature, in this worktree. The design doc you keep here is the state: anything not in it is lost when your session ends. ${ROLE_GUARD}
 
 ## Notify
-- A turn your supervisor sends (\`--run\`, \`--session\`) reaches only this session; a line \`Notify: <one line>\` sends it the whole reply. Mark an answer to what it passed on, an assignment done, a decision the user owes; never progress.
+- Your reply to a turn your supervisor sends stays in this session unless a last line \`Notify: <one line>\` marks it; the supervisor then reads the whole reply. Any other reply of yours too; a milestone and a \`Design final:\` reach it unmarked.
+- Mark an answer to what it passed on, an assignment done, a decision the user owes; never progress.
 `;
 
 const LEAD_DESIGN = `
@@ -127,7 +128,7 @@ const LEAD_BUILD = `
 - Split it into worker runs, \`pier task run --name "<a few words>"\`, the model per §Models; the prompt is a worker's whole handoff. You never launch a lead. A stuck or redirected worker: \`--run <id> --fresh\`.
 - Workers writing in parallel each take \`--worktree <branch>\` off yours, \`--rounds 0\` unless you want their reviews. A sequential worker may use this tree: you neither edit nor integrate until it returns, the tree clean at each handoff.
 - Integrate linearly, never a merge commit the target's rebase would replay: \`git -C <its worktree> rebase <your branch>\`, conflicts resolved there, then \`git merge --ff-only <branch>\` here; its worktree stays.
-- While a result is still owed to you, your replies reach only this session. Your reply to the last one is the milestone your supervisor reads. It is the conclusion ending on the verified state, then any question only the user can answer.
+- While a result is still owed to you, your replies stay in this session unless \`Notify:\` marks one. Your reply to the last one is the milestone your supervisor reads. It is the conclusion ending on the verified state, then any question only the user can answer.
 - Before the done milestone the integrated branch is reviewed as a goal, \`pier task run --rounds <n> --cwd <this worktree> --prompt "review …"\`, its fixes holding this tree. The done milestone names that goal's \`Goal:\` line; a material change after it opens another, a wording fix need not.
 - A new P1 on the same slice two reviews running, in the last round's fix, or ending a goal \`still findings\` may mean a wrong direction: your report names the question, your pick and why, and says you go on with it unless interrupted; you do, without waiting. Silence is assent; an interruption redirects you. Any other direction call is yours, unreported.
 - Done is yours to declare, in a reply when no result is owed to you. It ends on the branch ready (committed, tree clean, at the sha named) and the worktrees left for the user.

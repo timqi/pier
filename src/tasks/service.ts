@@ -11,7 +11,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner, type Restart } from "./agent.js";
-import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, ledgerRun, LEAD_TURN, MILESTONE, NOTIFY, runModel, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -240,23 +240,26 @@ export class TaskService {
           log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
         }
       }
-      if (!DESIGN_FINAL.test(text)) return;
+      if (!DESIGN_FINAL.test(text) && !NOTIFY.test(text)) return;
       // On Pi's dispatch stack, which must not unwind.
       try {
-        this.designFinal(sessionId, text);
+        this.leadReport(sessionId, text, opened === undefined);
       } catch (err) {
-        log.error(`lead ${sessionId}: a Design final: outside any run could not be recorded; main was not told`, err);
+        log.error(`lead ${sessionId}: a report outside any run could not be recorded; main was not told`, err);
       }
     });
   }
 
-  /** A design lead finalized in its own session, a turn outside any run (the
-   *  user confirmed there): recorded as a finished run of the lead whose result
-   *  is that reply, so it reports to the lead's supervisor, and the session list and
-   *  `/status` see it, exactly as a run's `Design final:` does. */
-  private designFinal(sessionId: string, text: string): void {
+  /** A lead's turn outside any run that reports — a design lead's `Design final:`
+   *  (the user confirmed there) or any lead's `Notify:` (after a worker's plain
+   *  callback, or the user writing there): recorded as a finished run of the lead
+   *  whose result is that reply, so it reports to the lead's supervisor, and the
+   *  session list and `/status` see it, exactly as a run's does. */
+  private leadReport(sessionId: string, text: string, byUser: boolean): void {
+    const phase = this.store.leadPhaseOf(sessionId);
+    const final = phase === "design" && DESIGN_FINAL.test(text);
     // A run's own turn reports through the run.
-    if (this.store.leadPhaseOf(sessionId) !== "design" || this.store.findActiveRunForTarget(sessionId)?.state === "running") return;
+    if (phase === undefined || (!final && !NOTIFY.test(text)) || this.store.findActiveRunForTarget(sessionId)?.state === "running") return;
     const last = this.store.latestRunForTarget(sessionId);
     if (!last) return;
     const run = this.store.transact(() => {
@@ -279,10 +282,12 @@ export class TaskService {
       this.store.saveRun(run);
       return run;
     });
-    if (run.callbackSessionId === null) log.warn(`lead ${sessionId}: Design final: recorded as run ${run.id}; the lead reports to no one`);
-    else log.info(`lead ${sessionId}: Design final: outside any run, recorded as run ${run.id} for ${run.callbackSessionId}`);
+    const what = final ? "Design final:" : "Notify:";
+    if (run.callbackSessionId === null) log.warn(`lead ${sessionId}: ${what} recorded as run ${run.id}; the lead reports to no one`);
+    else log.info(`lead ${sessionId}: ${what} outside any run, recorded as run ${run.id} for ${run.callbackSessionId}`);
     this.runs.start(run);
-    this.designLead(run);
+    // The user waits on no thread for a turn they wrote themselves.
+    if (final || !byUser) this.designLead(run);
   }
 
   /** What a settled run of a design lead means to whoever shows the lead to
@@ -290,9 +295,10 @@ export class TaskService {
   private designLead(run: TaskRun): void {
     const lead = run.targetSessionId;
     if (!this.instance.designLead || lead === null || this.store.leadPhaseOf(lead) !== "design") return;
-    const state = run.callbackError === LEAD_TURN ? "waiting"
-      : run.state !== "succeeded" ? "failed"
-      : run.result?.type === "agent" && DESIGN_FINAL.test(run.result.text) ? "final"
+    const text = run.result?.type === "agent" ? run.result.text : "";
+    const state = run.state !== "succeeded" ? "failed"
+      : DESIGN_FINAL.test(text) ? "final"
+      : run.callbackError === LEAD_TURN || NOTIFY.test(text) ? "waiting"
       : undefined;
     if (!state) return;
     try {
@@ -835,8 +841,8 @@ export class TaskService {
   }
 }
 
-/** A lead's milestone resume carries its marker; a design final outside any run
- *  is the one resume with no prompt (`designFinal`). */
+/** A lead's milestone resume carries its marker; a lead's report outside any run
+ *  is the one resume with no prompt (`leadReport`). */
 const byPier = (run: TaskRun): boolean =>
   run.triggerSource === "goal" || run.context.resumePrompt?.startsWith(MILESTONE) === true ||
   (run.resumedFromRunId !== null && !run.context.resumePrompt);

@@ -12,7 +12,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory, AgentLaunchOptions } from "../core/types.js";
-import { LEAD_TURN, MILESTONE } from "./callbacks.js";
+import { FROM_SUPERVISOR, LEAD_TURN, MILESTONE } from "./callbacks.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
@@ -88,7 +88,8 @@ async function laterBy(ms: number, then: () => Promise<unknown>): Promise<void> 
 describe("a feature lead", () => {
   it("is launched with --role lead, opened with its role, and told it may delegate", async () => {
     const { service, created, store } = rig();
-    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { model: "test/model", role: "lead", design: true } }, "main") as { runId: string };
+    const receipt = await service.handle({ operation: "run", prompt: "design the thing", launch: { model: "test/model", role: "lead", design: true } }, "main") as { runId: string; next: string };
+    expect(receipt.next).toMatch(/^a lead's milestone, Design final:, reply ending on a Notify: line or failure arrives as a callback message/);
     const run = await service.waitForRun(receipt.runId);
     expect(created.at(-1)).toMatchObject({ role: "lead", phase: "design" });
     // The contract is the session's (agent/roles.ts); the message names the run and its reader.
@@ -355,6 +356,23 @@ describe("a feature lead", () => {
     build.service.stop();
   });
 
+  // A Notify: outside any run takes the Design final: path, for either phase; a quoted one does not.
+  it("records a lead's Notify: turn outside any run and reports it to main; a design lead's the user wrote opens no thread", async () => {
+    for (const phase of ["build", "design"] as const) {
+      const { service, sessions, store, leadRan, router, leadStates } = rig();
+      await leadRan("succeeded", phase);
+      const lead = sessions.get("lead")!;
+      router.attach({ channelId: "web", conversationId: "lead" }, lead);
+      lead.emit({ type: "turn-end", text: "> Notify: quoted\nStill digging." });
+      expect(store.latestRunForTarget("lead")!.id, phase).toBe("lead-run");
+      lead.emit({ type: "turn-end", text: "The env is up.\nNotify: test env ready\n" });
+      await vi.waitFor(() => expect(sessions.get("main")!.systemInputs.map((i) => i.text), phase).toEqual([expect.stringContaining("Notify: test env ready")]));
+      expect(store.latestRunForTarget("lead"), phase).toMatchObject({ resumedFromRunId: "lead-run", callbackSessionId: "main", callbackState: "delivered" });
+      expect(leadStates, phase).toEqual([]);
+      service.stop();
+    }
+  });
+
   // The session's creator fixes the role: a follow-up from main carries no launch config of its own.
   it("settles main's --session and --run follow-ups on a design lead as the lead's: a plain turn owes nothing, Notify:, Design final: and a failure call back", async () => {
     const paths = {
@@ -362,16 +380,20 @@ describe("a feature lead", () => {
       run: { operation: "message", run_id: "lead-run", message: "what now?" },
     };
     for (const [path, request] of Object.entries(paths)) {
-      const replies = [{ reply: "lead says done" }, { reply: "Found it.\nNotify: the cause is the cache" }, { reply: "Design final: /repo/docs/design.md" }, { error: "provider down" }];
+      const replies = [
+        { reply: "lead says done" }, { reply: "Notify: not the last line\n```\nNotify: fenced\n```" },
+        { reply: "Found it.\nNotify: the cause is the cache" }, { reply: "Design final: /repo/docs/design.md" }, { error: "provider down" },
+      ];
       for (const reply of replies) {
         const { service, sessions, store, leadRan } = rig();
         await leadRan();
         sessions.set("lead", fakeSession("lead", reply));
         const receipt = await service.handle(request, "main") as { runId?: string; next?: string; run?: { runId: string; next?: string } };
-        expect(receipt.next ?? receipt.run!.next, path).toMatch(/Notify: line; any other reply stays in its session/);
+        expect(receipt.next ?? receipt.run!.next, path).toMatch(/Notify: line or failure arrives .*; any other reply stays in its session/);
         const run = await service.waitForRun(receipt.runId ?? receipt.run!.runId);
         expect(run, path).toMatchObject({ targetSessionId: "lead", callbackSessionId: "main" });
-        if ("reply" in reply && reply.reply === "lead says done") {
+        expect(run.context.renderedPrompt, path).toContain(`${FROM_SUPERVISOR}\n\nwhat now?`);
+        if (reply.reply === "lead says done" || reply.reply?.endsWith("```")) {
           expect(store.getRun(run.id), path).toMatchObject({ state: "succeeded", callbackState: null, callbackError: LEAD_TURN });
           await new Promise((resolve) => setTimeout(resolve, 50));
           expect(sessions.get("main")!.systemInputs, path).toEqual([]);
@@ -405,6 +427,11 @@ describe("a feature lead", () => {
     expect(waiting.leadStates.at(-1)).toEqual([recorded.id, "final"]);
     waiting.service.stop();
 
+    const notified = await states({ reply: "Two options.\nNotify: pick one" });
+    expect(notified.leadStates).toEqual([[notified.run.id, "waiting"]]);
+    expect(notified.store.getRun(notified.run.id)!.callbackError).toBeNull();
+    notified.service.stop();
+
     const final = await states({ reply: "Agreed.\nDesign final: /repo/design.md" });
     expect(final.leadStates).toEqual([[final.run.id, "final"]]);
     final.service.stop();
@@ -428,6 +455,22 @@ describe("a feature lead", () => {
     await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(sessions.get("main")!.systemInputs).toHaveLength(1);
+    service.stop();
+  });
+
+  it("calls main back from a build lead's Notify: turn while a worker's result is still coming, then reports the wave", async () => {
+    const { service, sessions, store, bash, leadRan } = rig();
+    await leadRan("succeeded", "build");
+    const slow = await bash("sleep 0.3; echo worker done");
+    const worker = service.run(slow.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    sessions.set("lead", fakeSession("lead", { reply: "Env is up.\nNotify: test env ready" }));
+    const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };
+    const turn = service.resume("lead-run", "set up the test env", owed);
+    await vi.waitFor(() => expect(store.getRun(turn.id)!.callbackState).toBe("delivered"));
+    expect(store.getRun(worker.id)!.state).toBe("running");
+    expect(sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("Notify: test env ready")]);
+    await vi.waitFor(() => expect(store.getRun(worker.id)!.callbackState).toBe("delivered"));
+    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(2));
     service.stop();
   });
 

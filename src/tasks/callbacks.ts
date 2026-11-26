@@ -68,8 +68,12 @@ export const MILESTONE = "[Pier: the last result owed to you follows; nothing el
 /** The line a design lead ends on once the user confirms: its milestone, whether a run's or a turn outside any. */
 export const DESIGN_FINAL = /^Design final:/m;
 
-/** The line a lead marks a turn with when its supervisor should hear of it: an answer, a done, a decision. */
-export const NOTIFY = /^Notify:/m;
+/** The last line a lead marks a reply with when its supervisor should hear of it: an answer, a done, a decision.
+ *  Only the last, so a quoted or fenced `Notify:` does not count. */
+export const NOTIFY = /(?:^|\n)Notify:[^\n]*\s*$/;
+
+/** Heads a turn its supervisor sends a lead on a session the lead already has (`--run`, `--session`). */
+export const FROM_SUPERVISOR = "[Pier: from your supervisor. Your reply stays in this session unless its last line is `Notify: <one line>`.]";
 
 /** On the record of a lead run that owed its supervisor nothing, so the run says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
