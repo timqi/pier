@@ -31,6 +31,18 @@ const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i;
 const AUDIO_EXT = /\.(mp3|wav|ogg|opus|m4a|aac|flac)$/i;
 const VIDEO_EXT = /\.(mp4|m4v|webm|mov)$/i;
 const MD_EXT = /\.(md|markdown)$/i;
+const HTML_EXT = /\.html?$/i;
+
+/** A previewed page loads nothing past its own bytes: no script, no fetch,
+ *  no file through Pier's routes — only inline styles and `data:` media. */
+const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
+/** Prepended, never spliced: nothing in the page can open ahead of them, and
+ *  a srcdoc document never enters quirks mode. Against an `about:srcdoc` base
+ *  a `#anchor` scrolls in place and any other relative URL fails to resolve;
+ *  the page's own `<base>` comes after `base-uri 'none'`. */
+const previewDoc = (html: string): string =>
+  `<base href="about:srcdoc"><meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">${html}`;
 
 /** name-status letters, toned like every diff tool tones them. */
 const STATUS_TONE: Record<string, string> = {
@@ -160,6 +172,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   let changes = new Map<string, { status: string; add: number; del: number }>();
   let onlyChanged = true; // the diff is why you came; the full tree is one toggle away
   let mdSource = false; // for the dialog's life: a reviewer who asked for source keeps it
+  let htmlPreview: string | null = null; // previewKey of the one page Preview was picked for; any other opens on source
   let collapsedAll = false;
   let savedExpanded: string[] = []; // what "collapse all" will restore
   const expanded = new Set<string>();
@@ -426,21 +439,46 @@ function createFilesDialog(root: HTMLDialogElement): Show {
   let viewSeq = 0;
   const current = (seq: number): boolean => seq === viewSeq;
 
-  /** Rendered unless Source was picked, or a reference named a line — only
-   *  the source has lines to reveal. */
-  const rendersMd = (path: string): boolean =>
-    MD_EXT.test(path) && !mdSource && !(path === selectedPath && pendingLine !== undefined);
+  const previewKey = (path: string): string => `${sessionKey}\n${cwd}\n${path}`;
+  /** Markdown renders unless Source was picked, HTML only once Preview was;
+   *  a reference naming a line opens either on the source, which has lines. */
+  const renders = (path: string): boolean => {
+    if (path === selectedPath && pendingLine !== undefined) return false;
+    if (MD_EXT.test(path)) return !mdSource;
+    return HTML_EXT.test(path) && htmlPreview === previewKey(path);
+  };
 
   /** Re-views on a pick, so the choice reads the same for a diff and a file. */
-  function mdToggle(path: string, rendered: boolean): HTMLElement[] {
-    if (!MD_EXT.test(path)) return [];
-    const el = segmented([["Rendered", "rendered"], ["Source", "source"]], rendered ? "rendered" : "source", (key) => {
+  function renderToggle(path: string, rendered: boolean): HTMLElement[] {
+    const md = MD_EXT.test(path);
+    if (!md && !HTML_EXT.test(path)) return [];
+    const el = segmented([[md ? "Rendered" : "Preview", "rendered"], ["Source", "source"]], rendered ? "rendered" : "source", (key) => {
       if ((key === "rendered") === rendered) return;
-      mdSource = key === "source";
+      if (md) mdSource = key === "source";
+      else htmlPreview = key === "rendered" ? previewKey(path) : null;
       void view(path);
     });
     el.classList.add("font-sans");
     return [el];
+  }
+
+  /** Fills the viewer with the file as its reader sees it. */
+  function showRendered(text: string, path: string): void {
+    if (MD_EXT.test(path)) return void viewer.replaceChildren(mdPane(text, path));
+    viewer.replaceChildren(htmlPane(text));
+    viewer.classList.add("flex", "flex-col");
+  }
+
+  /** An empty `sandbox` gives the page an opaque origin with scripts, forms,
+   *  popups and top navigation off: no cookie, no API, no same-origin reach. */
+  function htmlPane(text: string): HTMLElement {
+    const frame = document.createElement("iframe");
+    frame.className = "h-full w-full bg-white";
+    frame.setAttribute("sandbox", "");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("title", "HTML preview");
+    frame.setAttribute("srcdoc", previewDoc(text));
+    return frame;
   }
 
   /** A document as the reader sees it. Its own links stay in Files, an image
@@ -502,8 +540,8 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     const url = fsApi("file", { path });
     const body = h("div", "min-w-0");
     viewer.classList.remove("flex", "flex-col");
-    const rendered = rendersMd(path);
-    setTitle(path, true, ...mdToggle(path, rendered));
+    const rendered = renders(path);
+    setTitle(path, true, ...renderToggle(path, rendered));
     viewer.replaceChildren(body);
     if (IMG_EXT.test(path)) {
       const img = h("img", "max-w-full p-4") as HTMLImageElement;
@@ -553,7 +591,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     }
     const text = await res.text();
     if (!current(seq)) return;
-    if (rendered) return void body.replaceChildren(mdPane(text, path));
+    if (rendered) return showRendered(text, path);
     const rows = fileRows(text);
     const lang = await langFor(path); // first file of the session waits for hljs
     if (!current(seq)) return;
@@ -667,8 +705,8 @@ function createFilesDialog(root: HTMLDialogElement): Show {
     viewer.classList.remove("flex", "flex-col");
     const deleted = changes.get(path)?.status === "D";
     const canDownload = !deleted;
-    const rendered = rendersMd(path);
-    const toggle = mdToggle(path, rendered);
+    const rendered = renders(path);
+    const toggle = renderToggle(path, rendered);
     setTitle(path, canDownload, ...toggle);
     viewer.replaceChildren(note("…"));
     try {
@@ -684,7 +722,7 @@ function createFilesDialog(root: HTMLDialogElement): Show {
         // head is the document at that head — the old side when it is gone.
         const drop = deleted ? "add" : "del";
         const text = rows.filter((r) => r.tone !== drop && r.nums.some((n) => n !== "")).map((r) => r.text).join("\n");
-        return void viewer.replaceChildren(mdPane(text, path));
+        return showRendered(text, path);
       }
       markIntraline(rows);
       const lang = await langFor(path); // first file of the session waits for hljs

@@ -1,6 +1,7 @@
 // Where a chat reference opens the Files dialog: the rule that decides whether
 // the tree around a file is the project's or only its own folder; and a
-// Markdown file shown rendered, its own links and images kept in Files.
+// Markdown file shown rendered, its own links and images kept in Files; an
+// HTML page previewed only when asked, sandboxed off Pier's origin.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { button, installPage, type FakeDocument } from "./dom.testkit.js";
@@ -47,10 +48,16 @@ describe("resolveRef", () => {
   });
 });
 
-describe("a Markdown file in Files", () => {
+describe("a document in Files", () => {
+  // A base only a #anchor resolves against, then the policy, ahead of every byte of the page.
+  const PREAMBLE = `<base href="about:srcdoc"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'">`;
   const files: Record<string, string> = {
     "docs/guide.md": "# Guide\n\n## Set up\n\n![shot](img/a.png) [next](next.md) [site](https://x.dev) [up](#set-up)\n\n```ts\nconst a = 1;\n```\n",
     "docs/next.md": "# Next\n",
+    "docs/page.html": "<!-- built -->\n<!DOCTYPE html><html><head><script>parent.fetch('/api/sessions')</script></head><body><h1>Page</h1></body></html>\n",
+    "docs/other.htm": "<p>Other</p>\n",
+    "docs/abrupt.html": "<!--><img src=\"https://x.dev/a.png\">--><!DOCTYPE html><p>a</p>\n",
+    "docs/bang.html": "<!-- a --!><img src=\"https://x.dev/b.png\">--><!DOCTYPE html><p>b</p>\n",
     "media/clip.mp4": "",
     "media/song.flac": "",
   };
@@ -91,58 +98,124 @@ describe("a Markdown file in Files", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders by default, its image from disk beside it, its link opening in Files", async () => {
-    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md");
-    await settled();
-    const md = viewer()!;
-    expect(md.querySelector("h1")!.textContent).toBe("Guide");
-    expect(md.querySelector("img")!.getAttribute("src")).toBe(`/api/fs/file?${new URLSearchParams({ root: "/w", path: "docs/img/a.png" })}`);
-    expect(md.querySelector("pre")!.parentNode!.querySelector("button")!.textContent).toBe("Copy");
-    const [next, site, anchor] = md.querySelectorAll("a");
-    expect((site as unknown as HTMLAnchorElement).target).toBe("_blank");
-    expect(next!.getAttribute("href")).toBe(`/api/fs/file?${new URLSearchParams({ root: "/w", path: "docs/next.md" })}`);
-    const click = () => ({ button: 0, preventDefault: vi.fn() });
-    const hash = click();
-    anchor!.onclick!(hash as never); // the page's hash is the router's
-    expect(hash.preventDefault).toHaveBeenCalled();
-    next!.onclick!(click() as never);
-    await settled();
-    expect(viewer()!.querySelector("h1")!.textContent).toBe("Next");
+  describe("a Markdown file", () => {
+    it("renders by default, its image from disk beside it, its link opening in Files", async () => {
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md");
+      await settled();
+      const md = viewer()!;
+      expect(md.querySelector("h1")!.textContent).toBe("Guide");
+      expect(md.querySelector("img")!.getAttribute("src")).toBe(`/api/fs/file?${new URLSearchParams({ root: "/w", path: "docs/img/a.png" })}`);
+      expect(md.querySelector("pre")!.parentNode!.querySelector("button")!.textContent).toBe("Copy");
+      const [next, site, anchor] = md.querySelectorAll("a");
+      expect((site as unknown as HTMLAnchorElement).target).toBe("_blank");
+      expect(next!.getAttribute("href")).toBe(`/api/fs/file?${new URLSearchParams({ root: "/w", path: "docs/next.md" })}`);
+      const click = () => ({ button: 0, preventDefault: vi.fn() });
+      const hash = click();
+      anchor!.onclick!(hash as never); // the page's hash is the router's
+      expect(hash.preventDefault).toHaveBeenCalled();
+      next!.onclick!(click() as never);
+      await settled();
+      expect(viewer()!.querySelector("h1")!.textContent).toBe("Next");
+    });
+
+    it("shows the numbered source on Source, and stays there for the next file", async () => {
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md");
+      await settled();
+      const dialog = doc.querySelector("#files-dialog")!;
+      button(dialog, "Source")!.onclick!(null as never);
+      await settled();
+      expect(viewer()).toBeNull();
+      expect(dialog.querySelector('[data-line="1"]')!.textContent).toContain("# Guide");
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/next.md");
+      await settled();
+      expect(viewer()).toBeNull();
+      expect(button(dialog, "Source")!.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("opens on the source when a reference names a line", async () => {
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md", 3);
+      await settled();
+      expect(viewer()).toBeNull();
+      expect(doc.querySelector("#files-dialog")!.querySelector('[data-line="3"]')).not.toBeNull();
+    });
+
+    it("renders a changed file at the diff's head, and Source is the toned diff", async () => {
+      repo = true;
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/next.md");
+      await settled();
+      const md = viewer()!;
+      expect(md.querySelectorAll("h1").map((el) => el.textContent)).toEqual(["Next"]);
+      expect(urls.some((u) => u.startsWith("/api/explorer/diff") && u.includes("file="))).toBe(true);
+      const dialog = doc.querySelector("#files-dialog")!;
+      button(dialog, "Source")!.onclick!(null as never);
+      await settled();
+      expect(viewer()).toBeNull();
+      expect(dialog.querySelectorAll(".bg-red-50").map((el) => el.textContent)).toEqual([expect.stringContaining("# Old")]);
+    });
   });
 
-  it("shows the numbered source on Source, and stays there for the next file", async () => {
-    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md");
-    await settled();
-    const dialog = doc.querySelector("#files-dialog")!;
-    button(dialog, "Source")!.onclick!(null as never);
-    await settled();
-    expect(viewer()).toBeNull();
-    expect(dialog.querySelector('[data-line="1"]')!.textContent).toContain("# Guide");
-    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/next.md");
-    await settled();
-    expect(viewer()).toBeNull();
-    expect(button(dialog, "Source")!.getAttribute("aria-pressed")).toBe("true");
-  });
+  describe("an HTML page", () => {
+    it("shows an HTML page as source until Preview, then in a sandbox that loads nothing", async () => {
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/page.html");
+      await settled();
+      const dialog = doc.querySelector("#files-dialog")!;
+      expect(dialog.querySelector("iframe")).toBeNull();
+      expect(dialog.querySelector('[data-line="2"]')!.textContent).toContain("<!DOCTYPE html>");
+      expect(button(dialog, "Source")!.getAttribute("aria-pressed")).toBe("true");
+      button(dialog, "Preview")!.onclick!(null as never);
+      await settled();
+      const frame = dialog.querySelector("iframe")!;
+      expect(frame.getAttribute("sandbox")).toBe(""); // no allow-scripts, no allow-same-origin
+      expect(frame.getAttribute("src")).toBeNull();
+      expect(frame.getAttribute("srcdoc")).toBe(`${PREAMBLE}${files["docs/page.html"]}`); // the page untouched, after the policy
+      expect(urls.filter((u) => u.startsWith("/api/fs/file"))).toHaveLength(2); // the viewer's own reads, nothing for the page
 
-  it("opens on the source when a reference names a line", async () => {
-    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/guide.md", 3);
-    await settled();
-    expect(viewer()).toBeNull();
-    expect(doc.querySelector("#files-dialog")!.querySelector('[data-line="3"]')).not.toBeNull();
-  });
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/other.htm");
+      await settled();
+      expect(dialog.querySelector("iframe")).toBeNull(); // Preview was for that page only
+      expect(dialog.querySelector('[data-line="1"]')!.textContent).toContain("<p>Other</p>");
+      button(dialog, "Preview")!.onclick!(null as never);
+      await settled();
+      expect(dialog.querySelector("iframe")!.getAttribute("srcdoc")).toBe(`${PREAMBLE}<p>Other</p>\n`);
+    });
 
-  it("renders a changed file at the diff's head, and Source is the toned diff", async () => {
-    repo = true;
-    explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/next.md");
-    await settled();
-    const md = viewer()!;
-    expect(md.querySelectorAll("h1").map((el) => el.textContent)).toEqual(["Next"]);
-    expect(urls.some((u) => u.startsWith("/api/explorer/diff") && u.includes("file="))).toBe(true);
-    const dialog = doc.querySelector("#files-dialog")!;
-    button(dialog, "Source")!.onclick!(null as never);
-    await settled();
-    expect(viewer()).toBeNull();
-    expect(dialog.querySelectorAll(".bg-red-50").map((el) => el.textContent)).toEqual([expect.stringContaining("# Old")]);
+    it("puts the policy ahead of a comment the browser closes early, so nothing in it opens first", async () => {
+      const dialog = doc.querySelector("#files-dialog")!;
+      for (const path of ["docs/abrupt.html", "docs/bang.html"]) {
+        explorer.openFiles({ id: "s", cwd: "/w" }, "/w", path);
+        await settled();
+        button(dialog, "Preview")!.onclick!(null as never);
+        await settled();
+        expect(dialog.querySelector("iframe")!.getAttribute("srcdoc")).toBe(PREAMBLE + files[path]!);
+      }
+    });
+
+    it("keeps Preview to the file it was picked on, not a same-named page in another root or session", async () => {
+      const dialog = doc.querySelector("#files-dialog")!;
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/page.html");
+      await settled();
+      button(dialog, "Preview")!.onclick!(null as never);
+      await settled();
+      expect(dialog.querySelector("iframe")).not.toBeNull();
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/elsewhere", "docs/page.html");
+      await settled();
+      expect(dialog.querySelector("iframe")).toBeNull();
+      explorer.openFiles({ id: "t", cwd: "/w" }, "/w", "docs/page.html");
+      await settled();
+      expect(dialog.querySelector("iframe")).toBeNull();
+    });
+
+    it("opens an HTML page on the source when a reference names a line, even after Preview", async () => {
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/page.html");
+      await settled();
+      const dialog = doc.querySelector("#files-dialog")!;
+      button(dialog, "Preview")!.onclick!(null as never);
+      await settled();
+      explorer.openFiles({ id: "s", cwd: "/w" }, "/w", "docs/page.html", 2);
+      await settled();
+      expect(dialog.querySelector("iframe")).toBeNull();
+      expect(dialog.querySelector('[data-line="2"]')).not.toBeNull();
+    });
   });
 
   it("plays audio and video in place, from the file route the player seeks by Range", async () => {

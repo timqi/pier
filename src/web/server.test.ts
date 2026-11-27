@@ -2365,6 +2365,8 @@ describe("the app shell", () => {
     // Safari restores a no-cache document without revalidating it, and the
     // hashes it names are gone the moment the next build runs.
     expect(shell.headers.get("cache-control")).toBe("private, no-store");
+    // A previewed HTML page's frame cannot navigate off Pier's origin.
+    expect(shell.headers.get("content-security-policy")).toBe("frame-src 'self'");
     const gone = await app.request("/app/assets/index-DeadBeef.css");
     expect(gone.status).toBe(404);
     expect(gone.headers.get("cache-control")).toBe("private, no-store");

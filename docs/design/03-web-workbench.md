@@ -654,7 +654,17 @@ Settings is an overlay route: it opens over its origin, and ✕ or Esc returns t
   opens on it. A changed file renders the diff's head side (the old side when
   deleted); relative images load through `GET /api/fs/file` from the file's
   folder (a leading `/` is the project root), relative links open in Files,
-  `#anchors` scroll to the heading, URLs open a new tab. A PDF shows inline in the viewer's frame:
+  `#anchors` scroll to the heading, URLs open a new tab. A `.html`/`.htm` file
+  opens on Source; Preview, picked per file (session, root and path), shows
+  the text (the diff's head side for a changed file) in an
+  `<iframe sandbox srcdoc>` with an empty sandbox — opaque origin, no script,
+  form, popup or top navigation — prefixed, ahead of every byte of the page,
+  with `<base href="about:srcdoc">` (a `#anchor` scrolls in place, any other
+  relative link resolves to nothing) and a `Content-Security-Policy` meta that
+  loads only inline styles and `data:` media; so the page reaches no cookie,
+  API or `GET /api/fs/file`. The shell (`/app/`) answers
+  `Content-Security-Policy: frame-src 'self'`, so a link to another site is
+  refused in the frame rather than followed. A PDF shows inline in the viewer's frame:
   `GET /api/fs/file` answers `X-Frame-Options: SAMEORIGIN`, every other
   response `DENY`. Audio (mp3, wav, ogg, opus, m4a, aac, flac) and video (mp4,
   m4v, webm, mov) play in the viewer with the browser's own controls, video

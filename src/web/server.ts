@@ -918,6 +918,9 @@ export function createServer(
     // renders unstyled. `no-store`, not `no-cache` — Safari restores a
     // no-cache document from its cache without revalidating it.
     c.header("cache-control", "private, no-store");
+    // A frame may only navigate to Pier's own origin: a previewed HTML page
+    // (web/ui/explorer.ts) cannot take the viewer to another site.
+    c.header("content-security-policy", "frame-src 'self'");
     if (shell === null) {
       try {
         shell = withInstanceName(withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix), process.env.PIER_TITLE, host);
