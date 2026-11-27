@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- Files: an HTML file has a Preview/Source switch; Preview shows the page in a sandbox that runs no script and loads nothing from the network.
+- Web: an open item's row has one ⋯ menu, also on right click, in the status panel and the sidebar alike — Item view, Mark done and Stop…; Stop cancels every queued or running run of the item's tree after a confirm.
+
+### Changed
+
+- Dependencies: update Pi to 1.6.1 and drop the undici override, since Pi now ships a patched undici.
+
 ## 1.5.0
 
 ### Added
