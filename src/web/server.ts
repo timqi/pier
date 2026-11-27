@@ -174,6 +174,8 @@ interface WebDeps {
   runTree?: (runIds: string[]) => RunTree;
   /** `TaskService.closeItem` of exactly `problem`: the status panel's Close. */
   closeItem?: (chainId: string, problem: string) => string;
+  /** `TaskService.stopItem`: the sidebar item menu's Stop, how many runs it asked to stop. */
+  stopItem?: (chainId: string, problem: string) => number;
   /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
   invokedBy?: (sessionId: string) => string | undefined;
   /** `TaskStore.markOpenItems` with no marker: the head a message stamped `[item: <key>]`
@@ -249,6 +251,7 @@ export function createServer(
     itemHistory,
     runTree,
     closeItem,
+    stopItem,
     itemSent,
     invokedBy,
     channelOf,
@@ -712,6 +715,20 @@ export function createServer(
     } catch (err) {
       if (err instanceof ItemNotFound) return c.json({ error: err.message }, 404);
       if (err instanceof ChatCommandRefused) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
+  // The sidebar item menu's Stop: every queued or running run of the item's tree, as the user's cancel.
+  guarded(app, "POST", "/api/continuous/items/:chain/:problem/stop", 400, async (c) => {
+    const chainId = c.req.param("chain");
+    const problem = c.req.param("problem");
+    if (!chains.get(chainId)) return c.json({ error: `chain: no chain ${chainId}` }, 404);
+    try {
+      const stopped = stopItem?.(chainId, problem) ?? 0;
+      return stopped ? c.json({ stopped }) : c.json({ error: `nothing of "${problem}" is running or queued` }, 409);
+    } catch (err) {
+      if (err instanceof ItemNotFound) return c.json({ error: err.message }, 404);
       throw err;
     }
   });

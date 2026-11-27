@@ -90,12 +90,13 @@ export function openItems<C extends { id: string; members: string[] }>(store: Op
   const counts = shown.size ? store.workerCounts([...shown]) : new Map<string, Record<TaskRunState, number>>();
   // Every item's tree in one read too; a run with no session (a bash run, a fresh one queued) is its own tree.
   const held = [...new Set(each.flatMap(({ items }) => items.flatMap((i) => i.runs.flatMap((r) => (r.state !== NOT_IN_LEDGER && r.targetSessionId ? [r.targetSessionId] : [])))))];
-  const trees = held.length ? store.treeCounts(held) : new Map<string, { runs: number; running: number }>();
-  const treeOf = (runs: readonly OpenRun[]): { runs: number; running: number } => runs.reduce((sum, r) => {
+  type Tree = NonNullable<OpenItem["tree"]>;
+  const trees = held.length ? store.treeCounts(held) : new Map<string, Tree>();
+  const treeOf = (runs: readonly OpenRun[]): Tree => runs.reduce<Tree>((sum, r) => {
     if (r.state === NOT_IN_LEDGER) return sum;
-    const own = r.targetSessionId ? trees.get(r.targetSessionId) : { runs: 1, running: r.state === "running" ? 1 : 0 };
-    return own ? { runs: sum.runs + own.runs, running: sum.running + own.running } : sum;
-  }, { runs: 0, running: 0 });
+    const own = r.targetSessionId ? trees.get(r.targetSessionId) : { runs: 1, running: r.state === "running" ? 1 : 0, queued: r.state === "queued" ? 1 : 0 };
+    return own ? { ...sum, runs: sum.runs + own.runs, running: sum.running + own.running, queued: sum.queued + own.queued } : sum;
+  }, { runs: 0, running: 0, queued: 0, ...(runs.some(leadOf) ? { lead: true as const } : {}) });
   const joined = (r: OpenRun): OpenRun => {
     const workers = counts.get(leadOf(r) ?? "");
     const found = r.state !== NOT_IN_LEDGER && r.targetSessionId ? store.goalOf(r.targetSessionId) : undefined;
@@ -125,8 +126,7 @@ export function openItems<C extends { id: string; members: string[] }>(store: Op
 /** Every run behind an item holding `runIds`, newest first (`TaskStore.runTree`): its sessions' own runs, the ones
  *  they launched marked `launched`, and a run with no session as itself. */
 export function itemRunTree(store: Pick<TaskStore, "getRun" | "itemRun" | "lineage" | "runTree">, runIds: readonly string[]): RunTree {
-  const named = [...new Set(runIds.map((id) => store.itemRun(id)))].flatMap((id) => store.getRun(id) ?? []);
-  const sessions = [...new Set(named.flatMap((r) => r.targetSessionId ?? []))];
+  const { named, sessions } = itemSessions(store, runIds);
   const own = new Set(sessions.flatMap((id) => store.lineage(id)));
   const tree = sessions.length ? store.runTree(sessions) : { runs: [], total: 0, running: 0 };
   const alone = named.filter((r) => !r.targetSessionId && !tree.runs.some((t) => t.id === r.id));
@@ -211,4 +211,18 @@ export function openItemsStatus(open: OpenItems, now: number, unmatched: readonl
     ? `${listed}\n\n${RUNS_IN_NO_ITEM} — not keys, never <done> one; <open> an item naming a run that is tracked work:\n${unlisted.map((i) => `- ${runLabel(i.runs[0]!)} · ${i.problem} · ${i.status}`).join("\n")}`
     : listed;
   return { text: openItemsText(snapshot), seed, snapshot, sessions };
+}
+
+/** Every queued or running run of the tree `itemRunTree` lists, uncapped: what an item's Stop cancels. */
+export function itemUnfinished(store: Pick<TaskStore, "getRun" | "itemRun" | "unfinishedTree">, runIds: readonly string[]): TaskRun[] {
+  const { named, sessions } = itemSessions(store, runIds);
+  const tree = sessions.length ? store.unfinishedTree(sessions) : [];
+  const alone = named.filter((r) => !r.targetSessionId && (r.state === "queued" || r.state === "running") && !tree.some((t) => t.id === r.id));
+  return [...alone, ...tree];
+}
+
+/** An item's named runs, each resolved to the run standing for it (`TaskStore.itemRun`), and their sessions. */
+function itemSessions(store: Pick<TaskStore, "getRun" | "itemRun">, runIds: readonly string[]): { named: TaskRun[]; sessions: string[] } {
+  const named = [...new Set(runIds.map((id) => store.itemRun(id)))].flatMap((id) => store.getRun(id) ?? []);
+  return { named, sessions: [...new Set(named.flatMap((r) => r.targetSessionId ?? []))] };
 }

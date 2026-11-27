@@ -9,7 +9,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession } from "../core/session.testkit.js";
 import { NOT_IN_LEDGER, TASK_RUN_STATES, type AgentFactory, type LedgerRun, type TaskRunState } from "../core/types.js";
-import { itemRunTree, openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, unmatchedNote, type OpenItemReads } from "./open-items.js";
+import { itemRunTree, itemUnfinished, openItems, openItemsStatus, openStatus, recordOpenItems, staleItems, unmatchedNote, type OpenItemReads } from "./open-items.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { Goal, OpenItems, OpenRun, TaskDefinition, TaskRun } from "./types.js";
@@ -229,7 +229,7 @@ describe("the open items", () => {
       saved("other", { invokedBySessionId: "elsewhere", targetSessionId: "o1", queuedAt: 9 }),
     );
     r.item("feature", "", ["w1", "bash"], 1);
-    expect(r.list().items[0]!.tree).toEqual({ runs: 6, running: 3 });
+    expect(r.list().items[0]!.tree).toEqual({ runs: 6, running: 3, queued: 0, lead: true });
     const tree = itemRunTree(r.store, ["w1", "bash"]);
     expect([tree.total, tree.running]).toEqual([6, 3]);
     expect(tree.runs.map((x) => [x.runId, x.state, x.launched ?? false])).toEqual([
@@ -238,13 +238,38 @@ describe("the open items", () => {
     expect(itemRunTree(r.store, ["gone"])).toEqual({ runs: [], total: 0, running: 0 });
   });
 
+  // The sidebar menu's Stop: a lead's item stops the lead and its workers, a worker's the worker alone; finished runs and other items' stay.
+  it("stops every unfinished run of an item's tree as the user's cancel, and refuses an item not open", () => {
+    const store = new TaskStore(openDb(":memory:"));
+    const { service } = head(store);
+    store.saveRun(saved("L1", { lead: true, targetSessionId: "lead1" }));
+    store.saveRun(saved("w1", { invokedBySessionId: "lead1", targetSessionId: "ws1" }));
+    store.saveRun(saved("w2", { invokedBySessionId: "lead1", targetSessionId: "ws2", state: "queued" }));
+    store.saveRun(saved("w0", { invokedBySessionId: "lead1", targetSessionId: "ws0", state: "succeeded", finishedAt: 1 }));
+    store.saveRun(saved("solo", { targetSessionId: "s1" }));
+    store.saveRun(saved("other", { targetSessionId: "o1" }));
+    store.markOpenItems([{ op: "open", problem: "feature", stage: "", runIds: ["L1"] }, { op: "open", problem: "fix", stage: "", runIds: ["solo"] },
+      { op: "open", problem: "else", stage: "", runIds: ["other"] }], 1, "h0", "main");
+    const cancel = vi.spyOn(service, "cancel").mockImplementation((id) => store.getRun(id)!);
+
+    expect(service.stopItem("main", "feature")).toBe(3);
+    expect(cancel.mock.calls.map(([id, by]) => [id, by]).sort()).toEqual([["L1", undefined], ["w1", undefined], ["w2", undefined]]);
+    cancel.mockClear();
+    expect(service.stopItem("main", "fix")).toBe(1);
+    expect(cancel.mock.calls.map(([id]) => id)).toEqual(["solo"]);
+    expect(() => service.stopItem("main", "feat")).toThrow(ItemNotFound);
+    expect(() => service.stopItem("other", "feature")).toThrow('no open item "feature"');
+  });
+
   it("lists an item's newest 200 runs and counts them all", () => {
     const r = rig();
     r.save(...Array.from({ length: 250 }, (_, i) => saved(`s${i}`, { targetSessionId: "lead1", state: i < 3 ? "running" : "succeeded", queuedAt: i + 1 })));
     r.item("long lead", "", ["s0"], 1);
     const tree = itemRunTree(r.store, ["s0"]);
     expect([tree.runs.length, tree.runs[0]!.runId, tree.total, tree.running]).toEqual([200, "s249", 250, 3]);
-    expect(r.list().items[0]!.tree).toEqual({ runs: 250, running: 3 });
+    // Stop's runs go past the list's cap: the running ones are the oldest.
+    expect(itemUnfinished(r.store, ["s0"]).map((x) => x.id).sort()).toEqual(["s0", "s1", "s2"]);
+    expect(r.list().items[0]!.tree).toEqual({ runs: 250, running: 3, queued: 0 });
   });
 
   // An answered result's item is found by its session: the item may hold an older run of it, or of a session its lead continued.

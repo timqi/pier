@@ -1,12 +1,12 @@
-// The open-item row used by the status panel, its lead in the bar and fixed command cards.
+// The open-item row used by the status panel, the sidebar, its lead in the bar and fixed command cards.
 
-import { Check, CircleAlert, CircleCheck, Clock, Ellipsis, MessagesSquare, X, type IconNode } from "lucide";
+import { Check, CircleAlert, Clock, Ellipsis, X, type IconNode } from "lucide";
 import { openItemDestination, openItemGroups, UNMATCHED_DONE } from "../../core/open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { OpenItemPresentation, OpenItemsSnapshot, OpenItemTarget } from "../../core/types.js";
 import { agoLabel, h } from "./dom.js";
 import { icon } from "./icons.js";
-import { closeMenu, openMenu } from "./menu.js";
+import { closeMenu, openMenu, type MenuItem } from "./menu.js";
 import { topicColour } from "./topics.js";
 import { runningDot } from "./turn-activity.js";
 
@@ -14,12 +14,9 @@ interface Actions {
   openItem: (target: OpenItemTarget) => void;
   currentId?: string | null;
   grouped?: boolean;
-  /** The status panel's alone: an item row's secondary action, the item view. */
-  panelView?: (problem: string) => void;
-  /** The status panel's alone: an item row's second secondary action, closing it. */
-  panelClose?: (problem: string) => void;
-  /** The sidebar's: both secondary actions also behind one ⋯, the row's only action without hover (style.css). */
-  folded?: boolean;
+  /** A live row's (the status panel's and the sidebar's), giving an item row its ⋯: the menu's Item view, Mark done,
+   *  and Stop — the item's queued and running runs, a lead's with its workers. */
+  menu?: { view: (problem: string) => void; markDone?: (problem: string) => void; stop?: (item: OpenItemPresentation) => void };
   /** The status panel's: the chain a row of another chain belongs to. */
   tag?: string;
   /** An archived chain's row: unarchive it and open the item there. */
@@ -97,12 +94,13 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   const column = h("div", "min-w-0 flex-1", main);
   const li = h("li", "open-item", column);
   // A row's key is its identity, so whether it is an item never changes under the row.
-  const view = actions.panelView && p.key.startsWith("item:") ? viewButton() : null;
-  if (view) li.append(view);
-  const close = actions.panelClose && p.key.startsWith("item:") ? closeButton() : null;
-  if (close) li.append(close);
-  const more = view && close && actions.folded ? moreButton() : null;
+  const more = actions.menu && p.key.startsWith("item:") ? moreButton() : null;
   if (more) li.append(more);
+  // A right click opens the same menu, anchored on the ⋯.
+  if (more) li.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    more.click();
+  });
   updates.set(li, (item, a) => {
     li.dataset.rowKey = item.key;
     title.textContent = item.title;
@@ -131,43 +129,31 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
     if (!to.topic && to.session && to.session === a.currentId) main.setAttribute("aria-current", "page");
     else main.removeAttribute("aria-current");
     main.onclick = () => a.openItem(item);
-    if (view) {
-      view.setAttribute("aria-label", `Item view — ${item.title}`);
-      view.onclick = () => a.panelView?.(item.problem);
-    }
-    if (close) {
-      close.setAttribute("aria-label", `Close — ${item.title}`);
-      close.onclick = () => a.panelClose?.(item.problem);
-    }
     if (more) {
       more.setAttribute("aria-label", `Actions for ${item.title}`);
-      more.onclick = () => openMenu(more, [
-        { label: "Item view", onSelect: () => { closeMenu(); a.panelView?.(item.problem); } },
-        { label: "Close", onSelect: () => { closeMenu(); a.panelClose?.(item.problem); } },
-      ], item.title);
+      more.onclick = () => a.menu && openMenu(more, itemMenu(item, a.menu), item.title);
     }
   });
   updates.get(li)!(p, actions);
   return li;
 }
 
-function viewButton(): HTMLElement {
-  const b = h("button", "item-view-open flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(MessagesSquare));
-  b.setAttribute("type", "button");
-  b.title = "Item view — this item's conversation alone";
-  return b;
+/** A live item row's menu: the item's conversation, Mark done, and Stop, offered while any of its runs runs or waits queued. */
+function itemMenu(item: OpenItemPresentation, a: NonNullable<Actions["menu"]>): MenuItem[] {
+  const live = (item.tree?.running ?? 0) + (item.tree?.queued ?? 0);
+  const hint = live ? `${live} run${live === 1 ? "" : "s"}` : "nothing running";
+  return [
+    { label: "Item view", hint: "its conversation", onSelect: () => { closeMenu(); a.view(item.problem); } },
+    ...(a.markDone ? [{ label: "Mark done", onSelect: () => { closeMenu(); a.markDone?.(item.problem); } }] : []),
+    ...(a.stop ? [{ label: "Stop\u2026", hint, disabled: !live, separatorBefore: true,
+      onSelect: () => { closeMenu(); a.stop?.(item); } }] : []),
+  ];
 }
 
 function moreButton(): HTMLElement {
-  const b = h("button", "item-more h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(Ellipsis));
+  const b = h("button", "item-more flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(Ellipsis));
   b.setAttribute("type", "button");
-  return b;
-}
-
-function closeButton(): HTMLElement {
-  const b = h("button", "item-close flex h-8 w-8 flex-none items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-200", icon(CircleCheck));
-  b.setAttribute("type", "button");
-  b.title = "Close — done with this item";
+  b.setAttribute("aria-haspopup", "menu");
   return b;
 }
 

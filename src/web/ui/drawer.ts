@@ -189,7 +189,7 @@ function unlistedRow(r: OpenRun, now: number): OpenItemPresentation {
   return { ...openItemPresentation({ problem: r.name, title: r.title, stage: "", runs: [r], status: r.state === "queued" ? "queued" : "running" }, now, `run:${r.runId}`), direct: true };
 }
 
-/** The two surfaces a row is drawn on; a Close says which asked, so its refusal lands there. */
+/** The two surfaces a row is drawn on; a Close or a Stop says which asked, so its refusal lands there. */
 type Surface = "panel" | "rail";
 /** Row nodes by key, one map per surface: a node has one parent, and a row
  *  is reused across renders so a refresh between mousedown and mouseup keeps the click. */
@@ -246,9 +246,9 @@ function rowsOn(surface: Surface, { ordered, chainOf }: Listed): { items: HTMLEl
     const node = openItemRow(p, {
       currentId: deps.currentId(),
       openItem: (target) => { closeMenu(); deps.openItem(target, chain?.id); },
-      panelView: (problem) => toView(problem, chain?.id),
-      ...(chain ? { panelClose: (problem: string) => void closeItem(problem, chain.id, surface) } : {}),
-      folded: surface === "rail",
+      menu: { view: (problem) => toView(problem, chain?.id),
+        ...(chain ? { markDone: (problem: string) => void closeItem(problem, chain.id, surface),
+          stop: (item: OpenItemPresentation) => void stopItem(item, chain.id, surface) } : {}) },
       tag: chainTag(chain),
       ...(chain?.archived ? { reopen: () => { closeMenu(); deps.reopen(chain.id, p.problem); } } : {}),
     }, nodes.get(p.key));
@@ -299,7 +299,7 @@ railSessionsHead.id = "rail-sessions-head";
 const railLoose = h("ul", "");
 railLoose.dataset.list = "";
 let railLooseRows: HTMLElement[] = [];
-/** The last rail Close's refusal, atop its list until the next Close. */
+/** The last rail Close's or Stop's refusal, atop its list until the next Close or refused Stop. */
 let railError: HTMLElement | null = null;
 /** The row the bar leads with: the most urgent until the counter cycles it on,
  *  and again once a different row becomes the most urgent. */
@@ -413,7 +413,7 @@ function fill(into: HTMLElement, shown: HTMLElement[]): void {
 
 const toView = (problem: string, chain?: string): void => { closeMenu(); deps.itemView(problem, chain); };
 
-/** The last panel Close's refusal, atop the list until the next Close or opening. */
+/** The last panel Close's or Stop's refusal, atop the list until the next Close, refused Stop or opening. */
 let closeError: HTMLElement | null = null;
 
 /** Says a Close and its Undo to a screen reader; the row's own change is not announced. */
@@ -466,6 +466,11 @@ async function sendClose(key: string): Promise<void> {
   if (refusal === undefined) return;
   closing.delete(key);
   renderDrawer();
+  refusedOn(from, key, refusal);
+}
+
+/** A refusal under its row's surface: the panel reopened if its last row's leaving closed it. */
+function refusedOn(from: Surface, key: string, refusal: string): void {
   const said = note(refusal, "text-red-600");
   said.dataset.refused = key;
   if (from === "rail") {
@@ -475,6 +480,19 @@ async function sendClose(key: string): Promise<void> {
   if (!list?.isConnected) openDrawer();
   closeError = said;
   fillPanel();
+}
+
+/** Asked first: every queued or running run of the item's tree is cancelled, a lead's workers with it. The row's
+ *  status follows from `task-run-changed`; only a refusal is said here. */
+async function stopItem(item: OpenItemPresentation, chain: string, from: Surface): Promise<void> {
+  const live = (item.tree?.running ?? 0) + (item.tree?.queued ?? 0);
+  const runs = live === 1 ? "1 run" : `${live} runs`;
+  const asked = item.tree?.lead
+    ? `Stop ${item.title}? Its lead and every worker it launched will be cancelled \u2014 ${runs}.`
+    : `Stop ${item.title}? Its ${live === 1 ? "run" : runs} will be cancelled.`;
+  if (!window.confirm(asked)) return;
+  const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(item.problem)}/stop`, "POST", "Could not stop the item");
+  if (refusal !== undefined) refusedOn(from, item.key, refusal);
 }
 
 // --- search -------------------------------------------------------------------------------

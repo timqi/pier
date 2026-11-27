@@ -227,8 +227,9 @@ export interface OpenItemPresentation extends OpenItemTarget {
   metadata: string[];
   /** How long ago the item was first opened, `open 2h`; absent on a row with no opening time. */
   age?: string;
-  /** An item's whole run tree — its sessions' runs and the runs they launched — counted, and how many of those run. */
-  tree?: { runs: number; running: number };
+  /** An item's whole run tree — its sessions' runs and the runs they launched — counted, how many of those run and
+   *  wait queued (absent in a snapshot older than the count), and `lead` when the item is a lead's. */
+  tree?: { runs: number; running: number; queued?: number; lead?: true };
 }
 
 export interface OpenItemsSnapshot {

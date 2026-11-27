@@ -2495,6 +2495,7 @@ describe("the continuous conversation's routes", () => {
       itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
       runTree?: (runIds: string[]) => RunTree;
       closeItem?: (chainId: string, problem: string) => string;
+      stopItem?: (chainId: string, problem: string) => number;
       itemSent?: (item: string, sessionId: string) => void;
       invokedBy?: (sessionId: string) => string | undefined;
       openCount?: (chainId: string) => number;
@@ -2580,6 +2581,24 @@ describe("the continuous conversation's routes", () => {
     const broken = await app.request("/api/continuous/items/main/x/close", { method: "POST" });
     expect([broken.status, await broken.json()]).toEqual([400, { error: "Error: database is locked" }]);
     expect(closeItem).toHaveBeenCalledTimes(4);
+  });
+
+  it("stops the runs of the item the panel names: how many, 404 for none, 409 with nothing running", async () => {
+    const stopItem = vi.fn((_chain: string, problem: string): number => {
+      if (problem === "gone") throw new ItemNotFound('no open item "gone"');
+      return problem === "idle" ? 0 : 3;
+    });
+    const { app } = chainRig(undefined, undefined, { stopItem });
+    const res = await app.request(`/api/continuous/items/main/${encodeURIComponent("sign in")}/stop`, { method: "POST" });
+    expect([res.status, await res.json()]).toEqual([200, { stopped: 3 }]);
+    expect(stopItem).toHaveBeenCalledWith("main", "sign in");
+    const gone = await app.request("/api/continuous/items/main/gone/stop", { method: "POST" });
+    expect([gone.status, await gone.json()]).toEqual([404, { error: 'no open item "gone"' }]);
+    const idle = await app.request("/api/continuous/items/main/idle/stop", { method: "POST" });
+    expect([idle.status, await idle.json()]).toEqual([409, { error: 'nothing of "idle" is running or queued' }]);
+    const nowhere = await app.request("/api/continuous/items/c9/x/stop", { method: "POST" });
+    expect([nowhere.status, await nowhere.json()]).toEqual([404, { error: "chain: no chain c9" }]);
+    expect(stopItem).toHaveBeenCalledTimes(3);
   });
 
   it("answers the items a search finds, closed ones too", async () => {

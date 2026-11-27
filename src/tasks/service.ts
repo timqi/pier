@@ -19,7 +19,7 @@ import { TaskGoals, type Worktree } from "./goals.js";
 import { TaskGroups } from "./groups.js";
 import { assertNotReplaced, planHandoff, type Handoff } from "./handoff.js";
 import { TaskMessenger } from "./messages.js";
-import { doneOld, openItems, openItemsStatus, recordOpenItems, revivedItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
+import { doneOld, itemUnfinished, openItems, openItemsStatus, recordOpenItems, revivedItems, staleItems, staleNote, unmatchedNote } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { INTERRUPTED, namesKey, type LedgerScope, type StatsRow, type TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
@@ -492,6 +492,16 @@ export class TaskService {
     const note = `[Pier: the user closed ${key}]`;
     this.router.systemInputTo(headId, note, { kind: "open-items" }, "append", `open items: the note that the user closed "${key}" could not reach the head`);
     return key;
+  }
+
+  /** The sidebar item menu's Stop: the user's cancel (`cancel`) of every queued or running run in the open item `problem`'s
+   *  tree — a lead's with the workers it launched, a worker alone. Answers how many were asked to stop. */
+  stopItem(chainId: string, problem: string): number {
+    const item = this.store.openItems(chainId).find((i) => i.problem === problem);
+    if (!item) throw new ItemNotFound(`no open item "${problem}"`);
+    const live = itemUnfinished(this.store, item.runIds);
+    for (const r of live) this.cancel(r.id);
+    return live.length;
   }
 
   /** `chainId`'s items, or every chain's in the chain list's order; each row names its chain. */

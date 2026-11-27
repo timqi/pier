@@ -433,6 +433,7 @@ app.route("/", createServer({
   itemHistory: (problem, chainId) => taskStore.itemHistory(chainId, problem),
   runTree: (runIds) => itemRunTree(taskStore, runIds),
   closeItem: (chainId, problem) => tasks.closeItem(chainId, problem, Date.now(), true),
+  stopItem: (chainId, problem) => tasks.stopItem(chainId, problem),
   invokedBy: (id) => taskStore.creatorOf(id)?.invokedBySessionId ?? undefined,
   itemSent: (item, sessionId) => {
     taskStore.markOpenItems([], Date.now(), sessionId, chain.chainOf(sessionId)?.chainId ?? chains.first().id, { topic: item });

@@ -145,7 +145,7 @@ it("lists the items, then the rows no item holds under their own head, short tit
     { problem: "原始完整问题", title: "稳定标题", stage: "waiting on you: 是否合并？授权只限本分支。", status: "waiting on you", runs: [run("lead", { state: "succeeded", finishedAt: 0 })] },
     { problem: "merged", stage: "restart pending", status: "wrapping up", runs: [] },
     { problem: "gone", stage: "", status: "stopped", runs: [run("missing", { state: NOT_IN_LEDGER, targetSessionId: null })] },
-    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0, tree: { runs: 7, running: 2 } },
+    { problem: "auth", stage: "实现中", status: "running", runs: [run("work", { name: "auth review", queuedAt: 5 * 60_000 })], openedAt: 0, tree: { runs: 7, running: 2, queued: 0 } },
   ], unlisted: [run("q", { name: "Queued one", state: "queued", targetSessionId: null })] };
   drawer.renderDrawer(); drawer.openDrawer();
   // The bar leads with what waits on you, a session's too; the panel and the rail keep the items apart from it.
@@ -184,7 +184,7 @@ it("lists the items, then the rows no item holds under their own head, short tit
   expect(dot("item:auth").style.background).toBe(topicColour("auth"));
   expect(dot("run:q").style.background).toBe("var(--color-neutral-400)");
   expect([status("session:free").textContent, phrase("session:free")]).toEqual(["waiting on you", "turn finished — not viewed yet"]);
-  // An item's row has its view beside the row's one control; a run's or a session's has nothing else.
+  // An item's row has its menu's ⋯ beside the row's one control; a run's or a session's has nothing else.
   expect(panel().querySelectorAll(".open-item").map((li) => li.querySelectorAll("button").length)).toEqual([2, 2, 2, 2, 1, 1, 1]);
   expect(item("item:原始完整问题").querySelector(".session-open")!.title).toBe("稳定标题\nwaiting on you · 10m · 是否合并？授权只限本分支。");
   expect(item("item:auth").querySelector(".session-open")!.title).toBe("auth review\nopen 10m \u00b7 7 runs behind this item, 2 running \u2014 its own and the ones they launched\nOpens its session");
@@ -193,9 +193,8 @@ it("lists the items, then the rows no item holds under their own head, short tit
   expect(openItem).toHaveBeenCalledWith(expect.objectContaining({ problem: "原始完整问题" }), undefined);
   expect(menu.closeMenu).toHaveBeenCalled();
   drawer.openDrawer();
-  const view = item("item:auth").querySelector(".item-view-open")!;
-  expect(view.getAttribute("aria-label")).toBe("Item view — auth");
-  view.onclick?.();
+  expect(item("item:auth").querySelector(".item-more")!.getAttribute("aria-label")).toBe("Actions for auth");
+  choose(item("item:auth"), "Item view");
   expect(itemView).toHaveBeenCalledWith("auth", undefined);
 });
 
@@ -386,7 +385,7 @@ it("tags other chains' rows, orders this chain's before them, and reopens an arc
   item("item:b/other").querySelector(".session-open")!.onclick?.();
   expect(openItem).toHaveBeenLastCalledWith(expect.objectContaining({ problem: "other" }), "b");
   drawer.openDrawer();
-  item("item:b/other").querySelector(".item-view-open")!.onclick?.();
+  choose(item("item:b/other"), "Item view");
   expect(itemView).toHaveBeenLastCalledWith("other", "b");
   drawer.openDrawer();
   const reopenButton = (key: string) => item(key).querySelector(".open-item-reopen")!;
@@ -441,6 +440,22 @@ it("tags a found closed item with its chain", async () => {
 /** A Close's Undo window running out (drawer.ts UNDO_MS). */
 const lapse = () => vi.advanceTimersByTime(5000);
 const undoOf = (li: { querySelector: (s: string) => unknown }) => fake(li.querySelector(".item-undo"));
+type Entry = { label: string; hint?: string; disabled?: boolean; onSelect: () => void };
+/** The sidebar row's menu as its ⋯ opens it, the ⋯ focused first: the menu hands the focus back to it. */
+const menuOf = (li: ReturnType<typeof item>): Entry[] => {
+  const more = li.querySelector(".item-more")!;
+  more.focus();
+  more.onclick?.();
+  return menu.openMenu.mock.lastCall![1] as Entry[];
+};
+/** Its entry `label` chosen. The real closeMenu closes only the menu over the panel; the mock's closes the panel, so it is kept. */
+const choose = (li: ReturnType<typeof item>, label: string): void => {
+  const entry = menuOf(li).find((e) => e.label === label)!;
+  const kept = menu.panel;
+  menu.panel = null;
+  entry.onSelect();
+  menu.panel = kept;
+};
 
 // The panel's Close waits out its Undo, then the row leaves before the server answers; the stream's re-read agrees, a refusal brings it back.
 it("defers an item row's Close behind Undo, keeps focus in the list, and restores it with the error on a refusal", async () => {
@@ -454,12 +469,10 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "sign in", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
-  const close = (key: string) => item(key).querySelector(".item-close")!;
-  expect(close("item:a/auth").getAttribute("aria-label")).toBe("Close — auth");
-  expect(close("session:solo")).toBeNull();
-  close("item:a/auth").focus();
+  const close = (key: string) => choose(item(key), "Mark done");
+  expect(item("session:solo").querySelector(".item-more")).toBeNull();
   Object.defineProperty(item("item:a/auth"), "offsetHeight", { value: 52 });
-  close("item:a/auth").onclick?.();
+  close("item:a/auth");
   // In place and as tall, nothing sent: the row reads `Closed — Undo`, its Undo focused, the bar no longer counting it.
   expect(item("item:a/auth").textContent).toBe("Closed \u2014Undo");
   expect(item("item:a/auth").style.minHeight).toBe("52px");
@@ -480,8 +493,7 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   expect(labels()).toEqual(["sign in", "solo"]);
 
   // Undo sends nothing and gives the row, and the focus, back.
-  close("item:a/sign in").focus();
-  close("item:a/sign in").onclick?.();
+  close("item:a/sign in");
   undoOf(item("item:a/sign in")).onclick?.();
   expect(labels()).toEqual(["sign in", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/sign in").querySelector(".session-open"));
@@ -490,7 +502,7 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   expect(asked).toHaveLength(1);
 
   answer = { ok: false, status: 404, json: async () => ({ error: "no open item \"sign in\"" }) };
-  close("item:a/sign in").onclick?.();
+  close("item:a/sign in");
   lapse();
   expect(labels()).toEqual(["solo"]);
   await vi.waitFor(() => expect(labels()).toEqual(["sign in", "solo"]));
@@ -502,8 +514,7 @@ it("defers an item row's Close behind Undo, keeps focus in the list, and restore
   answer = { ok: true, status: 200, json: async () => ({ closed: "sign in" }) };
   open = { items: [open.items[0]!, { problem: "deploy", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   drawer.renderDrawer();
-  close("item:a/sign in").focus();
-  close("item:a/sign in").onclick?.();
+  close("item:a/sign in");
   expect(panel().querySelector("[data-list]")!.children[0]!.textContent).toBe("Closed \u2014Undo");
   lapse();
   expect(labels()).toEqual(["deploy", "solo"]);
@@ -520,14 +531,12 @@ it("keeps the focus on a row when the last item row closes above the Sessions he
   open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }, { problem: "deploy", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
-  const close = (key: string) => item(key).querySelector(".item-close")!;
-  close("item:a/deploy").focus();
-  close("item:a/deploy").onclick?.();
+  const close = (key: string) => choose(item(key), "Mark done");
+  close("item:a/deploy");
   lapse();
   expect(labels()).toEqual(["auth", "solo"]);
   expect(doc.activeElement).toBe(item("item:a/auth").querySelector(".session-open"));
-  close("item:a/auth").focus();
-  close("item:a/auth").onclick?.();
+  close("item:a/auth");
   lapse();
   expect(labels()).toEqual(["solo"]);
   expect(doc.activeElement).toBe(item("session:solo").querySelector(".session-open"));
@@ -544,7 +553,7 @@ it("times each deferred Close on its own and sends the waiting ones when the pag
   const items = ["one", "two", "three", "four"].map((problem) => ({ problem, stage: "", status: "running" as const, runs: [], chain: c }));
   open = { items, unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
-  const close = (problem: string) => item(`item:a/${problem}`).querySelector(".item-close")!.onclick?.();
+  const close = (problem: string) => choose(item(`item:a/${problem}`), "Mark done");
   close("one");
   vi.advanceTimersByTime(2000);
   close("two");
@@ -578,7 +587,7 @@ it("keeps a waiting Close's Undo through a re-read of the items, and sends it on
   const of = (problem: string, status: "running" | "waiting on you" = "running") => ({ problem, stage: "", status, runs: [], chain: c });
   open = { items: [of("auth"), of("deploy")], unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
-  item("item:a/auth").querySelector(".item-close")!.onclick?.();
+  choose(item("item:a/auth"), "Mark done");
 
   // Another item arrives and the waiting one changes state: its row is still the Undo, on both surfaces, uncounted.
   open = { items: [of("auth", "waiting on you"), of("deploy"), of("billing")], unlisted: [] };
@@ -603,7 +612,7 @@ it("keeps a waiting Close's Undo through a re-read of the items, and sends it on
 
 // A run tree with nothing running leaves the stage line alone; its total stays the tooltip's.
 it("hides the running count of a tree with none running and keeps its total in the tooltip", () => {
-  open = { items: [{ problem: "idle", stage: "", status: "wrapping up", runs: [], tree: { runs: 3, running: 0 } }], unlisted: [] };
+  open = { items: [{ problem: "idle", stage: "", status: "wrapping up", runs: [], tree: { runs: 3, running: 0, queued: 0 } }], unlisted: [] };
   drawer.renderDrawer(); drawer.openDrawer();
   expect(item("item:idle").querySelector(".open-item-tree")!.classList.contains("hidden")).toBe(true);
   expect(item("item:idle").querySelector(".session-open")!.title).toContain("3 runs behind this item, 0 running");
@@ -642,9 +651,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   drawer.renderDrawer();
   expect([railItem("item:a/auth"), item("item:a/auth")]).toEqual(before);
   // Close from the rail: `Closed — Undo` on both, then gone from both at once; focus stays in the rail's list.
-  const close = railItem("item:a/auth").querySelector(".item-close")!;
-  close.focus();
-  close.onclick?.();
+  choose(railItem("item:a/auth"), "Mark done");
   expect([railItem("item:a/auth").textContent, item("item:a/auth").textContent]).toEqual(["Closed \u2014Undo", "Closed \u2014Undo"]);
   expect(shown("#rail-items-head")).toBe("Items · 1");
   expect(doc.activeElement).toBe(undoOf(railItem("item:a/auth")));
@@ -658,7 +665,7 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   // Refused from the rail: the row is back on both, the sentence atop the rail's list, the panel left as it was.
   menu.closeMenu();
   answer = { ok: false, status: 409, json: async () => ({ error: "auth is still running" }) };
-  railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  choose(railItem("item:b/asks"), "Mark done");
   lapse();
   expect(railRows()).toEqual([]);
   await vi.waitFor(() => expect(railRows()).toEqual(["asks"]));
@@ -674,45 +681,83 @@ it("fills the rail's Items section with the panel's rows, closes on both surface
   expect(rail().textContent).not.toContain("still running");
   open = kept;
   drawer.renderDrawer();
-  railItem("item:b/asks").querySelector(".item-close")!.onclick?.();
+  choose(railItem("item:b/asks"), "Mark done");
   lapse();
   await vi.waitFor(() => expect(rail().querySelector("[data-list]")!.children[0]!.textContent).toBe("auth is still running"));
   // The panel's next Close takes the rail's refusal down too.
   drawer.openDrawer();
   expect(panel().querySelector("[data-list]")!.children[0]!.textContent).not.toContain("still running");
   answer = { ok: true, status: 200, json: async () => ({ closed: "asks" }) };
-  item("item:b/asks").querySelector(".item-close")!.onclick?.();
+  choose(item("item:b/asks"), "Mark done");
   lapse();
   expect(railRows()).toEqual([]);
   expect(rail().textContent).not.toContain("still running");
   vi.useRealTimers();
 });
 
-// Without hover the sidebar's row folds its two actions into one ⋯ (style.css); the panel's keeps both.
-it("gives the rail's item row a ⋯ menu of its item view and Close, the panel's none", async () => {
+// An item row has one ⋯ and its context menu, the same menu on both surfaces: the item view, Mark done and Stop.
+it("gives an item row on either surface one menu of its item view, Mark done and Stop", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const c = { id: "a", name: "Main", archived: false };
   chainId = "a";
   const asked: string[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return { ok: true, status: 200, json: async () => ({}) }; }));
-  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
+  let answer: { ok: boolean; status: number; json: () => Promise<unknown> } = { ok: true, status: 200, json: async () => ({ stopped: 3 }) };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { asked.push(`${String(init.method)} ${url}`); return answer; }));
+  const confirm = vi.fn(() => true);
+  vi.stubGlobal("window", { addEventListener: (name: string, fn: () => void) => onWindow.set(name, fn), confirm });
+  open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c, tree: { runs: 4, running: 3, queued: 1, lead: true } },
+    { problem: "idle", stage: "", status: "waiting on you", runs: [], chain: c, tree: { runs: 1, running: 0, queued: 0 } },
+    { problem: "next", stage: "", status: "running", runs: [], chain: c, tree: { runs: 1, running: 0, queued: 1 } }], unlisted: [] };
   sessions = [row("solo", { state: "streaming" })];
   drawer.renderDrawer(); drawer.openDrawer();
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
-  expect(item("item:a/auth").querySelector(".item-more")).toBeNull();
   expect(railSessions().querySelector("[data-row-key='session:solo']")!.querySelector(".item-more")).toBeNull();
   const more = railItem("item:a/auth").querySelector(".item-more")!;
-  expect(more.getAttribute("aria-label")).toBe("Actions for auth");
+  expect([more.getAttribute("aria-label"), more.getAttribute("aria-haspopup")]).toEqual(["Actions for auth", "menu"]);
   more.onclick?.();
-  const [anchor, entries, title] = menu.openMenu.mock.calls[0]! as [unknown, { label: string; onSelect: () => void }[], string];
-  expect([anchor, entries.map((e) => e.label), title]).toEqual([more, ["Item view", "Close"], "auth"]);
+  const [anchor, entries, title] = menu.openMenu.mock.calls[0]! as [unknown, Entry[], string];
+  expect([anchor, title]).toEqual([more, "auth"]);
+  expect(entries.map(({ label, hint, disabled }) => [label, hint, disabled])).toEqual([
+    ["Item view", "its conversation", undefined], ["Mark done", undefined, undefined], ["Stop\u2026", "4 runs", false]]);
   entries[0]!.onSelect();
   expect(itemView).toHaveBeenCalledWith("auth", "a");
-  entries[1]!.onSelect();
+  // A right click opens the same menu on the ⋯, the browser's own kept away.
+  const right = new Event("contextmenu", { cancelable: true });
+  railItem("item:a/auth").dispatchEvent(right);
+  expect([right.defaultPrevented, menu.openMenu.mock.lastCall![0]]).toEqual([true, more]);
+  // Nothing running: Stop is shown, not offered.
+  expect(menuOf(railItem("item:a/idle")).at(-1)).toMatchObject({ hint: "nothing running", disabled: true });
+  // A queued run is stopped too: a worker's item asks for its run alone.
+  expect(menuOf(railItem("item:a/next")).at(-1)).toMatchObject({ hint: "1 run", disabled: false });
+  confirm.mockReturnValueOnce(false);
+  choose(railItem("item:a/next"), "Stop\u2026");
+  expect(confirm).toHaveBeenLastCalledWith("Stop next? Its run will be cancelled.");
+
+  // Stop asks first; declined, nothing is sent.
+  confirm.mockReturnValueOnce(false);
+  choose(railItem("item:a/auth"), "Stop\u2026");
+  expect(confirm).toHaveBeenLastCalledWith("Stop auth? Its lead and every worker it launched will be cancelled \u2014 4 runs.");
+  expect(asked).toEqual([]);
+  choose(railItem("item:a/auth"), "Stop\u2026");
+  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/stop"]));
+  expect(railRows()).toEqual(["idle", "auth", "next"]);
+  // A refusal stands atop the rail's list.
+  answer = { ok: false, status: 409, json: async () => ({ error: 'nothing of "auth" is running or queued' }) };
+  choose(railItem("item:a/auth"), "Stop\u2026");
+  await vi.waitFor(() => expect(rail().querySelector("[data-list]")!.children[0]!.textContent).toBe('nothing of "auth" is running or queued'));
+  // The panel's row is the same row, its menu the same: a refusal there lands atop the panel's list.
+  drawer.openDrawer();
+  expect(item("item:a/auth").querySelector(".item-more")!.getAttribute("aria-label")).toBe("Actions for auth");
+  expect(menuOf(item("item:a/auth")).map(({ label, hint }) => [label, hint])).toEqual(entries.map(({ label, hint }) => [label, hint]));
+  choose(item("item:a/auth"), "Stop\u2026");
+  await vi.waitFor(() => expect(panel().querySelector("[data-list]")!.children[0]!.textContent).toBe('nothing of "auth" is running or queued'));
+  expect(asked.filter((a) => a.endsWith("/stop"))).toHaveLength(3);
+
+  choose(railItem("item:a/auth"), "Mark done");
   lapse();
-  expect(railRows()).toEqual([]);
+  expect(railRows()).toEqual(["idle", "next"]);
   expect(railLoose()).toEqual(["solo"]);
-  await vi.waitFor(() => expect(asked).toEqual(["POST /api/continuous/items/a/auth/close"]));
+  await vi.waitFor(() => expect(asked.at(-1)).toBe("POST /api/continuous/items/a/auth/close"));
   vi.useRealTimers();
 });
 
@@ -727,9 +772,7 @@ it("moves the focus to the current chain's row when the rail's last item row clo
   doc.querySelector("#rail-chains")!.append(chainRow);
   open = { items: [{ problem: "auth", stage: "", status: "running", runs: [], chain: c }], unlisted: [] };
   drawer.renderDrawer();
-  const close = rail().querySelector("[data-row-key='item:a/auth']")!.querySelector(".item-close")!;
-  close.focus();
-  close.onclick?.();
+  choose(rail().querySelector("[data-row-key='item:a/auth']")!, "Mark done");
   lapse();
   expect(rail().textContent).toContain("Nothing open");
   expect(doc.activeElement).toBe(chainRow);
@@ -749,9 +792,7 @@ it("keeps the focus in the list when a focused Undo's item closes elsewhere, on 
   const of = (problem: string) => ({ problem, stage: "", status: "running" as const, runs: [], chain: c });
   const railItem = (key: string) => rail().querySelector(`[data-row-key='${key}']`)!;
   const closeFocused = (li: () => ReturnType<typeof item>): void => {
-    const close = li().querySelector(".item-close")!;
-    close.focus();
-    close.onclick?.();
+    choose(li(), "Mark done");
     expect(doc.activeElement).toBe(undoOf(li()));
   };
   open = { items: [of("auth"), of("deploy"), of("billing")], unlisted: [] };

@@ -1,6 +1,7 @@
-// Anchored popover: one open at a time, closed by outside pointerdown, focus
-// or wheel, Esc, a scroll that moves the anchor, or resize. Used by the
-// session context menu and the model picker.
+// Anchored popover: one open at a time — a menu anchored inside one opens over
+// it, the only nesting — closed by outside pointerdown, focus or wheel, Esc, a
+// scroll that moves the anchor, or resize. Used by the session context menu,
+// the model picker and the status panel's item menus.
 
 import { Check, X } from "lucide";
 import { icon } from "./icons.js";
@@ -21,13 +22,18 @@ export interface MenuItem {
 let panel: HTMLElement | null = null;
 let trigger: HTMLElement | null = null;
 let backdrop: HTMLElement | null = null;
+/** The panels under the open one, each holding the anchor of the one above it. */
+const below: { panel: HTMLElement; trigger: HTMLElement | null; backdrop: HTMLElement | null }[] = [];
 
 function onOutside(ev: Event): void {
   // A trigger that declares its popup toggles it on click; closing here on the
   // press (or the focus it moves) would let that click reopen it.
-  if (ev.type !== "wheel" && trigger?.hasAttribute("aria-haspopup") && trigger.contains(ev.target as Node)) return;
-  if (panel && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
+  const toggles = (): boolean => ev.type !== "wheel" && !!trigger?.hasAttribute("aria-haspopup") && trigger.contains(ev.target as Node);
+  // A press in a panel below, or on its trigger, closes only the ones above it.
+  while (panel && !toggles() && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
 }
+
+const closeAll = (): void => { while (panel) closeMenu(); };
 
 // Arrows, readline's ⌃P/⌃N, and ⌃J/⌃K because ⌃N is a reserved chord in
 // Chrome and Firefox (new window, no `preventDefault` can stop it). Bare Ctrl
@@ -91,21 +97,24 @@ function onScroll(ev: Event): void {
   if (trigger && (ev.target as Node).contains(trigger)) closeMenu();
 }
 
+/** Closes the open panel, the one under it, if any, open again. */
 export function closeMenu(): void {
   if (!panel) return;
-  document.removeEventListener("pointerdown", onOutside, true);
-  document.removeEventListener("focusin", onOutside, true);
-  document.removeEventListener("wheel", onOutside, true);
-  document.removeEventListener("keydown", onKey, true);
-  window.removeEventListener("scroll", onScroll, true);
-  window.removeEventListener("resize", closeMenu);
-  const closing = panel;
-  panel = null;
+  const [closing, opener] = [panel, trigger];
   backdrop?.remove();
-  backdrop = null;
-  if (closing.contains(document.activeElement)) trigger?.focus({ preventScroll: true });
-  trigger?.removeAttribute("aria-expanded");
-  trigger = null;
+  const under = below.pop();
+  // Restored before the focus moves: its focusin is judged against the panel left open.
+  ({ panel, trigger, backdrop } = under ?? { panel: null, trigger: null, backdrop: null });
+  if (!under) {
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("focusin", onOutside, true);
+    document.removeEventListener("wheel", onOutside, true);
+    document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", closeAll);
+  }
+  if (closing.contains(document.activeElement)) opener?.focus({ preventScroll: true });
+  opener?.removeAttribute("aria-expanded");
   closing.inert = true;
   closing.dataset.closing = "";
   // Pending transitions include an interrupted entrance. Cancellation still
@@ -144,7 +153,8 @@ function sheetHead(title: string, closeLabel: string): HTMLElement {
  *  the floated panel, for a caller that must know when the pointer leaves it.
  *  `title` heads the panel when it is a sheet, beside its close control. */
 export function openPanel(anchor: HTMLElement, content: HTMLElement, title?: string, closeLabel = `Close ${title}`): HTMLElement {
-  closeMenu();
+  while (panel && !panel.contains(anchor)) closeMenu();
+  if (panel) below.push({ panel, trigger, backdrop });
   // Replacing a menu is one surface changing content, not stacked exits.
   document.querySelectorAll(".popover[data-closing]").forEach((el) => el.remove());
   const sheet = isSheet();
@@ -191,7 +201,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement, title?: str
   document.addEventListener("wheel", onOutside, { capture: true, passive: true });
   document.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", onScroll, true);
-  window.addEventListener("resize", closeMenu);
+  window.addEventListener("resize", closeAll);
   return panel;
 }
 

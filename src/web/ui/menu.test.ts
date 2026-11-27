@@ -135,6 +135,37 @@ describe("closing", () => {
     expect(labelled(sheetMenu, "Close menu")).toBeDefined();
   });
 
+  // The status panel's item rows open their menu over the panel, which stays.
+  it("opens a menu anchored inside a panel over it, closing only the menu on a press in the panel or Esc", () => {
+    const panel = open();
+    const inner = panel.querySelector("button")!;
+    inner.setAttribute("aria-haspopup", "menu");
+    const nested = (): FakeElement => {
+      menu.openMenu(inner as never, [{ label: "Stop\u2026", onSelect: vi.fn() }]);
+      return fake(doc.querySelectorAll('[data-menu="true"]').find((el) => !("closing" in el.dataset)));
+    };
+    const child = nested();
+    expect([isOpen(), inner.getAttribute("aria-expanded"), panel.dataset.closing]).toEqual([true, "true", undefined]);
+    fire(doc, "pointerdown", panel);
+    expect([isOpen(), inner.hasAttribute("aria-expanded"), child.dataset.closing]).toEqual([true, false, ""]);
+    nested();
+    // Its own trigger toggles it; the panel's trigger closes the menu and leaves the panel to its click.
+    fire(doc, "pointerdown", inner);
+    expect(inner.getAttribute("aria-expanded")).toBe("true");
+    anchor.setAttribute("aria-haspopup", "true");
+    fire(doc, "pointerdown", anchor);
+    expect([isOpen(), inner.hasAttribute("aria-expanded")]).toEqual([true, false]);
+    nested();
+    doc.dispatchEvent(Object.assign(new Event("keydown"), { key: "Escape" }));
+    expect([isOpen(), inner.hasAttribute("aria-expanded")]).toEqual([true, false]);
+    nested();
+    fire(doc, "pointerdown", pane);
+    expect([isOpen(), inner.hasAttribute("aria-expanded"), panel.dataset.closing]).toEqual([false, false, ""]);
+    menu.openMenu(open().querySelector("button") as never, [{ label: "Stop\u2026", onSelect: vi.fn() }]);
+    win.dispatchEvent(new Event("resize"));
+    expect([isOpen(), doc.querySelectorAll(".popover").every((el) => "closing" in el.dataset)]).toEqual([false, true]);
+  });
+
   it("leaves nothing listening once closed", () => {
     open();
     menu.closeMenu();

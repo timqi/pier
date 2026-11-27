@@ -121,7 +121,7 @@ the area is.
 | `channels/` | 5k | two adapters in one shape plus the shared layer that would otherwise be copied between them |
 | `web/` | 15.6k | the only implementation of every browser surface: password boundary, chat, Console, Files, Web Push, palette, voice input with its hold-to-talk mode, the composer's voice panel and ASR relay to two recognizers |
 | `agent/` | 3.2k | the Pi side of the seam: sessions, event translation, transcripts, the package registry and the role contracts |
-| `tasks/` | 4.3k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, the `--worktree` seam, and an item's run tree across a lead's workers and handoffs |
+| `tasks/` | 4.35k | one delivery engine, the scheduler, the owner seam, the goal loop run as code with the review brief that carries delivered steering, the `--worktree` seam, and an item's run tree across a lead's workers and handoffs, stopped whole |
 | root `src/*.ts` | 3.8k | one reason per file: credentials, service/update ops, the stop, managed CLI tools, the vault and the CLI socket's dispatch |
 | `websearch/` | 1.2k | two hosted tools on two wire formats with the fetched copy and `pier web`'s argv |
 | `native/` | 1.5k | the Tauri shell, Rust and the tab bar page: the instance store, one hidden-or-shown webview per open instance, badge and notification relay, and the bounded login-shell PATH a local Pier is found and run with |

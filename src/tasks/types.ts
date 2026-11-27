@@ -338,8 +338,8 @@ export interface OpenItem {
   /** The chain the item belongs to: on every row `TaskService.openItems` answers. */
   chain?: ItemChain;
   /** Its whole run tree counted — every run of its sessions and every run they launched, a lead's
-   *  workers (`TaskStore.treeCounts`) — and how many of those are running. */
-  tree?: { runs: number; running: number };
+   *  workers (`TaskStore.treeCounts`) — how many of those are running and queued, and `lead` when one of its sessions is a lead. */
+  tree?: { runs: number; running: number; queued: number; lead?: true };
 }
 
 /** One run of an item's tree (`TaskStore.runTree`), as the item view lists it; `launched`: a

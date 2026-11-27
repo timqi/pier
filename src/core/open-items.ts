@@ -24,7 +24,7 @@ interface Item {
   designSessionId?: string;
   waitsIn?: string;
   openedAt?: number;
-  tree?: { runs: number; running: number };
+  tree?: OpenItemPresentation["tree"];
 }
 
 const LABELS: Record<Item["status"], string> = {
@@ -139,7 +139,8 @@ export function isOpenItemsSnapshot(value: unknown): value is OpenItemsSnapshot 
     record(i) && ["key", "problem", "title", "statusLabel", "stage"].every((k) => typeof i[k] === "string")
     && typeof i.status === "string" && Object.hasOwn(LABELS, i.status) && strings(i.metadata)
     && optional(i, "designSessionId") && optional(i, "waitsIn") && optional(i, "age") && optional(i, "runName") && (i.direct === undefined || typeof i.direct === "boolean")
-    && (i.tree === undefined || (record(i.tree) && Number.isInteger(i.tree.runs) && Number.isInteger(i.tree.running)))
+    && (i.tree === undefined || (record(i.tree) && Number.isInteger(i.tree.runs) && Number.isInteger(i.tree.running)
+      && (i.tree.queued === undefined || Number.isInteger(i.tree.queued)) && (i.tree.lead === undefined || i.tree.lead === true)))
     && Array.isArray(i.runs) && i.runs.every((r: unknown) => record(r) && typeof r.runId === "string" && (r.targetSessionId === null || typeof r.targetSessionId === "string")));
 }
 

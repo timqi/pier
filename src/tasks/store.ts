@@ -189,19 +189,20 @@ export class TaskStore {
   }
 
   /** Each of `sessionIds`' run tree, counted in one statement: as `runTree` lists one. */
-  treeCounts(sessionIds: string[]): Map<string, { runs: number; running: number }> {
-    const counts = new Map(sessionIds.map((id) => [id, { runs: 0, running: 0 }]));
+  treeCounts(sessionIds: string[]): Map<string, { runs: number; running: number; queued: number }> {
+    const counts = new Map(sessionIds.map((id) => [id, { runs: 0, running: 0, queued: 0 }]));
     const lines = sessionIds.map((id) => [id, this.lineage(id)] as const);
     const all = JSON.stringify([...new Set(lines.flatMap(([, line]) => line))]);
     for (const r of this.sql(`
-      SELECT json_extract(json, '$.targetSessionId') AS target, json_extract(json, '$.invokedBySessionId') AS by, state = 'running' AS live, COUNT(*) AS n
+      SELECT json_extract(json, '$.targetSessionId') AS target, json_extract(json, '$.invokedBySessionId') AS by,
+        CASE WHEN state IN ('running', 'queued') THEN state END AS live, COUNT(*) AS n
       FROM task_runs WHERE ${TREE} GROUP BY target, by, live
-    `).all(all, all) as unknown as { target: string | null; by: string | null; live: number; n: number }[]) {
+    `).all(all, all) as unknown as { target: string | null; by: string | null; live: "running" | "queued" | null; n: number }[]) {
       for (const [id, line] of lines) {
         if (!line.includes(r.target ?? "") && !line.includes(r.by ?? "")) continue;
         const count = counts.get(id)!;
         count.runs += r.n;
-        if (r.live) count.running += r.n;
+        if (r.live) count[r.live] += r.n;
       }
     }
     return counts;
@@ -215,6 +216,12 @@ export class TaskStore {
     const runs = this.#many<TaskRun>(`SELECT json FROM task_runs WHERE ${TREE} ORDER BY queued_at DESC, rowid DESC LIMIT ${RUN_TREE_CAP}`, all, all);
     const { total, running } = this.sql(`SELECT COUNT(*) AS total, coalesce(sum(state = 'running'), 0) AS running FROM task_runs WHERE ${TREE}`).get(all, all) as { total: number; running: number };
     return { runs, total, running };
+  }
+
+  /** Every queued or running run of `sessionIds`' run tree, as `runTree` selects it but past its cap. */
+  unfinishedTree(sessionIds: string[]): TaskRun[] {
+    const all = JSON.stringify([...new Set(sessionIds.flatMap((id) => this.lineage(id)))]);
+    return this.#many<TaskRun>(`SELECT json FROM task_runs WHERE ${TREE} AND state IN ('queued', 'running')`, all, all);
   }
 
   /** `sessionId` and every session it continued (handoff.ts), newest first. */
