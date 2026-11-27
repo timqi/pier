@@ -1,19 +1,23 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
 
 ### Added
 
 - Console: Settings › Instance › Voice input picks the recognizer — Doubao, Qwen or Off; Off hides the composer's voice switch. It replaces the `PIER_VOICE` environment variable.
+- Web: an open item's row counts its whole run tree — a lead, its workers and their handoffs — and its view lists every run with its state and session; the chain's ledger shows a lead's workers while they run.
+- Tasks: a lead's reply ending on a `Notify:` line calls its supervisor back, inside or outside a run; a build lead flags a looping review's direction question in its report.
 
 ### Fixed
 
 - Database: on SQLite 3.54 (Node 24.22.3 and later) migration 35 stored each platform's chat list as a JSON string; schema 44 turns it back into the array.
 - Web: a recognizer that refuses its key now says why — `voice input: Doubao connection failed: HTTP 401 {"error":"Invalid X-Api-Key"}` instead of a bare "connection failed".
+- Tasks: an item naming a lead's worker belongs to its lead, so the lead no longer shows as a second row.
 
 ### Changed
 
 - Web: voice input is a mode. The switch beside Send turns the draft's row into a `Hold to talk` bar: hold and speak, release to keep the text in the draft, slide up to cancel; a tap listens hands-free until the next tap. While you speak, the composer expands into a panel that shows the draft in large type and follows your words to the end; takes add up in the same draft, a tap edits it between takes, and once sent it is one row again. Nothing is sent until you send it. The mode is remembered per browser.
+- Web: a build lead's and a worker's session is transcript-only — no composer, Stop or edit; steer them through the head.
 
 ## 1.4.4
 
