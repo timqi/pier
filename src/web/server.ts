@@ -172,9 +172,9 @@ interface WebDeps {
   itemHistory?: (problem: string, chainId: string) => ItemRecord | undefined;
   /** `itemRunTree`: every run behind an item holding `runIds`, the item view's list. */
   runTree?: (runIds: string[]) => RunTree;
-  /** `TaskService.closeItem` of exactly `problem`: the status panel's Close. */
+  /** `TaskService.closeItem` of exactly `problem`: an item row menu's Mark done, on the status panel and the sidebar. */
   closeItem?: (chainId: string, problem: string) => string;
-  /** `TaskService.stopItem`: the sidebar item menu's Stop, how many runs it asked to stop. */
+  /** `TaskService.stopItem`: an item row menu's Stop, on the status panel and the sidebar, how many runs it asked to stop. */
   stopItem?: (chainId: string, problem: string) => number;
   /** The session a task run's own session was launched from, for the chain its `‹` returns to. */
   invokedBy?: (sessionId: string) => string | undefined;
@@ -704,7 +704,7 @@ export function createServer(
     return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
   });
 
-  // The status panel's Close: the item as the head's `<done>` closes it, the head told.
+  // An item row menu's Mark done, on the status panel and the sidebar: the item as the head's `<done>` closes it, the head told.
   guarded(app, "POST", "/api/continuous/items/:chain/:problem/close", 400, async (c) => {
     const chainId = c.req.param("chain");
     const problem = c.req.param("problem");
@@ -719,7 +719,7 @@ export function createServer(
     }
   });
 
-  // The sidebar item menu's Stop: every queued or running run of the item's tree, as the user's cancel.
+  // An item row menu's Stop, on the status panel and the sidebar: every queued or running run of the item's tree, as the user's cancel.
   guarded(app, "POST", "/api/continuous/items/:chain/:problem/stop", 400, async (c) => {
     const chainId = c.req.param("chain");
     const problem = c.req.param("problem");

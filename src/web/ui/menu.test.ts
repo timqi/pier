@@ -136,8 +136,13 @@ describe("closing", () => {
   });
 
   // The status panel's item rows open their menu over the panel, which stays.
-  it("opens a menu anchored inside a panel over it, closing only the menu on a press in the panel or Esc", () => {
+  it("opens a menu anchored inside a panel that holds menus over it, closing only the menu on a press in the panel or Esc", () => {
+    const plain = open();
+    menu.openMenu(plain.querySelector("button") as never, [{ label: "Rename…", onSelect: vi.fn() }]);
+    expect(plain.dataset.closing).toBe("");
+    menu.closeMenu();
     const panel = open();
+    panel.dataset.holdsMenus = "";
     const inner = panel.querySelector("button")!;
     inner.setAttribute("aria-haspopup", "menu");
     const nested = (): FakeElement => {
@@ -161,7 +166,9 @@ describe("closing", () => {
     nested();
     fire(doc, "pointerdown", pane);
     expect([isOpen(), inner.hasAttribute("aria-expanded"), panel.dataset.closing]).toEqual([false, false, ""]);
-    menu.openMenu(open().querySelector("button") as never, [{ label: "Stop\u2026", onSelect: vi.fn() }]);
+    const again = open();
+    again.dataset.holdsMenus = "";
+    menu.openMenu(again.querySelector("button") as never, [{ label: "Stop\u2026", onSelect: vi.fn() }]);
     win.dispatchEvent(new Event("resize"));
     expect([isOpen(), doc.querySelectorAll(".popover").every((el) => "closing" in el.dataset)]).toEqual([false, true]);
   });

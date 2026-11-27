@@ -9,7 +9,7 @@ import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { chord, modalOpen } from "./shortcut.js";
 import { openItemPresentation } from "../../core/open-items.js";
-import { closedItemRow, openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
+import { closedItemRow, liveRuns, openItemRow, paintDot, paintStatus, stageLine, stagePhrase } from "./open-items.js";
 import { waitsOnYou } from "../../core/reply.js";
 import type { ChainMember, LeadPhase, OpenItemPresentation, OpenItemTarget, SessionState } from "../../core/types.js";
 import type { ItemSummary, OpenItem, OpenItems, OpenRun } from "../../tasks/types.js";
@@ -299,7 +299,7 @@ railSessionsHead.id = "rail-sessions-head";
 const railLoose = h("ul", "");
 railLoose.dataset.list = "";
 let railLooseRows: HTMLElement[] = [];
-/** The last rail Close's or Stop's refusal, atop its list until the next Close or refused Stop. */
+/** The last rail Close's or Stop's refusal, atop its list until the next Close or Stop. */
 let railError: HTMLElement | null = null;
 /** The row the bar leads with: the most urgent until the counter cycles it on,
  *  and again once a different row becomes the most urgent. */
@@ -413,7 +413,7 @@ function fill(into: HTMLElement, shown: HTMLElement[]): void {
 
 const toView = (problem: string, chain?: string): void => { closeMenu(); deps.itemView(problem, chain); };
 
-/** The last panel Close's or Stop's refusal, atop the list until the next Close, refused Stop or opening. */
+/** The last panel Close's or Stop's refusal, atop the list until the next Close, Stop or opening. */
 let closeError: HTMLElement | null = null;
 
 /** Says a Close and its Undo to a screen reader; the row's own change is not announced. */
@@ -485,12 +485,16 @@ function refusedOn(from: Surface, key: string, refusal: string): void {
 /** Asked first: every queued or running run of the item's tree is cancelled, a lead's workers with it. The row's
  *  status follows from `task-run-changed`; only a refusal is said here. */
 async function stopItem(item: OpenItemPresentation, chain: string, from: Surface): Promise<void> {
-  const live = (item.tree?.running ?? 0) + (item.tree?.queued ?? 0);
+  const live = liveRuns(item);
   const runs = live === 1 ? "1 run" : `${live} runs`;
   const asked = item.tree?.lead
     ? `Stop ${item.title}? Its lead and every worker it launched will be cancelled \u2014 ${runs}.`
     : `Stop ${item.title}? Its ${live === 1 ? "run" : runs} will be cancelled.`;
   if (!window.confirm(asked)) return;
+  // Filled directly: the render is keyed on the rows, which a Stop does not change.
+  closeError = railError = null;
+  fillRail();
+  fillPanel();
   const refusal = await refused(`/api/continuous/items/${encodeURIComponent(chain)}/${encodeURIComponent(item.problem)}/stop`, "POST", "Could not stop the item");
   if (refusal !== undefined) refusedOn(from, item.key, refusal);
 }
@@ -546,7 +550,10 @@ export function openDrawer(): void {
   list = h("ul", "");
   list.dataset.list = ""; // the arrows' walk (menu.ts listIn)
   fillPanel();
-  openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list), "Status").setAttribute("aria-label", "Status");
+  const panel = openPanel(lead, h("div", "w-[min(32rem,calc(100vw-2rem))] max-sm:w-full font-sans text-sm", searchField(), list), "Status");
+  panel.setAttribute("aria-label", "Status");
+  // A row's menu opens over the panel, so Escape or a pick returns to the list (menu.ts).
+  panel.dataset.holdsMenus = "";
   // A finger opening the panel is reading it: the field would raise the keyboard over the rows.
   if (matchMedia("(pointer: coarse)").matches) list.querySelector("button")?.focus({ preventScroll: true });
 }

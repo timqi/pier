@@ -138,9 +138,12 @@ export function openItemRow(p: OpenItemPresentation, actions: Actions, existing?
   return li;
 }
 
+/** What an item's Stop cancels: its tree's running and queued runs. */
+export const liveRuns = (item: OpenItemPresentation): number => (item.tree?.running ?? 0) + (item.tree?.queued ?? 0);
+
 /** A live item row's menu: the item's conversation, Mark done, and Stop, offered while any of its runs runs or waits queued. */
 function itemMenu(item: OpenItemPresentation, a: NonNullable<Actions["menu"]>): MenuItem[] {
-  const live = (item.tree?.running ?? 0) + (item.tree?.queued ?? 0);
+  const live = liveRuns(item);
   const hint = live ? `${live} run${live === 1 ? "" : "s"}` : "nothing running";
   return [
     { label: "Item view", hint: "its conversation", onSelect: () => { closeMenu(); a.view(item.problem); } },

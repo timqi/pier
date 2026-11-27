@@ -454,7 +454,7 @@ export class TaskService {
 
   unmatchedDone(chainId: string): readonly string[] { return this.unmatched.get(chainId) ?? []; }
 
-  /** The user's close, `/done` and the status panel's Close: the open item of `chainId` that `query` names —
+  /** The user's close, `/done` and an item row menu's Mark done (status panel and sidebar): the open item of `chainId` that `query` names —
    *  exactly in any case, else the one key holding each of its words in any case; with `exact`, only that key — closed as a `<done>`
    *  closes it. Its head, attached, is told. An exact key already closed answers itself: the panel's row
    *  raced the head's own `<done>`, and the user's ask holds. */
@@ -494,7 +494,7 @@ export class TaskService {
     return key;
   }
 
-  /** The sidebar item menu's Stop: the user's cancel (`cancel`) of every queued or running run in the open item `problem`'s
+  /** An item row menu's Stop, on the status panel and the sidebar: the user's cancel (`cancel`) of every queued or running run in the open item `problem`'s
    *  tree — a lead's with the workers it launched, a worker alone. Answers how many were asked to stop. */
   stopItem(chainId: string, problem: string): number {
     const item = this.store.openItems(chainId).find((i) => i.problem === problem);

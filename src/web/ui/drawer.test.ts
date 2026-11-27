@@ -751,7 +751,12 @@ it("gives an item row on either surface one menu of its item view, Mark done and
   expect(menuOf(item("item:a/auth")).map(({ label, hint }) => [label, hint])).toEqual(entries.map(({ label, hint }) => [label, hint]));
   choose(item("item:a/auth"), "Stop\u2026");
   await vi.waitFor(() => expect(panel().querySelector("[data-list]")!.children[0]!.textContent).toBe('nothing of "auth" is running or queued'));
-  expect(asked.filter((a) => a.endsWith("/stop"))).toHaveLength(3);
+  // The next Stop takes the standing refusals with it, on both surfaces.
+  answer = { ok: true, status: 200, json: async () => ({ stopped: 1 }) };
+  choose(item("item:a/next"), "Stop\u2026");
+  expect(rail().querySelector("[data-list]")!.querySelector("[data-refused]")).toBeNull();
+  expect(panel().querySelector("[data-list]")!.querySelector("[data-refused]")).toBeNull();
+  await vi.waitFor(() => expect(asked.filter((a) => a.endsWith("/stop"))).toHaveLength(4));
 
   choose(railItem("item:a/auth"), "Mark done");
   lapse();

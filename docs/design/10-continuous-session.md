@@ -329,12 +329,12 @@ other thread it is prose. `chatCommand` returns `{ command, args }`.
   seed's `## Open` lists them as `- unmatched <done>: X (closed nothing; if it
   meant an item above, <done> that item's key)`, `/status` under
   `Unmatched done` (`OpenItemsSnapshot.unmatched`).
-- The user closes an item too: `/done <item>` (§Chat commands) and the status
-  panel's **Close** (sent once its 5s Undo has passed) both call `TaskService.closeItem`, which closes it as a
+- The user closes an item too: `/done <item>` (§Chat commands) and the item
+  row menu's **Mark done** on the status panel and the sidebar (sent once its 5s Undo has passed) both call `TaskService.closeItem`, which closes it as a
   `<done>` does (`TaskStore.closeOpenItem`) and broadcasts `open-items-changed`.
   `/done` resolves its words among the chain's open keys — exact in any case,
   else the one key that contains every word, in any case; several are refused `/done <q> matches <a>, <b> —
-  say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Close** names its
+  say more`, none `no open item "<q>"` (`ItemNotFound`) — and **Mark done** names its
   key exactly, answering `{closed}` for a key the head's `<done>` closed first.
   The chain's head, when attached, is told with an `open-items`
   system input, mode `append`, no turn: `[Pier: the user closed <key>]`.

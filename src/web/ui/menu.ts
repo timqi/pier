@@ -1,6 +1,7 @@
-// Anchored popover: one open at a time — a menu anchored inside one opens over
-// it, the only nesting — closed by outside pointerdown, focus or wheel, Esc, a
-// scroll that moves the anchor, or resize. Used by the session context menu,
+// Anchored popover: one open at a time — a menu anchored inside a panel marked
+// `data-holds-menus` (the status panel) opens over it, the only nesting; any
+// other replaces the open one — closed by outside pointerdown, focus or wheel,
+// Esc, a scroll that moves the anchor, or resize. Used by the session context menu,
 // the model picker and the status panel's item menus.
 
 import { Check, X } from "lucide";
@@ -153,7 +154,7 @@ function sheetHead(title: string, closeLabel: string): HTMLElement {
  *  the floated panel, for a caller that must know when the pointer leaves it.
  *  `title` heads the panel when it is a sheet, beside its close control. */
 export function openPanel(anchor: HTMLElement, content: HTMLElement, title?: string, closeLabel = `Close ${title}`): HTMLElement {
-  while (panel && !panel.contains(anchor)) closeMenu();
+  while (panel && !("holdsMenus" in panel.dataset && panel.contains(anchor))) closeMenu();
   if (panel) below.push({ panel, trigger, backdrop });
   // Replacing a menu is one surface changing content, not stacked exits.
   document.querySelectorAll(".popover[data-closing]").forEach((el) => el.remove());
